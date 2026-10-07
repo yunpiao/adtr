@@ -286,7 +286,12 @@ func (s *Service) mutateResourceGroup(ctx context.Context, tx pgx.Tx, u User, ro
 	if err != nil {
 		return nil, err
 	}
-	if !deleting {
+	previousMembers := []string{}
+	if len(old.Datas) > 0 {
+		previousMembers = old.Datas[0].Resources
+	}
+	// Renaming a group or editing its remark is not a scope revocation.
+	if !deleting && (creating || !slices.Equal(previousMembers, ids)) {
 		if _, err = tx.Exec(ctx, "DELETE FROM adtr.resource_group_members WHERE tenant_id=$1 AND group_id=$2", u.tenant, id); err != nil {
 			return nil, err
 		}

@@ -10181,9 +10181,22 @@
         "FLD-3003"
       ],
       "ui_records": [],
-      "status": "in_progress",
+      "status": "implemented_verified_slice",
       "product_accepted": false,
-      "evidence": null
+      "evidence": {
+        "commit": "cd1547a81b3d17df42359d658198e3a562e36ba1",
+        "pr": "https://github.com/yunpiao/adtr/pull/70",
+        "ci": "https://github.com/yunpiao/adtr/actions/runs/37577820864",
+        "verified": [
+          "explicit role/domain data scope and platform-admin no-bypass",
+          "cross-tenant and out-of-scope rejection with valid credentials"
+        ],
+        "remaining": [
+          "real AD catalogue and downstream business-query enforcement",
+          "reference-system numeric applications/resourceType compatibility",
+          "capacity and production acceptance"
+        ]
+      }
     },
     {
       "id": "AD-F-180",
@@ -10230,9 +10243,21 @@
         "FLD-3035"
       ],
       "ui_records": [],
-      "status": "in_progress",
+      "status": "implemented_verified_slice",
       "product_accepted": false,
-      "evidence": null
+      "evidence": {
+        "commit": "cd1547a81b3d17df42359d658198e3a562e36ba1",
+        "pr": "https://github.com/yunpiao/adtr/pull/70",
+        "ci": "https://github.com/yunpiao/adtr/actions/runs/37577820864",
+        "verified": [
+          "persistent resource list/detail/filter/page APIs and browser detail"
+        ],
+        "remaining": [
+          "real AD catalogue and downstream business-query enforcement",
+          "reference-system numeric applications/resourceType compatibility",
+          "capacity and production acceptance"
+        ]
+      }
     },
     {
       "id": "AD-F-181",
@@ -10262,9 +10287,22 @@
         "FLD-3050"
       ],
       "ui_records": [],
-      "status": "in_progress",
+      "status": "implemented_verified_slice",
       "product_accepted": false,
-      "evidence": null
+      "evidence": {
+        "commit": "cd1547a81b3d17df42359d658198e3a562e36ba1",
+        "pr": "https://github.com/yunpiao/adtr/pull/70",
+        "ci": "https://github.com/yunpiao/adtr/actions/runs/37577820864",
+        "verified": [
+          "resource create/update/delete with fresh MFA and atomic audit",
+          "interrupted and repeated browser mutations"
+        ],
+        "remaining": [
+          "real AD catalogue and downstream business-query enforcement",
+          "reference-system numeric applications/resourceType compatibility",
+          "capacity and production acceptance"
+        ]
+      }
     },
     {
       "id": "AD-F-182",
@@ -10296,9 +10334,22 @@
         "FLD-3067"
       ],
       "ui_records": [],
-      "status": "in_progress",
+      "status": "implemented_verified_slice",
       "product_accepted": false,
-      "evidence": null
+      "evidence": {
+        "commit": "cd1547a81b3d17df42359d658198e3a562e36ba1",
+        "pr": "https://github.com/yunpiao/adtr/pull/70",
+        "ci": "https://github.com/yunpiao/adtr/actions/runs/37577820864",
+        "verified": [
+          "role resource association persistence and delegation ceiling",
+          "scope removal revokes affected sessions"
+        ],
+        "remaining": [
+          "real AD catalogue and downstream business-query enforcement",
+          "reference-system numeric applications/resourceType compatibility",
+          "capacity and production acceptance"
+        ]
+      }
     },
     {
       "id": "AD-F-183",
@@ -10318,9 +10369,21 @@
         "FLD-3072"
       ],
       "ui_records": [],
-      "status": "in_progress",
+      "status": "implemented_verified_slice",
       "product_accepted": false,
-      "evidence": null
+      "evidence": {
+        "commit": "cd1547a81b3d17df42359d658198e3a562e36ba1",
+        "pr": "https://github.com/yunpiao/adtr/pull/70",
+        "ci": "https://github.com/yunpiao/adtr/actions/runs/37577820864",
+        "verified": [
+          "tenant policy persistence, domain-count and expiry enforcement"
+        ],
+        "remaining": [
+          "real AD catalogue and downstream business-query enforcement",
+          "reference-system numeric applications/resourceType compatibility",
+          "capacity and production acceptance"
+        ]
+      }
     },
     {
       "id": "AD-F-184",
@@ -10584,7 +10647,7 @@
         "FLD-3149"
       ],
       "ui_records": [],
-      "status": "not_started",
+      "status": "in_progress",
       "product_accepted": false,
       "evidence": null
     },
@@ -10616,7 +10679,7 @@
       "issue": "https://github.com/yunpiao/adtr/issues/12",
       "field_records": [],
       "ui_records": [],
-      "status": "not_started",
+      "status": "in_progress",
       "product_accepted": false,
       "evidence": null
     },
@@ -10632,7 +10695,7 @@
       "issue": "https://github.com/yunpiao/adtr/issues/12",
       "field_records": [],
       "ui_records": [],
-      "status": "not_started",
+      "status": "in_progress",
       "product_accepted": false,
       "evidence": null
     },

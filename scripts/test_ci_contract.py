@@ -15,7 +15,7 @@ class CIEventContract(unittest.TestCase):
         self.assertNotIn('github.event.pull_request.draft', text)
         for command in ['make check', 'scripts/test_integration.py', 'scripts/test_lifecycle.py',
                         'scripts/test_auth_e2e.py', 'scripts/test_auth_e2e.py --expired',
-                        'scripts/test_auth_e2e.py --suite access', 'scripts/test_auth_e2e.py --suite resource']:
+                        'scripts/test_auth_e2e.py --suite access', 'scripts/test_auth_e2e.py --suite resource', 'scripts/test_auth_e2e.py --suite tasks']:
             self.assertIn(command, text)
         self.assertIn('permissions: {}', text)
         self.assertIn('contents: read', text)

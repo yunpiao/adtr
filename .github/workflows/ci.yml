@@ -47,3 +47,5 @@ jobs:
         run: python3 scripts/test_auth_e2e.py --suite access
       - name: Real resource isolation browser lifecycle
         run: python3 scripts/test_auth_e2e.py --suite resource
+      - name: Real task API Worker and database browser lifecycle
+        run: python3 scripts/test_auth_e2e.py --suite tasks

@@ -4,6 +4,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"sync"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/yunpiao/adtr/internal/auth"
+	"github.com/yunpiao/adtr/internal/tasks"
 )
 
 // Requires an isolated disposable DB. This test never drops any schema or table.
@@ -269,6 +271,90 @@ func TestExistingVersionThreeUpgrade(t *testing.T) {
 	var session bool
 	if err = conn.QueryRow(ctx, "SELECT EXISTS(SELECT FROM adtr.sessions WHERE token_hash='prior-v3-session' AND user_id=$1)", userID).Scan(&session); err != nil || !session {
 		t.Fatal("resource migration lost previous session", err)
+	}
+	if err = Ready(ctx, cfg); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestExistingVersionFourUpgrade(t *testing.T) {
+	ctx := context.Background()
+	dsn := os.Getenv("ADTR_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Fatal("isolated database required")
+	}
+	cfg, err := pgx.ParseConfig(dsn)
+	if err != nil {
+		t.Fatal("invalid test database URL")
+	}
+	admin, err := pgx.ConnectConfig(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer admin.Close(ctx)
+	name := fmt.Sprintf("adtr_task_upgrade_%d", time.Now().UnixNano())
+	quoted := pgx.Identifier{name}.Sanitize()
+	if _, err = admin.Exec(ctx, "CREATE DATABASE "+quoted); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if _, e := admin.Exec(ctx, "DROP DATABASE "+quoted+" WITH (FORCE)"); e != nil {
+			t.Error(e)
+		}
+	}()
+	cfg = cfg.Copy()
+	cfg.Database = name
+	conn, err := pgx.ConnectConfig(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(ctx)
+	if _, err = conn.Exec(ctx, `CREATE SCHEMA adtr; CREATE TABLE adtr.schema_version(singleton boolean PRIMARY KEY DEFAULT true CHECK(singleton),version integer NOT NULL CHECK(version>0)); INSERT INTO adtr.schema_version VALUES(true,4);`+auth.Schema+auth.SchemaV3+auth.ResourceSchema); err != nil {
+		t.Fatal(err)
+	}
+	const roleID = "rrrrrrrrrrrrrrrrrrrrrrrr"
+	if _, err = conn.Exec(ctx, "INSERT INTO adtr.access_roles(tenant_id,id,name) VALUES('default',$1,'Existing role')", roleID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = conn.Exec(ctx, "INSERT INTO adtr.access_permissions(tenant_id,role_id,mark,readable,writeable) VALUES('default',$1,'users',true,false)", roleID); err != nil {
+		t.Fatal(err)
+	}
+	var userID int64
+	if err = conn.QueryRow(ctx, "INSERT INTO adtr.users(tenant_id,username,password_hash,role,role_id,must_change) VALUES('default','prior-task-user','synthetic-hash','viewer',$1,false) RETURNING id", roleID).Scan(&userID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = conn.Exec(ctx, "INSERT INTO adtr.sessions(token_hash,user_id,expires_at) VALUES('prior-v4-session',$1,now()+interval '1 hour')", userID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = conn.Exec(ctx, "INSERT INTO adtr.resource_domains(tenant_id,id,name) VALUES('default','prior-domain','Existing synthetic domain'); INSERT INTO adtr.resource_groups(tenant_id,id,name) VALUES('default','prior-group','Existing group'); INSERT INTO adtr.resource_group_members(tenant_id,group_id,domain_id) VALUES('default','prior-group','prior-domain')"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = conn.Exec(ctx, "INSERT INTO adtr.resource_role_groups(tenant_id,role_id,group_id) VALUES('default',$1,'prior-group')", roleID); err != nil {
+		t.Fatal(err)
+	}
+	if err = Migrate(ctx, cfg); err != nil {
+		t.Fatal(err)
+	}
+	if err = Migrate(ctx, cfg); err != nil {
+		t.Fatal(err)
+	}
+	var epoch int64
+	var session, grant bool
+	if err = conn.QueryRow(ctx, "SELECT authorization_version,EXISTS(SELECT FROM adtr.sessions WHERE user_id=$1 AND token_hash='prior-v4-session'),EXISTS(SELECT FROM adtr.resource_role_groups WHERE tenant_id='default' AND role_id=$2 AND group_id='prior-group') FROM adtr.users WHERE id=$1", userID, roleID).Scan(&epoch, &session, &grant); err != nil || epoch <= 0 || !session || !grant {
+		t.Fatal("task migration lost prior state or epoch", err)
+	}
+	var tasksCount, permissionCount int
+	if err = conn.QueryRow(ctx, "SELECT (SELECT count(*) FROM adtr.tasks),(SELECT count(*) FROM adtr.access_permissions WHERE mark='tasks')").Scan(&tasksCount, &permissionCount); err != nil || tasksCount != 0 || permissionCount != 0 {
+		t.Fatal("migration invented tasks or broadened custom permissions", err)
+	}
+	tx, err := conn.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = auth.NewTaskAuthorizer()(ctx, tx, tasks.Principal{TenantID: "default", ActorID: userID}, tasks.Scope{DomainID: "platform", TaskName: "infrastructure.health", Platform: true}, tasks.Read)
+	_ = tx.Rollback(ctx)
+	if !errors.Is(err, tasks.ErrAuthorization) {
+		t.Fatal("old custom role gained new task access", err)
 	}
 	if err = Ready(ctx, cfg); err != nil {
 		t.Fatal(err)
