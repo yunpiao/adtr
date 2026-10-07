@@ -16,7 +16,9 @@ import {
   type Profile,
 } from "./api";
 
-type Page = "account" | "password" | "mfa" | "reset";
+import AccessWorkspace from "./AccessWorkspace";
+
+type Page = "account" | "password" | "mfa" | "reset" | "access";
 type Run = <T>(
   path: string,
   body: unknown | undefined,
@@ -192,7 +194,7 @@ export default function App() {
     setError("");
     setNotice("");
     window.history.pushState({}, "", `#${next}`);
-    if (pending) refresh();
+    if (pending || page === "access") refresh();
   };
   const updated = (data: Profile, message: string) => {
     setProfile(data);
@@ -276,7 +278,15 @@ export default function App() {
                     已登录为<strong>{profile.username}</strong>
                   </p>
                   <nav aria-label="账户设置">
-                    {(["account", "password", "mfa", "reset"] as Page[])
+                    {(
+                      [
+                        "account",
+                        "password",
+                        "mfa",
+                        "reset",
+                        "access",
+                      ] as Page[]
+                    )
                       .filter(
                         (p) =>
                           p !== "reset" || profile.role === "platform_admin",
@@ -295,6 +305,7 @@ export default function App() {
                               password: "修改密码",
                               mfa: "多因素认证",
                               reset: "重置用户密码",
+                              access: "访问管理",
                             }[p]
                           }
                         </button>
@@ -331,6 +342,15 @@ export default function App() {
                         : "首次登录或管理员重置后，需要修改密码"}
                       。完成修改后才能继续使用平台。
                     </div>
+                  )}
+                  {active === "access" && (
+                    <AccessWorkspace
+                      profile={profile}
+                      sessionChanged={() => {
+                        setPage("account");
+                        refresh();
+                      }}
+                    />
                   )}
                   {active === "account" && <Account profile={profile} />}{" "}
                   {active === "password" && (

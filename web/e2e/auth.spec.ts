@@ -58,6 +58,8 @@ test("real browser → API → PostgreSQL password and MFA lifecycle", async ({
   expect(me.status()).toBe(200);
   const initialProfile = await me.json();
   expect(initialProfile.needChangePwd).toBe(true);
+  if (process.env.ADTR_E2E_EXPIRED === "1")
+    expect(initialProfile.isExpired).toBe(true);
   expect(initialProfile.username).toBe(username.toLowerCase());
   const noCsrf = await context.request.post("/api/auth/logout", {
     data: {},
@@ -117,7 +119,11 @@ test("real browser → API → PostgreSQL password and MFA lifecycle", async ({
     await new Promise((resolve) =>
       setTimeout(resolve, (confirmedCounter + 1) * 30_000 - Date.now() + 1100),
     );
-  await page.getByLabel("二次认证验证码", { exact: true }).fill(totp(secret));
+  const loginNow = Date.now();
+  const loginCounter = Math.floor(loginNow / 30_000);
+  await page
+    .getByLabel("二次认证验证码", { exact: true })
+    .fill(totp(secret, loginNow));
   await page.getByRole("button", { name: "登录", exact: true }).click();
   await expect(
     page.getByRole("heading", { name: "账户概览", exact: true }),
@@ -129,6 +135,24 @@ test("real browser → API → PostgreSQL password and MFA lifecycle", async ({
   await expect(
     page.getByRole("heading", { name: "账户概览", exact: true }),
   ).toBeVisible();
+  await page.getByRole("button", { name: "多因素认证", exact: true }).click();
+  await page.getByLabel("当前密码", { exact: true }).fill(changed);
+  // The MFA login consumed its counter too. Disabling must prove possession
+  // with the next unused real authenticator code, never a replayed code.
+  const nextCounterAt = (loginCounter + 1) * 30_000 + 1100;
+  while (Date.now() < nextCounterAt)
+    await new Promise((resolve) =>
+      setTimeout(resolve, nextCounterAt - Date.now()),
+    );
+  await page.getByLabel("认证器验证码", { exact: true }).fill(totp(secret));
+  await page.getByRole("button", { name: "确认停用", exact: true }).click();
+  await expect(page.getByRole("status")).toContainText("多因素认证已停用");
+  const disabledMfa = await context.request.get("/api/auth/mfa");
+  expect(disabledMfa.status()).toBe(200);
+  expect(await disabledMfa.json()).toEqual({ hasMfa: false });
+  expect(
+    (await (await context.request.get("/api/auth/me")).json()).hasMfa,
+  ).toBe(false);
   await page.getByRole("button", { name: "退出登录", exact: true }).click();
   await expect(
     page.getByRole("heading", { name: "登录账户", exact: true }),

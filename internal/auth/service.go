@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -112,6 +113,7 @@ func (s *Service) readUser(row pgx.Row) (User, error) {
 	if err != nil {
 		return u, err
 	}
+	u.PasswordUpdated = u.PasswordUpdated.UTC()
 	u.HasMFA = u.mfaSecret != ""
 	u.PasswordDays = int(s.now().Sub(u.PasswordUpdated).Hours() / 24)
 	if u.PasswordDays < 0 {
@@ -197,7 +199,12 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			write(w, 400, map[string]string{"error": "invalid_input"})
 			return
 		}
-		d := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096))
+		raw, readErr := io.ReadAll(http.MaxBytesReader(w, r.Body, 4096))
+		if readErr != nil || !utf8.Valid(raw) {
+			write(w, 400, map[string]string{"error": "invalid_input"})
+			return
+		}
+		d := json.NewDecoder(strings.NewReader(string(raw)))
 		d.DisallowUnknownFields()
 		if err = d.Decode(&in); err != nil {
 			write(w, 400, map[string]string{"error": "invalid_input"})
@@ -254,7 +261,19 @@ func (s *Service) handle(ctx context.Context, r *http.Request, path string, in r
 		if err = s.rate(ctx, "login:"+username, 10); err != nil {
 			return nil, "", false, err
 		}
-		u, e := s.readUser(tx.QueryRow(ctx, "SELECT "+columns+" FROM adtr.users u WHERE username=$1 AND NOT disabled FOR UPDATE", username))
+		var tenant string
+		e = tx.QueryRow(ctx, "SELECT tenant_id FROM adtr.users WHERE username=$1 AND NOT disabled", username).Scan(&tenant)
+		if errors.Is(e, pgx.ErrNoRows) {
+			checkPassword(s.dummyHash, in.Password)
+			return nil, "", false, fail(401, "invalid_credentials")
+		}
+		if e != nil {
+			return nil, "", false, e
+		}
+		if e = lockIdentityTenant(ctx, tx, tenant); e != nil {
+			return nil, "", false, e
+		}
+		u, e := s.readUser(tx.QueryRow(ctx, "SELECT "+columns+" FROM adtr.users u WHERE username=$1 AND tenant_id=$2 AND NOT disabled FOR UPDATE", username, tenant))
 		if errors.Is(e, pgx.ErrNoRows) {
 			checkPassword(s.dummyHash, in.Password)
 			return nil, "", false, fail(401, "invalid_credentials")
@@ -295,7 +314,18 @@ func (s *Service) handle(ctx context.Context, r *http.Request, path string, in r
 	if e != nil || len(cookie.Value) != 43 {
 		return nil, "", false, fail(401, "unauthenticated")
 	}
-	u, e := s.readUser(tx.QueryRow(ctx, "SELECT "+columns+" FROM adtr.sessions s JOIN adtr.users u ON u.id=s.user_id WHERE s.token_hash=$1 AND s.expires_at>$2 AND NOT u.disabled FOR UPDATE OF u", digest(cookie.Value), s.now()))
+	var tenant string
+	e = tx.QueryRow(ctx, "SELECT u.tenant_id FROM adtr.sessions s JOIN adtr.users u ON u.id=s.user_id WHERE s.token_hash=$1 AND s.expires_at>$2 AND NOT u.disabled", digest(cookie.Value), s.now()).Scan(&tenant)
+	if errors.Is(e, pgx.ErrNoRows) {
+		return nil, "", false, fail(401, "unauthenticated")
+	}
+	if e != nil {
+		return nil, "", false, e
+	}
+	if e = lockIdentityTenant(ctx, tx, tenant); e != nil {
+		return nil, "", false, e
+	}
+	u, e := s.readUser(tx.QueryRow(ctx, "SELECT "+columns+" FROM adtr.sessions s JOIN adtr.users u ON u.id=s.user_id WHERE s.token_hash=$1 AND s.expires_at>$2 AND NOT u.disabled AND u.tenant_id=$3 FOR UPDATE OF u", digest(cookie.Value), s.now(), tenant))
 	if errors.Is(e, pgx.ErrNoRows) {
 		return nil, "", false, fail(401, "unauthenticated")
 	}
@@ -363,7 +393,7 @@ func (s *Service) handle(ctx context.Context, r *http.Request, path string, in r
 		u.NeedChange = false
 		u.IsExpired = false
 		u.PasswordDays = 0
-		u.PasswordUpdated = s.now()
+		u.PasswordUpdated = s.now().UTC()
 		action = "password_change"
 	case "/reset-password":
 		if u.Role != "platform_admin" || !u.HasMFA {
@@ -524,4 +554,11 @@ func (s *Service) recordFailure(ctx context.Context, path string) {
 		audit = &auditContext{tenant: "system"}
 	}
 	_, _ = conn.Exec(ctx, "INSERT INTO adtr.auth_audit(actor_id,tenant_id,action,target_id) VALUES($1,$2,$3,$4)", audit.actor, audit.tenant, strings.TrimPrefix(path, "/")+"_denied", audit.target)
+}
+
+// All identity and authorization operations acquire tenant then user locks.
+// Sharing this order with access mutations avoids cross-admin reset deadlocks.
+func lockIdentityTenant(ctx context.Context, tx pgx.Tx, tenant string) error {
+	_, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock(hashtextextended('adtr-access:' || $1,0))", tenant)
+	return err
 }

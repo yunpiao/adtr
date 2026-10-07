@@ -308,3 +308,159 @@ footer {
     font-size: 1.8rem;
   }
 }
+/* Management controls stay usable with keyboard navigation and narrow screens. */
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+select:focus-visible,
+textarea:focus-visible {
+  outline: 3px solid #ba6a0b;
+  outline-offset: 3px;
+}
+.field select,
+.field textarea {
+  width: 100%;
+  padding: 12px;
+  border: 1px solid #aebfc6;
+  border-radius: 6px;
+  background: #fff;
+  min-height: 46px;
+}
+.field textarea {
+  resize: vertical;
+}
+.access-workspace {
+  min-width: 0;
+}
+.workspace > section {
+  min-width: 0;
+}
+.access-tabs {
+  grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+  padding: 8px 0 24px;
+}
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 20px;
+}
+.filters {
+  padding: 16px;
+  border: 1px solid #d8e2e2;
+  border-radius: 8px;
+  margin: 20px 0;
+}
+.filters .field {
+  margin: 10px 0;
+}
+.compact {
+  margin: 12px 0;
+}
+.filter-group {
+  margin: 16px 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.filter-group legend,
+.proof legend,
+.permission-editor legend {
+  font-weight: 650;
+  margin-bottom: 12px;
+}
+.check {
+  display: block;
+  margin: 16px 0;
+}
+input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  vertical-align: middle;
+  margin-right: 8px;
+  accent-color: #075e59;
+}
+.proof {
+  border-top: 1px solid #d8e2e2;
+  margin-top: 28px;
+  padding-top: 20px;
+}
+.table-scroll {
+  overflow-x: auto;
+  margin: 20px 0;
+}
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+caption {
+  text-align: left;
+  font-weight: 650;
+  padding: 12px 0;
+}
+th,
+td {
+  border-bottom: 1px solid #d8e2e2;
+  padding: 12px 10px;
+  text-align: left;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+  min-width: 95px;
+}
+thead th {
+  background: #f1f7f5;
+  white-space: nowrap;
+}
+td dl {
+  min-width: 280px;
+}
+.block {
+  display: block;
+  font-weight: normal;
+  margin-top: 8px;
+}
+.row-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+.row-actions button {
+  padding: 6px 10px;
+  font-size: 0.8rem;
+}
+.danger {
+  color: #912d22;
+}
+.pagination {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin: 20px 0;
+}
+.permission-editor {
+  margin: 24px 0;
+}
+.permission-row {
+  padding: 18px 0;
+  border-bottom: 1px solid #d8e2e2;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+.permission-row > strong,
+.permission-row > details {
+  width: 100%;
+}
+.permission-row li {
+  overflow-wrap: anywhere;
+  line-height: 1.6;
+}
+@media (max-width: 760px) {
+  .form-grid {
+    grid-template-columns: 1fr;
+  }
+}
