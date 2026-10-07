@@ -18,8 +18,8 @@ type Config struct {
 }
 
 func LoadConfig(mode string, getenv func(string) string) (Config, error) {
-	if mode != "api" && mode != "worker" && mode != "migrate" {
-		return Config{}, errors.New("mode must be api, worker or migrate")
+	if mode != "api" && mode != "worker" && mode != "migrate" && mode != "bootstrap" {
+		return Config{}, errors.New("mode must be api, worker, migrate or bootstrap")
 	}
 	c := Config{DatabaseURL: getenv("ADTR_DATABASE_URL"), ListenAddr: getenv("ADTR_LISTEN_ADDR")}
 	u, err := url.Parse(c.DatabaseURL)
