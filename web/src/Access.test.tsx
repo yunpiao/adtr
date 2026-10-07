@@ -686,6 +686,7 @@ describe("roles and explicit function permissions", () => {
         { mark: "users", auth: { readable: true, writeable: true } },
         { mark: "roles", auth: { readable: false, writeable: false } },
         { mark: "permissions", auth: { readable: false, writeable: false } },
+        { mark: "tasks", auth: { readable: false, writeable: false } },
       ],
       actorPassword: "Actor Password 123",
       totpCode: "123456",

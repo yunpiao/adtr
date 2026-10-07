@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/mail"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -122,7 +123,7 @@ var accessRoutes = map[string]accessRoute{
 	"/permissions": {"GET", "permissions", false, "", ""}, "/permissions/save": {"POST", "permissions", true, "roleID permissions", ""},
 	"/menu": {"GET", "", false, "", ""}, "/check": {"POST", "", false, "paths", ""},
 }
-var accessMarks = []string{"users", "roles", "permissions"}
+var accessMarks = []string{"users", "roles", "permissions", "tasks"}
 
 func validAccessText(s string, max int) bool {
 	if !utf8.ValidString(s) || utf8.RuneCountInString(s) > max {
@@ -191,7 +192,7 @@ func validRoleID(id string) bool {
 func validateGrants(grants []AccessGrant) (map[string]AccessAuth, error) {
 	out := map[string]AccessAuth{}
 	for _, g := range grants {
-		if g.Mark != "users" && g.Mark != "roles" && g.Mark != "permissions" {
+		if !slices.Contains(accessMarks, g.Mark) {
 			return nil, fail(400, "unknown_permission")
 		}
 		if _, ok := out[g.Mark]; ok {

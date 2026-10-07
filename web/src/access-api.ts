@@ -1,6 +1,8 @@
 import { ApiError, messages } from "./api";
 
-export type Mark = "users" | "roles" | "permissions";
+export type ManagementTab = "users" | "roles" | "permissions";
+// Preserve server catalogue entries across versions; only managementTabs route locally.
+export type Mark = string;
 export interface Grant {
   readable: boolean;
   writeable: boolean;
@@ -74,11 +76,17 @@ export interface Proof {
   actorPassword: string;
   totpCode: string;
 }
-export const marks: Mark[] = ["users", "roles", "permissions"];
+export const managementTabs: ManagementTab[] = [
+  "users",
+  "roles",
+  "permissions",
+];
+export const marks: Mark[] = [...managementTabs, "tasks"];
 export const labels: Record<Mark, string> = {
   users: "用户管理",
   roles: "角色管理",
   permissions: "功能权限",
+  tasks: "后台任务",
 };
 export const operations = [
   "GET /api/access/users",

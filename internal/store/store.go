@@ -6,9 +6,10 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/yunpiao/adtr/internal/auth"
+	"github.com/yunpiao/adtr/internal/tasks"
 )
 
-const SchemaVersion = 4
+const SchemaVersion = 5
 
 // Ready checks the schema, not just the TCP port. Each probe owns its connection.
 func Ready(ctx context.Context, config *pgx.ConnConfig) error {
@@ -69,6 +70,12 @@ func Migrate(ctx context.Context, config *pgx.ConnConfig) error {
 			return errors.New("resource schema migration failed")
 		}
 		version = 4
+	}
+	if version < 5 {
+		if _, err := tx.Exec(ctx, auth.TaskPermissionSchema+auth.TaskAuthorizationSchema+tasks.Schema); err != nil {
+			return errors.New("task schema migration failed")
+		}
+		version = 5
 	}
 	if _, err := tx.Exec(ctx, "UPDATE adtr.schema_version SET version=$1 WHERE singleton=true", version); err != nil {
 		return errors.New("schema version update failed")

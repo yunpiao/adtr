@@ -18,8 +18,16 @@ import {
 
 import AccessWorkspace from "./AccessWorkspace";
 import ResourcesWorkspace from "./ResourcesWorkspace";
+import TaskWorkspace, { discardTaskIntent } from "./TaskWorkspace";
 
-type Page = "account" | "password" | "mfa" | "reset" | "access" | "resources";
+type Page =
+  | "account"
+  | "password"
+  | "mfa"
+  | "reset"
+  | "access"
+  | "resources"
+  | "tasks";
 type Run = <T>(
   path: string,
   body: unknown | undefined,
@@ -125,8 +133,10 @@ export default function App() {
       })
       .catch((err) => {
         if (id !== sequence.current) return;
-        if (err instanceof ApiError && err.status === 401) setProfile(null);
-        else setError(messages[err.code] ?? messages.internal);
+        if (err instanceof ApiError && err.status === 401) {
+          discardTaskIntent();
+          setProfile(null);
+        } else setError(messages[err.code] ?? messages.internal);
       })
       .finally(() => {
         if (id === sequence.current) setLoading(false);
@@ -168,6 +178,7 @@ export default function App() {
           return;
         }
         if (err instanceof ApiError && err.code === "unauthenticated") {
+          discardTaskIntent();
           setProfile(null);
           setRevision((n) => n + 1);
         }
@@ -195,7 +206,13 @@ export default function App() {
     setError("");
     setNotice("");
     window.history.pushState({}, "", `#${next}`);
-    if (pending || page === "access" || page === "resources") refresh();
+    if (
+      pending ||
+      page === "access" ||
+      page === "resources" ||
+      page === "tasks"
+    )
+      refresh();
   };
   const updated = (data: Profile, message: string) => {
     setProfile(data);
@@ -287,6 +304,7 @@ export default function App() {
                         "reset",
                         "access",
                         "resources",
+                        "tasks",
                       ] as Page[]
                     )
                       .filter(
@@ -309,6 +327,7 @@ export default function App() {
                               reset: "重置用户密码",
                               access: "访问管理",
                               resources: "资源与租户",
+                              tasks: "后台任务",
                             }[p]
                           }
                         </button>
@@ -323,6 +342,7 @@ export default function App() {
                           setError(messages.invalid_response);
                           return;
                         }
+                        discardTaskIntent();
                         setProfile(null);
                         setPage("account");
                         setRevision((n) => n + 1);
@@ -357,6 +377,15 @@ export default function App() {
                   )}
                   {active === "resources" && (
                     <ResourcesWorkspace
+                      profile={profile}
+                      sessionChanged={() => {
+                        setPage("account");
+                        refresh();
+                      }}
+                    />
+                  )}
+                  {active === "tasks" && (
+                    <TaskWorkspace
                       profile={profile}
                       sessionChanged={() => {
                         setPage("account");

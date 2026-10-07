@@ -285,7 +285,7 @@ func (s *Service) handleAccess(ctx context.Context, r *http.Request, path string
 			rt, known := accessRoutes[suffix]
 			results[i] = ok && prefix && known && method == rt.method && grantAllows(grants, rt)
 			if ok && !prefix {
-				results[i] = resourcePathAllowed(method, url, roleID, grants)
+				results[i] = resourcePathAllowed(method, url, roleID, grants) || taskPathAllowed(method, url, grants)
 			}
 		}
 		value = map[string]any{"results": results}
@@ -344,7 +344,7 @@ func loadAccessGrants(ctx context.Context, tx pgx.Tx, tenant, id string) (map[st
 }
 func permissionNodes(grants map[string]AccessAuth, onlyReadable bool) []AccessPermission {
 	nodes := make([]AccessPermission, 0, len(accessMarks))
-	names := map[string]string{"users": "Users", "roles": "Roles", "permissions": "Permissions"}
+	names := map[string]string{"users": "Users", "roles": "Roles", "permissions": "Permissions", "tasks": "Tasks"}
 	keys := make([]string, 0, len(accessRoutes))
 	for p := range accessRoutes {
 		keys = append(keys, p)
@@ -382,6 +382,21 @@ func permissionNodes(grants map[string]AccessAuth, onlyReadable bool) []AccessPe
 					mode = "writeable"
 				}
 				paths = append(paths, AccessPath{rt.method + " " + path, rt.method + " /api/resources" + path, mode})
+			}
+		}
+		if mark == "tasks" {
+			taskKeys := []string{}
+			for path := range taskRoutes {
+				taskKeys = append(taskKeys, path)
+			}
+			sort.Strings(taskKeys)
+			for _, path := range taskKeys {
+				rt := taskRoutes[path]
+				mode := "readable"
+				if rt.write {
+					mode = "writeable"
+				}
+				paths = append(paths, AccessPath{rt.method + " /tasks" + path, rt.method + " /api/tasks" + path, mode})
 			}
 		}
 		nodes = append(nodes, AccessPermission{names[mark], mark, []AccessPermission{}, paths, a.Readable, a, AccessAuth{true, true}, mark})

@@ -66,7 +66,7 @@ func newAccessFixture(t *testing.T) *accessFixture {
 		}
 		admin.Close(ctx)
 	})
-	if _, e = conn.Exec(ctx, "CREATE SCHEMA adtr;"+Schema+SchemaV3+ResourceSchema); e != nil {
+	if _, e = conn.Exec(ctx, "CREATE SCHEMA adtr;"+Schema+SchemaV3+ResourceSchema+TaskPermissionSchema); e != nil {
 		t.Fatal(e)
 	}
 	s, e := New(cfg, []byte(strings.Repeat("x", 32)), "http://localhost:8080", true)
@@ -187,7 +187,7 @@ func TestAccessDurableLifecycleAndFilters(t *testing.T) {
 	f.call(nil, "/api/access/users", nil, 401)
 	readRole := f.role("User readers", accessGrantInput("users", true, false))
 	roleInfo := f.call(&f.admin, "/api/access/roles/detail?roleID="+readRole, nil, 200)
-	if roleInfo["role"].(map[string]any)["name"] != "User readers" || len(roleInfo["permissions"].([]any)) != 3 {
+	if roleInfo["role"].(map[string]any)["name"] != "User readers" || len(roleInfo["permissions"].([]any)) != 4 {
 		t.Fatal("role detail persistence", roleInfo)
 	}
 	f.createUser("alice", "viewer")

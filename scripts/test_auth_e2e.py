@@ -17,7 +17,7 @@ from test_integration import IMAGE
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--suite", choices=["auth", "access", "resource"], default="auth")
+    parser.add_argument("--suite", choices=["auth", "access", "resource", "tasks"], default="auth")
     parser.add_argument("--expired", action="store_true")
     args = parser.parse_args()
     name = "adtr-auth-e2e-" + uuid.uuid4().hex[:12]
@@ -25,6 +25,7 @@ def main():
     env = dict(os.environ, POSTGRES_PASSWORD=password)
     created = False
     server = None
+    worker = None
     logs = tempfile.TemporaryFile(mode="w+")
     try:
         subprocess.run(["docker", "run", "--detach", "--rm", "--name", name,
@@ -77,20 +78,49 @@ def main():
             time.sleep(0.1)
         else:
             raise RuntimeError("authentication API failed readiness")
+        if args.suite == "tasks":
+            with socket.socket() as listener:
+                listener.bind(("127.0.0.1", 0))
+                worker_port = listener.getsockname()[1]
+            worker_env = dict(runtime_env, ADTR_LISTEN_ADDR=f"127.0.0.1:{worker_port}")
+            # Execution authorization needs persisted actors, not browser secrets.
+            for key in ["ADTR_AUTH_KEY", "ADTR_ORIGIN", "ADTR_WEB_DIR"]:
+                worker_env.pop(key, None)
+            worker = subprocess.Popen(["./bin/adtr", "-mode", "worker"], env=worker_env, stdout=logs, stderr=logs)
+            for _ in range(100):
+                if worker.poll() is not None:
+                    raise RuntimeError("task worker exited during startup")
+                try:
+                    with urllib.request.urlopen(f"http://127.0.0.1:{worker_port}/readyz", timeout=1) as response:
+                        if response.status == 200:
+                            break
+                except (OSError, urllib.error.URLError):
+                    pass
+                time.sleep(0.1)
+            else:
+                raise RuntimeError("task worker failed readiness")
         subprocess.run(["npm", "run", "test:e2e", "--prefix", "web", "--", f"e2e/{args.suite}.spec.ts"], env=env, check=True, timeout=420)
-        print(f"{args.suite} (expired={args.expired}): real browser -> API -> PostgreSQL acceptance PASS")
+        print(f"{args.suite} (expired={args.expired}): real browser -> API -> worker/database acceptance PASS")
     finally:
-        if server is not None:
-            server.terminate()
+        shutdown_error = None
+        for label, process in [("worker", worker), ("API", server)]:
+            if process is None:
+                continue
+            process.terminate()
             try:
-                server.wait(timeout=10)
+                code = process.wait(timeout=10)
+                if code != 0:
+                    shutdown_error = RuntimeError(f"{label} did not exit successfully")
             except subprocess.TimeoutExpired:
-                server.kill()
-                server.wait(timeout=10)
-                raise RuntimeError("authentication server did not stop gracefully")
+                process.kill()
+                process.wait(timeout=10)
+                shutdown_error = RuntimeError(f"{label} did not stop gracefully")
         logs.close()
         if created:
             subprocess.run(["docker", "rm", "--force", name], check=True, capture_output=True)
+        if shutdown_error is not None:
+            raise shutdown_error
+
 
 
 if __name__ == "__main__":

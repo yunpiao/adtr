@@ -15,3 +15,13 @@ The event contract test also guards all real PostgreSQL/lifecycle/browser stages
 
 Repository branch rules are not modified by this change. Actual required-check
 configuration and any merge queue settings remain repository-owner controls.
+
+## Bounded browser parallelism
+
+The first F48 PostgreSQL run took seven minutes. Its five existing browser
+suites now run in isolated matrix jobs with max-parallel 2, fail-fast disabled
+and the unchanged 20-minute per-job budget. Contract tests, real PostgreSQL
+and API/Worker lifecycle remain together in contracts. The final required
+check is still verify: it always runs, depends on contracts and the complete
+browser matrix, and fails for failed, cancelled or skipped dependencies.
+No check was removed and no repository protection settings changed.

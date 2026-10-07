@@ -181,8 +181,11 @@ func (s *Service) mutateAccessRole(ctx context.Context, tx pgx.Tx, actor User, a
 	} else if !changedPerms {
 		return nil, false, fail(409, "no_change")
 	}
-	if e = storeAccessGrants(ctx, tx, actor.tenant, id, desired); e != nil {
-		return nil, false, e
+	// Metadata-only edits must not revoke background authorization epochs.
+	if creating || changedPerms {
+		if e = storeAccessGrants(ctx, tx, actor.tenant, id, desired); e != nil {
+			return nil, false, e
+		}
 	}
 	if changedPerms && !creating {
 		// Authentication also locks users before creating/rotating sessions.

@@ -3,9 +3,9 @@ import { ApiError, type Profile } from "./api";
 import {
   accessRequest,
   labels,
-  marks,
+  managementTabs,
   operations,
-  type Mark,
+  type ManagementTab,
   type Permission,
   type Role,
   type RoleList,
@@ -28,7 +28,7 @@ export default function AccessWorkspace({
       menu: Permission[];
       results: boolean[];
     } | null>(null),
-    [active, setActive] = useState<Mark | null>(null),
+    [active, setActive] = useState<ManagementTab | null>(null),
     [revision, setRevision] = useState(0),
     [roles, setRoles] = useState<Role[]>([]);
   const task = useAccessTask(sessionChanged),
@@ -58,7 +58,7 @@ export default function AccessWorkspace({
       (data) => {
         setAccess(data);
         setActive(
-          marks.find(
+          managementTabs.find(
             (mark) =>
               data.menu.some(
                 (node) => node.mark === mark && node.auth.readable,
@@ -102,7 +102,7 @@ export default function AccessWorkspace({
       {access && (
         <>
           <nav className="access-tabs" aria-label="访问管理功能">
-            {marks
+            {managementTabs
               .filter(
                 (mark) =>
                   access.menu.some(

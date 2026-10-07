@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/base64"
+	"encoding/hex"
 	"flag"
 	"fmt"
 	"net/http"
@@ -16,6 +18,7 @@ import (
 	"github.com/yunpiao/adtr/internal/auth"
 	app "github.com/yunpiao/adtr/internal/runtime"
 	"github.com/yunpiao/adtr/internal/store"
+	"github.com/yunpiao/adtr/internal/tasks"
 )
 
 func main() {
@@ -52,6 +55,13 @@ func run() error {
 		defer cancel()
 		return store.Migrate(migrationCtx, cfg.Database)
 	}
+	var taskEngine *tasks.Engine
+	if *mode == "api" || *mode == "worker" {
+		taskEngine, err = tasks.New(cfg.Database, tasks.ProductionRegistry(), auth.NewTaskAuthorizer(), store.SchemaVersion)
+		if err != nil {
+			return fmt.Errorf("task engine configuration failed")
+		}
+	}
 	check := func(ctx context.Context) error { return store.Ready(ctx, cfg.Database) }
 	handler := app.Handler(*mode, check)
 	if *mode == "api" || *mode == "bootstrap" {
@@ -72,6 +82,9 @@ func run() error {
 			mux.Handle("/api/auth/", authentication)
 			mux.Handle("/api/access/", http.HandlerFunc(authentication.ServeAccessHTTP))
 			mux.Handle("/api/resources/", http.HandlerFunc(authentication.ServeResources))
+			taskHandler := authentication.TasksHandler(taskEngine)
+			mux.Handle("/api/tasks", taskHandler)
+			mux.Handle("/api/tasks/", taskHandler)
 			mux.Handle("/livez", handler)
 			mux.Handle("/readyz", handler)
 			if dir := os.Getenv("ADTR_WEB_DIR"); dir != "" {
@@ -96,6 +109,25 @@ func run() error {
 		}
 	}
 	server := &http.Server{Addr: cfg.ListenAddr, Handler: handler, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, MaxHeaderBytes: 16 << 10, WriteTimeout: 15 * time.Second, IdleTimeout: 30 * time.Second}
-	fmt.Fprintf(os.Stdout, "%s infrastructure starting\n", *mode)
+	fmt.Fprintf(os.Stdout, "%s service starting\n", *mode)
+	if *mode == "worker" {
+		var identity [16]byte
+		if _, err = rand.Read(identity[:]); err != nil {
+			return fmt.Errorf("worker identity unavailable")
+		}
+		worker, workerErr := tasks.NewWorker(taskEngine, tasks.WorkerConfig{Owner: hex.EncodeToString(identity[:]), Concurrency: 4, PollInterval: 250 * time.Millisecond, OnError: func(error) { fmt.Fprintln(os.Stderr, "task worker cycle failed") }})
+		if workerErr != nil {
+			return workerErr
+		}
+		result := make(chan error, 1)
+		go func() { result <- worker.Run(ctx); stop() }()
+		serverErr := app.Serve(ctx, server)
+		stop()
+		workerErr = <-result
+		if serverErr != nil {
+			return serverErr
+		}
+		return workerErr
+	}
 	return app.Serve(ctx, server)
 }

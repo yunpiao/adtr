@@ -106,3 +106,28 @@ TOTP、审计或浏览器到实际 API 的端到端效果；这些须由后端�
 然后仅运行 `npm run test:e2e --prefix web -- resource.spec.ts`，传入现有 `ADTR_E2E_USERNAME`、`ADTR_E2E_PASSWORD`、`ADTR_E2E_BASE_URL`。
 用例真实完成改密/MFA、租户保存和重新登录、无管理员自动授权、空组持久化、成员更新、显式管理员关联、正反检查、关联撤销/删除及最终无授权。等待最多八个真实 30 秒 TOTP 窗口，超时 300 秒；未放宽重放保护。
 测试发现与类型检查不是浏览器通过；最终真实集成证据必须由独立隔离 CI 记录。真实 AD/Windows、源数字枚举一致性、外部 UID/许可语义和容量测量仍未验收。
+
+## 后台任务（F48）
+
+关联 Issue #12 / AD-F-189、191、192。当前唯一可提交种类为
+`infrastructure.health` v1，范围 `platform`，空 payload；实际 Worker 检查数据库与队列。
+此切片没有 AD 检测/导出/远程响应/通知执行器，不代表跨域 AD 业务或完整产品验收。
+
+- 独立「后台任务」工作区通过服务器 `tasks` 菜单及六条精确 `/api/tasks` 操作检查展示功能
+- 列表支持域、种类、状态筛选与 1–100 条分页；详情展示权威状态、来源状态、UTC 时间、实际尝试、持久化进度、结果版本、结果、游标及事件
+- 非终态持续轮询，终态停止；`retry_wait` 不是成功，`cancel_requested` 不是取消完成；`completed-with-cancel-race` 事件展示实际竞争终态
+- 提交、取消、恢复要求密码、新鲜未使用 TOTP 和当前 Cookie/Origin/CSRF。重复点击被锁定；没有自动写重试
+- 未确认的提交/恢复保留同一幂等键。当前标签页的 sessionStorage 只存非秘密的操作键、目标任务 ID 与账户标识，用于刷新后继续核对；不存密码、OTP、CSRF/session token 或 payload。服务器确认、退出登录/401、账户或内存会话变化时清除。禁用存储时仍以内存保留导航间的键
+- 取消等待、切换页面、Back/Forward 均丢弃迟到响应，重新读取真实状态；停止等待不能撤销服务器事务。退出登录/关闭标签页后先核对服务器任务列表
+- 失败或死信恢复创建带父任务 ID 的新任务；不修改旧历史。部分失败不提供整体重放。作用域撤权/不存在详情均清除旧数据，不暴露历史结果
+- 权限编辑目录新增 `tasks` 并保留服务器返回的所有已有 grants；管理标签仍只有用户、角色、功能权限，不能把任务标记当成 `/api/access/tasks` 路由
+
+`src/Tasks.test.tsx` 是 mocked fetch 的 DOM/契约测试，包括重复/迟到响应、网络不确定重放、刷新恢复、取消竞争、终态停止轮询、分页、撤权清理、恢复父子任务、目录授权保留。
+它不能证明真实数据库或 Worker 行为。
+
+`e2e/tasks.spec.ts` 必须使用独立的新 bootstrap 数据库、真实 API 与真实 Worker，
+不复用 auth/access/resource 场景的数据库。执行真实改密、MFA、健康任务及结果事件、
+新 TOTP 同键重放返回相同 ID、持久化任务只读角色/账户，以及正确密码/MFA下的真实越权拒绝。
+仅运行 `npm run test:e2e --prefix web -- tasks.spec.ts`；沿用 `ADTR_E2E_USERNAME`、
+`ADTR_E2E_PASSWORD`、`ADTR_E2E_BASE_URL`，最长 300 秒并等待真实 TOTP 窗口。
+没有响应拦截、模拟 Worker、时间冻结或直接 SQL 成功结果夹具。测试发现/类型检查不等于端到端通过；本机缺少隔离 PostgreSQL/浏览器环境时，真实运行证据须由 CI 另行记录。

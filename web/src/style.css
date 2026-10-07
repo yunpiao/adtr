@@ -502,3 +502,49 @@ td dl {
 .resource-workspace dd {
   overflow-wrap: anywhere;
 }
+
+.task-notice {
+  border: 1px solid #b6cdd0;
+  border-radius: 7px;
+  padding: 14px 18px;
+  background: #edf5f5;
+  margin-bottom: 20px;
+}
+.task-json {
+  background: #f1f7f5;
+  border-radius: 8px;
+  padding: 16px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 0.8rem;
+}
+.task-progress {
+  display: grid;
+  gap: 10px;
+  margin: 24px 0;
+}
+.task-progress progress {
+  width: 100%;
+  accent-color: #075e59;
+}
+.task-state {
+  font-weight: 650;
+}
+.task-state-succeeded {
+  color: #175b36;
+}
+.task-state-failed,
+.task-state-dead_letter,
+.task-state-partial_failed {
+  color: #912d22;
+}
+.task-state-cancel_requested,
+.task-state-retry_wait {
+  color: #6f501b;
+}
+.task-action {
+  border-top: 1px solid #d8e2e2;
+  padding-top: 12px;
+  margin-top: 24px;
+}

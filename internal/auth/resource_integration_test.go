@@ -73,7 +73,7 @@ func newResourceFixture(t *testing.T) *resourceFixture {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { conn.Close(ctx) })
-	if _, err = conn.Exec(ctx, "CREATE SCHEMA adtr;"+Schema+SchemaV3+ResourceSchema); err != nil {
+	if _, err = conn.Exec(ctx, "CREATE SCHEMA adtr;"+Schema+SchemaV3+ResourceSchema+TaskPermissionSchema); err != nil {
 		t.Fatal(err)
 	}
 	s, err := New(cfg, []byte(strings.Repeat("r", 32)), "http://localhost:8080", true)

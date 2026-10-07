@@ -299,13 +299,22 @@ export function PermissionEditor({
   onChange: (value: PermissionInput[]) => void;
   readOnly?: boolean;
 }) {
+  // Preserve every received grant when another checkbox changes. Catalogue
+  // growth must never silently remove permissions during a role save.
+  const catalogue = [
+    ...new Set([
+      ...marks,
+      ...metadata.map((p) => p.mark),
+      ...value.map((p) => p.mark),
+    ]),
+  ];
   return (
     <fieldset className="permission-editor">
       <legend>功能授权</legend>
       <p className="muted">
         未授予的功能默认拒绝。写入必须同时允许读取；服务端限制可授予范围。
       </p>
-      {marks.map((mark) => {
+      {catalogue.map((mark) => {
         const grant = value.find((p) => p.mark === mark)?.auth ?? {
           readable: false,
           writeable: false,
@@ -313,7 +322,7 @@ export function PermissionEditor({
         const meta = metadata.find((p) => p.mark === mark);
         const update = (kind: "readable" | "writeable", checked: boolean) =>
           onChange(
-            marks.map((m) => {
+            catalogue.map((m) => {
               const auth = {
                 ...(value.find((p) => p.mark === m)?.auth ?? {
                   readable: false,
@@ -330,7 +339,7 @@ export function PermissionEditor({
           );
         return (
           <div className="permission-row" key={mark}>
-            <strong>{meta?.name || labels[mark]}</strong>
+            <strong>{meta?.name || labels[mark] || mark}</strong>
             <label>
               <input
                 type="checkbox"
@@ -340,7 +349,7 @@ export function PermissionEditor({
                 }
                 onChange={(e) => update("readable", e.target.checked)}
               />
-              {labels[mark]}：读取
+              {labels[mark] || meta?.name || mark}：读取
             </label>
             <label>
               <input
@@ -351,7 +360,7 @@ export function PermissionEditor({
                 }
                 onChange={(e) => update("writeable", e.target.checked)}
               />
-              {labels[mark]}：写入
+              {labels[mark] || meta?.name || mark}：写入
             </label>
             {meta && (
               <details>
