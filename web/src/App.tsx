@@ -17,8 +17,9 @@ import {
 } from "./api";
 
 import AccessWorkspace from "./AccessWorkspace";
+import ResourcesWorkspace from "./ResourcesWorkspace";
 
-type Page = "account" | "password" | "mfa" | "reset" | "access";
+type Page = "account" | "password" | "mfa" | "reset" | "access" | "resources";
 type Run = <T>(
   path: string,
   body: unknown | undefined,
@@ -194,7 +195,7 @@ export default function App() {
     setError("");
     setNotice("");
     window.history.pushState({}, "", `#${next}`);
-    if (pending || page === "access") refresh();
+    if (pending || page === "access" || page === "resources") refresh();
   };
   const updated = (data: Profile, message: string) => {
     setProfile(data);
@@ -285,6 +286,7 @@ export default function App() {
                         "mfa",
                         "reset",
                         "access",
+                        "resources",
                       ] as Page[]
                     )
                       .filter(
@@ -306,6 +308,7 @@ export default function App() {
                               mfa: "多因素认证",
                               reset: "重置用户密码",
                               access: "访问管理",
+                              resources: "资源与租户",
                             }[p]
                           }
                         </button>
@@ -345,6 +348,15 @@ export default function App() {
                   )}
                   {active === "access" && (
                     <AccessWorkspace
+                      profile={profile}
+                      sessionChanged={() => {
+                        setPage("account");
+                        refresh();
+                      }}
+                    />
+                  )}
+                  {active === "resources" && (
+                    <ResourcesWorkspace
                       profile={profile}
                       sessionChanged={() => {
                         setPage("account");

@@ -71,6 +71,7 @@ func run() error {
 			mux := http.NewServeMux()
 			mux.Handle("/api/auth/", authentication)
 			mux.Handle("/api/access/", http.HandlerFunc(authentication.ServeAccessHTTP))
+			mux.Handle("/api/resources/", http.HandlerFunc(authentication.ServeResources))
 			mux.Handle("/livez", handler)
 			mux.Handle("/readyz", handler)
 			if dir := os.Getenv("ADTR_WEB_DIR"); dir != "" {

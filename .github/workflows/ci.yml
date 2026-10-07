@@ -43,3 +43,5 @@ jobs:
         run: python3 scripts/test_auth_e2e.py --expired
       - name: Real user role and permission browser lifecycle
         run: python3 scripts/test_auth_e2e.py --suite access
+      - name: Real resource isolation browser lifecycle
+        run: python3 scripts/test_auth_e2e.py --suite resource

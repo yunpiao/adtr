@@ -17,7 +17,7 @@ from test_integration import IMAGE
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--suite", choices=["auth", "access"], default="auth")
+    parser.add_argument("--suite", choices=["auth", "access", "resource"], default="auth")
     parser.add_argument("--expired", action="store_true")
     args = parser.parse_args()
     name = "adtr-auth-e2e-" + uuid.uuid4().hex[:12]
@@ -53,6 +53,10 @@ def main():
             raise RuntimeError("build the real frontend before running acceptance")
         for mode in ["migrate", "bootstrap"]:
             subprocess.run(["./bin/adtr", "-mode", mode], env=env, check=True, timeout=60)
+        if args.suite == "resource":
+            subprocess.run(["docker", "exec", name, "psql", "-U", "postgres", "-d", "adtr_e2e", "-v", "ON_ERROR_STOP=1", "-c",
+                            "INSERT INTO adtr.resource_domains(tenant_id,id,name,active) VALUES('default','synthetic-domain-a','Synthetic Domain A',true)"],
+                           check=True, capture_output=True)
         if args.expired:
             subprocess.run(["docker", "exec", name, "psql", "-U", "postgres", "-d", "adtr_e2e", "-v", "ON_ERROR_STOP=1", "-c",
                             "UPDATE adtr.users SET must_change=false,password_updated_at=now()-interval '91 days' WHERE username='e2e-admin'"],
