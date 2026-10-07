@@ -4,11 +4,13 @@ package auth
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"image"
 	"image/color"
 	"image/png"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -287,5 +289,89 @@ func TestProfileConcurrentRevocationAfterSessionLookup(t *testing.T) {
 	}
 	if f.count("SELECT count(*) FROM adtr.profile_avatars") != 0 || f.count("SELECT count(*) FROM adtr.auth_audit WHERE action='profile_avatar_update'") != 0 {
 		t.Fatal("revoked request mutated avatar or success audit")
+	}
+}
+
+func TestProfileRevocationDuringUnlockedImageProcessing(t *testing.T) {
+	f := profileFixture(t)
+	id := profileID(t, f, "admin")
+	raw, err := json.Marshal(map[string]any{"userId": id, "file": profileIntegrationImage(t, color.NRGBA{G: 255, A: 255})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := func(csrf string) *http.Request {
+		r := httptest.NewRequest("POST", "/api/profile/avatar", bytes.NewReader(raw))
+		r.RemoteAddr = "127.0.0.1:3456"
+		r.Header.Set("Origin", f.s.origin)
+		r.Header.Set("Content-Type", "application/json")
+		r.Header.Set("X-CSRF-Token", csrf)
+		r.AddCookie(f.admin.cookie)
+		return r
+	}
+	// Authentication and CSRF must finish before any expensive decoder call.
+	decoded := false
+	bad := httptest.NewRecorder()
+	f.s.serveProfileHTTP(bad, request("wrong"), func(file string) ([]byte, error) { decoded = true; return normalizeProfileAvatar(file) })
+	if bad.Code != 403 || decoded {
+		t.Fatal("unauthorized request reached image processing")
+	}
+	entered, resume := make(chan struct{}), make(chan struct{})
+	released := false
+	unblock := func() {
+		if !released {
+			close(resume)
+			released = true
+		}
+	}
+	defer unblock()
+	result := make(chan int, 1)
+	go func() {
+		w := httptest.NewRecorder()
+		f.s.serveProfileHTTP(w, request(f.admin.csrf), func(file string) ([]byte, error) { close(entered); <-resume; return normalizeProfileAvatar(file) })
+		result <- w.Code
+	}()
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("authorized request did not reach decoder")
+	}
+	// The mutation below needs both locks. A decoder running inside its first
+	// transaction would block here and fail the deadline instead of passing.
+	ctx, cancel := context.WithTimeout(f.ctx, 3*time.Second)
+	defer cancel()
+	conn, err := pgx.ConnectConfig(ctx, f.s.database.Copy())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(f.ctx)
+	tx, err := conn.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(f.ctx)
+	if err = lockIdentityTenant(ctx, tx, "default"); err != nil {
+		t.Fatalf("decoder retained tenant lock: %v", err)
+	}
+	var lockedID int64
+	if err = tx.QueryRow(ctx, "SELECT id FROM adtr.users WHERE id=$1 FOR UPDATE", id).Scan(&lockedID); err != nil {
+		t.Fatalf("decoder retained user lock: %v", err)
+	}
+	if _, err = tx.Exec(ctx, "DELETE FROM adtr.sessions WHERE user_id=$1", id); err != nil {
+		t.Fatal(err)
+	}
+	if err = tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	unblock()
+	select {
+	case status := <-result:
+		if status != 401 {
+			t.Fatalf("revoked-during-decode upload status=%d", status)
+		}
+	case <-time.After(20 * time.Second):
+		t.Fatal("upload did not finish")
+	}
+	if f.count("SELECT count(*) FROM adtr.profile_avatars") != 0 || f.count("SELECT count(*) FROM adtr.auth_audit WHERE action='profile_avatar_update'") != 0 {
+		t.Fatal("revoked-during-decode upload committed")
 	}
 }

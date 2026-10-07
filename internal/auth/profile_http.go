@@ -17,6 +17,12 @@ import (
 // owner registers /api/profile/ after applying ProfileSchema. It reuses existing
 // durable identity/CSRF/revocation helpers without changing their contract.
 func (s *Service) ServeProfileHTTP(w http.ResponseWriter, r *http.Request) {
+	s.serveProfileHTTP(w, r, normalizeProfileAvatar)
+}
+
+// The unexported decoder parameter lets concurrency tests pause the real handler
+// between its two authentication transactions. Production always normalizes.
+func (s *Service) serveProfileHTTP(w http.ResponseWriter, r *http.Request, decode func(string) ([]byte, error)) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Cross-Origin-Resource-Policy", "same-origin")
@@ -70,7 +76,7 @@ func (s *Service) ServeProfileHTTP(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	ctx = context.WithValue(ctx, auditContextKey{}, &auditContext{tenant: "system"})
 	r = r.WithContext(ctx)
-	value, avatar, err := s.handleProfile(ctx, r, in)
+	value, avatar, err := s.handleProfile(ctx, r, in, decode)
 	if err != nil {
 		s.recordFailure(ctx, "profile")
 		var f failure
@@ -95,7 +101,7 @@ func (s *Service) ServeProfileHTTP(w http.ResponseWriter, r *http.Request) {
 	write(w, 200, value)
 }
 
-func (s *Service) handleProfile(ctx context.Context, r *http.Request, in profileUpload) (any, []byte, error) {
+func (s *Service) handleProfile(ctx context.Context, r *http.Request, in profileUpload, decode func(string) ([]byte, error)) (any, []byte, error) {
 	if r.Method == "POST" {
 		ip, _, _ := net.SplitHostPort(r.RemoteAddr)
 		if err := s.rate(ctx, "ip:"+ip, 60); err != nil {
@@ -126,11 +132,28 @@ func (s *Service) handleProfile(ctx context.Context, r *http.Request, in profile
 		if err = s.rate(ctx, "profile:"+strconv.FormatInt(actor.ID, 10), 30); err != nil {
 			return nil, nil, err
 		}
-		var png []byte
-		png, err = normalizeProfileAvatar(in.File)
-		if err == nil {
-			err = s.savePersonalAvatar(ctx, tx, actor, png)
+		// Release tenant/user locks before bounded but CPU-heavy image work.
+		// A second transaction below must revalidate the SAME cookie after it.
+		if err = tx.Commit(ctx); err != nil {
+			return nil, nil, err
 		}
+		png, decodeErr := decode(in.File)
+		if decodeErr != nil {
+			return nil, nil, decodeErr
+		}
+		tx, err = conn.Begin(ctx)
+		if err != nil {
+			return nil, nil, err
+		}
+		defer tx.Rollback(ctx)
+		current, _, _, authErr := s.authenticateAccess(ctx, tx, r)
+		if authErr != nil {
+			return nil, nil, authErr
+		}
+		if current.ID != actor.ID || current.tenant != actor.tenant {
+			return nil, nil, fail(403, "forbidden")
+		}
+		err = s.savePersonalAvatar(ctx, tx, current, png)
 		value = map[string]string{"result": "success"}
 	case r.URL.Path == "/api/profile/me":
 		value, err = readPersonalProfile(ctx, tx, actor)

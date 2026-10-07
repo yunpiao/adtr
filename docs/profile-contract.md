@@ -3,8 +3,7 @@
 Refs #61 / AD-F-170. Based on PR #72 `feat/background-tasks` at
 `e437919967074bc544cf378d72eab51c37f351cc`; work branch `feat/personal-profile`.
 The Issue, not the unavailable original workbook, is this slice's requirement
-input. Interface and image limits below are proposals awaiting coordination,
-not a claim that legacy semantics or product acceptance have been frozen.
+input. Interface and image limits were confirmed in the [coordination reply](https://github.com/yunpiao/adtr/issues/61#issuecomment-6036920999). They are explicit current product policy, not a claim that legacy semantics or product acceptance have been frozen.
 
 ## Scope and integration boundary
 
@@ -31,7 +30,7 @@ Until those integration steps, the running application exposes no new endpoint.
 Missing avatar storage returns a generic 500; there is no silent fallback,
 DDL-at-request-time, fake success or invented avatar.
 
-## Proposed API
+## Coordinated API
 
 - `GET /api/profile/me`: current user's persisted profile; no query parameters.
 - `GET /api/profile/avatar`: current user's sanitized PNG; absent image returns
@@ -73,14 +72,18 @@ No new permissions are registered or inherited from `userId`.
 
 POST uses the existing durable IP limiter (60 writes/15 minutes, shared bucket)
 and a profile-account bucket (30 uploads/15 minutes). Both are checked before
-image decoding; decoding occurs only after live authentication and self-ID
-validation. Stored image queries always include the authenticated tenant and
+image decoding. A short transaction first validates the live session, CSRF
+and self-ID; it commits and releases tenant/user locks before decoding and
+encoding. A second transaction then reacquires the locks and revalidates the
+same session cookie, user and tenant immediately before the avatar/audit write.
+Revocation, expiry or forced password change during image processing therefore
+prevents the commit without holding identity locks during CPU-heavy work. Stored image queries always include the authenticated tenant and
 user ID. `user_id` has the existing users-table foreign key with cascade delete;
 the duplicate tenant column is server-derived (the current users table has no
 composite unique key). A corrupt mismatched tenant row is unreadable and cannot
 be overwritten by an upsert; the server returns 409 `profile_conflict`.
 
-Proposed explicit image limits:
+Explicit coordinated image limits:
 
 - Canonical padded standard base64; no ignored whitespace or alternate encodings
 - Decoded upload 1 byte–2 MiB, PNG or JPEG only
@@ -123,7 +126,8 @@ unregistered fragment, reuse real session HTTP login, and check persisted
 profile values, missing/replaced bytes, self-only viewer/cross-tenant behavior,
 CSRF, forced change, disabled/expired/revoked sessions, failed-audit rollback,
 retry, inconsistent tenant storage and concurrent revocation while real GET/POST
-requests wait on the shared tenant lock. They are API/handler/database tests,
+requests wait on the shared tenant lock, plus revocation while decoding with
+identity locks demonstrably released. They are API/handler/database tests,
 not browser tests or proof the application's production route is wired.
 
 Baseline PR72 `make check` passed locally: Go race/vet/build, requirement and
