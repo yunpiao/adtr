@@ -1,14 +1,19 @@
 package runtime
 
 import (
+	"crypto/tls"
 	"errors"
 	"net"
 	"net/url"
 	"strconv"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 type Config struct {
 	DatabaseURL string
+	Database    *pgx.ConnConfig
 	ListenAddr  string
 }
 
@@ -28,6 +33,30 @@ func LoadConfig(mode string, getenv func(string) string) (Config, error) {
 	if query.Get("sslmode") != "verify-full" && !(getenv("ADTR_DEVELOPMENT") == "true" && query.Get("sslmode") == "disable") {
 		return Config{}, errors.New("database requires sslmode=verify-full; disable is limited to explicit development mode")
 	}
+	// Reject ambiguous or connection-redirecting URL parameters before parsing.
+	// In pgx, ssl=true can override sslmode with require. Reject both orders.
+	for key, values := range query {
+		if len(values) != 1 || key == "ssl" || key == "host" || key == "hostaddr" || key == "service" || key == "servicefile" {
+			return Config{}, errors.New("database URL contains an ambiguous or unsupported connection parameter")
+		}
+	}
+	parsed, err := pgx.ParseConfig(c.DatabaseURL)
+	if err != nil {
+		return Config{}, errors.New("invalid database configuration")
+	}
+	if query.Get("sslmode") == "verify-full" {
+		if !verifiedEndpoint(parsed.Host, parsed.Port, parsed.TLSConfig) {
+			return Config{}, errors.New("database requires verified TCP TLS for every endpoint")
+		}
+		for _, fallback := range parsed.Fallbacks {
+			if fallback == nil || !verifiedEndpoint(fallback.Host, fallback.Port, fallback.TLSConfig) {
+				return Config{}, errors.New("database requires verified TCP TLS for every endpoint")
+			}
+		}
+	}
+	// Retain the exact validated configuration; connections must not reparse
+	// environment variables or service files after validation.
+	c.Database = parsed
 	// Never return the connection string or parse error: either may contain credentials.
 	if c.ListenAddr == "" {
 		c.ListenAddr = "127.0.0.1:8080"
@@ -41,4 +70,9 @@ func LoadConfig(mode string, getenv func(string) string) (Config, error) {
 		return Config{}, errors.New("ADTR_LISTEN_ADDR must contain a valid host and port")
 	}
 	return c, nil
+}
+
+func verifiedEndpoint(host string, port uint16, config *tls.Config) bool {
+	network, _ := pgconn.NetworkAddress(host, port)
+	return network == "tcp" && host != "" && config != nil && !config.InsecureSkipVerify && config.ServerName == host
 }

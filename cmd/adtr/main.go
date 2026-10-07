@@ -46,9 +46,9 @@ func run() error {
 	if *mode == "migrate" {
 		migrationCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
-		return store.Migrate(migrationCtx, cfg.DatabaseURL)
+		return store.Migrate(migrationCtx, cfg.Database)
 	}
-	check := func(ctx context.Context) error { return store.Ready(ctx, cfg.DatabaseURL) }
+	check := func(ctx context.Context) error { return store.Ready(ctx, cfg.Database) }
 	server := &http.Server{Addr: cfg.ListenAddr, Handler: app.Handler(*mode, check), ReadHeaderTimeout: 5 * time.Second, WriteTimeout: 5 * time.Second, IdleTimeout: 30 * time.Second}
 	fmt.Fprintf(os.Stdout, "%s infrastructure starting\n", *mode)
 	return app.Serve(ctx, server)

@@ -10,8 +10,8 @@ import (
 const SchemaVersion = 1
 
 // Ready checks the schema, not just the TCP port. Each probe owns its connection.
-func Ready(ctx context.Context, databaseURL string) error {
-	conn, err := pgx.Connect(ctx, databaseURL)
+func Ready(ctx context.Context, config *pgx.ConnConfig) error {
+	conn, err := pgx.ConnectConfig(ctx, config.Copy())
 	if err != nil {
 		return errors.New("database unavailable")
 	}
@@ -25,8 +25,8 @@ func Ready(ctx context.Context, databaseURL string) error {
 
 // Migrate runs only as an explicit command. Runtime probes never mutate storage.
 // This first migration creates infrastructure metadata, not business tables.
-func Migrate(ctx context.Context, databaseURL string) error {
-	conn, err := pgx.Connect(ctx, databaseURL)
+func Migrate(ctx context.Context, config *pgx.ConnConfig) error {
+	conn, err := pgx.ConnectConfig(ctx, config.Copy())
 	if err != nil {
 		return errors.New("migration connection failed")
 	}

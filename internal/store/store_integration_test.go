@@ -18,6 +18,10 @@ func TestMigrationAndReadiness(t *testing.T) {
 	if dsn == "" {
 		t.Fatal("ADTR_TEST_DATABASE_URL required: missing integration environment is not a pass")
 	}
+	config, err := pgx.ParseConfig(dsn)
+	if err != nil {
+		t.Fatal("invalid test database configuration")
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	conn, err := pgx.Connect(ctx, dsn)
@@ -32,7 +36,7 @@ func TestMigrationAndReadiness(t *testing.T) {
 	if exists {
 		t.Fatal("test database must be fresh; refusing to modify an existing adtr schema")
 	}
-	if Ready(ctx, dsn) == nil {
+	if Ready(ctx, config) == nil {
 		t.Fatal("unmigrated DB must not be ready")
 	}
 	var wg sync.WaitGroup
@@ -40,22 +44,22 @@ func TestMigrationAndReadiness(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if err := Migrate(ctx, dsn); err != nil {
+			if err := Migrate(ctx, config); err != nil {
 				t.Error(err)
 			}
 		}()
 	}
 	wg.Wait()
-	if err := Ready(ctx, dsn); err != nil {
+	if err := Ready(ctx, config); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := conn.Exec(ctx, "UPDATE adtr.schema_version SET version=2"); err != nil {
 		t.Fatal(err)
 	}
-	if Ready(ctx, dsn) == nil {
+	if Ready(ctx, config) == nil {
 		t.Fatal("future schema must not be ready")
 	}
-	if Migrate(ctx, dsn) == nil {
+	if Migrate(ctx, config) == nil {
 		t.Fatal("future schema must not be overwritten")
 	}
 	var version int

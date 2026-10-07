@@ -4,6 +4,7 @@ GO ?= go
 build:
 	$(GO) build -buildvcs=false -trimpath -o bin/adtr ./cmd/adtr
 test:
+	python3 -m unittest discover -s scripts -p '*_contract.py'
 	$(GO) test -race -count=1 ./...
 lint:
 	test -z "$$(gofmt -l cmd internal)"
@@ -15,3 +16,4 @@ prepare-image:
 	$(GO) mod download
 	$(GO) mod verify
 	$(GO) mod vendor
+

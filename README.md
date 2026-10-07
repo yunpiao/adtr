@@ -59,6 +59,9 @@ Worker ready 仅表示工程基础设施可用，不代表业务执行器已实�
 独立进程支持 `bin/adtr -mode api|worker|migrate`，必须通过环境注入 `ADTR_DATABASE_URL`。
 `ADTR_LISTEN_ADDR` 默认分别为 `127.0.0.1:8080`/`127.0.0.1:8081`。
 数据库 URL 必须指定 `sslmode=verify-full`；仅 `ADTR_DEVELOPMENT=true` 时允许显式 `sslmode=disable`。
+启动时验证 pgx 实际主连接及全部 fallback 的证书校验和主机名；连接复用已验证配置，
+不在探针或迁移时重新读取环境配置。重复查询参数、`ssl` 别名和 URL 中的 host/service 覆盖均拒绝。
+生产连接禁止 Unix socket，避免绕过 TLS。
 Compose 使用此例外连接隔离的本地测试库；其共享开发数据库身份不代表生产最小权限方案。
 生产认证、分离迁移/运行角色、数据库 TLS 与发布验收仍在后续门禁范围内。
 
@@ -71,3 +74,4 @@ Compose 使用此例外连接隔离的本地测试库；其共享开发数据库
 
 工作簿字段冻结、209 项唯一映射、三套参考实现差异、真实 AD/Windows 八版本实验、
 规则输入、容量和 RPO/RTO 均待核验。mock、编译、容器就绪或 CI 通过不能替代产品验收。
+

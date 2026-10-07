@@ -32,3 +32,19 @@ CI 每次执行上述构建/集成/生命周期检查，不包含真实 AD 测�
 - 没有真实 AD 夹具、规则算法、前端或 209 项业务功能；当前产品验收仍为 0/209。
 - 云环境最初容器在线依赖下载因 CA 不可信失败；保留 TLS 校验，改为宿主校验依赖后容器离线构建。
 - 外部独立审查待执行；自审实际 diff 不等同于独立审查。
+
+
+## PR #6 review corrections on dot cloud computer (2026-10-07)
+
+- Source baseline: remote fda2ba092ad708c13f98b1d11ef43ac45cb37f29, read through the authorized GitHub connector.
+- Official Go 1.27.1 installed and archive SHA-256 verified before execution.
+- Exact remote baseline `make check`: PASS (format, vet, race tests, build).
+- Updated `make check`: PASS, including four Python lifecycle-runner regression tests.
+- TLS regression coverage: ssl alias in both orders, duplicate/encoded parameters, host/service overrides,
+  socket/non-verifying endpoints, retained primary and multi-host fallback configurations.
+- Restart regression: record IDs before restart, poll the same containers directly, fail on replacement;
+  explicit recreation is tested separately. Polling contract covers transient failure, timeout and ID changes.
+- Independent read-only diff review found no blocking finding in these fixes; one parser-order comment corrected.
+- This dot cloud computer currently has no Docker CLI/Engine. Real PostgreSQL migration and container lifecycle
+  checks were NOT run here. GitHub CI for the new head must be checked separately; earlier head success does
+  not verify these corrections. No AD/Windows or product acceptance is claimed.

@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -100,5 +101,68 @@ func TestMissingCheckFailsClosed(t *testing.T) {
 	Handler("api", nil).ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/readyz", nil))
 	if w.Code != http.StatusServiceUnavailable {
 		t.Fatal(w.Code)
+	}
+}
+
+func TestTLSParameterBypasses(t *testing.T) {
+	for _, query := range []string{
+		"sslmode=verify-full&ssl=true", "ssl=true&sslmode=verify-full",
+		"sslmode=verify-full&ssl=false&ssl=true", "ssl=true&ssl=false&sslmode=verify-full",
+		"sslmode=verify-full&sslmode=verify-full", "sslmode=disable&sslmode=verify-full",
+		"sslmode=verify-full&host=%2Ftmp", "host=other&sslmode=verify-full",
+		"sslmode=verify-full&host=localhost,%2Ftmp", "sslmode=verify-full&hostaddr=127.0.0.1",
+		"sslmode=verify-full&service=other", "sslmode=verify-full&servicefile=%2Ftmp%2Fsecret",
+		"sslmode=verify-full&connect_timeout=1&connect_timeout=2",
+	} {
+		t.Run(query, func(t *testing.T) {
+			_, err := LoadConfig("api", func(key string) string {
+				if key == "ADTR_DATABASE_URL" {
+					return "postgres://test:secret@localhost/test?" + query
+				}
+				return ""
+			})
+			if err == nil {
+				t.Fatal("unsafe or ambiguous URL accepted")
+			}
+			if strings.Contains(err.Error(), "secret") {
+				t.Fatal("credential leaked")
+			}
+		})
+	}
+}
+
+func TestEffectiveTLSEndpoints(t *testing.T) {
+	for _, host := range []string{"localhost", "127.0.0.1", "::1"} {
+		if !verifiedEndpoint(host, 5432, &tls.Config{ServerName: host}) {
+			t.Fatalf("valid host rejected: %s", host)
+		}
+	}
+	for _, tc := range []struct {
+		host   string
+		config *tls.Config
+	}{
+		{"localhost", nil}, {"/tmp", &tls.Config{ServerName: "/tmp"}},
+		{"C:\\tmp", &tls.Config{ServerName: "C:\\tmp"}}, {"", &tls.Config{}},
+		{"localhost", &tls.Config{ServerName: "other"}},
+		{"localhost", &tls.Config{ServerName: "localhost", InsecureSkipVerify: true}},
+	} {
+		if verifiedEndpoint(tc.host, 5432, tc.config) {
+			t.Fatal("unsafe endpoint accepted")
+		}
+	}
+	cfg, err := LoadConfig("api", func(key string) string {
+		if key == "ADTR_DATABASE_URL" {
+			return "postgres://test:secret@localhost:5432,other:5433/test?sslmode=verify-full"
+		}
+		return ""
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Database == nil || len(cfg.Database.Fallbacks) != 1 {
+		t.Fatal("validated configuration and all endpoints must be retained")
+	}
+	if cfg.Database.Fallbacks[0].TLSConfig.ServerName != "other" {
+		t.Fatal("fallback has incorrect TLS identity")
 	}
 }
