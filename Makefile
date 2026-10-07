@@ -7,6 +7,7 @@ test:
 	python3 -m unittest discover -s scripts -p '*_contract.py'
 	$(GO) test -race -count=1 ./...
 lint:
+	python3 scripts/verify_requirements.py
 	test -z "$$(gofmt -l cmd internal)"
 	$(GO) vet ./...
 integration:

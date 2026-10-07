@@ -14,8 +14,8 @@
 
 | 输入 | 已知事实 | 解除条件 |
 | --- | --- | --- |
-| 原始工作簿 | Library ID libfile_fd1e8820ccdc8191912c6818c3dea575；当前执行器缺少物化读取入口 | 在本执行器验证文件与原文；当前不填造字段矩阵 |
-| 209 编号映射 | 父任务核验 17 表、209 项、51 条支持细节，计划 57 功能单元 | 接收完整编号/原文/验收/实际 Issue 映射并验证唯一覆盖 |
+| 原始工作簿 | dot 云电脑已读取2026-10-03工作簿原文，SHA-256见 requirements/catalog.json | 文件可读阻碍已解除；逐业务字段冻结与源系统运行兼容核验仍按功能契约进行 |
+| 209 编号映射 | 已建立65个规划Issue：57功能组、7门禁和1路线图；209项唯一映射已核验 | requirements/catalog.json 纳入CI检查209项、3258字段与804控件引用；实现验收不能由编号覆盖替代 |
 | 三套参考实现 | 当前未收到引用及具体 commit | 固定引用，逐项记录差异、采纳/拒绝理由与迁移风险 |
 | 字段允许矩阵 | 类型/默认/空值/多值/运算符/时间单位/排序/页长/弃用均待原文 | 每字段可定位到来源和测试，不由 UI 猜测 |
 | 容量 | 域、DC、对象、ACL、EPS、保留期、P95、导出量未知 | G01 冻结目标及测量口径 |
@@ -46,3 +46,17 @@ CI 默认无权限，各 job 仅授予必要 contents: read；actions 固定完�
 - https://docs.github.com/en/copilot/tutorials/cloud-agent/get-the-best-results
 - https://learn.chatgpt.com/docs/agent-configuration/agents-md
 - https://docs.github.com/en/actions/reference/security/secure-use
+
+
+## dot 云电脑执行与分层验证（2026-10-07）
+
+切换后在 dot 云电脑重新物化远端源码；官方 Go 1.27.1 校验安装，本地无 Docker。
+PR #6 TLS与同容器重启审查修复提交 af1ad3d2b766df4c1ef8a71b9ade58c8d05c6d7e，
+本地 make check 及 GitHub CI 的真实 PostgreSQL/容器生命周期均通过。
+
+PR #68 的 F43/F44 提交 c77878d2d090a32c776fc29126971709cd2b3afd：本地 Go race/vet/build、
+20个DOM测试、TypeScript/build和依赖审计通过；独立审查后修复审计归属与TRUNCATE缺口。
+GitHub CI https://github.com/yunpiao/adtr/actions/runs/37573272781 已通过真实数据库迁移、
+认证状态/权限/并发回归、容器生命周期和真实浏览器→API→数据库认证链路。
+逐AD-F已验证部分与未决门禁记录在 requirements/catalog.json；当前产品完整验收仍为0/209。
+代码、真实链路测试、源系统1:1兼容、生产验收、合并和部署分别记录，不能互相替代。

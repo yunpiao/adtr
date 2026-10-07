@@ -1,4 +1,5 @@
 """Real browser/API/PostgreSQL acceptance on an isolated, owned test database."""
+import argparse
 import base64
 import os
 from pathlib import Path
@@ -15,6 +16,10 @@ from test_integration import IMAGE
 
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--suite", choices=["auth", "access"], default="auth")
+    parser.add_argument("--expired", action="store_true")
+    args = parser.parse_args()
     name = "adtr-auth-e2e-" + uuid.uuid4().hex[:12]
     password = secrets.token_hex(24)
     env = dict(os.environ, POSTGRES_PASSWORD=password)
@@ -48,6 +53,11 @@ def main():
             raise RuntimeError("build the real frontend before running acceptance")
         for mode in ["migrate", "bootstrap"]:
             subprocess.run(["./bin/adtr", "-mode", mode], env=env, check=True, timeout=60)
+        if args.expired:
+            subprocess.run(["docker", "exec", name, "psql", "-U", "postgres", "-d", "adtr_e2e", "-v", "ON_ERROR_STOP=1", "-c",
+                            "UPDATE adtr.users SET must_change=false,password_updated_at=now()-interval '91 days' WHERE username='e2e-admin'"],
+                           check=True, capture_output=True)
+            env["ADTR_E2E_EXPIRED"] = "1"
         # Credentials are only needed by explicit bootstrap; never pass them to the server.
         runtime_env = {k: v for k, v in env.items() if not k.startswith("ADTR_BOOTSTRAP_") and not k.startswith("ADTR_E2E_")}
         server = subprocess.Popen(["./bin/adtr", "-mode", "api"], env=runtime_env, stdout=logs, stderr=logs)
@@ -63,8 +73,8 @@ def main():
             time.sleep(0.1)
         else:
             raise RuntimeError("authentication API failed readiness")
-        subprocess.run(["npm", "run", "test:e2e", "--prefix", "web"], env=env, check=True, timeout=240)
-        print("Authentication: real browser -> API -> PostgreSQL acceptance PASS")
+        subprocess.run(["npm", "run", "test:e2e", "--prefix", "web", "--", f"e2e/{args.suite}.spec.ts"], env=env, check=True, timeout=420)
+        print(f"{args.suite} (expired={args.expired}): real browser -> API -> PostgreSQL acceptance PASS")
     finally:
         if server is not None:
             server.terminate()

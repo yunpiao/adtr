@@ -39,6 +39,7 @@ func TestHTTPRejectsBeforeDatabase(t *testing.T) {
 		{"POST", "/api/auth/login", "{}", "https://example.com", "text/plain", 400},
 		{"POST", "/api/auth/login", "{\"unknown\":1}", "https://example.com", "application/json", 400},
 		{"POST", "/api/auth/login", "{}{}", "https://example.com", "application/json", 400},
+		{"POST", "/api/auth/login", "{\"username\":\"a" + string([]byte{0xff}) + "\"}", "https://example.com", "application/json", 400},
 		{"POST", "/api/auth/login", strings.Repeat("x", 5000), "https://example.com", "application/json", 400},
 		{"GET", "/api/auth/login", "", "", "", 405},
 		{"GET", "/api/auth/missing", "", "", "", 404},

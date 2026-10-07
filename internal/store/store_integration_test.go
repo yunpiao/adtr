@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/yunpiao/adtr/internal/auth"
 )
 
 // Requires an isolated disposable DB. This test never drops any schema or table.
@@ -127,5 +128,69 @@ func TestExistingVersionOneUpgrade(t *testing.T) {
 	var tables int
 	if err = conn.QueryRow(ctx, "SELECT count(*) FROM information_schema.tables WHERE table_schema='adtr' AND table_name IN ('users','sessions','auth_attempts','auth_audit')").Scan(&tables); err != nil || tables != 4 {
 		t.Fatal("upgrade incomplete", tables, err)
+	}
+}
+
+func TestExistingVersionTwoUpgrade(t *testing.T) {
+	ctx := context.Background()
+	dsn := os.Getenv("ADTR_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Fatal("isolated database required")
+	}
+	cfg, err := pgx.ParseConfig(dsn)
+	if err != nil {
+		t.Fatal("invalid test database URL")
+	}
+	admin, err := pgx.ConnectConfig(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer admin.Close(ctx)
+	name := fmt.Sprintf("adtr_identity_upgrade_%d", time.Now().UnixNano())
+	quoted := pgx.Identifier{name}.Sanitize()
+	if _, err = admin.Exec(ctx, "CREATE DATABASE "+quoted); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if _, e := admin.Exec(ctx, "DROP DATABASE "+quoted+" WITH (FORCE)"); e != nil {
+			t.Error(e)
+		}
+	}()
+	cfg = cfg.Copy()
+	cfg.Database = name
+	conn, err := pgx.ConnectConfig(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(ctx)
+	if _, err = conn.Exec(ctx, `CREATE SCHEMA adtr; CREATE TABLE adtr.schema_version(singleton boolean PRIMARY KEY DEFAULT true CHECK(singleton),version integer NOT NULL CHECK(version>0)); INSERT INTO adtr.schema_version VALUES(true,2);`+auth.Schema); err != nil {
+		t.Fatal(err)
+	}
+	var userID int64
+	if err = conn.QueryRow(ctx, "INSERT INTO adtr.users(tenant_id,username,password_hash,role,email) VALUES('default','prior-user','synthetic-hash','viewer','prior@example.test') RETURNING id").Scan(&userID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = conn.Exec(ctx, "INSERT INTO adtr.sessions(token_hash,user_id,expires_at) VALUES('synthetic-token',$1,now()+interval '1 hour')", userID); err != nil {
+		t.Fatal(err)
+	}
+	if err = Migrate(ctx, cfg); err != nil {
+		t.Fatal(err)
+	}
+	if err = Migrate(ctx, cfg); err != nil {
+		t.Fatal(err)
+	}
+	var username, email, hash, role, roleID string
+	if err = conn.QueryRow(ctx, "SELECT username,email,password_hash,role,role_id FROM adtr.users WHERE id=$1", userID).Scan(&username, &email, &hash, &role, &roleID); err != nil {
+		t.Fatal(err)
+	}
+	if username != "prior-user" || email != "prior@example.test" || hash != "synthetic-hash" || role != "viewer" || roleID != "" {
+		t.Fatal("identity upgrade lost or changed existing identity")
+	}
+	var session bool
+	if err = conn.QueryRow(ctx, "SELECT EXISTS(SELECT FROM adtr.sessions WHERE token_hash='synthetic-token' AND user_id=$1)", userID).Scan(&session); err != nil || !session {
+		t.Fatal("upgrade lost prior session", err)
+	}
+	if err = Ready(ctx, cfg); err != nil {
+		t.Fatal(err)
 	}
 }
