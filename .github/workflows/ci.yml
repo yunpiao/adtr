@@ -1,8 +1,10 @@
 name: engineering-ci
 on:
   pull_request:
+  merge_group:
+    types: [checks_requested]
   push:
-    branches: [main, 'feat/**', 'docs/**']
+    branches: [main]
 permissions: {}
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
