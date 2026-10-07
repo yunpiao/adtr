@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/mail"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -191,7 +192,7 @@ func validRoleID(id string) bool {
 func validateGrants(grants []AccessGrant) (map[string]AccessAuth, error) {
 	out := map[string]AccessAuth{}
 	for _, g := range grants {
-		if g.Mark != "users" && g.Mark != "roles" && g.Mark != "permissions" {
+		if !slices.Contains(accessMarks, g.Mark) {
 			return nil, fail(400, "unknown_permission")
 		}
 		if _, ok := out[g.Mark]; ok {
