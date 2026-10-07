@@ -17,6 +17,12 @@ class CIEventContract(unittest.TestCase):
                         'scripts/test_auth_e2e.py', 'scripts/test_auth_e2e.py --expired',
                         'scripts/test_auth_e2e.py --suite access', 'scripts/test_auth_e2e.py --suite resource', 'scripts/test_auth_e2e.py --suite tasks']:
             self.assertIn(command, text)
+        self.assertIn('needs: [contracts, browser]', text)
+        self.assertIn('if: ${{ always() }}', text)
+        self.assertIn('fail-fast: false', text)
+        self.assertIn('max-parallel: 2', text)
+        self.assertIn('test "$CONTRACT_RESULT" = success && test "$BROWSER_RESULT" = success', text)
+        self.assertNotIn('continue-on-error', text)
         self.assertIn('permissions: {}', text)
         self.assertIn('contents: read', text)
         self.assertIn('persist-credentials: false', text)
