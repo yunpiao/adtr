@@ -1,0 +1,67 @@
+# Disposable local development only; not a production deployment.
+services:
+  db:
+    image: postgres:17.6-alpine@sha256:ef257d85f76e48da1c64832459b59fcaba1a4dac97bf5d7450c77753542eee94
+    environment:
+      POSTGRES_USER: adtr_dev
+      POSTGRES_DB: adtr_dev
+      POSTGRES_PASSWORD: ${ADTR_DEV_PASSWORD:?set a random disposable development password}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD, pg_isready, -h, 127.0.0.1, -U, adtr_dev, -d, adtr_dev]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+  migrate:
+    build: .
+    command: [-mode, migrate]
+    environment:
+      ADTR_DEVELOPMENT: 'true'
+      ADTR_DATABASE_URL: postgres://adtr_dev:${ADTR_DEV_PASSWORD}@db:5432/adtr_dev?sslmode=disable
+    depends_on:
+      db:
+        condition: service_healthy
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+  api:
+    build: .
+    command: [-mode, api]
+    environment:
+      ADTR_DEVELOPMENT: 'true'
+      ADTR_DATABASE_URL: postgres://adtr_dev:${ADTR_DEV_PASSWORD}@db:5432/adtr_dev?sslmode=disable
+      ADTR_LISTEN_ADDR: 0.0.0.0:8080
+    ports: ["127.0.0.1:${ADTR_API_PORT:-8080}:8080"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: [CMD, /adtr, -probe, http://127.0.0.1:8080/readyz]
+      interval: 2s
+      timeout: 4s
+      retries: 20
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+  worker:
+    build: .
+    command: [-mode, worker]
+    environment:
+      ADTR_DEVELOPMENT: 'true'
+      ADTR_DATABASE_URL: postgres://adtr_dev:${ADTR_DEV_PASSWORD}@db:5432/adtr_dev?sslmode=disable
+      ADTR_LISTEN_ADDR: 0.0.0.0:8081
+    ports: ["127.0.0.1:${ADTR_WORKER_PORT:-8081}:8081"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: [CMD, /adtr, -probe, http://127.0.0.1:8081/readyz]
+      interval: 2s
+      timeout: 4s
+      retries: 20
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+volumes:
+  pgdata:

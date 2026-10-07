@@ -1,8 +1,73 @@
-# adtr
+# ADTR
 
-项目初始化仓库，用于后续开发。
+面向 Active Directory 的安全产品，全部 209 项需求在
+[路线图 #1](https://github.com/yunpiao/adtr/issues/1) 范围内。
+当前只有 G01/G02 设计初稿及 G03 工程骨架；产品功能验收 **0/209**。
+API 与 Worker 仅提供基础设施探针，尚无业务 API、身份认证、任务消费、AD 采集或阻断能力。
 
-## 开始使用
+## 本地构建与测试
 
-目前仓库仅包含项目说明，暂无需要安装的依赖或启动的服务。
-后续添加代码时，请在此补充安装、运行和测试方法。
+需要 Go **1.27.1**、make；集成测试另需 Python 3、Docker Engine 与 Compose v2。
+Go 依赖由 `go.mod`/`go.sum` 固定，容器基础镜像固定 digest。
+
+```sh
+make check
+python3 scripts/test_integration.py
+python3 scripts/test_lifecycle.py
+```
+
+`make check` 执行格式检查、go vet、带 race 的单元/HTTP 契约测试以及编译类型检查。
+数据库脚本创建随机命名的全新 PostgreSQL，测试迁移前拒绝就绪、并发迁移、重复迁移及不兼容版本，
+退出时只删除自己创建的容器。生命周期脚本验证 API/Worker 启停、依赖故障、恢复和重启，
+并只清理自己随机命名的 Compose 项目与卷。没有测试环境会失败，不会跳过算通过。
+所有测试只使用合成基础设施数据，不连接 AD 或发送外部通知。
+
+云工作区可显式使用已校验安装的工具链：
+
+```sh
+export PATH=/workspace/toolchains/adtr-go-1.27.1/go/bin:$PATH
+export GOCACHE=/workspace/cache/go-build GOPATH=/workspace/cache/go
+export BUILDX_CONFIG=/workspace/cache/buildx
+```
+
+这些路径只适用于此云工作区；普通开发机安装官方 Go 并使用正常 PATH 即可。
+构建镜像前由宿主 Go 下载、校验并生成忽略提交的 vendor 目录，容器内离线编译。
+这样无需把宿主环境的证书或认证配置加入镜像，也不会关闭下载的 TLS 校验。
+
+## 启动开发环境
+
+```sh
+export ADTR_DEV_PASSWORD="$(python3 -c 'import secrets; print(secrets.token_hex(24))')"
+make prepare-image
+docker compose up --build --detach --wait
+./bin/adtr -probe http://127.0.0.1:8080/readyz
+./bin/adtr -probe http://127.0.0.1:8081/readyz
+docker compose stop
+docker compose start --wait
+```
+
+先运行 `make check` 生成探针客户端。同一开发数据库卷重启时保留同一个 `ADTR_DEV_PASSWORD`；
+新的随机密码仅用于新的开发卷。密码不得提交、输出到日志或复用为真实 AD 凭据。
+`docker compose down` 删除开发容器并保留数据库卷；需要重置数据时，
+确认该项目只含可丢弃数据后再手动删除其卷。
+
+容器迁移命令先于 API/Worker 执行。默认端口只绑定本机回环地址，数据库无宿主端口。
+`/livez` 表示进程存活；`/readyz` 仅在数据库可访问且 schema version 匹配时返回 200，否则返回 503。
+Worker ready 仅表示工程基础设施可用，不代表业务执行器已实现。
+未知业务 URL 返回 404。探针不输出数据库地址、凭据或错误细节。
+
+独立进程支持 `bin/adtr -mode api|worker|migrate`，必须通过环境注入 `ADTR_DATABASE_URL`。
+`ADTR_LISTEN_ADDR` 默认分别为 `127.0.0.1:8080`/`127.0.0.1:8081`。
+数据库 URL 必须指定 `sslmode=verify-full`；仅 `ADTR_DEVELOPMENT=true` 时允许显式 `sslmode=disable`。
+Compose 使用此例外连接隔离的本地测试库；其共享开发数据库身份不代表生产最小权限方案。
+生产认证、分离迁移/运行角色、数据库 TLS 与发布验收仍在后续门禁范围内。
+
+## 设计和验收边界
+
+- [架构 ADR、安全与兼容性](docs/architecture.md)
+- [任务与数据契约](docs/task-contract.md)
+- [需求台账、阻碍和交付约定](docs/delivery.md)
+- [当前工程验证记录](docs/validation-g03.md)
+
+工作簿字段冻结、209 项唯一映射、三套参考实现差异、真实 AD/Windows 八版本实验、
+规则输入、容量和 RPO/RTO 均待核验。mock、编译、容器就绪或 CI 通过不能替代产品验收。
