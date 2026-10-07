@@ -2,7 +2,7 @@ GO ?= go
 
 .PHONY: build test lint integration check prepare-image
 build:
-	$(GO) build -trimpath -o bin/adtr ./cmd/adtr
+	$(GO) build -buildvcs=false -trimpath -o bin/adtr ./cmd/adtr
 test:
 	$(GO) test -race -count=1 ./...
 lint:

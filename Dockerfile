@@ -4,7 +4,7 @@ COPY go.mod go.sum ./
 COPY vendor ./vendor
 COPY cmd ./cmd
 COPY internal ./internal
-RUN CGO_ENABLED=0 GOPROXY=off GOTOOLCHAIN=local go build -mod=vendor -trimpath -ldflags='-s -w' -o /adtr ./cmd/adtr
+RUN CGO_ENABLED=0 GOPROXY=off GOTOOLCHAIN=local go build -mod=vendor -buildvcs=false -trimpath -ldflags='-s -w' -o /adtr ./cmd/adtr
 
 FROM scratch
 COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
