@@ -2,21 +2,25 @@
 
 面向 Active Directory 的安全产品，全部 209 项需求在
 [路线图 #1](https://github.com/yunpiao/adtr/issues/1) 范围内。
-当前只有 G01/G02 设计初稿及 G03 工程骨架；产品功能验收 **0/209**。
-API 与 Worker 仅提供基础设施探针，尚无业务 API、身份认证、任务消费、AD 采集或阻断能力。
+当前已有 G01/G02 设计、G03 工程基础设施，以及 F43/F44 本地账户认证纵向实现。
+认证包括持久化登录/退出、首次/过期密码修改、管理员同租户重置、TOTP MFA 和实际浏览器界面。
+最新认证提交的独立审查与真实数据库/浏览器 CI 仍须逐项核验；产品验收计数仍为 **0/209**。
+尚无 AD 采集、阻断或任务消费；未进行生产部署。
 
 ## 本地构建与测试
 
-需要 Go **1.27.1**、make；集成测试另需 Python 3、Docker Engine 与 Compose v2。
+需要 Go **1.27.1**、Node **24.19.0**、npm、make；集成测试另需 Python 3、Docker Engine 与 Compose v2。
 Go 依赖由 `go.mod`/`go.sum` 固定，容器基础镜像固定 digest。
 
 ```sh
 make check
+(cd web && npx playwright install --with-deps chromium)
 python3 scripts/test_integration.py
+python3 scripts/test_auth_e2e.py
 python3 scripts/test_lifecycle.py
 ```
 
-`make check` 执行格式检查、go vet、带 race 的单元/HTTP 契约测试以及编译类型检查。
+`make check` 执行格式检查、go vet、带 race 的单元/HTTP 契约测试、编译、前端锁文件安装、类型检查、DOM测试、构建和依赖高危审计。
 数据库脚本创建随机命名的全新 PostgreSQL，测试迁移前拒绝就绪、并发迁移、重复迁移及不兼容版本，
 退出时只删除自己创建的容器。生命周期脚本验证 API/Worker 启停、依赖故障、恢复和重启，
 并只清理自己随机命名的 Compose 项目与卷。没有测试环境会失败，不会跳过算通过。
@@ -54,22 +58,23 @@ docker compose start --wait
 容器迁移命令先于 API/Worker 执行。默认端口只绑定本机回环地址，数据库无宿主端口。
 `/livez` 表示进程存活；`/readyz` 仅在数据库可访问且 schema version 匹配时返回 200，否则返回 503。
 Worker ready 仅表示工程基础设施可用，不代表业务执行器已实现。
-未知业务 URL 返回 404。探针不输出数据库地址、凭据或错误细节。
+未配置认证时业务 URL 返回 404。认证启用、引导和完整安全契约见 [身份认证契约](docs/identity-contract.md)。探针不输出数据库地址、凭据或错误细节。
 
-独立进程支持 `bin/adtr -mode api|worker|migrate`，必须通过环境注入 `ADTR_DATABASE_URL`。
+独立进程支持 `bin/adtr -mode api|worker|migrate|bootstrap`，必须通过环境注入 `ADTR_DATABASE_URL`。
 `ADTR_LISTEN_ADDR` 默认分别为 `127.0.0.1:8080`/`127.0.0.1:8081`。
 数据库 URL 必须指定 `sslmode=verify-full`；仅 `ADTR_DEVELOPMENT=true` 时允许显式 `sslmode=disable`。
 启动时验证 pgx 实际主连接及全部 fallback 的证书校验和主机名；连接复用已验证配置，
 不在探针或迁移时重新读取环境配置。重复查询参数、`ssl` 别名和 URL 中的 host/service 覆盖均拒绝。
 生产连接禁止 Unix socket，避免绕过 TLS。
 Compose 使用此例外连接隔离的本地测试库；其共享开发数据库身份不代表生产最小权限方案。
-生产认证、分离迁移/运行角色、数据库 TLS 与发布验收仍在后续门禁范围内。
+生产认证验收、分离迁移/运行角色、数据库 TLS 与发布验收仍在后续门禁范围内。
 
 ## 设计和验收边界
 
 - [架构 ADR、安全与兼容性](docs/architecture.md)
 - [任务与数据契约](docs/task-contract.md)
 - [需求台账、阻碍和交付约定](docs/delivery.md)
+- [本地身份认证安全契约](docs/identity-contract.md)
 - [当前工程验证记录](docs/validation-g03.md)
 
 工作簿字段冻结、209 项唯一映射、三套参考实现差异、真实 AD/Windows 八版本实验、

@@ -9,5 +9,8 @@ RUN CGO_ENABLED=0 GOPROXY=off GOTOOLCHAIN=local go build -mod=vendor -buildvcs=f
 FROM scratch
 COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY --from=build /adtr /adtr
+COPY web/dist /web
+ENV ADTR_WEB_DIR=/web
 USER 65532:65532
 ENTRYPOINT ["/adtr"]
+

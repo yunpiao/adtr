@@ -21,6 +21,11 @@ jobs:
         with:
           go-version: '1.27.1'
           cache: true
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24.19.0'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
       - name: Verify dependency checksums
         run: go mod verify
       - name: Lint, race tests, type checking and build
@@ -29,3 +34,8 @@ jobs:
         run: python3 scripts/test_integration.py
       - name: API and Worker lifecycle
         run: python3 scripts/test_lifecycle.py
+
+      - name: Install browser for real authentication acceptance
+        run: cd web && npx playwright install --with-deps chromium
+      - name: Real browser authentication lifecycle
+        run: python3 scripts/test_auth_e2e.py

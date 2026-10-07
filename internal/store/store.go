@@ -5,9 +5,10 @@ import (
 	"errors"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/yunpiao/adtr/internal/auth"
 )
 
-const SchemaVersion = 1
+const SchemaVersion = 2
 
 // Ready checks the schema, not just the TCP port. Each probe owns its connection.
 func Ready(ctx context.Context, config *pgx.ConnConfig) error {
@@ -24,7 +25,7 @@ func Ready(ctx context.Context, config *pgx.ConnConfig) error {
 }
 
 // Migrate runs only as an explicit command. Runtime probes never mutate storage.
-// This first migration creates infrastructure metadata, not business tables.
+// Schema v2 adds durable local platform identity, sessions and authentication audit.
 func Migrate(ctx context.Context, config *pgx.ConnConfig) error {
 	conn, err := pgx.ConnectConfig(ctx, config.Copy())
 	if err != nil {
@@ -48,8 +49,16 @@ func Migrate(ctx context.Context, config *pgx.ConnConfig) error {
 		}
 	}
 	var version int
-	if err := tx.QueryRow(ctx, "SELECT version FROM adtr.schema_version WHERE singleton = true").Scan(&version); err != nil || version != SchemaVersion {
+	if err := tx.QueryRow(ctx, "SELECT version FROM adtr.schema_version WHERE singleton = true").Scan(&version); err != nil || (version < 1 || version > SchemaVersion) {
 		return errors.New("unsupported schema version; refusing migration")
+	}
+	if version == 1 {
+		if _, err := tx.Exec(ctx, auth.Schema); err != nil {
+			return errors.New("identity schema migration failed")
+		}
+		if _, err := tx.Exec(ctx, "UPDATE adtr.schema_version SET version=$1 WHERE singleton=true", SchemaVersion); err != nil {
+			return errors.New("identity schema version update failed")
+		}
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return errors.New("migration commit failed")
