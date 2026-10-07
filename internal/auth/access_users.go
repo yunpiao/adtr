@@ -129,7 +129,11 @@ func (s *Service) accessMayAssign(ctx context.Context, tx pgx.Tx, actor User, gr
 	if actor.Role != "platform_admin" && (id == "platform_admin" || !accessCanDelegate(grants, desired)) {
 		return fail(403, "forbidden")
 	}
-	return nil
+	var actorRole string
+	if e = tx.QueryRow(ctx, "SELECT COALESCE(NULLIF(role_id,''),role) FROM adtr.users WHERE id=$1 AND tenant_id=$2", actor.ID, actor.tenant).Scan(&actorRole); e != nil {
+		return e
+	}
+	return s.canDelegateResourceRole(ctx, tx, actor, actorRole, id)
 }
 func setAccessRole(ctx context.Context, tx pgx.Tx, tenant string, userID int64, id string) error {
 	base, custom := "viewer", id

@@ -131,6 +131,11 @@ func (s *Service) mutateAccessRole(ctx context.Context, tx pgx.Tx, actor User, a
 			return nil, false, e
 		}
 	}
+	if !creating && path != "/roles/delete" {
+		if e = s.canDelegateResourceRole(ctx, tx, actor, actorRole, id); e != nil {
+			return nil, false, e
+		}
+	}
 	if path == "/roles/delete" {
 		if current.UserNum != 0 {
 			return nil, false, fail(409, "role_in_use")

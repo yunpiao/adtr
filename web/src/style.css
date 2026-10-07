@@ -464,3 +464,41 @@ td dl {
     grid-template-columns: 1fr;
   }
 }
+
+.resource-workspace h3 {
+  margin-top: 1.8rem;
+}
+.resource-workspace h4 {
+  margin: 1.4rem 0 0.8rem;
+}
+.resource-id {
+  display: block;
+  color: #526a75;
+  overflow-wrap: anywhere;
+  font-weight: normal;
+}
+.resource-empty {
+  border: 1px dashed #bccbd4;
+  border-radius: 10px;
+  padding: 1.2rem;
+  background: #f7fafb;
+}
+.resource-check {
+  display: flex;
+  gap: 0.6rem;
+  align-items: center;
+  margin: 1rem 0;
+}
+.resource-check input {
+  width: auto;
+}
+.resource-associations,
+.resource-checker {
+  border-top: 1px solid #dae3e8;
+  margin-top: 1.5rem;
+  padding-top: 0.8rem;
+}
+.resource-workspace li,
+.resource-workspace dd {
+  overflow-wrap: anywhere;
+}

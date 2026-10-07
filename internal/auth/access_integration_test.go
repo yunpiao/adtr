@@ -66,7 +66,7 @@ func newAccessFixture(t *testing.T) *accessFixture {
 		}
 		admin.Close(ctx)
 	})
-	if _, e = conn.Exec(ctx, "CREATE SCHEMA adtr;"+Schema+SchemaV3); e != nil {
+	if _, e = conn.Exec(ctx, "CREATE SCHEMA adtr;"+Schema+SchemaV3+ResourceSchema); e != nil {
 		t.Fatal(e)
 	}
 	s, e := New(cfg, []byte(strings.Repeat("x", 32)), "http://localhost:8080", true)

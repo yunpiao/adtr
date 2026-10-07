@@ -9363,9 +9363,9 @@
       "status": "implemented_verified_slice",
       "product_accepted": false,
       "evidence": {
-        "commit": "c77878d2d090a32c776fc29126971709cd2b3afd",
-        "pr": "https://github.com/yunpiao/adtr/pull/68",
-        "ci": "https://github.com/yunpiao/adtr/actions/runs/37573272781",
+        "commit": "f8907f075e49f0d991c35bb1913887a4efac4aa5",
+        "pr": "https://github.com/yunpiao/adtr/pull/69",
+        "ci": "https://github.com/yunpiao/adtr/actions/runs/37576255887",
         "verified": [
           "durable login/logout",
           "invalid credentials and session rejection",
@@ -9396,17 +9396,17 @@
       "status": "implemented_verified_slice",
       "product_accepted": false,
       "evidence": {
-        "commit": "c77878d2d090a32c776fc29126971709cd2b3afd",
-        "pr": "https://github.com/yunpiao/adtr/pull/68",
-        "ci": "https://github.com/yunpiao/adtr/actions/runs/37573272781",
+        "commit": "f8907f075e49f0d991c35bb1913887a4efac4aa5",
+        "pr": "https://github.com/yunpiao/adtr/pull/69",
+        "ci": "https://github.com/yunpiao/adtr/actions/runs/37576255887",
         "verified": [
           "first-login password gate",
           "90-day expiry policy gate",
-          "browser forced password change"
+          "browser forced password change",
+          "real expired-password browser path"
         ],
         "remaining": [
-          "reference-system expiry policy parity",
-          "expired-password browser path"
+          "reference-system expiry policy parity"
         ]
       }
     },
@@ -9448,16 +9448,16 @@
       "status": "implemented_verified_slice",
       "product_accepted": false,
       "evidence": {
-        "commit": "c77878d2d090a32c776fc29126971709cd2b3afd",
-        "pr": "https://github.com/yunpiao/adtr/pull/68",
-        "ci": "https://github.com/yunpiao/adtr/actions/runs/37573272781",
+        "commit": "f8907f075e49f0d991c35bb1913887a4efac4aa5",
+        "pr": "https://github.com/yunpiao/adtr/pull/69",
+        "ci": "https://github.com/yunpiao/adtr/actions/runs/37576255887",
         "verified": [
           "encrypted enrollment, enable and disable",
           "TOTP expiry/replay and concurrent reuse rejection",
-          "browser enrollment, enable and MFA login"
+          "browser enrollment, enable and MFA login",
+          "real MFA-disable browser path"
         ],
         "remaining": [
-          "disable browser path",
           "MFA recovery and key rotation",
           "production operational acceptance"
         ]
@@ -9601,9 +9601,23 @@
         "UI-0625",
         "UI-0626"
       ],
-      "status": "in_progress",
+      "status": "implemented_verified_slice",
       "product_accepted": false,
-      "evidence": null
+      "evidence": {
+        "commit": "f8907f075e49f0d991c35bb1913887a4efac4aa5",
+        "pr": "https://github.com/yunpiao/adtr/pull/69",
+        "ci": "https://github.com/yunpiao/adtr/actions/runs/37576255887",
+        "verified": [
+          "durable user listing, literal search and filters",
+          "pagination and input boundaries",
+          "browser list persistence"
+        ],
+        "remaining": [
+          "reference-system field/status compatibility",
+          "exhaustive browser filter and bulk combinations",
+          "capacity and production acceptance"
+        ]
+      }
     },
     {
       "id": "AD-F-172",
@@ -9688,9 +9702,23 @@
         "UI-0625",
         "UI-0626"
       ],
-      "status": "in_progress",
+      "status": "implemented_verified_slice",
       "product_accepted": false,
-      "evidence": null
+      "evidence": {
+        "commit": "f8907f075e49f0d991c35bb1913887a4efac4aa5",
+        "pr": "https://github.com/yunpiao/adtr/pull/69",
+        "ci": "https://github.com/yunpiao/adtr/actions/runs/37576255887",
+        "verified": [
+          "durable create/update/delete",
+          "tenant boundaries and administrator safety",
+          "browser assigned user creation and admin reset"
+        ],
+        "remaining": [
+          "reference-system field/status compatibility",
+          "exhaustive browser filter and bulk combinations",
+          "capacity and production acceptance"
+        ]
+      }
     },
     {
       "id": "AD-F-173",
@@ -9739,18 +9767,18 @@
       "status": "implemented_verified_slice",
       "product_accepted": false,
       "evidence": {
-        "commit": "c77878d2d090a32c776fc29126971709cd2b3afd",
-        "pr": "https://github.com/yunpiao/adtr/pull/68",
-        "ci": "https://github.com/yunpiao/adtr/actions/runs/37573272781",
+        "commit": "f8907f075e49f0d991c35bb1913887a4efac4aa5",
+        "pr": "https://github.com/yunpiao/adtr/pull/69",
+        "ci": "https://github.com/yunpiao/adtr/actions/runs/37576255887",
         "verified": [
           "self password change",
           "same-tenant admin reset",
           "cross-tenant reset rejection",
           "session invalidation",
-          "browser self change"
+          "browser self change",
+          "real administrator-reset and target-session-revocation browser path"
         ],
         "remaining": [
-          "admin reset browser path",
           "reference-system field compatibility"
         ]
       }
@@ -9837,9 +9865,22 @@
         "UI-0633",
         "UI-0634"
       ],
-      "status": "in_progress",
+      "status": "implemented_verified_slice",
       "product_accepted": false,
-      "evidence": null
+      "evidence": {
+        "commit": "f8907f075e49f0d991c35bb1913887a4efac4aa5",
+        "pr": "https://github.com/yunpiao/adtr/pull/69",
+        "ci": "https://github.com/yunpiao/adtr/actions/runs/37576255887",
+        "verified": [
+          "durable role listing and detail",
+          "builtin and tenant isolation"
+        ],
+        "remaining": [
+          "reference-system field/status compatibility",
+          "exhaustive browser filter and bulk combinations",
+          "capacity and production acceptance"
+        ]
+      }
     },
     {
       "id": "AD-F-175",
@@ -9901,9 +9942,23 @@
         "UI-0633",
         "UI-0634"
       ],
-      "status": "in_progress",
+      "status": "implemented_verified_slice",
       "product_accepted": false,
-      "evidence": null
+      "evidence": {
+        "commit": "f8907f075e49f0d991c35bb1913887a4efac4aa5",
+        "pr": "https://github.com/yunpiao/adtr/pull/69",
+        "ci": "https://github.com/yunpiao/adtr/actions/runs/37576255887",
+        "verified": [
+          "durable role save/delete",
+          "builtin and assigned-role protections",
+          "browser custom role creation"
+        ],
+        "remaining": [
+          "reference-system field/status compatibility",
+          "exhaustive browser filter and bulk combinations",
+          "capacity and production acceptance"
+        ]
+      }
     },
     {
       "id": "AD-F-176",
@@ -9963,9 +10018,23 @@
         "UI-0625",
         "UI-0626"
       ],
-      "status": "in_progress",
+      "status": "implemented_verified_slice",
       "product_accepted": false,
-      "evidence": null
+      "evidence": {
+        "commit": "f8907f075e49f0d991c35bb1913887a4efac4aa5",
+        "pr": "https://github.com/yunpiao/adtr/pull/69",
+        "ci": "https://github.com/yunpiao/adtr/actions/runs/37576255887",
+        "verified": [
+          "atomic single and bulk role assignments",
+          "delegation ceilings and audit rollback",
+          "session invalidation and reactivation restrictions"
+        ],
+        "remaining": [
+          "reference-system field/status compatibility",
+          "exhaustive browser filter and bulk combinations",
+          "capacity and production acceptance"
+        ]
+      }
     },
     {
       "id": "AD-F-177",
@@ -10018,9 +10087,23 @@
         "UI-0615",
         "UI-0616"
       ],
-      "status": "in_progress",
+      "status": "implemented_verified_slice",
       "product_accepted": false,
-      "evidence": null
+      "evidence": {
+        "commit": "f8907f075e49f0d991c35bb1913887a4efac4aa5",
+        "pr": "https://github.com/yunpiao/adtr/pull/69",
+        "ci": "https://github.com/yunpiao/adtr/actions/runs/37576255887",
+        "verified": [
+          "explicit function grant persistence",
+          "default deny and delegation ceiling",
+          "server-derived UI permissions"
+        ],
+        "remaining": [
+          "reference-system field/status compatibility",
+          "exhaustive browser filter and bulk combinations",
+          "capacity and production acceptance"
+        ]
+      }
     },
     {
       "id": "AD-F-178",
@@ -10054,9 +10137,23 @@
         "FLD-2990"
       ],
       "ui_records": [],
-      "status": "in_progress",
+      "status": "implemented_verified_slice",
       "product_accepted": false,
-      "evidence": null
+      "evidence": {
+        "commit": "f8907f075e49f0d991c35bb1913887a4efac4aa5",
+        "pr": "https://github.com/yunpiao/adtr/pull/69",
+        "ci": "https://github.com/yunpiao/adtr/actions/runs/37576255887",
+        "verified": [
+          "menu and exact path/method permission checks",
+          "backend enforcement with valid credentials",
+          "browser permission-controlled pages and denied writes"
+        ],
+        "remaining": [
+          "reference-system field/status compatibility",
+          "exhaustive browser filter and bulk combinations",
+          "capacity and production acceptance"
+        ]
+      }
     },
     {
       "id": "AD-F-179",

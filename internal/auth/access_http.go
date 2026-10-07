@@ -284,6 +284,9 @@ func (s *Service) handleAccess(ctx context.Context, r *http.Request, path string
 			suffix, prefix := strings.CutPrefix(url, "/api/access")
 			rt, known := accessRoutes[suffix]
 			results[i] = ok && prefix && known && method == rt.method && grantAllows(grants, rt)
+			if ok && !prefix {
+				results[i] = resourcePathAllowed(method, url, roleID, grants)
+			}
 		}
 		value = map[string]any{"results": results}
 	}
@@ -363,6 +366,23 @@ func permissionNodes(grants map[string]AccessAuth, onlyReadable bool) []AccessPe
 				mode = "writeable"
 			}
 			paths = append(paths, AccessPath{r.method + " " + p, r.method + " /api/access" + p, mode})
+		}
+		if mark == "roles" {
+			resourceKeys := []string{}
+			for path, rt := range resourceRoutes {
+				if rt.management && !rt.tenant {
+					resourceKeys = append(resourceKeys, path)
+				}
+			}
+			sort.Strings(resourceKeys)
+			for _, path := range resourceKeys {
+				rt := resourceRoutes[path]
+				mode := "readable"
+				if rt.write {
+					mode = "writeable"
+				}
+				paths = append(paths, AccessPath{rt.method + " " + path, rt.method + " /api/resources" + path, mode})
+			}
 		}
 		nodes = append(nodes, AccessPermission{names[mark], mark, []AccessPermission{}, paths, a.Readable, a, AccessAuth{true, true}, mark})
 	}
