@@ -1,0 +1,40 @@
+name: Hosted AD lab VM capability
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/ad-lab-capability.yml'
+      - 'scripts/ad_lab/Test-HostedHyperV.ps1'
+permissions: {}
+concurrency:
+  group: ad-lab-capability-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  diskless-vm:
+    if: github.repository == 'yunpiao/adtr' && (github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: windows-2025
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    env:
+      ADTR_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Start and remove isolated diskless VM
+        shell: powershell
+        run: ./scripts/ad_lab/Test-HostedHyperV.ps1
+      - name: Retry owned-resource cleanup on every outcome
+        if: ${{ always() }}
+        shell: powershell
+        run: ./scripts/ad_lab/Test-HostedHyperV.ps1 -CleanupOnly
+      - name: Retain sanitized capability evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: hosted-vm-capability-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/adtr-hyperv-capability.json
+          if-no-files-found: error
+          retention-days: 3
