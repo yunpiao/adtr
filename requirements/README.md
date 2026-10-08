@@ -15,9 +15,16 @@ Statuses are deliberately distinct:
 - `accepted`: all feature acceptance gates have been verified, with no remaining
   items; this is not the same as a PR, merge or deploy status
 
-Current product acceptance remains 0/209. Authentication work has actual layered
-CI evidence, but source-system 1:1 and production gates have not been substituted
-with mock, compilation or health checks. Priority never removes a requirement.
+Current product acceptance remains 0/209: 19 verified slices, 26 in-progress
+requirements and 164 with no implementation evidence recorded. Only AD-F-151/152
+change status in this reconciliation, to reflect the existing audit-only export
+history slice. Exact-head [PR #77 CI](https://github.com/yunpiao/adtr/actions/runs/37772558021)
+passed all 25 jobs at `4f64d90880b28b3cf7a749a9ba1da57049736dd9`.
+The catalog records narrow implemented scope and remaining gates; passing a shared
+suite does not verify every source field. Original evidence is retained in
+`previous_evidence` or supplemented by `latest_regression` where applicable.
+Source-system compatibility, real AD/Windows and production gates remain open.
+Priority never removes a requirement.
 
 `python3 scripts/verify_requirements.py` is part of `make check`; it fails on scope
 reduction, duplicate requirement IDs, missing field/control references or an

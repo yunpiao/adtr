@@ -3,6 +3,16 @@
 总路线图：https://github.com/yunpiao/adtr/issues/1 。全部 209 项均在范围内。
 工程文档、代码、PR、最新 head CI、合并、产品验收分别记录；任一阶段不能代表后续阶段完成。
 
+## 最新集成运行证据（2026-10-08）
+
+[PR #77](https://github.com/yunpiao/adtr/pull/77) 精确 head `4f64d90880b28b3cf7a749a9ba1da57049736dd9` 的 [CI 37772558021](https://github.com/yunpiao/adtr/actions/runs/37772558021) 已 completed/success，25/25 job 通过：19 个隔离真实浏览器/API/PostgreSQL套件、4 个认证集成分片、contracts 和最终 verify。contracts 包含 make check、真实 PostgreSQL 非认证包集成，以及 API/worker 容器生命周期。域检测/目录读取使用隔离合成 TLS LDAP，未验证真实 AD/Windows。
+
+本条是当前版本的运行证据。下方有日期的本地检查点及旧版本契约保留原文；其中当时缺少本地数据库/浏览器、尚未发布或未运行远端 CI 的说明不再代表当前远端执行状态。F12 的 directory、directory-controls、directory-readers 已分别通过非空分页、真实空结果/取消/结束确认、只读角色/跨标签原生焦点回退场景。F38 的 Audit/XLSX 历史和 F56 的实际 api/worker 日志包链路也已执行通过。
+
+当前应用 schema 仍为 15。F14 dictionary2 是未注册的组件，消费者能力为 false，没有生产迁移16、任务注册或版本化API/UI；组件/fragment测试通过不等于产品链路已交付。PR74/75/76尚未整合。
+
+本次台账仅将 AD-F-151/152 从 not_started 改为 in_progress；计数为19 implemented_verified_slice、26 in_progress、164 not_started。产品完整验收仍为0/209，源系统完整兼容、真实AD/Windows、容量与生产门禁仍开放；Issue、合并及部署不因本次CI通过自动完成。
+
 ## 基线（2026-10-07）
 
 初始提交 c47bc370b31f2511201c43be2976d1d06e192ae7，仅 README。
