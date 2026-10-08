@@ -168,7 +168,19 @@ test("real browser → Linux sampler → PostgreSQL history/settings and actual 
           context,
           "/api/system/resources/current?instance=local-api",
         );
-        return current.snapshot?.cpu.availability;
+        if (current.snapshot?.cpu.availability !== "available")
+          return current.snapshot?.cpu.availability;
+        // The first available CPU sample can be in the same second as checkedAt.
+        // History excludes its end second, so current availability alone does
+        // not establish that the initial chart has a persisted sample to draw.
+        const endTime = Math.floor(Date.parse(current.checkedAt) / 1000);
+        const history: History = await readJSON(
+          context,
+          `/api/system/resources/history?instance=local-api&graphType=cpu_basic&startTime=${endTime - 900}&endTime=${endTime}`,
+        );
+        return history.info[0].data.timestamp.length > 0
+          ? "available"
+          : "awaiting_history_sample";
       },
       { timeout: 40_000, intervals: [1000, 2000] },
     )

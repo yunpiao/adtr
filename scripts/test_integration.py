@@ -5,10 +5,13 @@ import subprocess
 import time
 import uuid
 
+from run_integration import parse_args, run_tests
+
 IMAGE = "postgres:17.6-alpine@sha256:ef257d85f76e48da1c64832459b59fcaba1a4dac97bf5d7450c77753542eee94"
 
 
 def main():
+    args = parse_args()
     name = "adtr-test-" + uuid.uuid4().hex[:12]
     password = secrets.token_hex(24)
     env = dict(os.environ, POSTGRES_PASSWORD=password)
@@ -27,11 +30,11 @@ def main():
             raise RuntimeError("disposable database did not become ready")
         address = subprocess.check_output(["docker", "port", name, "5432/tcp"], text=True).strip()
         env["ADTR_TEST_DATABASE_URL"] = f"postgres://postgres:{password}@{address}/adtr_test?sslmode=disable"
-        subprocess.run(["make", "integration"], env=env, check=True)
+        return run_tests(args, env)
     finally:
         if created:
             subprocess.run(["docker", "rm", "--force", name], check=True, capture_output=True)
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

@@ -380,9 +380,14 @@ func TestConnectionTestFamilyReplayCannotCrossActorOrSource(t *testing.T) {
 	})
 	original := f.submitAccount("family-intent")
 	var other int64
-	if err := f.conn.QueryRow(context.Background(), `INSERT INTO adtr.users(tenant_id,username,password_hash,role,must_change,password_updated_at,mfa_secret) VALUES($1,'another-admin','synthetic-hash','platform_admin',false,clock_timestamp(),'synthetic-mfa') RETURNING id`, f.p.TenantID).Scan(&other); err != nil {
-		t.Fatal(err)
-	}
+	// This role already has a live use grant. Adding a member must follow the
+	// same governed role-management boundary as the production access handler.
+	f.tx(func(ctx context.Context, tx pgx.Tx) error {
+		if err := credentialuse.SetGovernanceContext(ctx, tx, f.p, credentialuse.ManageRoles); err != nil {
+			return err
+		}
+		return tx.QueryRow(ctx, `INSERT INTO adtr.users(tenant_id,username,password_hash,role,must_change,password_updated_at,mfa_secret) VALUES($1,'another-admin','synthetic-hash','platform_admin',false,clock_timestamp(),'synthetic-mfa') RETURNING id`, f.p.TenantID).Scan(&other)
+	})
 	err := f.attempt(func(ctx context.Context, tx pgx.Tx) error {
 		_, err := f.store.SubmitTx(ctx, tx, f.engine, tasks.Principal{TenantID: f.p.TenantID, ActorID: other}, domains.Input{DomainID: f.id, ExpectedRevision: "2", IdempotencyKey: "family-intent"})
 		return err

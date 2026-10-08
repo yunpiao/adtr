@@ -1,6 +1,6 @@
 //go:build integration
 
-package taskarchive
+package taskarchive_test
 
 import (
 	"context"
@@ -15,6 +15,9 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/yunpiao/adtr/internal/auth"
+	"github.com/yunpiao/adtr/internal/store"
+	"github.com/yunpiao/adtr/internal/taskarchive"
 	"github.com/yunpiao/adtr/internal/tasks"
 )
 
@@ -23,7 +26,7 @@ type archiveFixture struct {
 	ctx       context.Context
 	cfg       *pgx.ConnConfig
 	db        *pgx.Conn
-	archive   *Engine
+	archive   *taskarchive.Engine
 	queue     *tasks.Engine
 	principal tasks.Principal
 }
@@ -72,18 +75,27 @@ func newArchiveFixture(t *testing.T, legacy bool) *archiveFixture {
 	}
 	t.Cleanup(func() { _ = db.Close(context.Background()) })
 	f := &archiveFixture{t: t, ctx: ctx, cfg: cfg, db: db, principal: tasks.Principal{TenantID: "one", ActorID: 1}}
-	schema := tasks.Schema
 	if legacy {
-		schema = strings.ReplaceAll(schema, tasks.ArchiveCoreSchema, "")
-	}
-	f.exec(`CREATE SCHEMA adtr;CREATE TABLE adtr.schema_version(singleton boolean PRIMARY KEY DEFAULT true CHECK(singleton),version integer NOT NULL);INSERT INTO adtr.schema_version VALUES(true,8);` + schema)
-	if legacy {
+		// Install the historical v5 queue before terminal timestamps existed, then
+		// let the complete production migrator upgrade its genuine old data.
+		prior := `CREATE SCHEMA adtr;
+CREATE TABLE adtr.schema_version(singleton boolean PRIMARY KEY DEFAULT true CHECK(singleton),version integer NOT NULL CHECK(version>0));
+INSERT INTO adtr.schema_version VALUES(true,5);` + auth.Schema + auth.SchemaV3 + auth.ResourceSchema + auth.TaskPermissionSchema + auth.TaskAuthorizationSchema + strings.Replace(tasks.Schema, tasks.ArchiveCoreSchema, "", 1)
+		f.exec(prior)
 		f.exec(`INSERT INTO adtr.tasks(task_id,tenant_id,domain_id,kind,payload_version,payload,payload_hash,actor_id,authorization_version,idempotency_key,state,max_attempts) VALUES('legacy-no-terminal-evidence','one','platform','infrastructure.health',1,'{}','legacy',1,'1','legacy','succeeded',5)`)
-		f.exec(tasks.ArchiveCoreSchema)
+		if err = store.Ready(ctx, cfg); err == nil {
+			t.Fatal("historical archive fixture accepted as current")
+		}
 	}
-	f.exec(Schema + `CREATE TABLE adtr.synthetic_archive_actors(tenant_id text NOT NULL,actor_id bigint NOT NULL,can_read boolean NOT NULL DEFAULT true,can_write boolean NOT NULL DEFAULT true,PRIMARY KEY(tenant_id,actor_id));INSERT INTO adtr.synthetic_archive_actors(tenant_id,actor_id) VALUES('one',1),('one',2),('two',3);`)
+	if err = store.Migrate(ctx, cfg); err != nil {
+		t.Fatal("migrate archive fixture", err)
+	}
+	if err = store.Ready(ctx, cfg); err != nil {
+		t.Fatal("archive fixture not ready", err)
+	}
+	f.exec(`CREATE TABLE adtr.synthetic_archive_actors(tenant_id text NOT NULL,actor_id bigint NOT NULL,can_read boolean NOT NULL DEFAULT true,can_write boolean NOT NULL DEFAULT true,PRIMARY KEY(tenant_id,actor_id));INSERT INTO adtr.synthetic_archive_actors(tenant_id,actor_id) VALUES('one',1),('one',2),('two',3);`)
 	authorize := func(ctx context.Context, tx pgx.Tx, p tasks.Principal, scope tasks.Scope, action tasks.Action) (string, error) {
-		if scope.TaskName != HealthKind || scope.DomainID != "platform" || !scope.Platform {
+		if scope.TaskName != taskarchive.HealthKind || scope.DomainID != "platform" || !scope.Platform {
 			return "", tasks.ErrAuthorization
 		}
 		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('adtr-access:' || $1,0))`, p.TenantID); err != nil {
@@ -99,11 +111,11 @@ func newArchiveFixture(t *testing.T, legacy bool) *archiveFixture {
 		}
 		return "1", nil
 	}
-	f.archive, err = New(authorize)
+	f.archive, err = taskarchive.New(authorize)
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.queue, err = tasks.New(cfg, tasks.ProductionRegistry(), authorize, SchemaVersion)
+	f.queue, err = tasks.New(cfg, tasks.ProductionRegistry(), authorize, taskarchive.SchemaVersion)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -139,7 +151,7 @@ func (f *archiveFixture) submit(key string, p tasks.Principal) tasks.Task {
 	var out tasks.Submission
 	err := f.transact(func(tx pgx.Tx) error {
 		var err error
-		out, err = f.queue.SubmitTx(f.ctx, tx, p, tasks.SubmitInput{TaskName: HealthKind, DomainID: "platform", PayloadVersion: 1, Payload: json.RawMessage(`{}`), IdempotencyKey: key})
+		out, err = f.queue.SubmitTx(f.ctx, tx, p, tasks.SubmitInput{TaskName: taskarchive.HealthKind, DomainID: "platform", PayloadVersion: 1, Payload: json.RawMessage(`{}`), IdempotencyKey: key})
 		return err
 	})
 	if err != nil {
@@ -168,8 +180,8 @@ func (f *archiveFixture) cutoff() string {
 	}
 	return now.UTC().Format(time.RFC3339Nano)
 }
-func (f *archiveFixture) mutation(in ArchiveInput) (Result, error) {
-	var result Result
+func (f *archiveFixture) mutation(in taskarchive.ArchiveInput) (taskarchive.Result, error) {
+	var result taskarchive.Result
 	err := f.transact(func(tx pgx.Tx) error {
 		var err error
 		result, err = f.archive.ArchiveTx(f.ctx, tx, f.principal, in)
@@ -189,8 +201,8 @@ func (f *archiveFixture) count(table string) int {
 	}
 	return count
 }
-func archiveInput(id, before, key string, version int64) ArchiveInput {
-	return ArchiveInput{Targets: []Target{{id, version}}, Before: before, Reason: "Synthetic archive verification", IdempotencyKey: key}
+func archiveInput(id, before, key string, version int64) taskarchive.ArchiveInput {
+	return taskarchive.ArchiveInput{Targets: []taskarchive.Target{{id, version}}, Before: before, Reason: "Synthetic archive verification", IdempotencyKey: key}
 }
 
 func TestArchiveRestoreReplayPreservesExecutionAndIdempotency(t *testing.T) {
@@ -215,10 +227,10 @@ func TestArchiveRestoreReplayPreservesExecutionAndIdempotency(t *testing.T) {
 	if replayedTask.ID != task.ID || !replayedTask.Archived {
 		t.Fatal("archival lost original idempotency", replayedTask)
 	}
-	var restored Result
+	var restored taskarchive.Result
 	err = f.transact(func(tx pgx.Tx) error {
 		var err error
-		restored, err = f.archive.RestoreTx(f.ctx, tx, f.principal, RestoreInput{Targets: []Target{{task.ID, 1}}, Reason: "Restore record", IdempotencyKey: "restore-once"})
+		restored, err = f.archive.RestoreTx(f.ctx, tx, f.principal, taskarchive.RestoreInput{Targets: []taskarchive.Target{{task.ID, 1}}, Reason: "Restore record", IdempotencyKey: "restore-once"})
 		return err
 	})
 	if err != nil || restored.Receipt.Targets[0].Archived || restored.Receipt.Targets[0].VisibilityVersion != 2 {
@@ -253,7 +265,7 @@ func TestArchiveBatchHasNoPartialEffects(t *testing.T) {
 			a := f.cancelled("a")
 			b := f.cancelled("b")
 			before := f.cutoff()
-			targets := []Target{{a.ID, 0}, {b.ID, 0}}
+			targets := []taskarchive.Target{{a.ID, 0}, {b.ID, 0}}
 			want := 409
 			switch mode {
 			case "foreign":
@@ -267,7 +279,7 @@ func TestArchiveBatchHasNoPartialEffects(t *testing.T) {
 			case "audit_failure":
 				f.exec(`CREATE FUNCTION adtr.synthetic_archive_failure() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'synthetic control audit unavailable'; END; $$;CREATE TRIGGER synthetic_archive_failure BEFORE INSERT ON adtr.task_archive_events FOR EACH ROW EXECUTE FUNCTION adtr.synthetic_archive_failure();`)
 			}
-			_, err := f.mutation(ArchiveInput{Targets: targets, Before: before, Reason: "Batch verification", IdempotencyKey: "batch"})
+			_, err := f.mutation(taskarchive.ArchiveInput{Targets: targets, Before: before, Reason: "Batch verification", IdempotencyKey: "batch"})
 			if err == nil || mode != "audit_failure" && !status(err, want) {
 				t.Fatal(mode, err)
 			}
@@ -319,7 +331,7 @@ func TestArchiveConcurrentVersionWinnerAndImmutableReceipts(t *testing.T) {
 func TestArchiveSuccessfulBatchReplayUsesCanonicalTargetsAndCutoff(t *testing.T) {
 	f := newArchiveFixture(t, false)
 	a, b := f.cancelled("batch-a"), f.cancelled("batch-b")
-	in := ArchiveInput{Targets: []Target{{b.ID, 0}, {a.ID, 0}}, Before: f.cutoff(), Reason: "Review both records", IdempotencyKey: "canonical-batch"}
+	in := taskarchive.ArchiveInput{Targets: []taskarchive.Target{{b.ID, 0}, {a.ID, 0}}, Before: f.cutoff(), Reason: "Review both records", IdempotencyKey: "canonical-batch"}
 	first, err := f.mutation(in)
 	if err != nil || first.Replayed || len(first.Receipt.Targets) != 2 {
 		t.Fatal(first, err)
@@ -328,7 +340,7 @@ func TestArchiveSuccessfulBatchReplayUsesCanonicalTargetsAndCutoff(t *testing.T)
 		t.Fatal("successful batch did not retain both ordered results", first)
 	}
 	in.Targets[0], in.Targets[1] = in.Targets[1], in.Targets[0]
-	before, err := ParseBefore(in.Before)
+	before, err := taskarchive.ParseBefore(in.Before)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -363,10 +375,10 @@ func TestArchiveLegacyUnknownTimeAndBoundaryAreIneligible(t *testing.T) {
 	if _, err := f.mutation(in); !status(err, 409) {
 		t.Fatal("equal cutoff was not strict", err)
 	}
-	var candidates Candidates
+	var candidates taskarchive.Candidates
 	err := f.transact(func(tx pgx.Tx) error {
 		var err error
-		candidates, err = f.archive.CandidatesTx(f.ctx, tx, f.principal, Filter{Before: f.cutoff()})
+		candidates, err = f.archive.CandidatesTx(f.ctx, tx, f.principal, taskarchive.Filter{Before: f.cutoff()})
 		return err
 	})
 	if err != nil || candidates.Page.Total != 1 || len(candidates.Tasks) != 1 || candidates.Tasks[0].TaskID != task.ID {
@@ -399,7 +411,7 @@ func TestArchivedRecoveryRequiresRestorationAndPreservesAncestry(t *testing.T) {
 		t.Fatal("archived recovery accepted", err)
 	}
 	err = f.transact(func(tx pgx.Tx) error {
-		_, err := f.archive.RestoreTx(f.ctx, tx, f.principal, RestoreInput{Targets: []Target{{parent.ID, 1}}, Reason: "Restore parent", IdempotencyKey: "restore-parent"})
+		_, err := f.archive.RestoreTx(f.ctx, tx, f.principal, taskarchive.RestoreInput{Targets: []taskarchive.Target{{parent.ID, 1}}, Reason: "Restore parent", IdempotencyKey: "restore-parent"})
 		return err
 	})
 	if err != nil {

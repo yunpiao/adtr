@@ -757,6 +757,18 @@ test("local operation-account CRUD, lost-response recovery, stale editor and dom
   });
   safe(tombstoneReceipt);
 
+  // Check for implicit diagnostics while the domain is still authorized. An
+  // explicit domain scope also permits an empty task list before any first task.
+  const diagnosticTasksPath = `/api/tasks?taskName=domain.connection_test&domainId=${domainId}`;
+  const diagnosticTasks = await readJSON(context, diagnosticTasksPath);
+  expect(diagnosticTasks).toMatchObject({
+    page: { total: 0 },
+    tasks: [],
+    exhausted: true,
+  });
+  safe(diagnosticTasks);
+  expect(remoteRequests).toEqual([]);
+
   await openDomains(page);
   await page
     .getByRole("button", { name: `查看 ${domain}`, exact: true })
@@ -772,10 +784,10 @@ test("local operation-account CRUD, lost-response recovery, stale editor and dom
       await context.request.get(`/api/domains/detail?domainId=${domainId}`)
     ).status(),
   ).toBe(404);
-  expect(
-    (await readJSON(context, "/api/tasks?taskName=domain.connection_test"))
-      .tasks,
-  ).toEqual([]);
+  // Deleting the domain removes its resource grant, including for this admin.
+  const deletedDomainTasks = await context.request.get(diagnosticTasksPath);
+  expect(deletedDomainTasks.status()).toBe(403);
+  expect(await deletedDomainTasks.json()).toEqual({ error: "forbidden" });
   expect(remoteRequests).toEqual([]);
   expect(accountCreates).toBe(1);
   await page.reload();

@@ -187,8 +187,30 @@ func TestAccessDurableLifecycleAndFilters(t *testing.T) {
 	f.call(nil, "/api/access/users", nil, 401)
 	readRole := f.role("User readers", accessGrantInput("users", true, false))
 	roleInfo := f.call(&f.admin, "/api/access/roles/detail?roleID="+readRole, nil, 200)
-	if roleInfo["role"].(map[string]any)["name"] != "User readers" || len(roleInfo["permissions"].([]any)) != 11 {
+	if roleInfo["role"].(map[string]any)["name"] != "User readers" {
 		t.Fatal("role detail persistence", roleInfo)
+	}
+	wantMarks := map[string]bool{
+		"users": true, "roles": true, "permissions": true, "tasks": true,
+		"audit": true, "audit_exports": true, "system": true, "schedules": true,
+		"task_archive": true, "domains": true, "operation_accounts": true,
+		"system_logs": true, "directory_assets": true,
+	}
+	permissions := roleInfo["permissions"].([]any)
+	if len(permissions) != len(wantMarks) {
+		t.Fatalf("role detail permission count=%d want=%d", len(permissions), len(wantMarks))
+	}
+	for _, value := range permissions {
+		permission := value.(map[string]any)
+		mark := permission["mark"].(string)
+		if !wantMarks[mark] {
+			t.Fatalf("unexpected or duplicate permission mark %q", mark)
+		}
+		delete(wantMarks, mark)
+		grant := permission["auth"].(map[string]any)
+		if grant["readable"] != (mark == "users") || grant["writeable"] != false || permission["checked"] != (mark == "users") {
+			t.Fatalf("role detail changed persisted grant for %s: %v", mark, permission)
+		}
 	}
 	f.createUser("alice", "viewer")
 	alice := f.loginUser("alice")

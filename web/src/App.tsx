@@ -60,13 +60,33 @@ type Run = <T>(
   success: (value: T) => void,
 ) => void;
 function pageFromHash(): Page {
-  if (window.location.hash === "#directory") return "directory";
-  if (window.location.hash === "#directory-credential-use")
-    return "directory-credential-use";
-  if (/^#audit(?:$|\/)/.test(window.location.hash)) return "audit";
-  if (/^#operational-logs(?:$|\/)/.test(window.location.hash))
-    return "operational-logs";
-  return "account";
+  const hash = window.location.hash;
+  // Restore only known workspaces. Each one rechecks current permissions and
+  // owns its safe initial view; no draft state is read from browser history.
+  const exact = (
+    [
+      "profile",
+      "credential-use",
+      "directory",
+      "directory-credential-use",
+    ] as const
+  ).find((name) => hash === `#${name}`);
+  if (exact) return exact;
+  return (
+    (
+      [
+        "access",
+        "resources",
+        "tasks",
+        "audit",
+        "system",
+        "operational-logs",
+        "domains",
+        "operation-accounts",
+      ] as const
+    ).find((name) => hash === `#${name}` || hash.startsWith(`#${name}/`)) ??
+    "account"
+  );
 }
 function Field({
   label,

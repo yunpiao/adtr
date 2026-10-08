@@ -407,7 +407,10 @@ test("default admin deny, explicit role grant, receipt recovery, expired-tenant 
       idempotencyKey: granted.key,
     },
   });
-  await page.unroute("**/api/credential-use/mutation?*");
+  // The recovery view can already have a real receipt read in flight. Finish
+  // its fetch/assert/abort handler before disabling interception or reloading;
+  // unroute() alone does not await handlers and can handle their route twice.
+  await page.unrouteAll({ behavior: "wait" });
   await page.reload();
   await page.getByRole("button", { name: "凭据授权清理", exact: true }).click();
   await expect(

@@ -12,6 +12,8 @@ export default defineConfig({
   outputDir: "test-results",
   use: {
     baseURL: process.env.ADTR_E2E_BASE_URL ?? "http://127.0.0.1:18080",
+    // The isolated harness passes --headed for session-invalidation and
+    // directory-readers so their real tab visibility/focus fallback can run.
     headless: true,
     trace: "retain-on-failure",
     screenshot: "only-on-failure",

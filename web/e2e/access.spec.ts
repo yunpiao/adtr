@@ -144,6 +144,7 @@ test("real browser → API → PostgreSQL users and function permissions", async
   expect(adminMenu.menu.map((node: Permission) => node.mark).sort()).toEqual([
     "audit",
     "audit_exports",
+    "directory_assets",
     "domains",
     "operation_accounts",
     "permissions",
@@ -210,6 +211,7 @@ test("real browser → API → PostgreSQL users and function permissions", async
     { mark: "domains", auth: { readable: false, writeable: false } },
     { mark: "operation_accounts", auth: { readable: false, writeable: false } },
     { mark: "system_logs", auth: { readable: false, writeable: false } },
+    { mark: "directory_assets", auth: { readable: false, writeable: false } },
   ]);
   expect(persistedRole.permissions).toEqual(permissions.permissions);
 

@@ -378,10 +378,14 @@ test("real domain enrollment, explicit grant, TLS diagnostics, rotation and loca
     (await context.request.get(`/api/domains/detail?domainId=${id}`)).status(),
   ).toBe(404);
   expect((await readJSON(context, "/api/domains")).page.total).toBe(0);
-  expect(
-    (await readJSON(context, "/api/tasks?taskName=domain.connection_test"))
-      .tasks,
-  ).toEqual([]);
+  // Creation grants no domain scope, even to the platform administrator.
+  // A filtered task list has no authorized scope until the explicit assignment.
+  const ungrantedTasks = await context.request.get(
+    `/api/tasks?taskName=domain.connection_test&domainId=${id}`,
+  );
+  expect(ungrantedTasks.status()).toBe(403);
+  expect(await ungrantedTasks.json()).toEqual({ error: "forbidden" });
+  expect(submittedTests).toBe(0);
   const pending = await page.evaluate(() =>
     JSON.parse(sessionStorage.getItem("adtr.domain-intent.v1") ?? "null"),
   );
@@ -426,8 +430,17 @@ test("real domain enrollment, explicit grant, TLS diagnostics, rotation and loca
     true,
   );
   await relogin(page, username, changed, auth);
+  // Now assert creation/recovery did not submit a diagnostic. This kind is not
+  // owner/epoch-filtered, so the grant's epoch change cannot hide an earlier task.
+  const initialTasks = await readJSON(
+    context,
+    `/api/tasks?taskName=domain.connection_test&domainId=${id}`,
+  );
+  expect(initialTasks.page.total).toBe(0);
+  expect(initialTasks.tasks).toEqual([]);
   await openDomains();
   await selectSavedSource(id, "1", "1", "unverified");
+  expect(submittedTests).toBe(0);
   await expect(
     page.getByRole("heading", { name: `域连接详情：${domain}`, exact: true }),
   ).toBeVisible();
@@ -446,6 +459,7 @@ test("real domain enrollment, explicit grant, TLS diagnostics, rotation and loca
     credentialConfigured: true,
     connectionState: "unverified",
     lastDiagnostic: null,
+    latestTaskUUID: "",
   });
   safe(initial);
   await page

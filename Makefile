@@ -11,7 +11,7 @@ lint:
 	test -z "$$(gofmt -l cmd internal)"
 	$(GO) vet ./...
 integration:
-	$(GO) test -race -count=1 -tags=integration ./...
+	GO="$(GO)" python3 scripts/run_integration.py
 web-build:
 	npm ci --prefix web --cache /tmp/adtr-npm-cache
 	npm run build --prefix web

@@ -591,10 +591,18 @@ describe("domain workspace security flows", () => {
     await screen.findByRole("table", { name: "获授权的域连接" });
     click("新增域连接");
     fill("AD 密码", "temporary secret");
-    await act(async () => window.dispatchEvent(new PopStateEvent("popstate")));
-    await screen.findByRole("heading", { name: "账户概览" });
+    const sessionReads = calls("/api/auth/me").length;
+    act(() => window.history.back());
+    await waitFor(() => expect(window.location.hash).toBe("#domains"));
+    await screen.findByRole("table", { name: "获授权的域连接" });
+    expect(calls("/api/auth/me").length).toBeGreaterThan(sessionReads);
     expect(screen.queryByLabelText("AD 密码")).toBeNull();
     expect(window.location.href).not.toContain("temporary");
+    act(() => window.history.forward());
+    await waitFor(() => expect(window.location.hash).toBe("#domains/create"));
+    await screen.findByRole("table", { name: "获授权的域连接" });
+    expect(screen.queryByLabelText("AD 密码")).toBeNull();
+    expect(screen.queryByDisplayValue("temporary secret")).toBeNull();
   });
   it("filters are literal, page changes reset correctly and empty scope is distinct from error", async () => {
     await start();

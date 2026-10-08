@@ -194,23 +194,106 @@ async function expectPixels(page: Page, rgb: number[], tolerance = 0) {
 
 async function upload(page: Page, file: Upload, userId: number) {
   await page.getByLabel("选择头像", { exact: true }).setInputFiles(file);
-  const [response] = await Promise.all([
-    page.waitForResponse(
-      (candidate) =>
-        new URL(candidate.url()).pathname === avatarPath &&
-        candidate.request().method() === "POST",
-    ),
-    page.getByRole("button", { name: /^(上传头像|替换头像)$/ }).click(),
-  ]);
-  expect(response.request().postDataJSON()).toEqual({
-    userId,
-    file: file.buffer.toString("base64"),
-  });
-  expect(response.request().headers()["x-csrf-token"]).toBeTruthy();
-  expect(response.status()).toBe(200);
-  expect(await response.json()).toEqual({ result: "success" });
-  await expect(page.getByRole("status")).toContainText(successMessage);
-  await expect(page.getByLabel("选择头像", { exact: true })).toHaveValue("");
+  // CDP can lose a no-store response body after the application consumes its
+  // stream (microsoft/playwright#42742). Observe this one original response in
+  // the browser, retaining exact JSON checks without replaying or fulfilling a
+  // request. The native request, response and production bounded reader remain.
+  const observed = await page.evaluateHandle((path) => {
+    const original = window.fetch;
+    type Observation = { body: unknown } | { error: string };
+    let finish!: (value: Observation) => void;
+    const body = new Promise<Observation>((resolve) => {
+      finish = resolve;
+    });
+    const observe: typeof window.fetch = (input, init) => {
+      const url = new URL(
+        input instanceof Request ? input.url : String(input),
+        location.href,
+      );
+      const method =
+        init?.method ?? (input instanceof Request ? input.method : "GET");
+      const pending = original.call(window, input, init);
+      if (
+        url.origin === location.origin &&
+        url.pathname === path &&
+        method.toUpperCase() === "POST"
+      ) {
+        window.fetch = original;
+        void pending.then(
+          async (response) => {
+            let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+            const chunks: Uint8Array[] = [];
+            let size = 0;
+            try {
+              reader = response.clone().body?.getReader();
+              if (!reader) throw new Error("Missing upload response body");
+              while (true) {
+                const chunk = await reader.read();
+                if (chunk.done) break;
+                size += chunk.value.byteLength;
+                if (size > 128 * 1024) {
+                  void reader.cancel().catch(() => {});
+                  throw new Error("Oversized upload response");
+                }
+                chunks.push(chunk.value);
+              }
+              const bytes = new Uint8Array(size);
+              let offset = 0;
+              for (const chunk of chunks) {
+                bytes.set(chunk, offset);
+                offset += chunk.byteLength;
+              }
+              finish({
+                body: JSON.parse(
+                  new TextDecoder("utf-8", { fatal: true }).decode(bytes),
+                ),
+              });
+            } catch {
+              finish({
+                error:
+                  "The original upload response was not bounded valid JSON",
+              });
+            } finally {
+              reader?.releaseLock();
+            }
+          },
+          () => finish({ error: "The original upload request failed" }),
+        );
+      }
+      return pending;
+    };
+    window.fetch = observe;
+    return {
+      body,
+      restore: () => {
+        if (window.fetch === observe) window.fetch = original;
+      },
+    };
+  }, avatarPath);
+  try {
+    const [response] = await Promise.all([
+      page.waitForResponse(
+        (candidate) =>
+          new URL(candidate.url()).pathname === avatarPath &&
+          candidate.request().method() === "POST",
+      ),
+      page.getByRole("button", { name: /^(上传头像|替换头像)$/ }).click(),
+    ]);
+    expect(response.request().postDataJSON()).toEqual({
+      userId,
+      file: file.buffer.toString("base64"),
+    });
+    expect(response.request().headers()["x-csrf-token"]).toBeTruthy();
+    expect(response.status()).toBe(200);
+    expect(await observed.evaluate(({ body }) => body)).toEqual({
+      body: { result: "success" },
+    });
+    await expect(page.getByRole("status")).toContainText(successMessage);
+    await expect(page.getByLabel("选择头像", { exact: true })).toHaveValue("");
+  } finally {
+    await observed.evaluate(({ restore }) => restore());
+    await observed.dispose();
+  }
 }
 
 async function uploadAuditCount(context: BrowserContext) {

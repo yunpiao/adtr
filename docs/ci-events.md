@@ -24,11 +24,22 @@ suite reports its outcome. Each job retains the 20-minute budget and uses its
 own fresh database. The audit browser subprocess has a 600-second budget for
 its additional real TOTP windows; prior suites retain 420 seconds.
 
-The final check remains named `verify`. It always runs and depends on both
-`contracts` and the complete `browser` matrix; failed, cancelled or skipped
-dependencies fail the gate. No repository required-check settings are changed.
-`contracts` still runs make check, real PostgreSQL migrations/concurrency and
+The final check remains named `verify`. It always runs and depends on `contracts`,
+the complete `auth-integration` matrix and the complete `browser` matrix; failed,
+cancelled or skipped dependencies fail the gate. No repository required-check
+settings are changed.
+`contracts` still runs make check, non-auth real PostgreSQL migrations/concurrency and
 API/Worker lifecycle acceptance. No previous browser suite was removed.
+
+Authentication/HTTP PostgreSQL contracts use four deterministic shards, with at
+most two concurrent jobs, fail-fast disabled and the same 20-minute job limit.
+Every shard discovers the actual integration-tagged Go test names, then takes
+its sorted round-robin partition. Tests, examples and fuzz seed cases are retained;
+subtests run with their parent. Discovery errors, duplicate names and empty shards
+fail. Each invocation keeps `-race -count=1 -timeout=10m`; password work factors and
+test assertions are unchanged. Verbose output records the actual executed names.
+The normal `python3 scripts/test_integration.py` and `make integration` entry points
+run all non-auth packages and all four auth shards, even if an earlier group fails.
 
 F52 adds a separate system browser matrix case with the same 20-minute job
 budget and two-job concurrency bound. The harness passes only the PID of its

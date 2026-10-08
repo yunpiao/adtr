@@ -90,11 +90,19 @@ func TestDatabaseBarrierActualMigratedSchema(t *testing.T) {
 	cfg, _ := migratedDatabase(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	db, err := connectDatabase(ctx, cfg.ConnString())
+	// ConnString retains the original parsed DSN, not cfg.Database's isolated
+	// test database. Pass the modified configuration to both helper connections.
+	db, err := connectDatabaseConfig(ctx, cfg)
 	if err != nil {
 		t.Fatal("helper did not prepare against actual migrated schema")
 	}
 	defer db.close()
+	for _, conn := range []*pgx.Conn{db.lock, db.observer} {
+		var name string
+		if err := conn.QueryRow(ctx, "SELECT current_database()").Scan(&name); err != nil || name != cfg.Database {
+			t.Fatal("helper connection did not select the isolated migrated database")
+		}
+	}
 	if db.lock.PgConn().PID() == db.observer.PgConn().PID() {
 		t.Fatal("observer shares lock connection")
 	}
@@ -250,7 +258,7 @@ func TestDatabaseBarrierActualEngineAcknowledgement(t *testing.T) {
 		return err
 	})
 	arm := armRecord{1, strings.Repeat("a", 32), p.TenantID, strconv.FormatInt(p.ActorID, 10), domain, account, "barrier-task"}
-	db, err := connectDatabase(ctx, cfg.ConnString())
+	db, err := connectDatabaseConfig(ctx, cfg)
 	if err != nil {
 		t.Fatal("barrier preconnection failed")
 	}

@@ -71,11 +71,16 @@ func connectDatabase(ctx context.Context, dsn string) (*database, error) {
 	if err != nil {
 		return nil, errors.New("database_configuration")
 	}
+	return connectDatabaseConfig(ctx, cfg)
+}
+
+func connectDatabaseConfig(ctx context.Context, cfg *pgx.ConnConfig) (*database, error) {
 	d := &database{}
 	lockConfig := cfg.Copy()
 	// Server-side backstop also releases an abandoned transaction if the helper
 	// stops scheduling. No SQL runs on this connection after row acquisition.
 	lockConfig.RuntimeParams["idle_in_transaction_session_timeout"] = "60000"
+	var err error
 	d.lock, err = pgx.ConnectConfig(ctx, lockConfig)
 	if err != nil {
 		return nil, errors.New("database_connect")

@@ -583,6 +583,79 @@ describe("system health interface", () => {
     expect(screen.queryByRole("img")).not.toBeInTheDocument();
     expect(screen.getAllByText("不可用")).toHaveLength(4);
   });
+  it.each(["刷新资源与历史", "资源与历史"])(
+    "keeps a current CPU sample out of history until %s reads a window containing it",
+    async (reload) => {
+      const measured = current();
+      measured.checkedAt = "2026-10-07T08:00:00.900Z";
+      override = (url) => {
+        const [path, query] = url.split("?");
+        if (path === "/api/system/resources/current") return response(measured);
+        if (path !== "/api/system/resources/history") return undefined;
+        const params = new URLSearchParams(query),
+          endTime = Number(params.get("endTime")),
+          included = seconds < endTime;
+        return response({
+          instance: "local-api",
+          graphType: "cpu_basic",
+          info: [
+            {
+              mode: "cpu_basic",
+              data: {
+                timestamp: included ? [seconds] : [],
+                value: included ? ["4"] : [],
+                dataStatistics: {
+                  max: included ? 4 : null,
+                  min: included ? 4 : null,
+                  avg: included ? 4 : null,
+                  current: included ? 4 : null,
+                },
+              },
+            },
+          ],
+          gaps: [
+            {
+              startTime: Number(params.get("startTime")),
+              endTime: included ? seconds : endTime,
+            },
+          ],
+          availableSince: now,
+          sampleIntervalSeconds: 15,
+        });
+      };
+      await start();
+      click("资源与历史");
+      await screen.findByText(/此范围没有真实历史样本/);
+      expect(
+        screen.getByRole("heading", { name: "CPU 使用率历史" }),
+      ).toBeVisible();
+      expect(screen.queryByRole("img")).not.toBeInTheDocument();
+      expect(
+        new URL(
+          calls("/resources/history")[0][0],
+          "http://local",
+        ).searchParams.get("endTime"),
+      ).toBe(String(seconds));
+      expect(screen.getAllByText("不可用")).toHaveLength(4);
+
+      // Only the server's check time advances; no new sample is manufactured.
+      measured.checkedAt = "2026-10-07T08:00:01Z";
+      click(reload);
+      const chart = await screen.findByRole("img", { name: /1 个实际样本/ });
+      expect(chart.querySelectorAll("circle")).toHaveLength(1);
+      expect(chart).toHaveTextContent(`${new Date(now).toISOString()}：4%`);
+      expect(calls("/resources/current")).toHaveLength(2);
+      expect(
+        new URL(
+          calls("/resources/history").at(-1)![0],
+          "http://local",
+        ).searchParams.get("endTime"),
+      ).toBe(String(seconds + 1));
+      expect(
+        screen.queryByText(/此范围没有真实历史样本/),
+      ).not.toBeInTheDocument();
+    },
+  );
   it("locks repeated writes, clears proof immediately, and reloads after server confirmation", async () => {
     let release!: (r: Response) => void;
     override = (url) =>
@@ -740,8 +813,12 @@ describe("system health interface", () => {
           })
         : undefined;
     click("保存告警阈值");
-    act(() => window.dispatchEvent(new PopStateEvent("popstate")));
-    await screen.findByRole("heading", { name: "账户概览" });
+    const pendingSignal = calls("/storage/settings")[0][1]
+      .signal as AbortSignal;
+    act(() => window.history.back());
+    await waitFor(() => expect(window.location.hash).toBe("#system/storage"));
+    await screen.findByRole("table", { name: "已登记节点" });
+    expect(pendingSignal.aborted).toBe(true);
     await act(async () =>
       release(
         await response({
@@ -756,6 +833,15 @@ describe("system health interface", () => {
         }),
       ),
     );
+    expect(screen.queryByLabelText("操作者当前密码")).not.toBeInTheDocument();
+    expect(screen.queryByText(/已由服务器保存/)).not.toBeInTheDocument();
+    act(() => window.history.forward());
+    await waitFor(() =>
+      expect(window.location.hash).toBe(
+        "#system/storage/settings/runtime-root",
+      ),
+    );
+    await screen.findByRole("table", { name: "已登记节点" });
     expect(screen.queryByLabelText("操作者当前密码")).not.toBeInTheDocument();
     expect(screen.queryByText(/已由服务器保存/)).not.toBeInTheDocument();
   });

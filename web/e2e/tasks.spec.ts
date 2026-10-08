@@ -124,7 +124,9 @@ test("real browser → API → Worker → PostgreSQL task result, idempotency an
   const mfa = await enrollMfa(page, changed);
   await page.getByRole("button", { name: "后台任务", exact: true }).click();
   await expect(page.getByRole("table", { name: "任务列表" })).toBeVisible();
-  await expect(page.getByText(/没有 AD 检测/)).toBeVisible();
+  await expect(
+    page.getByText(/平台健康成功不代表\s*AD 业务验收通过。/),
+  ).toBeVisible();
   const catalogue = await readJSON(context, "/api/tasks/kinds");
   expect(catalogue).toEqual({
     kinds: [
@@ -296,6 +298,7 @@ test("real browser → API → Worker → PostgreSQL task result, idempotency an
     { mark: "domains", auth: { readable: false, writeable: false } },
     { mark: "operation_accounts", auth: { readable: false, writeable: false } },
     { mark: "system_logs", auth: { readable: false, writeable: false } },
+    { mark: "directory_assets", auth: { readable: false, writeable: false } },
   ]);
   await page.getByRole("button", { name: "用户管理", exact: true }).click();
   await page.getByRole("button", { name: "新增用户", exact: true }).click();

@@ -448,12 +448,14 @@ test("real API/worker journal → lost-submit recovery → protected ZIP and own
   // A genuine empty time window still yields a real two-entry ZIP with an
   // explicit zero-row manifest, not fake producer records.
   await page.getByRole("button", { name: "事件查询", exact: true }).click();
+  // datetime-local canonicalizes zero seconds away; Playwright fill requires
+  // the exact canonical input value. These remain the same UTC instants.
   await page
     .getByLabel("入库开始时间（UTC）", { exact: true })
-    .fill("2000-01-01T00:00:00");
+    .fill("2000-01-01T00:00");
   await page
     .getByLabel("入库结束时间（UTC，不包含）", { exact: true })
-    .fill("2000-01-01T01:00:00");
+    .fill("2000-01-01T01:00");
   await page.getByRole("button", { name: "查询事件", exact: true }).click();
   await expect(page.getByText(/该范围没有已记录事件/)).toBeVisible();
   await page

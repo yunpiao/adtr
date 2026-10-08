@@ -71,7 +71,8 @@ func TestSourceReceiptReplaySurvivesRevocationAndOmitsPointers(t *testing.T) {
 
 func TestSourceDetachPreservesUnknownDependenciesAndLegacyUpdateBoundary(t *testing.T) {
 	f := fixtureForAccountExecutor(t, nil)
-	username, password := "synthetic-legacy", "synthetic-pair"
+	// A valid pair reaches the legacy source boundary instead of input validation.
+	username, password := "synthetic-legacy@example.test", "synthetic-pair"
 	err := f.attempt(func(ctx context.Context, tx pgx.Tx) error {
 		_, err := f.store.UpdateTx(ctx, tx, f.p, domains.Input{DomainID: f.id, ExpectedRevision: "2", DCHostName: "dc1.example.test", LDAPAddr: "10.20.0.8", Port: "389", Username: &username, Password: &password})
 		return err
@@ -203,7 +204,8 @@ func TestCreateUnconfiguredNeedsNoKeyAndSharesCreationKeyNamespace(t *testing.T)
 		return err
 	})
 	sourceProblem(t, err, "idempotency_conflict")
-	username, password := "synthetic-reader", "synthetic-password"
+	// Keep custom creation valid so this probes the shared idempotency namespace.
+	username, password := "synthetic-reader@bootstrap.test", "synthetic-password"
 	err = a.attempt(func(ctx context.Context, tx pgx.Tx) error {
 		cross := input
 		cross.Username = &username

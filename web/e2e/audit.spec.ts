@@ -477,13 +477,16 @@ test("real browser audit history, visibility, XLSX worker export and persisted r
     )) as AuditList;
     expect(initial.page.total).toBeGreaterThanOrEqual(5);
     const bootstrap = initial.List.find((row) => row.event === "bootstrap");
+    // Bootstrap runs after migration and captures the new account's username.
+    // It has no HTTP request, so only its request metadata remains absent.
     expect(bootstrap).toMatchObject({
       source: "auth",
-      loginUser: null,
+      loginUser: username,
+      userId: me.ID,
       sourceIp: null,
       eventResult: "SUCCESS",
       availability: {
-        loginUser: false,
+        loginUser: true,
         sourceIp: false,
         path: false,
         requestId: false,
@@ -493,8 +496,9 @@ test("real browser audit history, visibility, XLSX worker export and persisted r
     const missingRow = table
       .getByRole("row")
       .filter({ hasText: bootstrap!.ID });
+    await expect(missingRow).toContainText(username);
     await expect(missingRow).toContainText("未记录");
-    expect(JSON.parse(bootstrap!.eventArgs)).not.toHaveProperty("path");
+    expect(JSON.parse(bootstrap!.eventArgs)).toEqual({ targetId: me.ID });
     const loginRows = (await readJSON(
       context,
       `/api/audit?${stableQuery}`,
@@ -959,6 +963,67 @@ test("real browser audit history, visibility, XLSX worker export and persisted r
         .getByRole("button", { name: "返回审计列表", exact: true })
         .click();
     }
+  });
+
+  await test.step("worker audit retains missing login and request metadata", async () => {
+    // These records come from the real export worker, whose transaction has no
+    // HTTP metadata. The task actor ID must not fabricate a login username.
+    await page
+      .getByLabel("审计事件筛选", { exact: true })
+      .selectOption(["finished"]);
+    await page.getByLabel("审计类型筛选", { exact: true }).selectOption(["8"]);
+    const finished = await filteredAudit(page, "");
+    expect(finished.page.total).toBe(exportIDs.length);
+    expect(
+      finished.List.map((row) => JSON.parse(row.eventArgs).taskUUID).sort(),
+    ).toEqual([...exportIDs].sort());
+    const table = page.getByRole("table", {
+      name: "操作审计记录",
+      exact: true,
+    });
+    for (const row of finished.List) {
+      expect(row).toMatchObject({
+        source: "task",
+        event: "finished",
+        userId: me.ID,
+        loginUser: null,
+        sourceIp: null,
+        eventResult: "SUCCESS",
+        availability: {
+          loginUser: false,
+          sourceIp: false,
+          path: false,
+          requestId: false,
+          eventResult: true,
+        },
+      });
+      expect(JSON.parse(row.eventArgs)).toEqual({
+        taskUUID: expect.any(String),
+        state: "succeeded",
+        attempt: 1,
+      });
+      const missingRow = table.getByRole("row").filter({
+        has: page.getByRole("checkbox", {
+          name: `选择 ${row.ID}`,
+          exact: true,
+        }),
+      });
+      await expect(
+        missingRow
+          .getByRole("cell")
+          .filter({ hasText: /^未记录（历史数据缺失）/ }),
+      ).toHaveCount(2);
+      await expect(missingRow).toContainText(`用户 ID：${me.ID}`);
+      await missingRow
+        .getByText(`查看元数据 ${row.ID}`, { exact: true })
+        .click();
+      await expect(missingRow).toContainText(
+        "未记录：登录用户、登录IP、请求路径、请求标识。历史缺失信息不会用当前账户信息补写。",
+      );
+    }
+    await page.getByLabel("审计事件筛选", { exact: true }).selectOption([]);
+    await page.getByLabel("审计类型筛选", { exact: true }).selectOption([]);
+    await filteredAudit(page, "");
   });
 
   await test.step("persisted export history filters and pages use task creation time and canonical states", async () => {

@@ -1204,11 +1204,17 @@ test("real empty directory reader and same-context account-switch isolation", as
             `/api/directory-credential-use/${operation}`,
             {
               accountId,
-              roleId: roleID,
+              // Grant targets the ungranted reader role; revoke targets the
+              // actual producer grant. Revoke revision zero is invalid input
+              // and would never reach the role-authority boundary under test.
+              roleId: operation === "grant" ? roleID : "platform_admin",
               purpose: "domain.directory_read",
               expectedAccountRevision: account.revision,
               expectedCredentialRevision: account.credentialRevision,
-              expectedGrantRevision: "0",
+              expectedGrantRevision:
+                operation === "grant"
+                  ? "0"
+                  : directoryGrant.value.grantRevision,
               idempotencyKey: `reader-forbidden-directory-${operation}`,
             },
           ] as const,
@@ -1223,6 +1229,11 @@ test("real empty directory reader and same-context account-switch isolation", as
       });
       await forbidden(response);
     }
+    expect(await readJSON(context, effectivePath, actorId)).toMatchObject({
+      explicitlyGranted: true,
+      eligible: true,
+      grantRevision: directoryGrant.value.grantRevision,
+    });
     const reread = await readJSON(
       readerContext,
       `/api/directory/observation?domainId=${domainId}`,

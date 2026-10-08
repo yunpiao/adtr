@@ -601,6 +601,7 @@ describe("credential governance views", () => {
     );
   });
   it("preserves actor-bound intent on browser Back and ignores a late grant response before GET recovery", async () => {
+    window.history.replaceState({}, "", "#account");
     let finishGrant!: (r: Response) => void;
     override = (url) =>
       url === `${base}/grant`
@@ -623,9 +624,8 @@ describe("credential governance views", () => {
     const intent = readCredentialIntent(profile)!;
     expect(intent).toEqual(pending({ idempotencyKey: expect.any(String) }));
     expect(readCredentialIntent({ ...profile, ID: 2 })).toBeNull();
-    act(() => {
-      window.dispatchEvent(new PopStateEvent("popstate"));
-    });
+    act(() => window.history.back());
+    await waitFor(() => expect(window.location.hash).toBe("#account"));
     await screen.findByRole("heading", { name: "账户概览" });
     expect(calls("grant")[0][1].signal.aborted).toBe(true);
     expect(

@@ -573,8 +573,9 @@ describe("reversible archive UI", () => {
       "injected",
     );
     proof();
-    act(() => window.dispatchEvent(new PopStateEvent("popstate")));
-    await screen.findByRole("heading", { name: "账户概览" });
+    act(() => window.history.back());
+    await waitFor(() => expect(window.location.hash).toBe("#tasks"));
+    await screen.findByRole("table", { name: "任务列表" });
     expect(screen.queryByLabelText("操作者当前密码")).not.toBeInTheDocument();
     override = (url) =>
       url === "/api/auth/logout" ? response({ result: "SUCCESS" }) : undefined;

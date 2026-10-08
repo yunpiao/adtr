@@ -4,8 +4,10 @@ import base64
 import os
 from pathlib import Path
 import secrets
+import shutil
 import socket
 import subprocess
+import sys
 import tempfile
 import time
 import urllib.error
@@ -18,11 +20,34 @@ from account_barrier_e2e_fixture import AccountBarrierFixture
 from e2e_owned_container import OWNER_LABEL, remove_owned_container
 
 
+REAL_TAB_LIFECYCLE_SUITES = {"session-invalidation", "directory-readers"}
+
+
+def browser_command(suite):
+    command = ["npm", "run", "test:e2e", "--prefix", "web", "--", f"e2e/{suite}.spec.ts"]
+    if suite in REAL_TAB_LIFECYCLE_SUITES:
+        # These regressions require genuine background/foreground tab changes.
+        # Headless shell keeps tabs visible even after focus emulation is off.
+        # --headed overrides the ordinary suites' Playwright headless default.
+        command.append("--headed")
+        if sys.platform.startswith("linux") and not os.environ.get("DISPLAY"):
+            if shutil.which("xvfb-run") is None:
+                raise RuntimeError(
+                    f"{suite} requires headed Chromium and a display; install Xvfb "
+                    "with `cd web && npx playwright install --with-deps chromium` "
+                    "or provide DISPLAY"
+                )
+            command = ["xvfb-run", "-a", *command]
+    return command
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--suite", choices=["auth", "access", "resource", "tasks", "audit", "system", "maintenance", "domains", "operations", "profile", "credential-use", "account-references", "operational-logs", "session-invalidation", "account-reference-barrier", "directory", "directory-controls", "directory-readers"], default="auth")
     parser.add_argument("--expired", action="store_true")
     args = parser.parse_args()
+    # Check display support before creating a disposable database or fixtures.
+    command = browser_command(args.suite)
     name = "adtr-auth-e2e-" + uuid.uuid4().hex[:12]
     password = secrets.token_hex(24)
     env = dict(os.environ, POSTGRES_PASSWORD=password)
@@ -135,7 +160,7 @@ def main():
         # DOM snapshot. Suppress that separate artifact so proof fields cannot
         # enter an error-context prompt; explicit safe screenshots remain intact.
         env["PLAYWRIGHT_NO_COPY_PROMPT"] = "1"
-        subprocess.run(["npm", "run", "test:e2e", "--prefix", "web", "--", f"e2e/{args.suite}.spec.ts"], env=env, check=True, timeout=930 if args.suite in {"directory-controls", "directory-readers"} else 660 if args.suite == "directory" else 600 if args.suite == "audit" else 540 if args.suite in {"maintenance", "domains", "operations", "credential-use", "account-references", "operational-logs", "account-reference-barrier"} else 480 if args.suite == "system" else 420)
+        subprocess.run(command, env=env, check=True, timeout=930 if args.suite in {"directory-controls", "directory-readers"} else 660 if args.suite == "directory" else 600 if args.suite == "audit" else 540 if args.suite in {"maintenance", "domains", "operations", "credential-use", "account-references", "operational-logs", "account-reference-barrier"} else 480 if args.suite == "system" else 420)
         chain = "real browser -> API -> worker/PostgreSQL" if worker is not None else "real browser -> API -> PostgreSQL"
     finally:
         shutdown_error = None

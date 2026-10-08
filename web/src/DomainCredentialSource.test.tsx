@@ -7,6 +7,7 @@ import {
 } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import DomainsWorkspace from "./DomainsWorkspace";
+import App from "./App";
 import type { Profile } from "./api";
 import { labels, marks } from "./access-api";
 import {
@@ -216,6 +217,52 @@ beforeEach(() => {
     throw Error(`Unexpected ${url}`);
   });
   vi.stubGlobal("fetch", fetcher);
+});
+describe("source navigation through the app", () => {
+  it("aborts a delayed source read on real Back/Forward and restores only the domain list", async () => {
+    override = (url) =>
+      url === "/api/auth/me" ? response(profile) : undefined;
+    render(<App />);
+    await screen.findByRole("heading", { name: "账户概览" });
+    click("域连接");
+    await screen.findByRole("button", { name: "查看 synthetic.invalid" });
+    click("查看 synthetic.invalid");
+    await screen.findByRole("button", { name: "管理凭据来源" });
+    click("管理凭据来源");
+    await screen.findByLabelText("新的凭据来源");
+    await selectReference();
+    proof();
+    let resolve!: (value: Response) => void;
+    override = (url) =>
+      url === "/api/auth/me"
+        ? response(profile)
+        : url.split("?")[0] === base
+          ? new Promise<Response>((done) => {
+              resolve = done;
+            })
+          : undefined;
+    click("重新读取凭据来源");
+    await waitFor(() => expect(calls(base)).toHaveLength(2));
+    const delayedSignal = calls(base).at(-1)![1].signal as AbortSignal;
+    expect(delayedSignal.aborted).toBe(false);
+    act(() => window.history.back());
+    await waitFor(() => expect(window.location.hash).toBe("#domains/detail"));
+    await screen.findByRole("button", { name: "查看 synthetic.invalid" });
+    expect(delayedSignal.aborted).toBe(true);
+    expect(screen.queryByLabelText("新的凭据来源")).toBeNull();
+    expect(screen.queryByLabelText("操作者当前密码")).toBeNull();
+    await act(async () => resolve(await response(detail())));
+    act(() => window.history.forward());
+    await waitFor(() =>
+      expect(window.location.hash).toBe("#domains/credential-source"),
+    );
+    await screen.findByRole("button", { name: "查看 synthetic.invalid" });
+    expect(screen.queryByLabelText("新的凭据来源")).toBeNull();
+    expect(screen.queryByText(account.label)).toBeNull();
+    expect(screen.queryByDisplayValue("Synthetic Actor Secret")).toBeNull();
+    expect(calls(base)).toHaveLength(2);
+    expect(calls(`${base}/reference`)).toHaveLength(0);
+  });
 });
 describe("source contracts and persistence", () => {
   it("accepts only exact metadata-only receipts and safe source detail", () => {

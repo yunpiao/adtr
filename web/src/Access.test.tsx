@@ -340,10 +340,15 @@ describe("server-driven navigation and sessions", () => {
     await startApp();
     await click("新增用户");
     await proof();
-    act(() => window.dispatchEvent(new PopStateEvent("popstate")));
+    const sessionReads = () =>
+      fetcher.mock.calls.filter(([url]) => url === "/api/auth/me").length;
+    const readsBefore = sessionReads();
+    act(() => window.history.back());
+    await waitFor(() => expect(window.location.hash).toBe("#access"));
     expect(
-      await screen.findByRole("heading", { name: "账户概览" }),
+      await screen.findByRole("heading", { name: "访问管理" }),
     ).toBeInTheDocument();
+    expect(sessionReads()).toBeGreaterThan(readsBefore);
     expect(screen.queryByLabelText("操作者当前密码")).not.toBeInTheDocument();
   });
 });

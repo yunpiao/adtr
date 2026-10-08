@@ -195,6 +195,68 @@ describe("authentication", () => {
     expect(screen.getByRole("button", { name: "登录" })).toBeEnabled();
   });
 });
+describe("workspace history routing", () => {
+  it.each([
+    ["#profile", "个人资料"],
+    ["#access/users/create", "访问管理"],
+    ["#resources/groups/edit", "资源与租户"],
+    ["#tasks/detail", "后台任务"],
+    ["#audit/history", "操作审计"],
+    ["#system/resources", "系统健康"],
+    ["#operational-logs/history", "运行日志与诊断包"],
+    ["#domains/credential-source", "域连接"],
+    ["#operation-accounts/detail", "管理操作账户"],
+    ["#credential-use", "凭据授权清理"],
+    ["#directory", "目录资产"],
+    ["#directory-credential-use", "目录读取授权"],
+  ])(
+    "restores %s only after verifying the current session",
+    async (hash, name) => {
+      window.history.replaceState({}, "", hash);
+      let resolve!: (value: Response) => void;
+      fetcher.mockImplementation(() => new Promise<Response>(() => {}));
+      fetcher.mockImplementationOnce(
+        () =>
+          new Promise<Response>((done) => {
+            resolve = done;
+          }),
+      );
+      render(<App />);
+      expect(screen.queryByRole("navigation", { name: "账户设置" })).toBeNull();
+      expect(fetcher).toHaveBeenCalledTimes(1);
+      expect(fetcher.mock.calls[0][0]).toBe("/api/auth/me");
+      await act(async () => resolve(await reply(profile)));
+      expect(screen.getByRole("button", { name })).toHaveAttribute(
+        "aria-current",
+        "page",
+      );
+    },
+  );
+  it.each([
+    "#domains-extra/detail",
+    "#operation-accounts-extra",
+    "#credential-use-extra",
+    "#directory-extra",
+    "#unknown/domains",
+    "#profile/edit",
+    "#password",
+    "#mfa",
+    "#reset",
+  ])(
+    "keeps unknown and proof-only route %s at account overview",
+    async (hash) => {
+      window.history.replaceState({}, "", hash);
+      fetcher.mockImplementation(() => reply(profile));
+      render(<App />);
+      await screen.findByRole("heading", { name: "账户概览" });
+      expect(fetcher).toHaveBeenCalledTimes(1);
+      expect(screen.getByRole("button", { name: "账户概览" })).toHaveAttribute(
+        "aria-current",
+        "page",
+      );
+    },
+  );
+});
 describe("password lifecycle and access boundaries", () => {
   it.each(["needChangePwd", "isExpired"] as const)(
     "gates %s accounts and rotates profile after password change",

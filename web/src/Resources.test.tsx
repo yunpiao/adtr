@@ -715,9 +715,11 @@ describe("tenant configuration and navigation", () => {
     await click("新增资源组");
     fill("资源组名称", "discard-me");
     const readsBefore = requests("/api/auth/me").length;
-    fireEvent.popState(window);
-    await screen.findByRole("heading", { name: "账户概览" });
+    act(() => window.history.back());
+    await waitFor(() => expect(window.location.hash).toBe("#resources/groups"));
+    await screen.findByRole("heading", { name: "资源与租户" });
     expect(requests("/api/auth/me").length).toBeGreaterThan(readsBefore);
+    expect(screen.queryByLabelText("资源组名称")).not.toBeInTheDocument();
     await click("资源与租户");
     await click("资源组");
     await click("新增资源组");

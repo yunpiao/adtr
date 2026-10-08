@@ -17,11 +17,15 @@ class CIEventContract(unittest.TestCase):
                         'scripts/test_auth_e2e.py', 'scripts/test_auth_e2e.py --expired',
                         'scripts/test_auth_e2e.py --suite access', 'scripts/test_auth_e2e.py --suite resource', 'scripts/test_auth_e2e.py --suite tasks', 'scripts/test_auth_e2e.py --suite audit', 'scripts/test_auth_e2e.py --suite system', 'scripts/test_auth_e2e.py --suite maintenance', 'scripts/test_auth_e2e.py --suite domains', 'scripts/test_auth_e2e.py --suite operations', 'scripts/test_auth_e2e.py --suite profile', 'scripts/test_auth_e2e.py --suite credential-use', 'scripts/test_auth_e2e.py --suite account-references', 'scripts/test_auth_e2e.py --suite operational-logs', 'scripts/test_auth_e2e.py --suite session-invalidation', 'scripts/test_auth_e2e.py --suite account-reference-barrier']:
             self.assertIn(command, text)
-        self.assertIn('needs: [contracts, browser]', text)
+        self.assertIn('scripts/test_integration.py --suite non-auth', text)
+        self.assertIn('scripts/test_integration.py --suite auth --shard ${{ matrix.shard }}', text)
+        self.assertIn('shard: [1, 2, 3, 4]', text)
+        self.assertIn('needs: [contracts, auth-integration, browser]', text)
         self.assertIn('if: ${{ always() }}', text)
         self.assertIn('fail-fast: false', text)
         self.assertIn('max-parallel: 2', text)
-        self.assertIn('test "$CONTRACT_RESULT" = success && test "$BROWSER_RESULT" = success', text)
+        self.assertIn('AUTH_INTEGRATION_RESULT: ${{ needs.auth-integration.result }}', text)
+        self.assertIn('test "$CONTRACT_RESULT" = success && test "$AUTH_INTEGRATION_RESULT" = success && test "$BROWSER_RESULT" = success', text)
         self.assertNotIn('continue-on-error', text)
         self.assertIn('permissions: {}', text)
         self.assertIn('contents: read', text)

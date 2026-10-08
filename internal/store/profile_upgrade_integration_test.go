@@ -168,12 +168,24 @@ INSERT INTO adtr.domain_connections(tenant_id,domain_id,canonical_domain,dc_host
 		"domain_connections", "domain_credentials", "domain_dependencies", "domain_audit",
 		"operation_accounts", "operation_account_credentials", "operation_account_dependencies",
 		"operation_account_mutations", "operation_account_audit", "auth_audit", "audit_source",
-		"task_authorization_epoch",
+	}
+	// Compare every historical column after migration as well. Additive columns
+	// are checked separately below; they must not obscure old-field preservation.
+	projections := make(map[string]string, len(tables))
+	for _, table := range tables {
+		var columns []string
+		if e := conn.QueryRow(ctx, `SELECT array_agg(attname::text ORDER BY attnum) FROM pg_attribute WHERE attrelid=$1::regclass AND attnum>0 AND NOT attisdropped`, pgx.Identifier{"adtr", table}.Sanitize()).Scan(&columns); e != nil || len(columns) == 0 {
+			t.Fatalf("read historical columns for %s: %v", table, e)
+		}
+		for i := range columns {
+			columns[i] = pgx.Identifier{columns[i]}.Sanitize()
+		}
+		projections[table] = strings.Join(columns, ",")
 	}
 	snapshot := func(table string) string {
 		t.Helper()
 		var data string
-		query := `SELECT COALESCE(jsonb_agg(to_jsonb(r) ORDER BY to_jsonb(r)::text),'[]'::jsonb)::text FROM ` + pgx.Identifier{"adtr", table}.Sanitize() + ` r`
+		query := `SELECT COALESCE(jsonb_agg(to_jsonb(r) ORDER BY to_jsonb(r)::text),'[]'::jsonb)::text FROM (SELECT ` + projections[table] + ` FROM ` + pgx.Identifier{"adtr", table}.Sanitize() + `) r`
 		if e := conn.QueryRow(ctx, query).Scan(&data); e != nil {
 			t.Fatalf("snapshot %s: %v", table, e)
 		}
@@ -183,6 +195,22 @@ INSERT INTO adtr.domain_connections(tenant_id,domain_id,canonical_domain,dc_host
 	for _, table := range tables {
 		before[table] = snapshot(table)
 	}
+	// Sequences have no composite row type in PostgreSQL. Read every persisted
+	// sequence state field explicitly without advancing the authorization epoch.
+	type sequenceState struct {
+		lastValue int64
+		logCount  int64
+		isCalled  bool
+	}
+	snapshotEpoch := func() sequenceState {
+		t.Helper()
+		var state sequenceState
+		if e := conn.QueryRow(ctx, `SELECT last_value,log_cnt,is_called FROM adtr.task_authorization_epoch`).Scan(&state.lastValue, &state.logCount, &state.isCalled); e != nil {
+			t.Fatal("snapshot task authorization sequence", e)
+		}
+		return state
+	}
+	epochBefore := snapshotEpoch()
 	assertPreserved := func() {
 		t.Helper()
 		if e := Ready(ctx, cfg); e != nil {
@@ -199,6 +227,19 @@ INSERT INTO adtr.domain_connections(tenant_id,domain_id,canonical_domain,dc_host
 			if snapshot(table) != before[table] {
 				t.Fatalf("migration changed existing %s data", table)
 			}
+		}
+		if snapshotEpoch() != epochBefore {
+			t.Fatal("migration changed task authorization sequence state")
+		}
+		var unadopted bool
+		if e := conn.QueryRow(ctx, `SELECT
+ NOT EXISTS(SELECT FROM adtr.domain_connections WHERE operation_account_id IS NOT NULL OR operation_account_credential_revision IS NOT NULL)
+ AND NOT EXISTS(SELECT FROM adtr.operation_account_dependencies WHERE account_credential_revision IS NOT NULL OR connection_credential_generation IS NOT NULL)
+ AND NOT EXISTS(SELECT FROM adtr.domain_audit WHERE credential_source IS NOT NULL OR operation_account_id IS NOT NULL OR account_credential_revision IS NOT NULL)
+ AND NOT EXISTS(SELECT FROM adtr.operation_account_use_grants)
+ AND NOT EXISTS(SELECT FROM adtr.domain_account_task_uses)
+ AND NOT EXISTS(SELECT FROM adtr.domain_directory_task_uses)`).Scan(&unadopted); e != nil || !unadopted {
+			t.Fatal("migration adopted historical credentials or dependencies", e)
 		}
 	}
 	start := make(chan struct{})
