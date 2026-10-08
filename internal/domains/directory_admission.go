@@ -33,10 +33,23 @@ func ValidateDirectoryInput(in DirectoryInput) error {
 // SubmitDirectoryTx never advances diagnostic_generation or latest_test_task.
 // Caller must first check fresh proof, directory-write and current domain scope.
 func (s *Store) SubmitDirectoryTx(ctx context.Context, tx pgx.Tx, engine *tasks.Engine, p tasks.Principal, in DirectoryInput) (tasks.Submission, error) {
+	return s.submitDirectoryForProfileTx(ctx, tx, engine, p, in, directoryTaskV1)
+}
+
+// SubmitDirectoryV2Tx admits only the separately granted fixed dictionary 2.
+func (s *Store) SubmitDirectoryV2Tx(ctx context.Context, tx pgx.Tx, engine *tasks.Engine, p tasks.Principal, in DirectoryInput) (tasks.Submission, error) {
+	return s.submitDirectoryForProfileTx(ctx, tx, engine, p, in, directoryTaskV2)
+}
+
+func (s *Store) submitDirectoryForProfileTx(ctx context.Context, tx pgx.Tx, engine *tasks.Engine, p tasks.Principal, in DirectoryInput, profile directoryTaskProfile) (tasks.Submission, error) {
+	identity, ok := profile.identity()
+	if !ok {
+		return tasks.Submission{}, tasks.ErrAuthorization
+	}
 	if err := ValidateDirectoryInput(in); err != nil {
 		return tasks.Submission{}, err
 	}
-	if engine == nil || !s.runtime.DirectoryReadEnabled() {
+	if engine == nil || !s.directoryEnabled(profile) {
 		return tasks.Submission{}, problem(503, "directory_read_disabled")
 	}
 	v, err := getRow(ctx, tx, p.TenantID, in.DomainID, true)
@@ -59,7 +72,7 @@ func (s *Store) SubmitDirectoryTx(ctx context.Context, tx pgx.Tx, engine *tasks.
 	if _, err = s.runtime.Policy().AuthorizeTarget(p.TenantID, v.Domain, v.DCHostName, ip); err != nil {
 		return tasks.Submission{}, problem(403, "destination_denied")
 	}
-	role, grant, err := directoryGrantTx(ctx, tx, p, v)
+	role, grant, err := directoryGrantForProfileTx(ctx, tx, profile, p, v)
 	if err != nil {
 		return tasks.Submission{}, err
 	}
@@ -67,29 +80,29 @@ func (s *Store) SubmitDirectoryTx(ctx context.Context, tx pgx.Tx, engine *tasks.
 	var actor int64
 	var version int
 	var raw json.RawMessage
-	err = tx.QueryRow(ctx, `SELECT actor_id,payload_version,payload FROM adtr.tasks WHERE tenant_id=$1 AND domain_id=$2 AND kind=$3 AND idempotency_key=$4`, p.TenantID, v.DomainID, DirectoryKindName, in.IdempotencyKey).Scan(&actor, &version, &raw)
+	err = tx.QueryRow(ctx, `SELECT actor_id,payload_version,payload FROM adtr.tasks WHERE tenant_id=$1 AND domain_id=$2 AND kind=$3 AND idempotency_key=$4`, p.TenantID, v.DomainID, identity.kind, in.IdempotencyKey).Scan(&actor, &version, &raw)
 	if err == nil {
-		canonical, validErr := validateDirectoryPayload(raw)
+		canonical, validErr := validateDirectoryPayloadForProfile(profile, raw)
 		var previous directoryPinnedPayload
 		if actor != p.ActorID || version != 1 || validErr != nil || json.Unmarshal(canonical, &previous) != nil || previous != pins {
 			return tasks.Submission{}, problem(409, "idempotency_conflict")
 		}
-		return engine.SubmitTx(ctx, tx, p, tasks.SubmitInput{TaskName: DirectoryKindName, DomainID: v.DomainID, PayloadVersion: 1, Payload: canonical, IdempotencyKey: in.IdempotencyKey})
+		return engine.SubmitTx(ctx, tx, p, tasks.SubmitInput{TaskName: identity.kind, DomainID: v.DomainID, PayloadVersion: 1, Payload: canonical, IdempotencyKey: in.IdempotencyKey})
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
 		return tasks.Submission{}, err
 	}
-	out, err := engine.SubmitTx(ctx, tx, p, tasks.SubmitInput{TaskName: DirectoryKindName, DomainID: v.DomainID, PayloadVersion: 1, Payload: pins.json(), IdempotencyKey: in.IdempotencyKey})
+	out, err := engine.SubmitTx(ctx, tx, p, tasks.SubmitInput{TaskName: identity.kind, DomainID: v.DomainID, PayloadVersion: 1, Payload: profile.payload(pins), IdempotencyKey: in.IdempotencyKey})
 	if err != nil {
 		return out, err
 	}
 	if out.Replayed {
 		return tasks.Submission{}, problem(409, "idempotency_conflict")
 	}
-	if err = reserveDirectoryUseTx(ctx, tx, out.Task, pins); err != nil {
+	if err = reserveDirectoryUseForProfileTx(ctx, tx, profile, out.Task, pins); err != nil {
 		return tasks.Submission{}, err
 	}
-	if err = audit(ctx, tx, p, v.DomainID, "domain_directory_submit", v.revision, v.revision, v.credential, out.Task.ID, "queued"); err != nil {
+	if err = audit(ctx, tx, p, v.DomainID, profile.auditAction("submit"), v.revision, v.revision, v.credential, out.Task.ID, "queued"); err != nil {
 		return tasks.Submission{}, err
 	}
 	return out, nil

@@ -23,10 +23,11 @@ var (
 // Runtime is a startup snapshot. Its fields and the objects it owns cannot be
 // changed through this package's public API. Zero and nil values are disabled.
 type Runtime struct {
-	vault                *Vault
-	policy               *Policy
-	probeEnabled         bool
-	directoryReadEnabled bool
+	vault                  *Vault
+	policy                 *Policy
+	probeEnabled           bool
+	directoryReadEnabled   bool
+	directoryReadV2Enabled bool
 }
 
 func (r *Runtime) Enabled() bool      { return r != nil && r.vault != nil }
@@ -35,6 +36,12 @@ func (r *Runtime) ProbeEnabled() bool { return r.Enabled() && r.probeEnabled }
 // DirectoryReadEnabled is a separate deployment gate, never implied by probes.
 // An enabled deployment still needs an explicit live directory-purpose grant.
 func (r *Runtime) DirectoryReadEnabled() bool { return r.Enabled() && r.directoryReadEnabled }
+
+// DirectoryReadV2Enabled requires both immutable deployment switches. Neither
+// this compiled capability nor either flag supplies a credential-purpose grant.
+func (r *Runtime) DirectoryReadV2Enabled() bool {
+	return r.DirectoryReadEnabled() && r.directoryReadV2Enabled
+}
 func (r *Runtime) Vault() *Vault {
 	if r == nil {
 		return nil
@@ -61,6 +68,7 @@ func Load(getenv func(string) string) (*Runtime, error) {
 	encodedKey := getenv("ADTR_DOMAIN_KEY")
 	probeFlag := getenv("ADTR_DOMAIN_PROBE_ENABLED")
 	directoryFlag := getenv("ADTR_DIRECTORY_READ_ENABLED")
+	directoryV2Flag := getenv("ADTR_DIRECTORY_READ_V2_ENABLED")
 	caPath := getenv("ADTR_LDAP_CA_FILE")
 	policyPath := getenv("ADTR_LDAP_EGRESS_POLICY_FILE")
 	if probeFlag != "" && probeFlag != "true" && probeFlag != "false" {
@@ -69,7 +77,10 @@ func Load(getenv func(string) string) (*Runtime, error) {
 	if directoryFlag != "" && directoryFlag != "true" && directoryFlag != "false" {
 		return nil, ErrConfiguration
 	}
-	if keyID == "" && encodedKey == "" && caPath == "" && policyPath == "" && probeFlag != "true" && directoryFlag != "true" {
+	if directoryV2Flag != "" && directoryV2Flag != "true" && directoryV2Flag != "false" {
+		return nil, ErrConfiguration
+	}
+	if keyID == "" && encodedKey == "" && caPath == "" && policyPath == "" && probeFlag != "true" && directoryFlag != "true" && directoryV2Flag != "true" {
 		return &Runtime{}, nil
 	}
 	if !validToken(keyID, 64) || len(encodedKey) != base64.StdEncoding.EncodedLen(32) || (caPath == "") != (policyPath == "") {
@@ -113,12 +124,13 @@ func Load(getenv func(string) string) (*Runtime, error) {
 			return nil, ErrConfiguration
 		}
 	}
-	if probeFlag == "true" || directoryFlag == "true" {
+	if probeFlag == "true" || directoryFlag == "true" || directoryV2Flag == "true" {
 		if runtime.policy == nil || len(runtime.policy.targets) == 0 {
 			return nil, ErrConfiguration
 		}
 		runtime.probeEnabled = probeFlag == "true"
 		runtime.directoryReadEnabled = directoryFlag == "true"
+		runtime.directoryReadV2Enabled = directoryV2Flag == "true"
 	}
 	return runtime, nil
 }

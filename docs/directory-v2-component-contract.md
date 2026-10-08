@@ -1,5 +1,7 @@
 # Versioned directory components
 
+Current local integration is described in [directory-v2-integration-status.md](directory-v2-integration-status.md). The component checkpoint below is preserved as history; its then-unregistered/schema15 statements do not describe the later integration worktree. Actual v2 database/browser CI remains a separate required gate.
+
 This checkpoint implements only an independent dictionary 2 object/envelope codecs, accumulator and fixed extended LDAP transport. It does not register a product task, grant a purpose, migrate storage, add HTTP routes or expose a UI. Existing dictionary 1 behavior remains callable and exact. Real database/browser/AD acceptance remains open.
 
 ## Intended integrated identity

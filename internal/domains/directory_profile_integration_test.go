@@ -18,9 +18,9 @@ import (
 	"github.com/yunpiao/adtr/internal/tasks"
 )
 
-// Component-only installation: the production migrator and registry stay at
-// schema15. The isolated fixture installs all three fragments under the existing
-// exclusive fence without pretending that migration16 has been integrated.
+// Component-only installation on an explicit historical schema15 fixture.
+// Runtime cases below use the current production migrator and never reapply
+// fragments. No fixture changes schema-version stamps to bypass a guard.
 func installDirectoryProfileFragments(f *directoryUseFixture) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
@@ -81,7 +81,7 @@ func submitDirectoryV2Tx(f *directoryUseFixture, ctx context.Context, tx pgx.Tx,
 }
 
 func TestDirectoryProfileFragmentsPreserveLegacyReservationAndHistory(t *testing.T) {
-	f := fixtureForDirectoryUse(t, true, nil)
+	f := fixtureForDirectoryUseAtVersion(t, true, nil, 15)
 	task := f.submitDirectory("pre-versioned-reservation")
 	var original string
 	if err := f.conn.QueryRow(context.Background(), `SELECT to_jsonb(t)::text FROM adtr.tasks t WHERE task_id=$1`, task.ID).Scan(&original); err != nil {
@@ -109,9 +109,6 @@ func TestDirectoryProfileFragmentsPreserveLegacyReservationAndHistory(t *testing
 
 func TestDirectoryV2LedgerRequiresSeparatePurposeAndExactDependency(t *testing.T) {
 	f := fixtureForDirectoryUse(t, true, nil)
-	if err := installDirectoryProfileFragments(f); err != nil {
-		t.Fatal(err)
-	}
 	f.installKind(t, domains.DirectoryV2UseKindForTest(f.store, openDirectoryV2Ledger))
 	err := f.attempt(func(ctx context.Context, tx pgx.Tx) error {
 		_, err := submitDirectoryV2Tx(f, ctx, tx, "legacy-grant-denied", f.directoryGrant)
@@ -170,9 +167,6 @@ func TestDirectoryProfilesKeepOriginalOpenerCleanupAfterRevocationAndLeaseLoss(t
 		}
 		t.Run(name, func(t *testing.T) {
 			f := fixtureForDirectoryUse(t, true, nil)
-			if err := installDirectoryProfileFragments(f); err != nil {
-				t.Fatal(err)
-			}
 			grant := f.directoryGrant
 			if v2 {
 				grant = grantDirectoryV2(f)
@@ -285,7 +279,7 @@ func TestDirectoryProfilesKeepOriginalOpenerCleanupAfterRevocationAndLeaseLoss(t
 func TestDirectoryProfileFragmentsRejectReservedCollisionsAtomically(t *testing.T) {
 	for _, mode := range []string{"task", "dependency", "column", "index"} {
 		t.Run(mode, func(t *testing.T) {
-			f := fixtureForDirectoryUse(t, true, nil)
+			f := fixtureForDirectoryUseAtVersion(t, true, nil, 15)
 			switch mode {
 			case "task":
 				f.exec(`INSERT INTO adtr.tasks(task_id,tenant_id,domain_id,kind,payload_version,payload,payload_hash,actor_id,authorization_version,idempotency_key,state,max_attempts) VALUES('v2-collision',$1,$2,'domain.directory_read.v2',1,'{}','original-collision-hash',$3,'original-epoch','original-collision-key','queued',1)`, f.p.TenantID, f.id, f.p.ActorID)
@@ -323,7 +317,7 @@ func TestDirectoryProfileFragmentsRejectReservedCollisionsAtomically(t *testing.
 }
 
 func TestDirectoryProfileFragmentsRejectAnOpenedLegacyUse(t *testing.T) {
-	f := fixtureForDirectoryUse(t, true, nil)
+	f := fixtureForDirectoryUseAtVersion(t, true, nil, 15)
 	f.submitDirectory("opened-before-profile")
 	lease, err := f.engine.Claim(context.Background(), "unreturned-legacy-owner")
 	if err != nil {
@@ -358,9 +352,6 @@ func TestDirectoryProfilesReconcileNeverOpenedTerminalUsesWithoutCurrentAuthorit
 		}
 		t.Run(name, func(t *testing.T) {
 			f := fixtureForDirectoryUse(t, true, nil)
-			if err := installDirectoryProfileFragments(f); err != nil {
-				t.Fatal(err)
-			}
 			grant, purpose := f.directoryGrant, credentialuse.DirectoryPurpose
 			if v2 {
 				grant, purpose = grantDirectoryV2(f), credentialuse.DirectoryV2Purpose
@@ -434,7 +425,7 @@ func TestDirectoryLegacyOpeningRejectsPresentInvalidProvenance(t *testing.T) {
 	// string "1" into the absent-column schema15 provenance convention.
 	for _, value := range []string{"NULL", `'null'::jsonb`, `'"1"'::jsonb`, `'0'::jsonb`, `'2'::jsonb`, `'{}'::jsonb`} {
 		t.Run(value, func(t *testing.T) {
-			f := fixtureForDirectoryUse(t, true, nil)
+			f := fixtureForDirectoryUseAtVersion(t, true, nil, 15)
 			task := f.submitDirectory("invalid-present-provenance")
 			f.exec(`ALTER TABLE adtr.domain_directory_task_uses ADD COLUMN dictionary_version jsonb DEFAULT ` + value)
 			lease, err := f.engine.Claim(context.Background(), "partial-schema-owner")

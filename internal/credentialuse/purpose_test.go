@@ -119,9 +119,9 @@ func testDirectoryMutationRevisions(t *testing.T, purpose string) {
 	}
 }
 
-func TestDirectoryV2KnownPurposeDoesNotEnableAnUnregisteredConsumer(t *testing.T) {
-	if DirectoryV2ConsumerEnabled || consumerEnabledForPurpose(DirectoryV2Purpose) {
-		t.Fatal("unregistered dictionary 2 consumer was advertised as enabled")
+func TestDirectoryV2RegisteredCapabilityKeepsExactPurposeBoundary(t *testing.T) {
+	if !DirectoryV2ConsumerEnabled || !consumerEnabledForPurpose(DirectoryV2Purpose) {
+		t.Fatal("registered dictionary 2 capability was not advertised")
 	}
 	for _, purpose := range []string{DirectoryPurpose, DirectoryV2Purpose} {
 		if !isDirectoryPurpose(purpose) || validatePurpose(purpose) != nil {

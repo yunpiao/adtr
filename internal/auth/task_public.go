@@ -11,7 +11,7 @@ import (
 // Generic task controls expose status, not private artifact metadata. Only the
 // audit endpoint may disclose snapshot rows/counts/digests after live checks.
 func publicTask(t tasks.Task) tasks.Task {
-	if t.Kind == audit.ExportKind || t.Kind == operationallogs.BundleKindName || domains.IsConnectionTestKind(t.Kind) || t.Kind == domains.DirectoryKindName {
+	if t.Kind == audit.ExportKind || t.Kind == operationallogs.BundleKindName || domains.IsConnectionTestKind(t.Kind) || isDirectoryTaskKind(t.Kind) {
 		t.Result = json.RawMessage(`{}`)
 		t.Cursor = json.RawMessage(`{}`)
 	}

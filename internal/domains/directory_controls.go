@@ -12,6 +12,18 @@ import (
 // DirectoryReceiptTx recovers only the caller's own immutable intent. It does
 // not retry execution or require the deployment read switch to remain enabled.
 func (s *Store) DirectoryReceiptTx(ctx context.Context, tx pgx.Tx, engine *tasks.Engine, p tasks.Principal, domainID, key string) (tasks.Task, error) {
+	return s.directoryReceiptForProfileTx(ctx, tx, engine, p, domainID, key, directoryTaskV1)
+}
+
+func (s *Store) DirectoryV2ReceiptTx(ctx context.Context, tx pgx.Tx, engine *tasks.Engine, p tasks.Principal, domainID, key string) (tasks.Task, error) {
+	return s.directoryReceiptForProfileTx(ctx, tx, engine, p, domainID, key, directoryTaskV2)
+}
+
+func (s *Store) directoryReceiptForProfileTx(ctx context.Context, tx pgx.Tx, engine *tasks.Engine, p tasks.Principal, domainID, key string, profile directoryTaskProfile) (tasks.Task, error) {
+	identity, ok := profile.identity()
+	if !ok {
+		return tasks.Task{}, tasks.ErrAuthorization
+	}
 	if !ValidID(domainID) || !ValidKey(key) {
 		return tasks.Task{}, problem(422, "invalid_input")
 	}
@@ -19,7 +31,7 @@ func (s *Store) DirectoryReceiptTx(ctx context.Context, tx pgx.Tx, engine *tasks
 		return tasks.Task{}, problem(503, "directory_unavailable")
 	}
 	var id string
-	err := tx.QueryRow(ctx, `SELECT task_id FROM adtr.tasks WHERE tenant_id=$1 AND domain_id=$2 AND actor_id=$3 AND kind=$4 AND idempotency_key=$5`, p.TenantID, domainID, p.ActorID, DirectoryKindName, key).Scan(&id)
+	err := tx.QueryRow(ctx, `SELECT task_id FROM adtr.tasks WHERE tenant_id=$1 AND domain_id=$2 AND actor_id=$3 AND kind=$4 AND idempotency_key=$5`, p.TenantID, domainID, p.ActorID, identity.kind, key).Scan(&id)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return tasks.Task{}, problem(404, "not_found")
 	}
@@ -30,7 +42,7 @@ func (s *Store) DirectoryReceiptTx(ctx context.Context, tx pgx.Tx, engine *tasks
 	if err != nil {
 		return tasks.Task{}, err
 	}
-	if detail.Task.Kind != DirectoryKindName || detail.Task.ActorID != p.ActorID || detail.Task.DomainID != domainID {
+	if detail.Task.Kind != identity.kind || detail.Task.ActorID != p.ActorID || detail.Task.DomainID != domainID {
 		return tasks.Task{}, problem(404, "not_found")
 	}
 	return detail.Task, nil
@@ -39,6 +51,18 @@ func (s *Store) DirectoryReceiptTx(ctx context.Context, tx pgx.Tx, engine *tasks
 // Cancellation records acceptance, never proof that credential use stopped.
 // The engine's original return witness still owns opened-use acknowledgement.
 func (s *Store) CancelDirectoryTx(ctx context.Context, tx pgx.Tx, engine *tasks.Engine, p tasks.Principal, id string, allowed []string) (tasks.Task, error) {
+	return s.cancelDirectoryForProfileTx(ctx, tx, engine, p, id, allowed, directoryTaskV1)
+}
+
+func (s *Store) CancelDirectoryV2Tx(ctx context.Context, tx pgx.Tx, engine *tasks.Engine, p tasks.Principal, id string, allowed []string) (tasks.Task, error) {
+	return s.cancelDirectoryForProfileTx(ctx, tx, engine, p, id, allowed, directoryTaskV2)
+}
+
+func (s *Store) cancelDirectoryForProfileTx(ctx context.Context, tx pgx.Tx, engine *tasks.Engine, p tasks.Principal, id string, allowed []string, profile directoryTaskProfile) (tasks.Task, error) {
+	identity, ok := profile.identity()
+	if !ok {
+		return tasks.Task{}, tasks.ErrAuthorization
+	}
 	if !ValidID(id) {
 		return tasks.Task{}, problem(422, "invalid_input")
 	}
@@ -50,7 +74,7 @@ func (s *Store) CancelDirectoryTx(ctx context.Context, tx pgx.Tx, engine *tasks.
 		return tasks.Task{}, err
 	}
 	before := detail.Task
-	if before.Kind != DirectoryKindName || !slices.Contains(allowed, before.DomainID) {
+	if before.Kind != identity.kind || !slices.Contains(allowed, before.DomainID) {
 		return tasks.Task{}, problem(404, "not_found")
 	}
 	out, err := engine.CancelTx(ctx, tx, p, id)
@@ -62,7 +86,7 @@ func (s *Store) CancelDirectoryTx(ctx context.Context, tx pgx.Tx, engine *tasks.
 		if err = tx.QueryRow(ctx, `SELECT connection_revision,credential_revision FROM adtr.domain_connections WHERE tenant_id=$1 AND domain_id=$2 FOR UPDATE`, p.TenantID, before.DomainID).Scan(&revision, &generation); err != nil {
 			return tasks.Task{}, err
 		}
-		if err = audit(ctx, tx, p, before.DomainID, "domain_directory_cancel", revision, revision, generation, id, "cancel_requested"); err != nil {
+		if err = audit(ctx, tx, p, before.DomainID, profile.auditAction("cancel"), revision, revision, generation, id, "cancel_requested"); err != nil {
 			return tasks.Task{}, err
 		}
 	}

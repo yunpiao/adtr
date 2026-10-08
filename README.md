@@ -23,6 +23,10 @@ F39/F52/F49 的真实 PostgreSQL/浏览器切片已在上述 CI 通过，Linux �
 
 F12 当前切片包含独立目录凭据用途、逐页授权、受执行结束证明保护的账本、完整观测暂存、当前域权限下的稳定分页与界面。迁移15原子安装新约束，并在未确认旧凭据使用已停止时拒绝升级。`ADTR_DIRECTORY_READ_ENABLED` 默认关闭，启用仍需独立密钥、CA、出口策略和当前角色显式 `domain.directory_read` 授权。连接检测授权不会自动变成目录授权。当前仅覆盖 GUID/DN/类别/对象类/可选 SAM/UAC 字段；没有增量、缺席删除推断、完整字段兼容或真实 AD 验收。契约见 [directory-api-contract.md](docs/directory-api-contract.md)，证据与剩余门禁见 [delivery.md](docs/delivery.md)。
 
+## Dictionary 2 整合范围
+
+当前分支增加独立 `domain.directory_read.v2` 任务/授权、迁移16和 `/api/directory/v2/*` 界面链路，提供 SID、mail、description 和创建时间四类事实字段。采集需要 `ADTR_DIRECTORY_READ_ENABLED=true`、`ADTR_DIRECTORY_READ_V2_ENABLED=true` 以及独立当前 v2 授权；两个开关默认关闭，旧授权不升级。当前本地检查已通过，新增真实 PostgreSQL/浏览器 CI 仍待执行，不能使用上述 PR77 检查点替代。范围与门禁见 [v2 整合检查点](docs/directory-v2-integration-status.md)。
+
 ## 本地构建与测试
 
 需要 Go **1.27.1**、Node **24.19.0**、npm、make；集成测试另需 Python 3、Docker Engine 与 Compose v2。

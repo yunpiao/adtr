@@ -1,5 +1,7 @@
 # Dictionary 2 exact-purpose governance components
 
+Current local integration is described in [directory-v2-integration-status.md](directory-v2-integration-status.md). The component checkpoint below is preserved as history; its then-unregistered/schema15 statements do not describe the later integration worktree. Actual v2 database/browser CI remains a separate required gate.
+
 This checkpoint prepares an explicit domain.directory_read.v2 purpose, immutable task profile and shared credential-use ledger. It does not install migration 16, register a task/consumer or expose routes. The application schema remains15 and the new compiled consumer capability remains false. Existing v1 wrappers must continue to function against schema 15.
 
 The new kind/purpose uses task payloadVersion 1 with the original eight immutable pins plus dictionaryVersion 2. Old payload validation remains exactly the original eight-key v1 shape. The internal profile selector is closed to v1/v2; no caller supplies arbitrary kinds, purposes, SQL identifiers or field dictionaries. Existing grants are never copied, upgraded or treated as v2 authority. Unknown purpose/profile combinations fail closed.

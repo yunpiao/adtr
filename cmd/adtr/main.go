@@ -83,7 +83,7 @@ func run() (runErr error) {
 		if err != nil {
 			return fmt.Errorf("system health configuration failed")
 		}
-		taskEngine, err = tasks.New(cfg.Database, tasks.ProductionRegistry(audit.Kind(), domainStore.Kind(), domainStore.AccountKind(), domainStore.DirectoryKind(), operationallogs.Kind()), auth.NewTaskAuthorizer(), store.SchemaVersion)
+		taskEngine, err = tasks.New(cfg.Database, tasks.ProductionRegistry(audit.Kind(), domainStore.Kind(), domainStore.AccountKind(), domainStore.DirectoryKind(), domainStore.DirectoryV2Kind(), operationallogs.Kind()), auth.NewTaskAuthorizer(), store.SchemaVersion)
 		if err != nil {
 			return fmt.Errorf("task engine configuration failed")
 		}
@@ -171,6 +171,9 @@ func run() (runErr error) {
 			directoryUseHandler := authentication.DirectoryCredentialUseHandler(credentialuse.New())
 			mux.Handle("/api/directory-credential-use", directoryUseHandler)
 			mux.Handle("/api/directory-credential-use/", directoryUseHandler)
+			directoryV2UseHandler := authentication.DirectoryV2CredentialUseHandler(credentialuse.New())
+			mux.Handle("/api/directory-credential-use/v2", directoryV2UseHandler)
+			mux.Handle("/api/directory-credential-use/v2/", directoryV2UseHandler)
 			operationAccountHandler := authentication.OperationAccountsHandler(operationAccountStore)
 			mux.Handle("/api/operation-accounts", operationAccountHandler)
 			mux.Handle("/api/operation-accounts/", operationAccountHandler)
@@ -183,6 +186,9 @@ func run() (runErr error) {
 			directoryHandler := authentication.DirectoryHandler(domainStore, taskEngine)
 			mux.Handle("/api/directory", directoryHandler)
 			mux.Handle("/api/directory/", directoryHandler)
+			directoryV2Handler := authentication.DirectoryV2Handler(domainStore, taskEngine)
+			mux.Handle("/api/directory/v2", directoryV2Handler)
+			mux.Handle("/api/directory/v2/", directoryV2Handler)
 			operationalHandler := authentication.OperationalLogsHandler(taskEngine)
 			mux.Handle("/api/system/logs", operationalHandler)
 			mux.Handle("/api/system/logs/", operationalHandler)
@@ -244,6 +250,9 @@ func run() (runErr error) {
 				return err
 			}, func(pass context.Context) error {
 				_, err := domainStore.ReconcileReservedDirectoryUses(pass, cfg.Database, 32)
+				return err
+			}, func(pass context.Context) error {
+				_, err := domainStore.ReconcileReservedDirectoryV2Uses(pass, cfg.Database, 32)
 				return err
 			})
 		}

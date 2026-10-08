@@ -5,8 +5,38 @@ import {
   parseDirectoryUseObservation,
   readDirectoryUse,
 } from "../e2e/directory-ledger-observer";
+import {
+  directoryV2ObserverQuery,
+  readDirectoryV2Use,
+} from "../e2e/directory-v2-ledger-observer";
 
 describe("read-only directory test observer", () => {
+  it("pins the v2 ledger, dependency and task purpose with only SELECT statements", async () => {
+    const sql = directoryV2ObserverQuery("v2-task_1");
+    expect(sql).toContain("d.consumer_kind='domain.directory_read.v2'");
+    expect(sql).toContain("u.purpose='domain.directory_read.v2'");
+    expect(sql).toContain("t.kind='domain.directory_read.v2'");
+    expect(sql).toContain("u.task_id='v2-task_1'");
+    expect(sql).not.toMatch(
+      /\b(UPDATE|INSERT|DELETE|ALTER|DROP|CREATE|TRUNCATE)\b/u,
+    );
+    expect(directoryObserverQuery("v1-task")).not.toContain(
+      "directory_read.v2",
+    );
+    for (const id of [
+      "",
+      "x' OR true --",
+      "x;UPDATE",
+      "x\n",
+      "x\\y",
+      "x".repeat(129),
+    ]) {
+      expect(() => directoryV2ObserverQuery(id)).toThrow();
+      await expect(readDirectoryV2Use(id)).rejects.toThrow(
+        "Invalid isolated directory task identifier",
+      );
+    }
+  });
   it("rejects unsafe task identifiers before any process", async () => {
     for (const id of [
       "",

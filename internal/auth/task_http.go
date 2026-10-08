@@ -276,7 +276,7 @@ func (s *Service) handleTask(ctx context.Context, r *http.Request, engine *tasks
 		if err = tx.QueryRow(ctx, "SELECT COALESCE((SELECT kind FROM adtr.tasks WHERE tenant_id=$1 AND task_id=$2),'')", actor.tenant, in.TaskUUID).Scan(&privateKind); err != nil {
 			return nil, err
 		}
-		if code := dedicatedTaskRouteCode(privateKind); code != "" && (path == "/recover" || privateKind == operationallogs.BundleKindName || privateKind == domains.DirectoryKindName) {
+		if code := dedicatedTaskRouteCode(privateKind); code != "" && (path == "/recover" || privateKind == operationallogs.BundleKindName || isDirectoryTaskKind(privateKind)) {
 			if _, err = engine.DetailTx(ctx, tx, tasks.Principal{TenantID: actor.tenant, ActorID: actor.ID}, in.TaskUUID); err != nil {
 				return nil, err
 			}
@@ -352,7 +352,7 @@ func dedicatedTaskRouteCode(kind string) string {
 		return "audit_route_required"
 	case operationallogs.BundleKindName:
 		return "operational_log_route_required"
-	case domains.DirectoryKindName:
+	case domains.DirectoryKindName, domains.DirectoryV2KindName:
 		return "directory_route_required"
 	case domains.KindName, domains.AccountKindName:
 		return "domain_route_required"

@@ -15,6 +15,7 @@ import (
 	"math/big"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -43,6 +44,22 @@ type execFixture struct {
 
 func runtimeForExecutor(t *testing.T) *domainconfig.Runtime {
 	t.Helper()
+	return runtimeForExecutorDirectoryGates(t, false, false)
+}
+
+func runtimeForExecutorDirectoryGates(t *testing.T, master, v2 bool) *domainconfig.Runtime {
+	t.Helper()
+	values := runtimeForExecutorEnvironment(t)
+	values["ADTR_DIRECTORY_READ_ENABLED"] = strconv.FormatBool(master)
+	values["ADTR_DIRECTORY_READ_V2_ENABLED"] = strconv.FormatBool(v2)
+	r, e := domainconfig.Load(func(k string) string { return values[k] })
+	if e != nil {
+		t.Fatal(e)
+	}
+	return r
+}
+func runtimeForExecutorEnvironment(t *testing.T) map[string]string {
+	t.Helper()
 	k, e := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if e != nil {
 		t.Fatal(e)
@@ -62,12 +79,9 @@ func runtimeForExecutor(t *testing.T) *domainconfig.Runtime {
 		t.Fatal(e)
 	}
 	values := map[string]string{"ADTR_DOMAIN_KEY_ID": "synthetic", "ADTR_DOMAIN_KEY": base64.StdEncoding.EncodeToString([]byte(strings.Repeat("x", 32))), "ADTR_DOMAIN_PROBE_ENABLED": "true", "ADTR_LDAP_CA_FILE": caPath, "ADTR_LDAP_EGRESS_POLICY_FILE": policyPath}
-	r, e := domainconfig.Load(func(k string) string { return values[k] })
-	if e != nil {
-		t.Fatal(e)
-	}
-	return r
+	return values
 }
+
 func fixtureForExecutor(t *testing.T, probe func(context.Context, ldapconnection.Config, ldapconnection.Credential) (ldapconnection.Result, error)) *execFixture {
 	t.Helper()
 	return fixtureForExecutorAtVersion(t, probe, dbstore.SchemaVersion)
@@ -109,6 +123,8 @@ func fixtureForExecutorAtVersion(t *testing.T, probe func(context.Context, ldapc
 	migrate := dbstore.Migrate
 	if version == 14 {
 		migrate = dbstore.MigrateDirectoryBaselineForTest
+	} else if version == 15 {
+		migrate = dbstore.MigrateDirectoryV2BaselineForTest
 	} else if version != dbstore.SchemaVersion {
 		t.Fatal("unsupported fixture schema version")
 	}

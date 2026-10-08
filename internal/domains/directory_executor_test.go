@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -292,6 +293,7 @@ type directoryExecutorStubTx struct {
 	failure                  string
 	openCalls, envelopeCalls int
 	scannedEnvelope          []byte
+	dictionary               string
 }
 
 func (s *directoryExecutorStubTx) QueryRow(_ context.Context, sql string, args ...any) pgx.Row {
@@ -305,7 +307,7 @@ func (s *directoryExecutorStubTx) QueryRow(_ context.Context, sql string, args .
 		case strings.Contains(sql, "FROM adtr.domain_connections"):
 			values = []any{s.task.DomainID, "example.test", "dc1.example.test", "10.20.0.1", "636", "ldaps", int64(2), int64(2), time.Now(), time.Now(), (*time.Time)(nil), "unrelated-b2-task", int64(987), "operation_account", s.pins.AccountID, int64(1)}
 		case strings.Contains(sql, "SELECT g.role_id,g.grant_revision::text"):
-			if len(args) != 7 || args[6] != "domain.directory_read" {
+			if len(args) != 7 || args[6] != s.task.Kind {
 				s.t.Fatal("directory grant query used another purpose")
 			}
 			if s.failure == "grant-denied" {
@@ -345,7 +347,7 @@ func (s *directoryExecutorStubTx) QueryRow(_ context.Context, sql string, args .
 
 func (s *directoryExecutorStubTx) Exec(_ context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
 	s.t.Helper()
-	if !strings.HasPrefix(sql, "UPDATE adtr.domain_directory_task_uses u SET state='opened'") || len(args) != 16 || args[0] != s.task.TenantID || args[1] != s.task.DomainID || args[2] != s.task.ID || args[14] != DirectoryKindName || args[15] != "1" {
+	if !strings.HasPrefix(sql, "UPDATE adtr.domain_directory_task_uses u SET state='opened'") || len(args) != 16 || args[0] != s.task.TenantID || args[1] != s.task.DomainID || args[2] != s.task.ID || args[14] != s.task.Kind || args[15] != s.dictionary {
 		s.t.Fatal("unexpected mutation in opening stub", sql)
 	}
 	s.openCalls++
@@ -356,6 +358,11 @@ func (s *directoryExecutorStubTx) Exec(_ context.Context, sql string, args ...an
 }
 
 func directoryExecutorStubFixture(t *testing.T) (*Store, tasks.Task, *directoryExecutorStubTx) {
+	t.Helper()
+	return directoryExecutorStubFixtureForProfile(t, directoryTaskV1)
+}
+
+func directoryExecutorStubFixtureForProfile(t *testing.T, profile directoryTaskProfile) (*Store, tasks.Task, *directoryExecutorStubTx) {
 	t.Helper()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
@@ -375,6 +382,9 @@ func directoryExecutorStubFixture(t *testing.T) (*Store, tasks.Task, *directoryE
 		t.Fatal(err)
 	}
 	env := map[string]string{"ADTR_DOMAIN_KEY_ID": "synthetic", "ADTR_DOMAIN_KEY": base64.StdEncoding.EncodeToString(bytes.Repeat([]byte("x"), 32)), "ADTR_DIRECTORY_READ_ENABLED": "true", "ADTR_LDAP_CA_FILE": caPath, "ADTR_LDAP_EGRESS_POLICY_FILE": policyPath}
+	if profile == directoryTaskV2 {
+		env["ADTR_DIRECTORY_READ_V2_ENABLED"] = "true"
+	}
 	runtime, err := domainconfig.Load(func(key string) string { return env[key] })
 	if err != nil {
 		t.Fatal(err)
@@ -383,12 +393,16 @@ func directoryExecutorStubFixture(t *testing.T) (*Store, tasks.Task, *directoryE
 	pins := directoryUseTestPins()
 	pins.PolicyRevision = store.policyRevision()
 	task := directoryUseTestTask()
-	task.Payload = pins.json()
+	identity, ok := profile.identity()
+	if !ok {
+		t.Fatal("invalid fixture profile")
+	}
+	task.Kind, task.Payload = identity.kind, profile.payload(pins)
 	task.State, task.Attempt, task.LeaseOwner, task.FencingToken = tasks.Running, 1, "synthetic-worker", 1
 	sealed, err := runtime.Vault().SealOperationCredential(task.TenantID, task.DomainID, pins.AccountID, 1, []byte(`{"version":2,"username":"synthetic@example.test","password":"synthetic-password"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { clear(sealed.Ciphertext) })
-	return store, task, &directoryExecutorStubTx{t: t, task: task, pins: pins, sealed: sealed}
+	return store, task, &directoryExecutorStubTx{t: t, task: task, pins: pins, sealed: sealed, dictionary: strconv.Itoa(identity.dictionaryVersion)}
 }

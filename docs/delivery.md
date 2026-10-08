@@ -9,9 +9,13 @@
 
 本条是上述固定提交的运行证据；main 目标与合并后验证另行记录。下方有日期的本地检查点及旧版本契约保留原文；其中当时缺少本地数据库/浏览器、尚未发布或未运行远端 CI 的说明不再代表当前远端执行状态。F12 的 directory、directory-controls、directory-readers 已分别通过非空分页、真实空结果/取消/结束确认、只读角色/跨标签原生焦点回退场景。F38 的 Audit/XLSX 历史和 F56 的实际 api/worker 日志包链路也已执行通过。
 
-当前应用 schema 仍为 15。F14 dictionary2 是未注册的组件，消费者能力为 false，没有生产迁移16、任务注册或版本化API/UI；组件/fragment测试通过不等于产品链路已交付。PR74/75/76尚未整合。
+上述固定检查点的应用 schema 为 15，dictionary2 尚未注册。后续本地 schema16/v2 整合的实现与未通过门禁另见 [directory-v2-integration-status.md](directory-v2-integration-status.md)，不能沿用旧检查点的 CI 作为其运行证据。PR74/75/76尚未整合。
 
 本次台账仅将 AD-F-151/152 从 not_started 改为 in_progress；计数为19 implemented_verified_slice、26 in_progress、164 not_started。产品完整验收仍为0/209，源系统完整兼容、真实AD/Windows、容量与生产门禁仍开放；Issue 关闭与部署不因本次 CI 通过自动完成；代码按下方已授权的 PR 验证与合并流程推进。
+
+## Dictionary 2 本地整合（2026-10-08）
+
+独立用途、schema16、真实有界读取器、受保护 API 与界面已接线，部署默认仍关闭。完整本地检查通过，新增实际数据库/浏览器用例仍须在隔离 CI 执行；没有据此增加产品验收计数或宣布 F14 业务资产页面完成。具体命令、已修复审查问题和剩余门禁见 [本地整合检查点](directory-v2-integration-status.md)。
 
 ## 基线（2026-10-07）
 

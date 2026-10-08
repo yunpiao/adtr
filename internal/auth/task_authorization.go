@@ -95,7 +95,7 @@ func taskAuthorizer(now func() time.Time) tasks.Authorizer {
 				return deny()
 			}
 		}
-		if scope.TaskName == domains.DirectoryKindName && role != "platform_admin" {
+		if isDirectoryTaskKind(scope.TaskName) && role != "platform_admin" {
 			var allowed bool
 			err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT FROM adtr.access_permissions d JOIN adtr.access_permissions a ON a.tenant_id=d.tenant_id AND a.role_id=d.role_id WHERE d.tenant_id=$1 AND d.role_id=$2 AND d.mark='domains' AND d.readable AND a.mark='directory_assets' AND a.readable AND ($3 OR a.writeable))`, p.TenantID, role, action == tasks.Read).Scan(&allowed)
 			if err != nil {
@@ -128,11 +128,14 @@ func taskAuthorizer(now func() time.Time) tasks.Authorizer {
 		// Reading/cancelling a task is safe after use revocation. Only execution
 		// resolves a live account source and always requires an explicit allow,
 		// including platform administrators.
-		if (scope.TaskName == domains.AccountKindName || scope.TaskName == domains.DirectoryKindName) && action == tasks.Execute {
+		if (scope.TaskName == domains.AccountKindName || isDirectoryTaskKind(scope.TaskName)) && action == tasks.Execute {
 			purpose := "domain.connection_test"
 			eligibility := "adtr.credential_use_role_eligible(c.tenant_id,c.domain_id,$3)"
-			if scope.TaskName == domains.DirectoryKindName {
+			if isDirectoryTaskKind(scope.TaskName) {
 				purpose = "domain.directory_read"
+				if scope.TaskName == domains.DirectoryV2KindName {
+					purpose = "domain.directory_read.v2"
+				}
 				eligibility = "adtr.credential_use_role_eligible_for_purpose(c.tenant_id,c.domain_id,$3,$4)"
 			}
 			var allowed bool

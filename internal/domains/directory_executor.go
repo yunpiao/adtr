@@ -15,18 +15,40 @@ import (
 	"github.com/yunpiao/adtr/internal/tasks"
 )
 
-// DirectoryKind describes an unregistered, single-attempt directory consumer.
+// DirectoryKind describes the legacy single-attempt directory consumer.
 // Its observation is staged by the final checkpoint and becomes visible only
 // through a succeeded task. A cancellation racing Finish discards publication.
 // ReadDirectory closes and joins its I/O before returning; executor defers clear
 // owned credentials before the engine can issue the OnQuiesced return witness.
 func (s *Store) DirectoryKind() tasks.Kind {
-	return tasks.Kind{Name: DirectoryKindName, Version: 1, MaxAttempts: 1,
+	return s.directoryKind(directoryTaskV1)
+}
+
+// DirectoryV2Kind keeps the fixed v2 purpose, decoder and original-opener
+// acknowledgement together. A v1 grant or payload cannot select this consumer.
+func (s *Store) DirectoryV2Kind() tasks.Kind {
+	return s.directoryKind(directoryTaskV2)
+}
+
+func (s *Store) directoryKind(profile directoryTaskProfile) tasks.Kind {
+	identity, ok := profile.identity()
+	if !ok {
+		return tasks.Kind{}
+	}
+	return tasks.Kind{Name: identity.kind, Version: 1, MaxAttempts: 1,
 		Lease: 30 * time.Second, Heartbeat: time.Second, Timeout: 125 * time.Second,
 		RetryBase: time.Second, RetryCap: time.Second, SingleAttemptOnly: true,
 		ReplaySafe: false, CancelDiscardsResult: true, OwnerScoped: false,
-		Schedulable: false, Validate: validateDirectoryPayload,
-		Execute: s.executeDirectory, OnQuiesced: s.acknowledgeDirectoryUse}
+		Schedulable: false,
+		Validate: func(raw json.RawMessage) (json.RawMessage, error) {
+			return validateDirectoryPayloadForProfile(profile, raw)
+		},
+		Execute: func(ctx context.Context, ex tasks.Execution) tasks.Outcome {
+			return s.executeDirectoryForProfile(ctx, ex, profile)
+		},
+		OnQuiesced: func(ctx context.Context, tx pgx.Tx, q tasks.QuiescedAttempt) error {
+			return s.acknowledgeDirectoryUseForProfile(ctx, tx, profile, q)
+		}}
 }
 
 // These explicit provisional security caps are part of kind version 1. They
@@ -37,10 +59,14 @@ func directoryReadLimits() directoryassets.Limits {
 }
 
 func (s *Store) executeDirectory(ctx context.Context, ex tasks.Execution) tasks.Outcome {
+	return s.executeDirectoryForProfile(ctx, ex, directoryTaskV1)
+}
+
+func (s *Store) executeDirectoryForProfile(ctx context.Context, ex tasks.Execution, profile directoryTaskProfile) tasks.Outcome {
 	if ex.WithTx == nil {
 		return failed("executor_unavailable")
 	}
-	pinned, err := directoryUseTaskPayload(ex.Task)
+	pinned, err := directoryUseTaskPayloadForProfile(profile, ex.Task)
 	if err != nil {
 		return failed("invalid_input")
 	}
@@ -55,9 +81,9 @@ func (s *Store) executeDirectory(ctx context.Context, ex tasks.Execution) tasks.
 	defer func() { clear(sealed.Ciphertext) }()
 	version, err = ex.WithTx(ctx, version, func(ctx context.Context, tx pgx.Tx) (int, json.RawMessage, json.RawMessage, error) {
 		var err error
-		config, err = s.currentDirectory(ctx, tx, ex.Task, pinned)
+		config, err = s.currentDirectoryForProfile(ctx, tx, profile, ex.Task, pinned)
 		if err == nil {
-			err = openDirectoryUseTx(ctx, tx, ex.Task, pinned)
+			err = openDirectoryUseForProfileTx(ctx, tx, profile, ex.Task, pinned)
 		}
 		if err == nil {
 			err = tx.QueryRow(ctx, `SELECT key_id,ciphertext FROM adtr.operation_account_credentials WHERE tenant_id=$1 AND domain_id=$2 AND account_id=$3 AND credential_revision=$4 AND envelope_version=2`, ex.Task.TenantID, ex.Task.DomainID, pinned.AccountID, pinned.AccountCredentialRevision).Scan(&sealed.KeyID, &sealed.Ciphertext)
@@ -120,7 +146,7 @@ func (s *Store) executeDirectory(ctx context.Context, ex tasks.Execution) tasks.
 		}
 		nextProgress := max(progress, directoryReadProgress(stage, pages))
 		next, err := ex.WithTx(phaseCtx, version, func(ctx context.Context, tx pgx.Tx) (int, json.RawMessage, json.RawMessage, error) {
-			_, err := s.currentDirectory(ctx, tx, ex.Task, pinned)
+			_, err := s.currentDirectoryForProfile(ctx, tx, profile, ex.Task, pinned)
 			return nextProgress, json.RawMessage(`{}`), json.RawMessage(`{}`), err
 		})
 		if err != nil {
@@ -130,11 +156,26 @@ func (s *Store) executeDirectory(ctx context.Context, ex tasks.Execution) tasks.
 		version, progress = next, nextProgress
 		return nil
 	}
-	observation, readErr := ldapconnection.ReadDirectory(ctx, ldapconnection.DirectoryConfig{
-		Mode: ldapconnection.Mode(config.Mode), ServerName: config.DCHostName,
-		Domain: config.Domain, DialIP: ip, Roots: s.runtime.Policy().Roots(),
-		AllowedNetworks: prefixes, Limits: directoryReadLimits(), Authorize: authorize,
-	}, ldapconnection.Credential{Username: credential.Username, Password: password})
+	var observation ldapconnection.DirectoryObservation
+	var observationV2 ldapconnection.DirectoryV2Observation
+	defer observationV2.Discard()
+	var readErr error
+	switch profile {
+	case directoryTaskV1:
+		observation, readErr = ldapconnection.ReadDirectory(ctx, ldapconnection.DirectoryConfig{
+			Mode: ldapconnection.Mode(config.Mode), ServerName: config.DCHostName,
+			Domain: config.Domain, DialIP: ip, Roots: s.runtime.Policy().Roots(),
+			AllowedNetworks: prefixes, Limits: directoryReadLimits(), Authorize: authorize,
+		}, ldapconnection.Credential{Username: credential.Username, Password: password})
+	case directoryTaskV2:
+		observationV2, readErr = ldapconnection.ReadDirectoryV2(ctx, ldapconnection.DirectoryV2Config{
+			Mode: ldapconnection.Mode(config.Mode), ServerName: config.DCHostName,
+			Domain: config.Domain, DialIP: ip, Roots: s.runtime.Policy().Roots(),
+			AllowedNetworks: prefixes, Limits: directoryReadLimits(), Authorize: ldapconnection.DirectoryV2ReadAuthorization(authorize),
+		}, ldapconnection.Credential{Username: credential.Username, Password: password})
+	default:
+		return failed("invalid_input")
+	}
 	clear(password)
 	credential.Username = ""
 	if phaseError != nil {
@@ -142,6 +183,12 @@ func (s *Store) executeDirectory(ctx context.Context, ex tasks.Execution) tasks.
 	}
 	if readErr != nil {
 		code, _ := probeClassification(readErr)
+		if profile == directoryTaskV2 {
+			var failure *ldapconnection.Error
+			if errors.As(readErr, &failure) && (failure.Code == ldapconnection.CodeDirectoryLimit || failure.Code == ldapconnection.CodeUnsupportedProfile) {
+				code = string(failure.Code)
+			}
+		}
 		if code == "cancelled" {
 			return directoryExecutionError(context.Canceled)
 		}
@@ -149,14 +196,25 @@ func (s *Store) executeDirectory(ctx context.Context, ex tasks.Execution) tasks.
 	}
 	// AD may return DNS names with mixed case. Persist the same canonical DNS
 	// identity used by configured targets, rejecting malformed RootDSE names.
-	observation.Source.DCHostName, err = CanonicalDNS(observation.Source.DCHostName)
+	source := &observation.Source
+	if profile == directoryTaskV2 {
+		source = &observationV2.Source
+	}
+	source.DCHostName, err = CanonicalDNS(source.DCHostName)
 	if err != nil {
 		return failed("invalid_response")
 	}
 	_, err = ex.WithTx(ctx, version, func(ctx context.Context, tx pgx.Tx) (int, json.RawMessage, json.RawMessage, error) {
-		_, err := s.currentDirectory(ctx, tx, ex.Task, pinned)
+		_, err := s.currentDirectoryForProfile(ctx, tx, profile, ex.Task, pinned)
 		if err == nil {
-			err = publishDirectoryObservationTx(ctx, tx, ex.Task, pinned, observation)
+			switch profile {
+			case directoryTaskV1:
+				err = publishDirectoryObservationTx(ctx, tx, ex.Task, pinned, observation)
+			case directoryTaskV2:
+				err = publishDirectoryObservationV2Tx(ctx, tx, ex.Task, pinned, observationV2)
+			default:
+				err = errDirectoryUseEvidence
+			}
 		}
 		return 100, json.RawMessage(`{}`), json.RawMessage(`{}`), err
 	})

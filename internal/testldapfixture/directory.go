@@ -34,6 +34,7 @@ var directorySearchBody = bytes.Join([][]byte{
 }, nil)
 
 type directorySession struct {
+	v2     bool
 	empty  bool
 	slow   bool
 	page   int
@@ -69,7 +70,11 @@ func pagingRequestControl(cookie []byte) []byte {
 }
 
 func (d *directorySession) matches(req request) bool {
-	if d.page >= d.pages() || !bytes.Equal(req.body, directorySearchBody) {
+	body := directorySearchBody
+	if d.v2 {
+		body = directoryV2SearchBody
+	}
+	if d.page >= d.pages() || !bytes.Equal(req.body, body) {
 		return false
 	}
 	// Exact byte validation also rejects missing/noncritical/duplicate/unknown
@@ -111,7 +116,7 @@ func (d *directorySession) writePage(ctx context.Context, conn io.Writer, id int
 	entries := d.objects() / d.pages()
 	first := d.page*entries + 1
 	for row := first; row < first+entries; row++ {
-		if err := writeAll(conn, directoryEntry(id, row)); err != nil {
+		if err := writeAll(conn, directoryEntryForDictionary(id, row, d.v2)); err != nil {
 			return err
 		}
 	}
@@ -143,6 +148,10 @@ func directoryAttribute(name string, values ...string) []byte {
 // times. Row 1 has present UAC zero; every group has absent UAC and row 24
 // (group-12) also has absent SAM. Missing fields must survive as nulls.
 func directoryEntry(id, row int) []byte {
+	return directoryEntryForDictionary(id, row, false)
+}
+
+func directoryEntryForDictionary(id, row int, v2 bool) []byte {
 	kind, number, ou := "user", row, "Users"
 	classes := []string{"top", "person", "organizationalPerson", "user"}
 	uac := "512"
@@ -170,6 +179,9 @@ func directoryEntry(id, row int) []byte {
 	}
 	if uac != "" {
 		attributes = append(attributes, directoryAttribute("userAccountControl", uac)...)
+	}
+	if v2 && row != 24 {
+		attributes = append(attributes, directoryV2Supplemental(row)...)
 	}
 	return message(id, 0x64, octets(dn), element(0x30, attributes))
 }

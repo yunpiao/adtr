@@ -15,12 +15,15 @@ from test_integration import IMAGE
 
 class LDAPFixture:
     def __init__(self, control_enabled=False, directory_enabled=False,
-                 directory_empty=False, directory_slow=False):
-        if any(not isinstance(value, bool) for value in (directory_enabled, directory_empty, directory_slow)):
+                 directory_empty=False, directory_slow=False, *, directory_v2=False):
+        if any(not isinstance(value, bool) for value in (directory_enabled, directory_empty, directory_slow, directory_v2)):
             raise TypeError("synthetic directory modes must be booleans")
+        if directory_v2 and not directory_enabled:
+            raise ValueError("synthetic dictionary 2 requires directory mode")
         if (directory_empty or directory_slow) and not directory_enabled:
             raise ValueError("synthetic empty and slow modes require directory mode")
         self.directory_enabled = directory_enabled
+        self.directory_v2 = directory_v2
         self.directory_empty = directory_empty
         self.directory_slow = directory_slow
         self.name = "adtr-ldap-e2e-" + uuid.uuid4().hex[:12]
@@ -71,6 +74,8 @@ class LDAPFixture:
             command.extend(["-control-dir", "/control"])
         if self.directory_enabled:
             command.append("-directory-mode")
+        if self.directory_v2:
+            command.append("-directory-v2")
         if self.directory_empty:
             command.append("-directory-empty")
         if self.directory_slow:
@@ -99,7 +104,8 @@ class LDAPFixture:
                    ADTR_LDAP_EGRESS_POLICY_FILE=str(root / "egress.json"), ADTR_E2E_LDAP_IP=str(ip),
                    ADTR_E2E_LDAP_USERNAME=username, ADTR_E2E_LDAP_PASSWORD=password)
         for suffix, enabled in (("MODE", self.directory_enabled),
-                                ("EMPTY", self.directory_empty), ("SLOW", self.directory_slow)):
+                                ("EMPTY", self.directory_empty), ("SLOW", self.directory_slow),
+                                ("V2", self.directory_v2)):
             key = "ADTR_E2E_LDAP_DIRECTORY_" + suffix
             if enabled:
                 env[key] = "true"

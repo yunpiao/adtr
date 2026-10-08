@@ -67,6 +67,10 @@ func directoryCredentialUsePathAllowed(method, path, role string, grants map[str
 	return credentialUsePathAllowedForPurpose(method, path, role, grants, credentialuse.DirectoryPurpose)
 }
 
+func directoryV2CredentialUsePathAllowed(method, path, role string, grants map[string]AccessAuth) bool {
+	return credentialUsePathAllowedForPurpose(method, path, role, grants, credentialuse.DirectoryV2Purpose)
+}
+
 // Only a trusted HTTP entry point selects a purpose. Neither request metadata
 // nor a grant for one purpose can select another endpoint or enable its consumer.
 func credentialUseEndpointForPurpose(purpose string) (prefix string, consumerEnabled bool) {
@@ -75,6 +79,8 @@ func credentialUseEndpointForPurpose(purpose string) (prefix string, consumerEna
 		return "/api/credential-use", credentialuse.ConsumerEnabled
 	case credentialuse.DirectoryPurpose:
 		return "/api/directory-credential-use", credentialuse.DirectoryConsumerEnabled
+	case credentialuse.DirectoryV2Purpose:
+		return "/api/directory-credential-use/v2", credentialuse.DirectoryV2ConsumerEnabled
 	default:
 		return "", false
 	}
@@ -91,7 +97,7 @@ func credentialUsePathAllowedForPurpose(method, path, role string, grants map[st
 		return false
 	}
 	if suffix == "/effective" {
-		if purpose == credentialuse.DirectoryPurpose {
+		if purpose == credentialuse.DirectoryPurpose || purpose == credentialuse.DirectoryV2Purpose {
 			return grants["domains"].Readable && grants["directory_assets"].Readable
 		}
 		return grants["operation_accounts"].Readable
@@ -108,6 +114,12 @@ func (s *Service) CredentialUseHandler(store *credentialuse.Store) http.Handler 
 func (s *Service) DirectoryCredentialUseHandler(store *credentialuse.Store) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		s.serveCredentialUseForPurpose(w, r, store, credentialuse.DirectoryPurpose)
+	})
+}
+
+func (s *Service) DirectoryV2CredentialUseHandler(store *credentialuse.Store) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		s.serveCredentialUseForPurpose(w, r, store, credentialuse.DirectoryV2Purpose)
 	})
 }
 

@@ -7,7 +7,6 @@ import (
 	"strconv"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/yunpiao/adtr/internal/credentialuse"
 	"github.com/yunpiao/adtr/internal/tasks"
 )
 
@@ -16,6 +15,14 @@ import (
 // lock order. A metadata-only account rename does not revoke an otherwise pinned
 // credential pair. A source rebind or pair/grant incarnation change does.
 func directoryGrantTx(ctx context.Context, tx pgx.Tx, p tasks.Principal, v row) (string, string, error) {
+	return directoryGrantForProfileTx(ctx, tx, directoryTaskV1, p, v)
+}
+
+func directoryGrantForProfileTx(ctx context.Context, tx pgx.Tx, profile directoryTaskProfile, p tasks.Principal, v row) (string, string, error) {
+	identity, ok := profile.identity()
+	if !ok {
+		return "", "", tasks.ErrAuthorization
+	}
 	var role, grant string
 	err := tx.QueryRow(ctx, `SELECT g.role_id,g.grant_revision::text
  FROM adtr.operation_accounts a
@@ -27,7 +34,7 @@ func directoryGrantTx(ctx context.Context, tx pgx.Tx, p tasks.Principal, v row) 
  AND NOT u.disabled AND NOT u.must_change AND u.password_updated_at>clock_timestamp()-interval '90 days'
  AND adtr.credential_use_role_eligible_for_purpose(a.tenant_id,a.domain_id,g.role_id,$7)
  AND EXISTS(SELECT FROM adtr.operation_account_dependencies d WHERE d.tenant_id=a.tenant_id AND d.domain_id=a.domain_id AND d.account_id=a.account_id AND d.consumer_kind='domain.connection_binding' AND d.object_id=a.domain_id AND d.account_credential_revision=a.credential_revision AND d.connection_credential_generation=$6)
- FOR UPDATE OF a,g`, p.TenantID, v.DomainID, v.accountID, p.ActorID, v.accountCredential, v.credential, credentialuse.DirectoryPurpose).Scan(&role, &grant)
+ FOR UPDATE OF a,g`, p.TenantID, v.DomainID, v.accountID, p.ActorID, v.accountCredential, v.credential, identity.purpose).Scan(&role, &grant)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", "", tasks.ErrAuthorization
 	}
@@ -35,15 +42,20 @@ func directoryGrantTx(ctx context.Context, tx pgx.Tx, p tasks.Principal, v row) 
 }
 
 // currentDirectory checks current authority without reading or mutating the B2
-// diagnostic generation/latest-test identity. The future consumer must invoke
+// diagnostic generation/latest-test identity. Both fixed consumers invoke
 // this within the engine's fenced transaction at opening, every page and final
 // publication; this helper alone does not open or decrypt a credential.
 func (s *Store) currentDirectory(ctx context.Context, tx pgx.Tx, t tasks.Task, p directoryPinnedPayload) (row, error) {
-	canonical, err := validateDirectoryPayload(t.Payload)
-	if err != nil || t.Kind != DirectoryKindName || t.PayloadVersion != 1 || t.ActorID <= 0 || !bytes.Equal(canonical, p.json()) {
+	return s.currentDirectoryForProfile(ctx, tx, directoryTaskV1, t, p)
+}
+
+func (s *Store) currentDirectoryForProfile(ctx context.Context, tx pgx.Tx, profile directoryTaskProfile, t tasks.Task, p directoryPinnedPayload) (row, error) {
+	identity, ok := profile.identity()
+	canonical, err := validateDirectoryPayloadForProfile(profile, t.Payload)
+	if !ok || err != nil || t.Kind != identity.kind || t.PayloadVersion != 1 || t.ActorID <= 0 || !bytes.Equal(canonical, profile.payload(p)) {
 		return row{}, tasks.ErrAuthorization
 	}
-	if !s.runtime.DirectoryReadEnabled() {
+	if !s.directoryEnabled(profile) {
 		return row{}, problem(503, "directory_read_disabled")
 	}
 	if s.policyRevision() != p.PolicyRevision {
@@ -60,7 +72,7 @@ func (s *Store) currentDirectory(ctx context.Context, tx pgx.Tx, t tasks.Task, p
 	if v.CredentialSource != "operation_account" || v.Revision != p.ConnectionRevision || v.CredentialRevision != p.ConnectionCredentialGeneration || v.accountID != p.AccountID || strconv.FormatInt(v.accountCredential, 10) != p.AccountCredentialRevision {
 		return row{}, problem(409, "connection_revision_changed")
 	}
-	role, grant, err := directoryGrantTx(ctx, tx, tasks.Principal{TenantID: t.TenantID, ActorID: t.ActorID}, v)
+	role, grant, err := directoryGrantForProfileTx(ctx, tx, profile, tasks.Principal{TenantID: t.TenantID, ActorID: t.ActorID}, v)
 	if err != nil {
 		return row{}, err
 	}

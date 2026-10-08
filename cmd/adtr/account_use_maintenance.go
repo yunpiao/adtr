@@ -34,15 +34,16 @@ func runAccountUseMaintenanceTicks(ctx context.Context, ticks <-chan time.Time, 
 	}
 }
 
-// Both bounded passes begin in the same cycle instead of making the second
-// inherit the first pass's exhausted deadline. There are exactly two joined
+// All bounded passes begin in the same cycle instead of making a later one
+// inherit an earlier pass's exhausted deadline. There are exactly three joined
 // callbacks; the caller's existing shutdown/cycle budget is unchanged.
-func reconcileCredentialReservations(ctx context.Context, account, directory func(context.Context) error) error {
-	var accountErr, directoryErr error
+func reconcileCredentialReservations(ctx context.Context, account, directory, directoryV2 func(context.Context) error) error {
+	var accountErr, directoryErr, directoryV2Err error
 	var joined sync.WaitGroup
-	joined.Add(2)
+	joined.Add(3)
 	go func() { defer joined.Done(); accountErr = account(ctx) }()
 	go func() { defer joined.Done(); directoryErr = directory(ctx) }()
+	go func() { defer joined.Done(); directoryV2Err = directoryV2(ctx) }()
 	joined.Wait()
-	return errors.Join(accountErr, directoryErr)
+	return errors.Join(accountErr, directoryErr, directoryV2Err)
 }
