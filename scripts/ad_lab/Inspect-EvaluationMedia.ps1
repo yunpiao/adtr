@@ -153,8 +153,10 @@ $report = [ordered]@{
 }
 
 function Assert-OfficialUri([uri]$Uri) {
+    # Observed official fwlink intermediary; allow this one URI, not arbitrary aka.ms links.
+    $knownAlias = $Uri.IsAbsoluteUri -and $Uri.AbsoluteUri -ceq 'https://aka.ms/WinServ2025iso-enus'
     if (-not $Uri.IsAbsoluteUri -or $Uri.Scheme -cne 'https' -or $Uri.Port -ne 443 -or $Uri.UserInfo -or
-        $Uri.Fragment -or $allowedHosts -cnotcontains $Uri.DnsSafeHost) {
+        $Uri.Fragment -or (($allowedHosts -cnotcontains $Uri.DnsSafeHost) -and -not $knownAlias)) {
         $report.failure_code = 'UNEXPECTED_DOWNLOAD_ORIGIN'
         throw 'Unexpected download origin; do not bypass login or registration.'
     }
