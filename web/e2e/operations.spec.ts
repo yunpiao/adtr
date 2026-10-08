@@ -485,9 +485,17 @@ test("local operation-account CRUD, lost-response recovery, stale editor and dom
     domainId,
   });
   // Reload must recover using the same safe intent, without replaying secrets.
+  await expect(page).toHaveURL(/#operation-accounts\/create$/);
   await page.unroute("**/api/operation-accounts/mutation?*");
   await page.reload();
-  await openOperations(page);
+  // The restored workspace performs recovery itself. Reopening it can discard
+  // a receipt that finished before the navigation click.
+  await expect(
+    page.getByRole("button", { name: "管理操作账户", exact: true }),
+  ).toHaveAttribute("aria-current", "page");
+  await expect(
+    page.getByRole("heading", { name: "管理操作账户", exact: true }),
+  ).toBeVisible();
   await expect(page.getByLabel("账户 ID", { exact: true })).toHaveValue(
     accountId,
   );

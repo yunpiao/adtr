@@ -359,6 +359,68 @@ describe("domain workspace security flows", () => {
     );
     expect(sessionStorage.length).toBe(0);
   });
+  it.each(["immediate", "delayed"] as const)(
+    "restores the creation route and original receipt with an %s response",
+    async (timing) => {
+      saveDomainIntent(profile, {
+        kind: "create",
+        key: "reload-create-key",
+        domain: "synthetic.invalid",
+      });
+      window.history.replaceState({}, "", "#domains/create");
+      let resolve!: (value: Response) => void;
+      const receipt = {
+        receipt: {
+          domainId: id,
+          domain: "synthetic.invalid",
+          revision: "1",
+          deleted: false,
+          requiresResourceAssignment: true,
+        },
+      };
+      override = (url) =>
+        url.startsWith("/api/domains/creation?")
+          ? timing === "immediate"
+            ? response(receipt)
+            : new Promise<Response>((done) => (resolve = done))
+          : url.startsWith("/api/domains?")
+            ? response(list([]))
+            : undefined;
+      render(<App />);
+      if (timing === "immediate") {
+        // Recovery may finish before the caller observes the restored route.
+        await screen.findByLabelText("新域 ID");
+      } else {
+        await screen.findByRole("heading", { name: "核对未确认的登记" });
+        expect(screen.queryByLabelText("新域 ID")).toBeNull();
+        expect(readDomainIntent(profile)?.key).toBe("reload-create-key");
+        expect(
+          screen.getByRole("button", { name: "新增域连接" }),
+        ).toBeDisabled();
+      }
+      expect(screen.getByRole("button", { name: "域连接" })).toHaveAttribute(
+        "aria-current",
+        "page",
+      );
+      expect(screen.getByRole("heading", { name: "域连接" })).toBeVisible();
+      expect(window.location.hash).toBe("#domains/create");
+      if (timing === "delayed")
+        await act(async () => resolve(await response(receipt)));
+      expect(await screen.findByLabelText("新域 ID")).toHaveValue(id);
+      expect(calls("/api/auth/me")).toHaveLength(1);
+      expect(calls("/api/domains/creation")).toHaveLength(1);
+      expect(calls("/api/domains/creation")[0][0]).toBe(
+        "/api/domains/creation?idempotencyKey=reload-create-key",
+      );
+      expect(calls("/api/domains/create")).toHaveLength(0);
+      expect(calls("/api/domains/test")).toHaveLength(0);
+      expect(readDomainIntent(profile)).toBeNull();
+      expect(sessionStorage.length).toBe(0);
+      expect(screen.queryByLabelText("AD 密码")).toBeNull();
+      expect(screen.queryByLabelText("操作者当前密码")).toBeNull();
+      await screen.findByText(/当前筛选下没有获授权的域连接/);
+    },
+  );
   it("keeps unknown creation blocked after missing receipt and shows no optimistic save", async () => {
     await create();
     override = (url) =>
