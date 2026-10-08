@@ -256,6 +256,19 @@ async function fallbackPage(context: BrowserContext) {
 }
 
 async function refocusWithRealSessionRead(page: Page) {
+  // Visibility and focus loss are separate browser lifecycle updates. Do not
+  // clear the witness or switch back while the previous deactivation is still
+  // pending: an already-focused document need not emit another focus event.
+  // Observe both native states without dispatching events or overriding them.
+  await expect
+    .poll(() =>
+      page.evaluate(() => ({
+        visibility: document.visibilityState,
+        focused: document.hasFocus(),
+        events: window.sessionInvalidationEvents,
+      })),
+    )
+    .toMatchObject({ visibility: "hidden", focused: false });
   await page.evaluate(() => {
     window.sessionInvalidationEvents = [];
   });
@@ -267,18 +280,24 @@ async function refocusWithRealSessionRead(page: Page) {
   );
   await page.bringToFront();
   await read;
-  await expect.poll(() => page.evaluate(() => document.hasFocus())).toBe(true);
+  // Keep the event witnesses in assertion output. A boolean hid whether the
+  // browser missed focus, visibility, trust, or their foreground state in CI.
   await expect
     .poll(() =>
-      page.evaluate(() =>
-        ["focus", "visibilitychange"].every((type) =>
-          window.sessionInvalidationEvents.some(
-            (event) => event.type === type && event.visible && event.trusted,
-          ),
-        ),
-      ),
+      page.evaluate(() => ({
+        visibility: document.visibilityState,
+        focused: document.hasFocus(),
+        events: window.sessionInvalidationEvents,
+      })),
     )
-    .toBe(true);
+    .toEqual({
+      visibility: "visible",
+      focused: true,
+      events: expect.arrayContaining([
+        { type: "focus", visible: true, trusted: true },
+        { type: "visibilitychange", visible: true, trusted: true },
+      ]),
+    });
   await expect(
     page.getByRole("status").filter({ hasText: "正在核验当前会话" }),
   ).toHaveCount(0);

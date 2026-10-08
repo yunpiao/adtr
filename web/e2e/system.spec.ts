@@ -566,14 +566,38 @@ test("real browser → Linux sampler → PostgreSQL history/settings and actual 
   process.kill(workerPID, "SIGTERM");
   await page.getByRole("button", { name: "系统健康", exact: true }).click();
   await page.getByRole("button", { name: "平台依赖健康", exact: true }).click();
+  const expectedStoppedCycles = healthy.worker.cycles.map(
+    ({ workerId, cycle }) => ({
+      workerId,
+      cycle,
+      availability: "unavailable",
+      reason: "stale_worker_activity",
+    }),
+  );
   await expect
     .poll(
-      async () =>
-        ((await readJSON(context, "/api/system/health")) as SystemHealth).worker
-          .availability,
+      async () => {
+        const { worker } = (await readJSON(
+          context,
+          "/api/system/health",
+        )) as SystemHealth;
+        // Aggregate health fails when the first required cycle expires. Wait
+        // for every independently timestamped cycle, without dropping evidence.
+        return {
+          availability: worker.availability,
+          cycles: worker.cycles.map(
+            ({ workerId, cycle, availability, reason }) => ({
+              workerId,
+              cycle,
+              availability,
+              reason,
+            }),
+          ),
+        };
+      },
       { timeout: 35_000, intervals: [2000] },
     )
-    .toBe("unavailable");
+    .toEqual({ availability: "unavailable", cycles: expectedStoppedCycles });
   const stopped: SystemHealth = await readJSON(context, "/api/system/health");
   expect(stopped.result).toBe("degraded");
   expect(stopped.dependencies.find((d) => d.id === "worker")?.status).toBe(
@@ -587,6 +611,12 @@ test("real browser → Linux sampler → PostgreSQL history/settings and actual 
   );
   expect(
     stopped.worker.cycles.every((c) => c.availability === "unavailable"),
+  ).toBe(true);
+  expect(stopped.worker.cycles.map((c) => [c.workerId, c.cycle])).toEqual(
+    healthy.worker.cycles.map((c) => [c.workerId, c.cycle]),
+  );
+  expect(
+    stopped.worker.cycles.every((c) => c.reason === "stale_worker_activity"),
   ).toBe(true);
   await expect(
     page
