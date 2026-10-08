@@ -35,6 +35,7 @@ $maxLicenseFiles = 16
 $maxDiagnosticCandidates = 64
 $maxDiagnosticRoots = 24
 $isoRoot = $null
+$wimReadOnlyVerified = $false
 $state = $null
 $report = $null
 
@@ -155,6 +156,7 @@ $report = [ordered]@{
     candidate_only=$true; applicability_unverified=$true; selection_scope=''; unexported_candidate_count=0
     diagnostic_roots=@(); diagnostic_candidates=@(); diagnostic_candidates_truncated=$false
     diagnostic_entries_scanned=0; diagnostic_directories_scanned=0
+    diagnostic_reparse_points=@(); diagnostic_reparse_points_truncated=$false; wim_mount_read_only_verified=$false
     license_note='Candidate files copied from the actual inspected media only. Generic paths do not establish applicability. Human review is required before accepting, installing, or booting.'
     inspection_complete=$false; cleanup_verified=$false; passed=$false; failure_stage=''; failure_code=''; failure_hresult=''
 }
@@ -179,7 +181,102 @@ function Set-InspectionStage {
     Save-Manifest
     Write-Host ('Inspection stage: {0}' -f $Name)
 }
-function Get-MediaPathStatus([string]$Path, [string]$MediaRoot) {
+function Initialize-ReparseReader {
+    if ('AdtrMedia.ReparseReader' -as [type]) { return }
+    # Microsoft documents FindFirstFile's dwReserved0 as the exact reparse tag.
+    # https://learn.microsoft.com/en-us/windows/win32/fileio/reparse-point-tags
+    # WIM=0x80000008 and WOF=0x80000017 are data filters, not name surrogates:
+    # https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-fscc/c8e77b37-3909-4fe6-a4ea-2b9d423b1ee4
+    Add-Type -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+using System.Text;
+using Microsoft.Win32.SafeHandles;
+namespace AdtrMedia {
+    public sealed class ReparseInfo {
+        public uint Tag;
+        public bool IsDirectory;
+        public string Target = "";
+        public bool TargetTruncated;
+        public int TargetQueryError;
+    }
+    public static class ReparseReader {
+        [StructLayout(LayoutKind.Sequential, CharSet=CharSet.Unicode)]
+        private struct FindData {
+            public uint Attributes;
+            public System.Runtime.InteropServices.ComTypes.FILETIME Creation, Access, Write;
+            public uint SizeHigh, SizeLow, Reserved0, Reserved1;
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst=260)] public string Name;
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst=14)] public string AlternateName;
+        }
+        [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true, ExactSpelling=true)]
+        private static extern IntPtr FindFirstFileW(string path, out FindData data);
+        [DllImport("kernel32.dll", SetLastError=true)]
+        [return: MarshalAs(UnmanagedType.Bool)] private static extern bool FindClose(IntPtr handle);
+        [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true, ExactSpelling=true)]
+        private static extern SafeFileHandle CreateFileW(string path, uint access, uint share,
+            IntPtr security, uint creation, uint flags, IntPtr template);
+        [DllImport("kernel32.dll", SetLastError=true)]
+        [return: MarshalAs(UnmanagedType.Bool)] private static extern bool DeviceIoControl(
+            SafeFileHandle handle, uint code, IntPtr input, uint inputBytes,
+            byte[] output, uint outputBytes, out uint returned, IntPtr overlapped);
+        public static bool IsKnownWimDataTag(uint tag) {
+            return tag == 0x80000008U || tag == 0x80000017U;
+        }
+        public static bool CanReadWimDataLeaf(uint tag, bool isDirectory, bool isLicenseLeaf, bool ownedReadOnlyWim) {
+            return !isDirectory && isLicenseLeaf && ownedReadOnlyWim &&
+                (tag & 0x20000000U) == 0 && IsKnownWimDataTag(tag);
+        }
+        public static ReparseInfo Read(string path) {
+            FindData data;
+            IntPtr search = FindFirstFileW(path, out data);
+            if (search == new IntPtr(-1)) throw new Win32Exception(Marshal.GetLastWin32Error());
+            try {
+                if ((data.Attributes & 0x400U) == 0) throw new InvalidOperationException("Expected reparse metadata.");
+                ReparseInfo info = new ReparseInfo { Tag=data.Reserved0, IsDirectory=(data.Attributes & 0x10U) != 0 };
+                // Symlinks/junctions are NEVER followed. Read only bounded target metadata for diagnosis.
+                if (info.Tag == 0xA000000CU || info.Tag == 0xA0000003U) {
+                    // Desired access 0; OPEN_EXISTING; OPEN_REPARSE_POINT | BACKUP_SEMANTICS.
+                    using (SafeFileHandle handle = CreateFileW(path, 0, 7, IntPtr.Zero, 3, 0x02200000U, IntPtr.Zero)) {
+                        if (handle.IsInvalid) { info.TargetQueryError=Marshal.GetLastWin32Error(); return info; }
+                        byte[] buffer = new byte[16384]; uint returned;
+                        // FSCTL_GET_REPARSE_POINT only. No SET/DELETE operation exists in this helper.
+                        if (!DeviceIoControl(handle, 0x000900A8U, IntPtr.Zero, 0, buffer, (uint)buffer.Length, out returned, IntPtr.Zero)) {
+                            info.TargetQueryError=Marshal.GetLastWin32Error(); return info;
+                        }
+                        int pathStart = info.Tag == 0xA000000CU ? 20 : 16;
+                        if (returned < pathStart || BitConverter.ToUInt32(buffer, 0) != info.Tag) {
+                            info.TargetQueryError=13; return info;
+                        }
+                        int dataEnd = 8 + BitConverter.ToUInt16(buffer, 4);
+                        int offset = BitConverter.ToUInt16(buffer, 8), length = BitConverter.ToUInt16(buffer, 10);
+                        if (dataEnd > returned || pathStart + offset + length > dataEnd || (offset & 1) != 0 || (length & 1) != 0) {
+                            info.TargetQueryError=13; return info;
+                        }
+                        int bounded = Math.Min(length, 1024);
+                        info.Target=Encoding.Unicode.GetString(buffer, pathStart + offset, bounded);
+                        info.TargetTruncated=length > bounded;
+                    }
+                }
+                return info;
+            } finally { FindClose(search); }
+        }
+    }
+}
+'@
+}
+function Add-ReparseDiagnostic([string]$Path, [string]$MediaRoot, $Info, [bool]$Allowed) {
+    $relative = Get-MediaRelativePath $Path $MediaRoot
+    $origin = if ($MediaRoot.TrimEnd('\') -ieq $mountPath) { 'selected-wim' } else { 'iso' }
+    if (@($report.diagnostic_reparse_points | Where-Object { $_.origin -ceq $origin -and $_.relative_path -ceq $relative }).Count) { return }
+    if ($report.diagnostic_reparse_points.Count -ge 64) { $report.diagnostic_reparse_points_truncated=$true; return }
+    $report.diagnostic_reparse_points += [ordered]@{ origin=$origin; relative_path=$relative
+        tag=('0x{0:X8}' -f $Info.Tag); is_directory=$Info.IsDirectory; data_file_read_allowed=$Allowed
+        target=$Info.Target; target_truncated=$Info.TargetTruncated; target_query_error=$Info.TargetQueryError }
+}
+
+function Get-MediaPathStatus([string]$Path, [string]$MediaRoot, [switch]$AllowWimDataFile) {
     $base = [IO.Path]::GetFullPath($MediaRoot).TrimEnd('\')
     if ($base -ine $mountPath.TrimEnd('\') -and ($null -eq $isoRoot -or $base -ine $isoRoot.TrimEnd('\'))) {
         throw 'Inspection root must be this run owned ISO or selected WIM mount.'
@@ -195,7 +292,18 @@ function Get-MediaPathStatus([string]$Path, [string]$MediaRoot) {
     foreach ($component in $components) {
         if ($component) { $current = Join-Path $current $component }
         if (-not (Test-Path -LiteralPath $current)) { return 'missing' }
-        if ((Get-Item -LiteralPath $current -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) { return 'reparse-skipped' }
+        if ((Get-Item -LiteralPath $current -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) {
+            Initialize-ReparseReader
+            $info = [AdtrMedia.ReparseReader]::Read($current.TrimEnd('\'))
+            $isLicenseLeaf = $current.TrimEnd('\') -ieq $full -and
+                [IO.Path]::GetFileName($full) -match '^(?i)(license|eula)[a-z0-9_.-]*\.(rtf|txt)$'
+            $ownedReadOnlyWim = $base -ieq $mountPath.TrimEnd('\') -and $wimReadOnlyVerified
+            $allowData = $AllowWimDataFile -and [AdtrMedia.ReparseReader]::CanReadWimDataLeaf(
+                $info.Tag, $info.IsDirectory, $isLicenseLeaf, $ownedReadOnlyWim)
+            Add-ReparseDiagnostic $current $MediaRoot $info ([bool]$allowData)
+            if ($allowData) { return 'safe' }
+            return 'reparse-skipped'
+        }
     }
     return 'safe'
 }
@@ -324,7 +432,7 @@ function Receive-OfficialIso {
 }
 function Find-LicenseFiles([string]$Root, [string]$Origin, [string]$MediaRoot, [switch]$TopLevelOnly) {
     if ($report.diagnostic_roots.Count -ge $maxDiagnosticRoots) { throw 'Diagnostic root bound exceeded.' }
-    $status = Get-MediaPathStatus $Root $MediaRoot
+    $status = Get-MediaPathStatus $Root $MediaRoot -AllowWimDataFile
     $probe = [ordered]@{ origin=$Origin; relative_path=(Get-MediaRelativePath $Root $MediaRoot)
         status=$status; top_level_only=[bool]$TopLevelOnly; directories_scanned=0; entries_scanned=0
         candidates_found=0; reparse_entries_skipped=0; limit_reached=$false }
@@ -354,7 +462,12 @@ function Find-LicenseFiles([string]$Root, [string]$Origin, [string]$MediaRoot, [
             if ($probe.entries_scanned -gt 4096 -or $report.diagnostic_entries_scanned -gt 8192) {
                 $probe.limit_reached=$true; throw 'License entry scan limit reached.'
             }
-            if ($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) { $probe.reparse_entries_skipped++; continue }
+            if ($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+                # Only a documented data-tagged license leaf in the verified read-only WIM can pass.
+                if ((Get-MediaPathStatus $entry.FullName $MediaRoot -AllowWimDataFile) -ne 'safe') {
+                    $probe.reparse_entries_skipped++; continue
+                }
+            }
             if ($entry.PSIsContainer) {
                 if (-not $TopLevelOnly) { $pending.Enqueue($entry.FullName) }
             } elseif ($entry.Name -match '^(?i)(license|eula)[a-z0-9_.-]*\.(rtf|txt)$') {
@@ -370,7 +483,7 @@ function Export-License($File, [string]$Origin, [string]$Root, [string]$Selectio
     if ($report.licenses.Count -ge $maxLicenseFiles -or $File.Length -le 0 -or $File.Length -gt $maxLicenseBytes) {
         throw 'License count or individual size limit exceeded.'
     }
-    if ((Get-MediaPathStatus $File.FullName $Root) -ne 'safe') { throw 'Unsafe or missing actual media candidate.' }
+    if ((Get-MediaPathStatus $File.FullName $Root -AllowWimDataFile) -ne 'safe') { throw 'Unsafe or missing actual media candidate.' }
     $relative = Get-MediaRelativePath $File.FullName $Root
     $index = $report.licenses.Count + 1
     $extension = $File.Extension.ToLowerInvariant()
@@ -424,6 +537,22 @@ try {
     $report.temp_free_gib = [Math]::Round($free / 1GB, 2)
     if ($free -lt $minFreeBytes) { throw 'At least 25 GiB free temporary disk space is required.' }
     Import-Module Dism
+    # Compile and exercise the pure tag/scope gate before spending any network/media budget.
+    Initialize-ReparseReader
+    foreach ($hex in @('80000008','80000017')) {
+        $tag = [Convert]::ToUInt32($hex, 16)
+        if (-not [AdtrMedia.ReparseReader]::CanReadWimDataLeaf($tag, $false, $true, $true) -or
+            [AdtrMedia.ReparseReader]::CanReadWimDataLeaf($tag, $true, $true, $true) -or
+            [AdtrMedia.ReparseReader]::CanReadWimDataLeaf($tag, $false, $false, $true) -or
+            [AdtrMedia.ReparseReader]::CanReadWimDataLeaf($tag, $false, $true, $false)) {
+            throw 'Data-tag scope regression check failed.'
+        }
+    }
+    foreach ($hex in @('A0000003','A000000C','80000009','80000018','00000000')) {
+        if ([AdtrMedia.ReparseReader]::CanReadWimDataLeaf([Convert]::ToUInt32($hex, 16), $false, $true, $true)) {
+            throw 'Unknown or name-surrogate tag must never pass.'
+        }
+    }
     Set-InspectionStage 'public-iso-download'
     Receive-OfficialIso
     Set-InspectionStage 'readonly-iso-mount'
@@ -480,6 +609,12 @@ try {
         $state.WimImagePath = $wim; $state.WimIndex = [int]$details.ImageIndex
         $state.WimMountAttempted = $true; Save-State
         Mount-WindowsImage -ImagePath $wim -Index $state.WimIndex -Path $mountPath -ReadOnly -ScratchDirectory $scratchPath -LogPath $logPath | Out-Null
+        $verifiedMount = @(Get-WindowsImage -Mounted -LogPath $logPath | Where-Object { $_.Path.TrimEnd('\') -ieq $mountPath })
+        if ($verifiedMount.Count -ne 1 -or $verifiedMount[0].ImagePath -ine $state.WimImagePath -or
+            [int]$verifiedMount[0].ImageIndex -ne $state.WimIndex -or $verifiedMount[0].MountMode.ToString() -ne 'ReadOnly') {
+            throw 'Selected WIM read-only mount identity could not be verified.'
+        }
+        $wimReadOnlyVerified = $true; $report.wim_mount_read_only_verified = $true
         Set-InspectionStage 'selected-edition-license-search'
         $wimCandidates = @()
         foreach ($relativeRoot in @('Windows\System32\en-US\Licenses','Windows\System32\Licenses')) {
