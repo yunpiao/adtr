@@ -467,6 +467,7 @@ test("real browser → Linux sampler → PostgreSQL history/settings and actual 
       "domains",
       "operation_accounts",
       "system_logs",
+      "directory_assets",
     ].map((mark) => ({
       mark,
       auth: { readable: mark === "system", writeable: false },

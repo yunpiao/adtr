@@ -56,6 +56,8 @@ func withBoundConnection(ctx context.Context, cfg Config, credential Credential,
 		return classifyIO(dialCtx, err, StageDial)
 	}
 	stopDial()
+	ctx, cancelOperations := context.WithCancel(ctx)
+	defer cancelOperations()
 	// This is the only goroutine owned by the adapter. Closing the raw connection
 	// interrupts TLS and all reads/writes; cleanup joins it before every return.
 	stopWatch := make(chan struct{})
@@ -64,6 +66,10 @@ func withBoundConnection(ctx context.Context, cfg Config, credential Credential,
 		defer close(watchDone)
 		select {
 		case <-ctx.Done():
+			// Done can close before cancellation reaches the per-step children.
+			// Finish propagating this already-selected cause before closing I/O,
+			// so its error cannot be misclassified using a still-live step context.
+			cancelOperations()
 			_ = raw.Close()
 		case <-stopWatch:
 		}

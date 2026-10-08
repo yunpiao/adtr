@@ -360,9 +360,21 @@ describe("saved source consumer and lifecycle", () => {
         : undefined;
     await start();
     const table = screen.getByRole("table", { name: "已授权的保存连接配置" });
-    expect(within(table).getByText("历史检测通过")).toBeVisible();
-    expect(within(table).getByText(observed.observedAt)).toBeVisible();
-    expect(within(table).getByText("配置 IP：未配置")).toBeVisible();
+    const row = within(table)
+      .getByRole("radio", { name: "选择数据源 synthetic.invalid" })
+      .closest("tr");
+    expect(row).not.toBeNull();
+    const historicalStatus = within(row!).getByRole("cell", {
+      name: /^历史检测通过/u,
+    });
+    expect(historicalStatus).toBeVisible();
+    expect(historicalStatus).toHaveTextContent(
+      /^历史检测通过\s*历史结果：TLS、凭据绑定及域命名上下文检测通过。$/u,
+    );
+    expect(
+      within(row!).getByRole("cell", { name: observed.observedAt }),
+    ).toBeVisible();
+    expect(within(row!).getByText("配置 IP：未配置")).toBeVisible();
   });
   it("applies literal search/state/page size, paginates, and resets to the first page", async () => {
     await start();

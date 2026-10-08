@@ -36,7 +36,8 @@ import (
 	"github.com/yunpiao/adtr/internal/tasks"
 )
 
-const historyReadRole = "history-read-role"
+// Custom role IDs must use exactly 24 URL-safe characters, including in fixtures.
+const historyReadRole = "history-read-role-000001"
 
 // Query tracing observes the real HTTP connection. A history page must not
 // perform an extra authorization/detail/artifact query for every returned row.
@@ -903,7 +904,15 @@ func TestExportHistoryMigratedHTTPMetadataCorruptionAndArchiveDefense(t *testing
 	}
 	// F49 still refuses ordinary audit-export archival. Defense against an
 	// anomalous old visibility row does not grant a new archive capability.
-	f.mutate("grant", "/api/tasks/archive", map[string]any{"targets": []map[string]any{{"taskUUID": original, "visibilityVersion": 0}}, "before": time.Now().UTC().Format(time.RFC3339Nano), "reason": "synthetic archive rejection", "idempotencyKey": "history-cannot-archive"}, 409)
+	// Use the database clock and its exact microsecond precision for the cutoff.
+	var archiveBefore time.Time
+	if err := f.conn.QueryRow(f.ctx, `SELECT clock_timestamp()`).Scan(&archiveBefore); err != nil {
+		t.Fatal(err)
+	}
+	denied := f.mutate("grant", "/api/tasks/archive", map[string]any{"targets": []map[string]any{{"taskUUID": original, "visibilityVersion": 0}}, "before": archiveBefore.UTC().Format(time.RFC3339Nano), "reason": "synthetic archive rejection", "idempotencyKey": "history-cannot-archive"}, 409)
+	if denied["error"] != "task_not_archivable" {
+		t.Fatal("audit export archival was not rejected by the eligibility boundary", denied)
+	}
 	f.exec(`INSERT INTO adtr.task_visibility(task_id,tenant_id,archived,visibility_version,archived_at,archived_by,reason)
  VALUES($1,$2,true,1,clock_timestamp(),$3,'synthetic anomalous historic archive')`, original, governanceHTTPTenant, c.id)
 	active := f.history(c, "?pageSize=100")

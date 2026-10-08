@@ -537,6 +537,50 @@ func TestParentDeadlineBoundsBlockedTLS(t *testing.T) {
 	}
 }
 
+func TestParentDeadlineBoundsBlockedLDAP(t *testing.T) {
+	for _, stage := range []Stage{StageStartTLS, StageBind, StageSearch} {
+		t.Run(string(stage), func(t *testing.T) {
+			certificate, roots := trustedFixture(t)
+			mode := LDAPS
+			if stage == StageStartTLS {
+				mode = StartTLS
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+			defer cancel()
+			network := pipeTransport(t, mode, func(raw net.Conn) error {
+				if stage == StageStartTLS {
+					if _, err := readExpected(raw, 1, 0x77); err != nil {
+						return err
+					}
+					return expectNoApplicationBytes(raw)
+				}
+				secured, err := establishFixtureTLS(raw, mode, certificate)
+				if err != nil {
+					return err
+				}
+				if _, err := readExpected(secured, 2, 0x60); err != nil {
+					return err
+				}
+				if stage == StageSearch {
+					if _, err := secured.Write(fixtureResult(2, 0x61, 0)); err != nil {
+						return err
+					}
+					if _, err := readExpected(secured, 3, 0x63); err != nil {
+						return err
+					}
+				}
+				return expectNoApplicationBytes(secured)
+			})
+			started := time.Now()
+			_, err := probe(ctx, fixtureConfig(t, mode, roots), fixtureCredential(), network)
+			assertError(t, err, CodeLDAPTimeout, stage)
+			if time.Since(started) > time.Second {
+				t.Error("parent deadline was not respected")
+			}
+		})
+	}
+}
+
 func TestTLSBelow12NeverBinds(t *testing.T) {
 	certificate, roots := trustedFixture(t)
 	network := pipeTransport(t, LDAPS, func(raw net.Conn) error {

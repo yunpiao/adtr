@@ -242,22 +242,35 @@ test("real domain enrollment, explicit grant, TLS diagnostics, rotation and loca
       ].sort(),
     );
     safe(choices);
+    const sourceRadio = page.getByRole("radio", {
+      name: `选择数据源 ${domain}`,
+      exact: true,
+    });
+    const sourceRow = page
+      .getByRole("table", { name: "已授权的保存连接配置", exact: true })
+      .getByRole("row")
+      .filter({ has: sourceRadio });
+    await expect(sourceRow).toBeVisible();
     if (observedAt) {
       expect(choices.List[0].lastTest).toMatchObject({
         observedAt,
         code: "ok",
         dcHostName: dc,
       });
+      // The status cell includes its nested diagnostic summary. Check both
+      // pieces together, with the exact observation time in the same domain row.
+      const historicalStatus = sourceRow
+        .getByRole("cell")
+        .filter({ hasText: "历史检测通过" });
+      await expect(historicalStatus).toBeVisible();
+      await expect(historicalStatus).toHaveText(
+        /^历史检测通过\s*历史结果：TLS、凭据绑定及域命名上下文检测通过。$/u,
+      );
       await expect(
-        page
-          .getByRole("table", { name: "已授权的保存连接配置" })
-          .getByText("历史检测通过", { exact: true }),
+        sourceRow.getByRole("cell", { name: observedAt, exact: true }),
       ).toBeVisible();
-      await expect(page.getByText(observedAt, { exact: true })).toBeVisible();
     } else expect(choices.List[0].lastTest).toBeNull();
-    await page
-      .getByRole("radio", { name: `选择数据源 ${domain}`, exact: true })
-      .check();
+    await sourceRadio.check();
     const [resolution, detailResponse] = await Promise.all([
       page.waitForResponse(
         (r) =>
