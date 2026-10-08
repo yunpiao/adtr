@@ -1,0 +1,41 @@
+name: AD lab contracts (no provisioning)
+# This workflow validates contracts only. The separate ad-lab-windows.yml
+# controller remains disabled until reviewed runtime execution is feasible.
+on:
+  workflow_dispatch:
+permissions: {}
+jobs:
+  guest-contracts:
+    runs-on: windows-2025
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5
+        with:
+          go-version: '1.27.1'
+          cache: false
+      - name: Validate non-provisioning plan and report contracts
+        shell: pwsh
+        run: |
+          python -m unittest discover -s scripts/ad_lab -p 'test_*.py'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Parse guest PowerShell without executing it
+        shell: powershell
+        run: |
+          $failed = $false
+          Get-ChildItem scripts/ad_lab/guest -Filter *.ps1 | ForEach-Object {
+            $tokens = $null; $parseErrors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$tokens, [ref]$parseErrors)
+            if ($parseErrors.Count -gt 0) { $failed = $true; Write-Error 'Guest PowerShell syntax invalid' -ErrorAction Continue }
+          }
+          if ($failed) { exit 1 }
+      - name: Compile real AD tests without contacting a directory
+        shell: pwsh
+        run: |
+          go test -tags realad -c -o "$env:RUNNER_TEMP/adtr-realad.test.exe" ./tests/adlab
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
