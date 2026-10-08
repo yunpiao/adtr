@@ -411,6 +411,7 @@ test("real domain enrollment, explicit grant, TLS diagnostics, rotation and loca
   });
   safe(pending);
   expect(submittedCreates).toBe(1);
+  await expect(page).toHaveURL(/#domains\/create$/);
   const [recoveryResponse] = await Promise.all([
     page.waitForResponse((response) => {
       const url = new URL(response.url());
@@ -420,11 +421,16 @@ test("real domain enrollment, explicit grant, TLS diagnostics, rotation and loca
         response.request().method() === "GET"
       );
     }),
-    (async () => {
-      await page.reload();
-      await openDomains();
-    })(),
+    page.reload(),
   ]);
+  // Reload restores this workspace and recovers the original intent. Clicking
+  // its navigation entry again can discard a receipt already recovered here.
+  await expect(
+    page.getByRole("button", { name: "域连接", exact: true }),
+  ).toHaveAttribute("aria-current", "page");
+  await expect(
+    page.getByRole("heading", { name: "域连接", exact: true }),
+  ).toBeVisible();
   expect(recoveryResponse.status()).toBe(200);
   expect(recoveryResponse.headers()["x-adtr-user-id"]).toBe(String(actor.ID));
   await expect(page.getByLabel("新域 ID", { exact: true })).toHaveValue(id);

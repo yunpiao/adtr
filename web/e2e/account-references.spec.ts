@@ -662,9 +662,17 @@ test("unconfigured bootstrap, explicit own-role reference, real LDAP consumption
   );
   // Finish the genuine receipt read/abort before removing interception and
   // reloading; otherwise unroute can handle an in-flight route first.
+  await expect(page).toHaveURL(/#domains\/credential-source$/);
   await page.unrouteAll({ behavior: "wait" });
   await page.reload();
-  await page.getByRole("button", { name: "域连接", exact: true }).click();
+  // Reload recovers the original source intent in the restored workspace.
+  // A second navigation could clear its already-confirmed receipt notice.
+  await expect(
+    page.getByRole("button", { name: "域连接", exact: true }),
+  ).toHaveAttribute("aria-current", "page");
+  await expect(
+    page.getByRole("heading", { name: "域连接", exact: true }),
+  ).toBeVisible();
   await expect(page.getByText(/原凭据来源操作已确认/)).toBeVisible();
   expect(sourcePosts).toBe(1);
   expect((await safeBrowser()).session).toEqual({});

@@ -586,6 +586,61 @@ describe("operation account permissions and lifecycle", () => {
     expect(calls(`${base}/delete`)).toHaveLength(1);
     expect(screen.queryByText(/当前登记已删除/)).not.toBeInTheDocument();
   });
+  it.each(["immediate", "delayed"] as const)(
+    "restores the creation route and original receipt with an %s response",
+    async (timing) => {
+      saveOperationAccountIntent(profile, {
+        kind: "create",
+        key: "reload-operation-key",
+        domainId,
+      });
+      window.history.replaceState({}, "", "#operation-accounts/create");
+      let resolve!: (value: Response) => void;
+      const recovered = { receipt: receipt({ replayed: true }) };
+      override = (url) =>
+        url.startsWith(`${base}/mutation?`)
+          ? timing === "immediate"
+            ? response(recovered)
+            : new Promise<Response>((done) => (resolve = done))
+          : undefined;
+      render(<App />);
+      if (timing === "immediate") {
+        // Recovery may finish before the caller observes the restored route.
+        await screen.findByLabelText("账户 ID");
+      } else {
+        await screen.findByRole("heading", { name: "核对未确认的操作" });
+        expect(screen.queryByLabelText("账户 ID")).toBeNull();
+        expect(readOperationAccountIntent(profile)?.key).toBe(
+          "reload-operation-key",
+        );
+        expect(
+          screen.getByRole("button", { name: "新增操作账户" }),
+        ).toBeDisabled();
+        expect(window.location.hash).toBe("#operation-accounts/create");
+      }
+      expect(
+        screen.getByRole("button", { name: "管理操作账户" }),
+      ).toHaveAttribute("aria-current", "page");
+      expect(
+        screen.getByRole("heading", { name: "管理操作账户" }),
+      ).toBeVisible();
+      if (timing === "delayed")
+        await act(async () => resolve(await response(recovered)));
+      expect(await screen.findByLabelText("账户 ID")).toHaveValue(accountId);
+      await screen.findByRole("heading", { name: "操作账户详情：部署凭据" });
+      expect(window.location.hash).toBe("#operation-accounts/detail");
+      expect(calls("/api/auth/me")).toHaveLength(1);
+      expect(calls(`${base}/mutation`)).toHaveLength(1);
+      expect(calls(`${base}/mutation`)[0][0]).toBe(
+        `${base}/mutation?idempotencyKey=reload-operation-key`,
+      );
+      expect(calls(`${base}/create`)).toHaveLength(0);
+      expect(readOperationAccountIntent(profile)).toBeNull();
+      expect(sessionStorage.length).toBe(0);
+      expect(screen.queryByLabelText("AD 密码")).toBeNull();
+      expect(screen.queryByLabelText("操作者当前密码")).toBeNull();
+    },
+  );
   it("ignores late mutations after cancel and keeps receipt recovery active", async () => {
     let resolve!: (value: Response) => void;
     override = (url) =>
