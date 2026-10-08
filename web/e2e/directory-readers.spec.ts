@@ -603,12 +603,14 @@ async function fallbackTab(context: BrowserContext) {
       reset() {
         events = [];
       },
-      verified() {
-        return ["focus", "visibilitychange"].every((type) =>
-          events.some(
-            (event) => event.type === type && event.trusted && event.visible,
-          ),
-        );
+      read() {
+        // Preserve event order and native state in failure output. This
+        // witness contains no identity, credentials, request or DOM content.
+        return {
+          visibility: document.visibilityState,
+          focused: document.hasFocus(),
+          events,
+        };
       },
       stop() {
         window.removeEventListener("focus", record);
@@ -1340,11 +1342,11 @@ test("real empty directory reader and same-context account-switch isolation", as
         await held.fetched();
       }
       monitorWrites = true;
-      scenarioStage = "observe native hidden state";
+      scenarioStage = "observe native hidden and unfocused state";
       await switching.bringToFront();
       await expect
-        .poll(() => fallback.page.evaluate(() => document.visibilityState))
-        .toBe("hidden");
+        .poll(() => fallback.lifecycle.evaluate((value) => value.read()))
+        .toMatchObject({ visibility: "hidden", focused: false });
       scenarioStage = "switch the shared session";
       await logout(switching);
       // The ordinary tab clears through a real same-origin notification while
@@ -1376,6 +1378,12 @@ test("real empty directory reader and same-context account-switch isolation", as
         username,
       );
       scenarioStage = "revalidate the fallback tab";
+      // Visibility and focus loss arrive through separate browser lifecycle
+      // updates. Require complete native deactivation before clearing the
+      // witness and switching back; hidden alone does not prove focus loss.
+      await expect
+        .poll(() => fallback.lifecycle.evaluate((value) => value.read()))
+        .toMatchObject({ visibility: "hidden", focused: false });
       await fallback.lifecycle.evaluate((value) => value.reset());
       const reread = fallback.page.waitForResponse(
         (response) =>
@@ -1392,8 +1400,15 @@ test("real empty directory reader and same-context account-switch isolation", as
         needChangePwd: false,
       });
       await expect
-        .poll(() => fallback.lifecycle.evaluate((value) => value.verified()))
-        .toBe(true);
+        .poll(() => fallback.lifecycle.evaluate((value) => value.read()))
+        .toEqual({
+          visibility: "visible",
+          focused: true,
+          events: expect.arrayContaining([
+            { type: "focus", visible: true, trusted: true },
+            { type: "visibilitychange", visible: true, trusted: true },
+          ]),
+        });
       await signedIn(fallback.page, readerUsername);
       witnesses.push(
         await watchReaderDOM(fallback.page, readerUsername, accountLabel),

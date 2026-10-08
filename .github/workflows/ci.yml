@@ -70,6 +70,8 @@ jobs:
       max-parallel: 2
       matrix:
         include:
+          - name: directory-readers
+            command: python3 scripts/test_auth_e2e.py --suite directory-readers
           - name: authentication
             command: python3 scripts/test_auth_e2e.py
           - name: expired-password
@@ -106,8 +108,6 @@ jobs:
             command: python3 scripts/test_auth_e2e.py --suite directory
           - name: directory-controls
             command: python3 scripts/test_auth_e2e.py --suite directory-controls
-          - name: directory-readers
-            command: python3 scripts/test_auth_e2e.py --suite directory-readers
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
