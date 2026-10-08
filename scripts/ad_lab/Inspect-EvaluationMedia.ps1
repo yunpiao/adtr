@@ -32,6 +32,9 @@ $minFreeBytes = [long]25GB
 $maxLicenseBytes = [long]524288
 $maxEvidenceBytes = [long]8388608
 $maxLicenseFiles = 16
+$maxDiagnosticCandidates = 64
+$maxDiagnosticRoots = 24
+$isoRoot = $null
 $state = $null
 $report = $null
 
@@ -148,8 +151,65 @@ $report = [ordered]@{
     hash_note='Measured SHA-256 only; no independent vendor checksum was available for comparison.'
     image_os=$env:ImageOS; image_version=$env:ImageVersion; temp_free_gib=0; selected_image=$null
     licenses=@(); evidence_bytes=0; license_acceptance_occurred=$false; image_installed=$false; guest_booted=$false
-    license_note='Actual candidate files from evaluation media only. Review applicability and terms before accepting, installing, or booting.'
+    current_stage='initializing'; milestones=@(); partial_download_bytes=0; download_elapsed_seconds=0
+    candidate_only=$true; applicability_unverified=$true; selection_scope=''; unexported_candidate_count=0
+    diagnostic_roots=@(); diagnostic_candidates=@(); diagnostic_candidates_truncated=$false
+    diagnostic_entries_scanned=0; diagnostic_directories_scanned=0
+    license_note='Candidate files copied from the actual inspected media only. Generic paths do not establish applicability. Human review is required before accepting, installing, or booting.'
     inspection_complete=$false; cleanup_verified=$false; passed=$false; failure_stage=''; failure_code=''; failure_hresult=''
+}
+
+
+function Save-Manifest {
+    Assert-NotReparse $manifestPath
+    Assert-NotReparse "$manifestPath.tmp"
+    $json = $report | ConvertTo-Json -Depth 8
+    if ([Text.Encoding]::UTF8.GetByteCount($json) -gt 131072) { throw 'Bounded manifest size exceeded.' }
+    $json | Set-Content -LiteralPath "$manifestPath.tmp" -Encoding UTF8
+    Move-Item -LiteralPath "$manifestPath.tmp" -Destination $manifestPath -Force
+}
+function Set-InspectionStage {
+    param([ValidateSet('preflight','public-iso-download','readonly-iso-mount','evaluation-image-metadata',
+        'iso-evaluation-license-search','readonly-evaluation-wim-mount','selected-edition-license-search',
+        'inspection-complete','cleanup','finished')][string]$Name)
+    $script:stage = $Name
+    $report.current_stage = $Name
+    if ($report.milestones.Count -ge 16) { throw 'Stage milestone bound exceeded.' }
+    $report.milestones += [ordered]@{ stage=$Name; utc=[DateTime]::UtcNow.ToString('o') }
+    Save-Manifest
+    Write-Host ('Inspection stage: {0}' -f $Name)
+}
+function Get-MediaPathStatus([string]$Path, [string]$MediaRoot) {
+    $base = [IO.Path]::GetFullPath($MediaRoot).TrimEnd('\')
+    if ($base -ine $mountPath.TrimEnd('\') -and ($null -eq $isoRoot -or $base -ine $isoRoot.TrimEnd('\'))) {
+        throw 'Inspection root must be this run owned ISO or selected WIM mount.'
+    }
+    $full = [IO.Path]::GetFullPath($Path).TrimEnd('\')
+    if ($full -ine $base -and -not $full.StartsWith($base + '\', [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'Candidate path escaped its exact inspected media root.'
+    }
+    # Walk from the trusted root outward. Never access a descendant through a reparse parent.
+    $current = $base + '\'
+    $relative = $full.Substring($base.Length).TrimStart('\')
+    $components = @('') + @($relative.Split([char[]]@('\'), [StringSplitOptions]::RemoveEmptyEntries))
+    foreach ($component in $components) {
+        if ($component) { $current = Join-Path $current $component }
+        if (-not (Test-Path -LiteralPath $current)) { return 'missing' }
+        if ((Get-Item -LiteralPath $current -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) { return 'reparse-skipped' }
+    }
+    return 'safe'
+}
+function Get-MediaRelativePath([string]$Path, [string]$MediaRoot) {
+    $relative = [IO.Path]::GetFullPath($Path).Substring([IO.Path]::GetFullPath($MediaRoot).TrimEnd('\').Length).TrimStart('\')
+    if ($relative.Length -gt 512) { throw 'Candidate diagnostic path length exceeded.' }
+    if (-not $relative) { return '.' }
+    return $relative
+}
+function Add-CandidateDiagnostic($File, [string]$Origin, [string]$MediaRoot) {
+    $relative = Get-MediaRelativePath $File.FullName $MediaRoot
+    if (@($report.diagnostic_candidates | Where-Object { $_.origin -ceq $Origin -and $_.relative_path -ceq $relative }).Count) { return }
+    if ($report.diagnostic_candidates.Count -ge $maxDiagnosticCandidates) { $report.diagnostic_candidates_truncated=$true; return }
+    $report.diagnostic_candidates += [ordered]@{ origin=$Origin; relative_path=$relative; bytes=[long]$File.Length }
 }
 
 function Assert-OfficialUri([uri]$Uri) {
@@ -226,6 +286,7 @@ function Receive-OfficialIso {
         $hasher = [Security.Cryptography.SHA256]::Create()
         $buffer = New-Object byte[] 1048576
         $total = [long]0
+        $nextProgressBytes = [long]1GB
         while ($true) {
             $cts.Token.ThrowIfCancellationRequested()
             # A wall-clock wait also bounds streams whose async cancellation is delayed.
@@ -239,12 +300,21 @@ function Receive-OfficialIso {
             if ($total -gt $maxDownloadBytes -or $total -gt $length) { throw 'ISO exceeds its strict byte bound.' }
             $outputStream.Write($buffer, 0, $count)
             [void]$hasher.TransformBlock($buffer, 0, $count, $buffer, 0)
+            $report.partial_download_bytes = $total
+            $report.download_elapsed_seconds = [Math]::Round($clock.Elapsed.TotalSeconds, 1)
+            if ($total -ge $nextProgressBytes) {
+                Save-Manifest
+                Write-Host ('ISO progress bytes: {0}; elapsed seconds: {1}' -f $total, $report.download_elapsed_seconds)
+                $nextProgressBytes += [long]1GB
+            }
         }
         $cts.Token.ThrowIfCancellationRequested()
         if ($total -ne $length) { throw 'Incomplete ISO download.' }
         [void]$hasher.TransformFinalBlock([byte[]]@(), 0, 0)
         $report.downloaded_bytes = $total
         $report.sha256 = ([BitConverter]::ToString($hasher.Hash)).Replace('-', '').ToLowerInvariant()
+        Save-Manifest
+        Write-Host ('ISO download complete bytes: {0}' -f $total)
     } finally {
         foreach ($disposable in @($inputStream, $outputStream, $hasher)) { if ($null -ne $disposable) { $disposable.Dispose() } }
         if ($null -ne $head) { $head.Response.Dispose() }
@@ -252,29 +322,56 @@ function Receive-OfficialIso {
         $cts.Dispose(); $client.Dispose(); $handler.Dispose()
     }
 }
-function Find-LicenseFiles([string]$Root) {
-    if (-not (Test-Path -LiteralPath $Root -PathType Container)) { return }
+function Find-LicenseFiles([string]$Root, [string]$Origin, [string]$MediaRoot, [switch]$TopLevelOnly) {
+    if ($report.diagnostic_roots.Count -ge $maxDiagnosticRoots) { throw 'Diagnostic root bound exceeded.' }
+    $status = Get-MediaPathStatus $Root $MediaRoot
+    $probe = [ordered]@{ origin=$Origin; relative_path=(Get-MediaRelativePath $Root $MediaRoot)
+        status=$status; top_level_only=[bool]$TopLevelOnly; directories_scanned=0; entries_scanned=0
+        candidates_found=0; reparse_entries_skipped=0; limit_reached=$false }
+    $report.diagnostic_roots += $probe
+    Save-Manifest
+    if ($status -ne 'safe') { return }
+    $rootItem = Get-Item -LiteralPath $Root -Force
+    if (-not $rootItem.PSIsContainer) {
+        if ($rootItem.Name -match '^(?i)(license|eula)[a-z0-9_.-]*\.(rtf|txt)$') {
+            $probe.candidates_found++
+            Add-CandidateDiagnostic $rootItem $Origin $MediaRoot
+            $rootItem
+        }
+        return
+    }
     $pending = New-Object 'System.Collections.Generic.Queue[string]'
     $pending.Enqueue($Root)
-    $visited = 0; $files = 0
     while ($pending.Count -gt 0) {
         $directory = $pending.Dequeue()
-        if (++$visited -gt 512) { throw 'License directory scan limit reached.' }
-        Assert-NotReparse $directory
+        $probe.directories_scanned++; $report.diagnostic_directories_scanned++
+        if ($probe.directories_scanned -gt 512 -or $report.diagnostic_directories_scanned -gt 1024) {
+            $probe.limit_reached=$true; throw 'License directory scan limit reached.'
+        }
+        if ((Get-MediaPathStatus $directory $MediaRoot) -ne 'safe') { $probe.reparse_entries_skipped++; continue }
         foreach ($entry in @(Get-ChildItem -LiteralPath $directory -Force)) {
-            if (++$files -gt 4096) { throw 'License entry scan limit reached.' }
-            if ($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) { continue }
-            if ($entry.PSIsContainer) { $pending.Enqueue($entry.FullName) }
-            elseif ($entry.Name -match '^(?i)(license|eula)[a-z0-9_.-]*\.(rtf|txt)$') { $entry }
+            $probe.entries_scanned++; $report.diagnostic_entries_scanned++
+            if ($probe.entries_scanned -gt 4096 -or $report.diagnostic_entries_scanned -gt 8192) {
+                $probe.limit_reached=$true; throw 'License entry scan limit reached.'
+            }
+            if ($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) { $probe.reparse_entries_skipped++; continue }
+            if ($entry.PSIsContainer) {
+                if (-not $TopLevelOnly) { $pending.Enqueue($entry.FullName) }
+            } elseif ($entry.Name -match '^(?i)(license|eula)[a-z0-9_.-]*\.(rtf|txt)$') {
+                $probe.candidates_found++
+                Add-CandidateDiagnostic $entry $Origin $MediaRoot
+                $entry
+            }
         }
     }
+    Save-Manifest
 }
-function Export-License($File, [string]$Origin, [string]$Root) {
+function Export-License($File, [string]$Origin, [string]$Root, [string]$SelectionReason) {
     if ($report.licenses.Count -ge $maxLicenseFiles -or $File.Length -le 0 -or $File.Length -gt $maxLicenseBytes) {
         throw 'License count or individual size limit exceeded.'
     }
-    Assert-NotReparse $File.FullName
-    $relative = $File.FullName.Substring($Root.TrimEnd('\').Length).TrimStart('\')
+    if ((Get-MediaPathStatus $File.FullName $Root) -ne 'safe') { throw 'Unsafe or missing actual media candidate.' }
+    $relative = Get-MediaRelativePath $File.FullName $Root
     $index = $report.licenses.Count + 1
     $extension = $File.Extension.ToLowerInvariant()
     $leaf = '{0:D2}-{1}{2}' -f $index, $Origin, $extension
@@ -287,6 +384,7 @@ function Export-License($File, [string]$Origin, [string]$Root) {
     $report.evidence_bytes += $bytes.LongLength
     $record = [ordered]@{ origin=$Origin; source_relative_path=$relative; file="licenses/$leaf"
         plain_file=''; bytes=$bytes.LongLength; plain_bytes=0; readable_plain_available=$false
+        candidate_only=$true; applicability_unverified=$true; selection_reason=$SelectionReason
         sha256=(Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash.ToLowerInvariant() }
     $report.licenses += $record
     if ($extension -eq '.rtf') {
@@ -320,14 +418,15 @@ function Export-License($File, [string]$Origin, [string]$Root) {
 }
 $stage = 'preflight'
 try {
+    Set-InspectionStage 'preflight'
     $driveRoot = [IO.Path]::GetPathRoot($tempRoot)
     $free = [IO.DriveInfo]::new($driveRoot).AvailableFreeSpace
     $report.temp_free_gib = [Math]::Round($free / 1GB, 2)
     if ($free -lt $minFreeBytes) { throw 'At least 25 GiB free temporary disk space is required.' }
     Import-Module Dism
-    $stage = 'public-iso-download'
+    Set-InspectionStage 'public-iso-download'
     Receive-OfficialIso
-    $stage = 'readonly-iso-mount'
+    Set-InspectionStage 'readonly-iso-mount'
     $state.IsoMountAttempted = $true; Save-State
     $disk = Mount-DiskImage -ImagePath $isoPath -StorageType ISO -Access ReadOnly -PassThru
     $volumes = @($disk | Get-Volume | Where-Object { $_.DriveLetter })
@@ -335,7 +434,7 @@ try {
     $isoRoot = "$($volumes[0].DriveLetter):\"
     $wim = Join-Path $isoRoot 'sources\install.wim'
     if (-not (Test-Path -LiteralPath $wim -PathType Leaf)) { throw 'Official media lacks expected install.wim.' }
-    $stage = 'evaluation-image-metadata'
+    Set-InspectionStage 'evaluation-image-metadata'
     $images = @(Get-WindowsImage -ImagePath $wim -LogPath $logPath)
     if ($images.Count -eq 0 -or $images.Count -gt 16) { throw 'Unexpected image count; stop rather than scan unbounded metadata.' }
     $evaluationImages = @()
@@ -359,37 +458,82 @@ try {
         $report.failure_code = 'UNEXPECTED_EVALUATION_IMAGE_VERSION_OR_ARCHITECTURE'
         throw 'Actual image metadata must identify Windows Server 2025 build 26100, x64.'
     }
-    $stage = 'iso-evaluation-license-search'
-    $candidates = @(Find-LicenseFiles (Join-Path $isoRoot 'sources\license')) + @(Find-LicenseFiles (Join-Path $isoRoot 'sources\licenses'))
-    # Never substitute generic retail/OEM terms when evaluation-specific candidates are absent.
-    $evaluationCandidates = @($candidates | Where-Object { $_.FullName -match '(?i)[\\/][^\\/]*eval[^\\/]*[\\/]' } | Sort-Object FullName -Unique)
-    foreach ($candidate in $evaluationCandidates) { Export-License $candidate 'iso-eval' $isoRoot }
+    Set-InspectionStage 'iso-evaluation-license-search'
+    $candidates = @()
+    foreach ($relativeRoot in @('sources\license','sources\licenses','license','licenses')) {
+        $candidates += @(Find-LicenseFiles (Join-Path $isoRoot $relativeRoot) 'iso' $isoRoot)
+    }
+    foreach ($relativeRoot in @('.','sources','sources\en-us')) {
+        $candidates += @(Find-LicenseFiles (Join-Path $isoRoot $relativeRoot) 'iso' $isoRoot -TopLevelOnly)
+    }
+    $candidates = @($candidates | Sort-Object FullName -Unique)
+    $evaluationCandidates = @($candidates | Where-Object { $_.FullName -match '(?i)[\\/][^\\/]*eval[^\\/]*[\\/]' })
+    if ($evaluationCandidates.Count) {
+        $report.selection_scope = 'iso-evaluation-named-paths'
+        $report.unexported_candidate_count = [Math]::Max(0, $evaluationCandidates.Count - $maxLicenseFiles)
+        foreach ($candidate in @($evaluationCandidates | Select-Object -First $maxLicenseFiles)) {
+            Export-License $candidate 'iso-eval' $isoRoot 'Evaluation-named ISO path; applicability requires human review.'
+        }
+    }
     if ($report.licenses.Count -eq 0) {
-        $stage = 'readonly-evaluation-wim-mount'
+        Set-InspectionStage 'readonly-evaluation-wim-mount'
         $state.WimImagePath = $wim; $state.WimIndex = [int]$details.ImageIndex
         $state.WimMountAttempted = $true; Save-State
         Mount-WindowsImage -ImagePath $wim -Index $state.WimIndex -Path $mountPath -ReadOnly -ScratchDirectory $scratchPath -LogPath $logPath | Out-Null
-        $stage = 'selected-edition-license-search'
-        $wimCandidates = @(Find-LicenseFiles (Join-Path $mountPath 'Windows\System32\en-US\Licenses')) +
-            @(Find-LicenseFiles (Join-Path $mountPath 'Windows\System32\Licenses'))
+        Set-InspectionStage 'selected-edition-license-search'
+        $wimCandidates = @()
+        foreach ($relativeRoot in @('Windows\System32\en-US\Licenses','Windows\System32\Licenses')) {
+            $wimCandidates += @(Find-LicenseFiles (Join-Path $mountPath $relativeRoot) 'selected-wim' $mountPath)
+        }
+        $targetedWimCandidates = @()
+        foreach ($relativeFile in @('Windows\System32\license.rtf','Windows\System32\license.txt',
+            'Windows\System32\eula.rtf','Windows\System32\eula.txt',
+            'Windows\System32\en-US\license.rtf','Windows\System32\en-US\license.txt',
+            'Windows\System32\en-US\eula.rtf','Windows\System32\en-US\eula.txt')) {
+            $targetedWimCandidates += @(Find-LicenseFiles (Join-Path $mountPath $relativeFile) 'selected-wim' $mountPath)
+        }
+        $wimCandidates = @(@($wimCandidates + $targetedWimCandidates) | Sort-Object FullName -Unique)
         $editionPattern = '(?i)[\\/]' + [regex]::Escape($details.EditionId) + '[\\/]'
-        $editionCandidates = @($wimCandidates | Where-Object { $_.FullName -match $editionPattern } | Sort-Object FullName -Unique)
-        foreach ($candidate in $editionCandidates) { Export-License $candidate 'wim-eval' $mountPath }
+        $editionCandidates = @($wimCandidates | Where-Object { $_.FullName -match $editionPattern })
+        $chosenCandidates = if ($editionCandidates.Count) { $editionCandidates } else {
+            # Canonical generic files come before other SKU trees when the edition directory is absent.
+            @($targetedWimCandidates | Sort-Object FullName -Unique) +
+                @($wimCandidates | Where-Object { $_.FullName -notin @($targetedWimCandidates | ForEach-Object FullName) })
+        }
+        $report.selection_scope = if ($editionCandidates.Count) { 'selected-wim-edition-named-paths' } else { 'selected-wim-generic-candidates' }
+        $report.unexported_candidate_count = [Math]::Max(0, @($chosenCandidates).Count - $maxLicenseFiles)
+        foreach ($candidate in @($chosenCandidates | Select-Object -First $maxLicenseFiles)) {
+            Export-License $candidate 'selected-wim' $mountPath $report.selection_scope
+        }
+        if ($report.licenses.Count -eq 0 -and $candidates.Count) {
+            # Preserve real media candidates for human review even if the selected WIM has none.
+            # This is not a substitution or assertion that generic ISO terms apply to evaluation.
+            $report.selection_scope = 'iso-generic-candidates-selected-wim-had-none'
+            $report.unexported_candidate_count = [Math]::Max(0, $candidates.Count - $maxLicenseFiles)
+            foreach ($candidate in @($candidates | Select-Object -First $maxLicenseFiles)) {
+                Export-License $candidate 'iso-generic' $isoRoot $report.selection_scope
+            }
+        }
     }
+    Save-Manifest
     if ($report.licenses.Count -eq 0) {
         $report.failure_code = 'NO_EVALUATION_LICENSE_FOUND'
-        throw 'No actual evaluation license found; do not guess or substitute retail license terms.'
+        throw 'No actual media license candidates found; inspect bounded root and candidate diagnostics rather than guessing terms.'
     }
     $report.inspection_complete = $true
+    Set-InspectionStage 'inspection-complete'
 } catch {
     $report.failure_stage = $stage
     if (-not $report.failure_code) { $report.failure_code = 'INSPECTION_STOPPED' }
     $report.failure_hresult = '0x{0:X8}' -f $_.Exception.HResult
 } finally {
+    Write-Host 'Inspection stage: cleanup'
     try { Remove-OwnedResources; $report.cleanup_verified = $true }
     catch { $report.cleanup_verified = $false; $report.failure_stage = 'cleanup'; $report.failure_code = 'OWNED_CLEANUP_NOT_VERIFIED' }
     $report.passed = $report.inspection_complete -and $report.cleanup_verified
-    $report | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $manifestPath -Encoding UTF8
+    $report.current_stage = 'finished'
+    $report.milestones += [ordered]@{ stage='finished'; utc=[DateTime]::UtcNow.ToString('o') }
+    Save-Manifest
     Write-Host ('Inspection complete: {0}; licenses: {1}; cleanup verified: {2}; license acceptance occurred: false; failure stage: {3}; failure code: {4}' -f
         $report.inspection_complete, $report.licenses.Count, $report.cleanup_verified, $report.failure_stage, $report.failure_code)
 }
