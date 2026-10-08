@@ -1,0 +1,13 @@
+*
+!go.mod
+!go.sum
+!vendor/
+!vendor/**
+!cmd/
+!cmd/**
+!internal/
+!internal/**
+
+!web/
+!web/dist/
+!web/dist/**
