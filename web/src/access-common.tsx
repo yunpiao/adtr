@@ -152,16 +152,18 @@ export function getProof(values: Record<string, string>): Proof | null {
 }
 export function FormActions({
   busy,
+  disabled = false,
   cancel,
   children,
 }: {
   busy: boolean;
+  disabled?: boolean;
   cancel: () => void;
   children: ReactNode;
 }) {
   return (
     <div className="actions">
-      <button disabled={busy} type="submit">
+      <button disabled={busy || disabled} type="submit">
         {busy ? "正在提交…" : children}
       </button>
       <button type="button" className="secondary" onClick={cancel}>
@@ -230,6 +232,7 @@ export function Pagination({
         页
       </span>
       <button
+        type="button"
         className="secondary"
         disabled={busy || page.pageIdx <= 1}
         onClick={() => change(page.pageIdx - 1)}
@@ -237,6 +240,7 @@ export function Pagination({
         上一页
       </button>
       <button
+        type="button"
         className="secondary"
         disabled={busy || exhausted || page.pageSize === -1}
         onClick={() => change(page.pageIdx + 1)}

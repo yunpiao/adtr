@@ -18,13 +18,15 @@ import (
 	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/yunpiao/adtr/internal/credentialuse"
 )
 
 type auditContextKey struct{}
 type auditContext struct {
-	actor  *int64
-	tenant string
-	target *int64
+	actor                                    *int64
+	tenant                                   string
+	target                                   *int64
+	username, peerIP, requestPath, requestID string
 }
 
 type Service struct {
@@ -127,6 +129,9 @@ func (s *Service) readUser(row pgx.Row) (User, error) {
 	return u, nil
 }
 func (s *Service) audit(ctx context.Context, tx pgx.Tx, u User, action string, target int64) error {
+	if err := setAuditMetadata(ctx, tx, u); err != nil {
+		return err
+	}
 	_, err := tx.Exec(ctx, "INSERT INTO adtr.auth_audit(actor_id,tenant_id,action,target_id) VALUES($1,$2,$3,$4)", u.ID, u.tenant, action, target)
 	return err
 }
@@ -174,7 +179,7 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
-	ctx = context.WithValue(ctx, auditContextKey{}, &auditContext{tenant: "system"})
+	ctx = context.WithValue(ctx, auditContextKey{}, newAuditContext(r))
 	r = r.WithContext(ctx)
 	path := strings.TrimPrefix(r.URL.Path, "/api/auth")
 	expected := map[string]string{"/login": "POST", "/logout": "POST", "/me": "GET", "/password": "POST", "/reset-password": "POST", "/mfa": "GET", "/mfa/enroll": "POST", "/mfa/confirm": "POST", "/mfa/disable": "POST"}
@@ -218,6 +223,9 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	value, token, clear, err := s.handle(ctx, r, path, in)
 	if err != nil {
 		s.recordFailure(ctx, path)
+		if credentialuse.IsGovernanceError(err) {
+			err = fail(403, "credential_use_governance_required")
+		}
 		var f failure
 		if errors.As(err, &f) {
 			if f.status == 429 {
@@ -344,6 +352,7 @@ func (s *Service) handle(ctx context.Context, r *http.Request, path string, in r
 	if audit, ok := ctx.Value(auditContextKey{}).(*auditContext); ok {
 		audit.actor = &u.ID
 		audit.tenant = u.tenant
+		audit.username = u.Username
 	}
 	u.CSRF = csrfToken(s.key, cookie.Value)
 	if r.Method == "POST" && subtle.ConstantTimeCompare([]byte(r.Header.Get("X-CSRF-Token")), []byte(u.CSRF)) != 1 {
@@ -386,6 +395,9 @@ func (s *Service) handle(ctx context.Context, r *http.Request, path string, in r
 		if e != nil {
 			return nil, "", false, e
 		}
+		if err = setCredentialSelfContext(ctx, tx, u, credentialuse.ChangePassword); err != nil {
+			return nil, "", false, err
+		}
 		if _, err = tx.Exec(ctx, "UPDATE adtr.users SET password_hash=$1,must_change=false,password_updated_at=$2,pass_strength=$4 WHERE id=$3", hash, s.now(), u.ID, passwordStrength(in.NewPassword)); err != nil {
 			return nil, "", false, err
 		}
@@ -417,6 +429,9 @@ func (s *Service) handle(ctx context.Context, r *http.Request, path string, in r
 		if e != nil {
 			return nil, "", false, e
 		}
+		if err = setCredentialGovernance(ctx, tx, u, credentialuse.ResetPassword); err != nil {
+			return nil, "", false, err
+		}
 		if _, err = tx.Exec(ctx, "UPDATE adtr.users SET password_hash=$1,must_change=true,password_updated_at=$2,pass_strength=$4 WHERE id=$3", hash, s.now(), target, passwordStrength(in.NewPassword)); err != nil {
 			return nil, "", false, err
 		}
@@ -446,6 +461,9 @@ func (s *Service) handle(ctx context.Context, r *http.Request, path string, in r
 		if e != nil {
 			return nil, "", false, e
 		}
+		if err = setCredentialSelfContext(ctx, tx, u, credentialuse.BeginMFA); err != nil {
+			return nil, "", false, err
+		}
 		if _, err = tx.Exec(ctx, "UPDATE adtr.users SET mfa_pending=$1,mfa_pending_until=$2 WHERE id=$3", encrypted, s.now().Add(10*time.Minute), u.ID); err != nil {
 			return nil, "", false, err
 		}
@@ -469,6 +487,9 @@ func (s *Service) handle(ctx context.Context, r *http.Request, path string, in r
 		if !ok {
 			return nil, "", false, fail(401, "invalid_credentials")
 		}
+		if err = setCredentialSelfContext(ctx, tx, u, credentialuse.ConfirmMFA); err != nil {
+			return nil, "", false, err
+		}
 		if _, err = tx.Exec(ctx, "UPDATE adtr.users SET mfa_secret=mfa_pending,mfa_pending='',mfa_pending_until=NULL,mfa_last_step=$1 WHERE id=$2", step, u.ID); err != nil {
 			return nil, "", false, err
 		}
@@ -477,6 +498,9 @@ func (s *Service) handle(ctx context.Context, r *http.Request, path string, in r
 	case "/mfa/disable":
 		if !u.HasMFA || !checkPassword(u.passwordHash, in.Password) || !s.mfa(&u, in.MFACode) {
 			return nil, "", false, fail(401, "invalid_credentials")
+		}
+		if err = setCredentialSelfContext(ctx, tx, u, credentialuse.DisableMFA); err != nil {
+			return nil, "", false, err
 		}
 		if _, err = tx.Exec(ctx, "UPDATE adtr.users SET mfa_secret='',mfa_pending='',mfa_pending_until=NULL,mfa_last_step=-1 WHERE id=$1", u.ID); err != nil {
 			return nil, "", false, err
@@ -534,7 +558,7 @@ func (s *Service) Bootstrap(ctx context.Context, username, password string) erro
 	if err = tx.QueryRow(ctx, "INSERT INTO adtr.users(tenant_id,username,password_hash,role,pass_strength) VALUES('default',$1,$2,'platform_admin',$3) RETURNING id", username, hash, passwordStrength(password)).Scan(&id); err != nil {
 		return errors.New("bootstrap failed")
 	}
-	if err = s.audit(ctx, tx, User{ID: id, tenant: "default"}, "bootstrap", id); err != nil {
+	if err = s.audit(ctx, tx, User{ID: id, Username: username, tenant: "default"}, "bootstrap", id); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
@@ -553,7 +577,18 @@ func (s *Service) recordFailure(ctx context.Context, path string) {
 	if audit == nil {
 		audit = &auditContext{tenant: "system"}
 	}
-	_, _ = conn.Exec(ctx, "INSERT INTO adtr.auth_audit(actor_id,tenant_id,action,target_id) VALUES($1,$2,$3,$4)", audit.actor, audit.tenant, strings.TrimPrefix(path, "/")+"_denied", audit.target)
+	tx, err := conn.Begin(ctx)
+	if err != nil {
+		return
+	}
+	defer tx.Rollback(ctx)
+	if err = setAuditMetadata(ctx, tx, User{Username: audit.username}); err != nil {
+		return
+	}
+	if _, err = tx.Exec(ctx, "INSERT INTO adtr.auth_audit(actor_id,tenant_id,action,target_id) VALUES($1,$2,$3,$4)", audit.actor, audit.tenant, strings.TrimPrefix(path, "/")+"_denied", audit.target); err != nil {
+		return
+	}
+	_ = tx.Commit(ctx)
 }
 
 // All identity and authorization operations acquire tenant then user locks.

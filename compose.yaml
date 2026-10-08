@@ -27,6 +27,7 @@ services:
     security_opt: [no-new-privileges:true]
   api:
     build: .
+    stop_grace_period: 30s
     command: [-mode, api]
     environment:
       ADTR_DEVELOPMENT: 'true'
@@ -46,6 +47,7 @@ services:
     security_opt: [no-new-privileges:true]
   worker:
     build: .
+    stop_grace_period: 30s
     command: [-mode, worker]
     environment:
       ADTR_DEVELOPMENT: 'true'

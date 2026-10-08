@@ -172,3 +172,16 @@ actual PostgreSQL execution. The current dot workspace lacks PostgreSQL/Docker;
 real database and built-browser evidence must come from the isolated CI runs.
 Source-runtime parity, AD/Windows execution, capacity and production controls
 remain separate gates; this document makes no full-product acceptance claim.
+
+## Audit export integration (schema 6)
+
+The platform kind `audit.export` additionally requires `audit.readable` and
+`audit_exports.readable`; writes/execution require `audit_exports.writeable`
+in addition to the existing task grants. Changes to either audit mark bump
+actor authorization epochs under the same tenant/user lock order. Existing
+custom roles gain no new rights automatically.
+
+Artifact reads use dedicated audit endpoints and recheck the creator, current
+session/grants/epoch, every snapshot domain's live expiry/capacity/membership,
+and the audit visibility revision. Generic task interfaces retain owner-scoped
+control state, but never disclose private artifact result/cursor metadata.

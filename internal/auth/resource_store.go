@@ -212,6 +212,9 @@ func (s *Service) revokeResourceRoles(ctx context.Context, tx pgx.Tx, u User, ro
 	return mine, err
 }
 func (s *Service) resourceAudit(ctx context.Context, tx pgx.Tx, u User, action, id string) error {
+	if err := setAuditMetadata(ctx, tx, u); err != nil {
+		return err
+	}
 	if _, err := tx.Exec(ctx, "INSERT INTO adtr.resource_audit(actor_id,tenant_id,action,target_id) VALUES($1,$2,$3,$4)", u.ID, u.tenant, action, id); err != nil {
 		return err
 	}

@@ -18,6 +18,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/yunpiao/adtr/internal/credentialuse"
 )
 
 // ServeAccessHTTP reuses durable identity, session and CSRF protections.
@@ -57,11 +58,14 @@ func (s *Service) ServeAccessHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
-	ctx = context.WithValue(ctx, auditContextKey{}, &auditContext{tenant: "system"})
+	ctx = context.WithValue(ctx, auditContextKey{}, newAuditContext(r))
 	r = r.WithContext(ctx)
 	value, revoked, err := s.handleAccess(ctx, r, path, route, in)
 	if err != nil {
 		s.recordFailure(ctx, "access"+strings.ReplaceAll(path, "/", "_"))
+		if credentialuse.IsGovernanceError(err) {
+			err = fail(403, "credential_use_governance_required")
+		}
 		var f failure
 		var pg *pgconn.PgError
 		if errors.As(err, &pg) && pg.Code == "23505" {
@@ -151,6 +155,7 @@ func (s *Service) authenticateAccess(ctx context.Context, tx pgx.Tx, r *http.Req
 	if a, ok := ctx.Value(auditContextKey{}).(*auditContext); ok {
 		a.actor = &u.ID
 		a.tenant = u.tenant
+		a.username = u.Username
 	}
 	u.CSRF = csrfToken(s.key, cookie.Value)
 	if r.Method != "GET" && subtle.ConstantTimeCompare([]byte(r.Header.Get("X-CSRF-Token")), []byte(u.CSRF)) != 1 {
@@ -205,6 +210,9 @@ func (s *Service) handleAccess(ctx context.Context, r *http.Request, path string
 	}
 	if route.write {
 		if e = s.requireAccessProof(ctx, tx, &u, in.ActorPassword, in.TOTPCode); e != nil {
+			return nil, false, e
+		}
+		if e = setCredentialGovernance(ctx, tx, u, credentialuse.ManageRoles); e != nil {
 			return nil, false, e
 		}
 	}
@@ -285,7 +293,7 @@ func (s *Service) handleAccess(ctx context.Context, r *http.Request, path string
 			rt, known := accessRoutes[suffix]
 			results[i] = ok && prefix && known && method == rt.method && grantAllows(grants, rt)
 			if ok && !prefix {
-				results[i] = resourcePathAllowed(method, url, roleID, grants) || taskPathAllowed(method, url, grants)
+				results[i] = resourcePathAllowed(method, url, roleID, grants) || taskPathAllowed(method, url, grants) || auditPathAllowed(method, url, grants) || systemPathAllowed(method, url, u.tenant, grants) || schedulePathAllowed(method, url, grants) || archivePathAllowed(method, url, grants) || credentialUsePathAllowed(method, url, roleID, grants) || operationAccountPathAllowed(method, url, grants) || domainSelectionPathAllowed(method, url, grants) || domainAccessPathAllowed(method, url, roleID, grants) || operationalLogPathAllowed(method, url, u.tenant, grants) || directoryPathAllowed(method, url, grants) || directoryCredentialUsePathAllowed(method, url, roleID, grants)
 			}
 		}
 		value = map[string]any{"results": results}
@@ -344,7 +352,7 @@ func loadAccessGrants(ctx context.Context, tx pgx.Tx, tenant, id string) (map[st
 }
 func permissionNodes(grants map[string]AccessAuth, onlyReadable bool) []AccessPermission {
 	nodes := make([]AccessPermission, 0, len(accessMarks))
-	names := map[string]string{"users": "Users", "roles": "Roles", "permissions": "Permissions", "tasks": "Tasks"}
+	names := map[string]string{"users": "Users", "roles": "Roles", "permissions": "Permissions", "tasks": "Tasks", "audit": "Audit", "audit_exports": "Audit exports", "system": "System", "schedules": "Schedules", "task_archive": "Task archive", "domains": "Domain connections", "operation_accounts": "Operation accounts", "system_logs": "Operational logs", "directory_assets": "Directory assets"}
 	keys := make([]string, 0, len(accessRoutes))
 	for p := range accessRoutes {
 		keys = append(keys, p)
@@ -382,6 +390,163 @@ func permissionNodes(grants map[string]AccessAuth, onlyReadable bool) []AccessPe
 					mode = "writeable"
 				}
 				paths = append(paths, AccessPath{rt.method + " " + path, rt.method + " /api/resources" + path, mode})
+			}
+		}
+		if mark == "audit" || mark == "audit_exports" {
+			auditKeys := []string{}
+			for path := range auditRoutes {
+				if strings.HasPrefix(path, "/exports") == (mark == "audit_exports") {
+					auditKeys = append(auditKeys, path)
+				}
+			}
+			sort.Strings(auditKeys)
+			for _, path := range auditKeys {
+				rt := auditRoutes[path]
+				mode := "readable"
+				if rt.write {
+					mode = "writeable"
+				}
+				paths = append(paths, AccessPath{rt.method + " " + path, rt.method + " /api/audit" + path, mode})
+			}
+		}
+		if mark == "directory_assets" {
+			useKeys := []string{}
+			for path := range credentialUseRoutes {
+				useKeys = append(useKeys, path)
+			}
+			sort.Strings(useKeys)
+			for _, path := range useKeys {
+				rt := credentialUseRoutes[path]
+				mode := "readable"
+				if rt.write {
+					mode = "writeable"
+				}
+				name := "Directory credential governance (builtin admin): " + path
+				if path == "/effective" {
+					name = "Own directory-use eligibility"
+				}
+				paths = append(paths, AccessPath{name, rt.method + " /api/directory-credential-use" + path, mode})
+			}
+			keys := []string{}
+			for path := range directoryRoutes {
+				keys = append(keys, path)
+			}
+			sort.Strings(keys)
+			for _, path := range keys {
+				rt := directoryRoutes[path]
+				mode := "readable"
+				if rt.write {
+					mode = "writeable"
+				}
+				paths = append(paths, AccessPath{rt.method + " " + path, rt.method + " /api/directory" + path, mode})
+			}
+		}
+		if mark == "system_logs" {
+			keys := []string{}
+			for path := range operationalLogRoutes {
+				keys = append(keys, path)
+			}
+			sort.Strings(keys)
+			for _, path := range keys {
+				rt := operationalLogRoutes[path]
+				mode := "readable"
+				if rt.write {
+					mode = "writeable"
+				}
+				paths = append(paths, AccessPath{rt.method + " " + path, rt.method + " /api/system/logs" + path, mode})
+			}
+		}
+		if mark == "system" {
+			systemKeys := []string{}
+			for path := range systemRoutes {
+				systemKeys = append(systemKeys, path)
+			}
+			sort.Strings(systemKeys)
+			for _, path := range systemKeys {
+				rt := systemRoutes[path]
+				mode := "readable"
+				if rt.write {
+					mode = "writeable"
+				}
+				paths = append(paths, AccessPath{rt.method + " " + path, rt.method + " /api/system" + path, mode})
+			}
+		}
+		if mark == "schedules" {
+			keys := []string{}
+			for path := range scheduleRoutes {
+				keys = append(keys, path)
+			}
+			sort.Strings(keys)
+			for _, path := range keys {
+				rt := scheduleRoutes[path]
+				mode := "readable"
+				if rt.write {
+					mode = "writeable"
+				}
+				paths = append(paths, AccessPath{rt.method + " " + path, rt.method + " /api/tasks/schedules" + path, mode})
+			}
+		}
+		if mark == "task_archive" {
+			keys := []string{}
+			for path := range archiveRoutes {
+				keys = append(keys, path)
+			}
+			sort.Strings(keys)
+			for _, path := range keys {
+				rt := archiveRoutes[path]
+				mode := "readable"
+				if rt.write {
+					mode = "writeable"
+				}
+				paths = append(paths, AccessPath{rt.method + " " + path, rt.method + " /api/tasks" + path, mode})
+			}
+		}
+		if mark == "operation_accounts" {
+			useKeys := []string{}
+			for path := range credentialUseRoutes {
+				useKeys = append(useKeys, path)
+			}
+			sort.Strings(useKeys)
+			for _, path := range useKeys {
+				rt := credentialUseRoutes[path]
+				mode := "readable"
+				if rt.write {
+					mode = "writeable"
+				}
+				name := "Credential use governance (builtin admin): " + path
+				if path == "/effective" {
+					name = "Own credential-use eligibility"
+				}
+				paths = append(paths, AccessPath{name, rt.method + " /api/credential-use" + path, mode})
+			}
+			keys := []string{}
+			for path := range operationAccountRoutes {
+				keys = append(keys, path)
+			}
+			sort.Strings(keys)
+			for _, path := range keys {
+				rt := operationAccountRoutes[path]
+				mode := "readable"
+				if rt.write {
+					mode = "writeable"
+				}
+				paths = append(paths, AccessPath{rt.method + " " + path, rt.method + " /api/operation-accounts" + path, mode})
+			}
+		}
+		if mark == "domains" {
+			paths = append(paths, AccessPath{"Select configured domains", "GET /api/domain-selection", "readable"}, AccessPath{"Resolve configured selection", "GET /api/domain-selection/resolve", "readable"})
+			keys := []string{}
+			for path := range domainRoutes {
+				keys = append(keys, path)
+			}
+			sort.Strings(keys)
+			for _, path := range keys {
+				rt := domainRoutes[path]
+				mode := "readable"
+				if rt.write {
+					mode = "writeable"
+				}
+				paths = append(paths, AccessPath{rt.method + " " + path, rt.method + " /api/domains" + path, mode})
 			}
 		}
 		if mark == "tasks" {

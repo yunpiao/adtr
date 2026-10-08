@@ -1,4 +1,7 @@
 import { defineConfig } from "@playwright/test";
+// Playwright can emit error-context DOM snapshots independently of trace and
+// screenshot settings. Never copy proof inputs into those failure artifacts.
+process.env.PLAYWRIGHT_NO_COPY_PROMPT = "1";
 export default defineConfig({
   testDir: "./e2e",
   timeout: 120_000,

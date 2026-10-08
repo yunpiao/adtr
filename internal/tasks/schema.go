@@ -2,7 +2,7 @@ package tasks
 
 // Schema runs only through the explicit versioned migrator. History and
 // idempotency records deliberately have no implicit retention/deletion policy.
-const Schema = queueSchema + ScheduleSchema
+const Schema = queueSchema + ScheduleSchema + ArchiveCoreSchema
 
 const queueSchema = `
 CREATE TABLE adtr.tasks (

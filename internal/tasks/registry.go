@@ -22,8 +22,14 @@ type Registry struct{ kinds map[string]Kind }
 func NewRegistry(kinds ...Kind) (*Registry, error) {
 	r := &Registry{kinds: map[string]Kind{}}
 	for _, k := range kinds {
-		if !kindName.MatchString(k.Name) || k.Version < 1 || k.MaxAttempts < 1 || k.MaxAttempts > 5 || k.Validate == nil || k.Execute == nil || !k.ReplaySafe || k.Lease < 100*time.Millisecond || k.Lease > 5*time.Minute || k.Heartbeat < 10*time.Millisecond || k.Heartbeat > k.Lease/3 || k.Timeout < 10*time.Millisecond || k.Timeout > time.Hour || k.RetryBase < 10*time.Millisecond || k.RetryCap < k.RetryBase || k.RetryCap > time.Minute {
+		if !kindName.MatchString(k.Name) || k.Version < 1 || k.MaxAttempts < 1 || k.MaxAttempts > 5 || k.Validate == nil || k.Execute == nil || !(k.ReplaySafe || k.SingleAttemptOnly) || k.Lease < 100*time.Millisecond || k.Lease > 5*time.Minute || k.Heartbeat < 10*time.Millisecond || k.Heartbeat > k.Lease/3 || k.Timeout < 10*time.Millisecond || k.Timeout > time.Hour || k.RetryBase < 10*time.Millisecond || k.RetryCap < k.RetryBase || k.RetryCap > time.Minute {
 			return nil, fmt.Errorf("invalid task kind policy: %s", k.Name)
+		}
+		if k.SingleAttemptOnly && (k.ReplaySafe || k.MaxAttempts != 1 || len(k.RetryCodes) != 0 || k.Schedulable) {
+			return nil, fmt.Errorf("invalid single-attempt task policy")
+		}
+		if k.OnQuiesced != nil && (!k.SingleAttemptOnly || k.Schedulable) {
+			return nil, fmt.Errorf("quiescence hook requires unschedulable single-attempt kind")
 		}
 		if _, exists := r.kinds[k.Name]; exists {
 			return nil, fmt.Errorf("duplicate task kind")
@@ -38,8 +44,8 @@ func NewRegistry(kinds ...Kind) (*Registry, error) {
 	}
 	return r, nil
 }
-func ProductionRegistry() *Registry {
-	r, err := NewRegistry(Kind{Name: "infrastructure.health", Version: 1, Platform: true, MaxAttempts: 5, Lease: 30 * time.Second, Heartbeat: 5 * time.Second, Timeout: 10 * time.Second, RetryBase: 5 * time.Second, RetryCap: 60 * time.Second, RetryCodes: []string{"database_unavailable"}, ReplaySafe: true, Validate: emptyPayload, Execute: func(ctx context.Context, ex Execution) Outcome {
+func ProductionRegistry(extra ...Kind) *Registry {
+	health := Kind{Name: "infrastructure.health", Version: 1, Platform: true, Schedulable: true, MaxAttempts: 5, Lease: 30 * time.Second, Heartbeat: 5 * time.Second, Timeout: 10 * time.Second, RetryBase: 5 * time.Second, RetryCap: 60 * time.Second, RetryCodes: []string{"database_unavailable"}, ReplaySafe: true, Validate: emptyPayload, Execute: func(ctx context.Context, ex Execution) Outcome {
 		if _, err := ex.Checkpoint(ctx, 25, json.RawMessage(`{}`), json.RawMessage(`{}`), ex.Task.ResultVersion); err != nil {
 			if errors.Is(err, ErrCancelRequested) {
 				return Outcome{State: Cancelled, Code: "cancelled"}
@@ -53,7 +59,8 @@ func ProductionRegistry() *Registry {
 			return Outcome{State: Failed, Code: "database_unavailable", Retryable: true}
 		}
 		return Outcome{State: Succeeded, Result: json.RawMessage(`{"database":"ready","queue":"ready"}`)}
-	}})
+	}}
+	r, err := NewRegistry(append([]Kind{health}, extra...)...)
 	if err != nil {
 		panic(err)
 	}

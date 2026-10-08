@@ -123,7 +123,7 @@ var accessRoutes = map[string]accessRoute{
 	"/permissions": {"GET", "permissions", false, "", ""}, "/permissions/save": {"POST", "permissions", true, "roleID permissions", ""},
 	"/menu": {"GET", "", false, "", ""}, "/check": {"POST", "", false, "paths", ""},
 }
-var accessMarks = []string{"users", "roles", "permissions", "tasks"}
+var accessMarks = []string{"users", "roles", "permissions", "tasks", "audit", "audit_exports", "system", "schedules", "task_archive", "domains", "operation_accounts", "system_logs", "directory_assets"}
 
 func validAccessText(s string, max int) bool {
 	if !utf8.ValidString(s) || utf8.RuneCountInString(s) > max {

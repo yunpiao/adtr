@@ -54,6 +54,9 @@ const task = (
   result: null,
   cursor: null,
   parentTaskUUID: "",
+  terminalAt: null,
+  archived: false,
+  visibilityVersion: 0,
 });
 const list = (tasks = [task()]) => ({
   page: { pageIdx: 1, pageSize: 20, total: tasks.length, totalPage: 1 },
@@ -81,7 +84,8 @@ let override: (url: string, init: RequestInit) => Promise<Response> | undefined;
 let fetcher: ReturnType<typeof vi.fn>;
 let counter = 0;
 beforeEach(() => {
-  discardTaskIntent();
+  discardTaskIntent({ ID: 1, username: "admin" });
+  sessionStorage.clear();
   profile = {
     ID: 1,
     username: "admin",
@@ -245,7 +249,7 @@ describe("task workspace", () => {
     await screen.findByRole("heading", { name: "账户概览" });
     click("后台任务");
     await screen.findByRole("table", { name: "任务列表" });
-    expect(screen.getByText(/没有 AD 检测/)).toBeVisible();
+    expect(screen.getByText(/域连接检测请使用域连接页面/)).toBeVisible();
     expect(
       JSON.parse(
         fetcher.mock.calls.find(([url]) => url === "/api/access/check")![1]
@@ -391,7 +395,7 @@ describe("task workspace", () => {
     click("继续核对未确认的提交");
     await screen.findByLabelText("提交幂等键");
     expect(screen.getByLabelText("提交幂等键")).toHaveValue(key);
-    expect(screen.getByLabelText("操作者当前密码")).toHaveValue("");
+    expect(await screen.findByLabelText("操作者当前密码")).toHaveValue("");
   });
   it("retains one idempotency key across network failure, refetch, and fresh-proof replay", async () => {
     let submissions = 0;
@@ -523,7 +527,7 @@ describe("task workspace", () => {
   });
 });
 describe("task interruption persistence", () => {
-  it("restores a non-secret pending key after reload and clears it on logout", async () => {
+  it("restores a non-secret pending key after reload and clears it only on explicit discard", async () => {
     const key = "10000000-0000-4000-8000-000000000001";
     sessionStorage.setItem(
       "adtr.pending-task",
@@ -539,12 +543,16 @@ describe("task interruption persistence", () => {
     await screen.findByLabelText("提交幂等键");
     expect(screen.getByLabelText("提交幂等键")).toHaveValue(key);
     expect(screen.getByLabelText("操作者当前密码")).toHaveValue("");
-    expect(sessionStorage.getItem("adtr.pending-task")).not.toContain(
-      profile.csrfToken,
-    );
-    expect(sessionStorage.getItem("adtr.pending-task")).not.toContain(
-      "actorPassword",
-    );
+    expect(
+      sessionStorage.getItem(
+        `adtr.pending-task:${profile.ID}:${encodeURIComponent(profile.username)}`,
+      ),
+    ).not.toContain(profile.csrfToken);
+    expect(
+      sessionStorage.getItem(
+        `adtr.pending-task:${profile.ID}:${encodeURIComponent(profile.username)}`,
+      ),
+    ).not.toContain("actorPassword");
     discardTaskIntent();
     expect(sessionStorage.length).toBe(0);
   });
@@ -571,4 +579,178 @@ describe("expanded permission catalogue", () => {
     );
     expect(updated).toContainEqual(unknown);
   });
+});
+
+describe("audit export tasks use their dedicated creation route", () => {
+  it("does not expose generic recovery for a failed audit export", async () => {
+    override = (url) =>
+      url.startsWith("/api/tasks/detail")
+        ? response({
+            task: {
+              ...task("dead_letter"),
+              taskName: "audit.export",
+              result: {},
+              cursor: {},
+            },
+            events: [],
+          })
+        : undefined;
+    await detail();
+    expect(
+      screen.queryByRole("button", { name: "创建恢复任务" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByText(/审计导出文件请在「操作审计」/),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText("任务实际结果")).toHaveTextContent("{}");
+  });
+  it("clears an obsolete saved recovery intent once its audit kind is confirmed", async () => {
+    sessionStorage.setItem(
+      "adtr.pending-task",
+      JSON.stringify({
+        owner: profile.ID,
+        username: profile.username,
+        action: "recover",
+        taskUUID: task().taskUUID,
+        key: "00000000-0000-4000-8000-000000000039",
+      }),
+    );
+    override = (url) =>
+      url.startsWith("/api/tasks/detail")
+        ? response({
+            task: {
+              ...task("failed"),
+              taskName: "audit.export",
+              result: {},
+              cursor: {},
+            },
+            events: [],
+          })
+        : undefined;
+    await start();
+    click("继续核对未确认的提交");
+    await screen.findByText(/审计导出文件请在「操作审计」/);
+    expect(
+      screen.queryByRole("button", { name: "确认恢复任务" }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("恢复幂等键")).not.toBeInTheDocument();
+    expect(
+      sessionStorage.getItem(
+        `adtr.pending-task:${profile.ID}:${encodeURIComponent(profile.username)}`,
+      ),
+    ).toBeNull();
+    expect(calls("/recover")).toHaveLength(0);
+    click("返回任务列表");
+    await screen.findByRole("table", { name: "任务列表" });
+    expect(screen.getByRole("button", { name: "提交健康检查" })).toBeEnabled();
+  });
+  it("retains explicit cancellation for a running audit export", async () => {
+    override = (url) =>
+      url.startsWith("/api/tasks/detail")
+        ? response({
+            task: {
+              ...task("running"),
+              taskName: "audit.export",
+              result: {},
+              cursor: {},
+            },
+            events: [],
+          })
+        : undefined;
+    await detail();
+    expect(screen.getByRole("button", { name: "请求取消任务" })).toBeEnabled();
+  });
+});
+
+describe("dedicated domain connection task guard", () => {
+  it.each(["domain.connection_test", "domain.account_connection_test"])(
+    "hides generic recovery and all raw results/cursors for %s",
+    async (kind) => {
+      override = (url) =>
+        url.startsWith("/api/tasks/detail")
+          ? response({
+              task: {
+                ...task("failed"),
+                taskName: kind,
+                domainId: "synthetic-domain-id",
+                maxAttempts: 1,
+                result: { unsafe: "DO_NOT_RENDER" },
+                cursor: { unsafe: "DO_NOT_RENDER_CURSOR" },
+              },
+              events: [],
+            })
+          : undefined;
+      await detail();
+      expect(
+        screen.getByText(/域连接诊断请在「域连接」页面查看/),
+      ).toBeVisible();
+      expect(screen.queryByRole("button", { name: "创建恢复任务" })).toBeNull();
+      expect(screen.queryByText(/DO_NOT_RENDER/)).toBeNull();
+      expect(calls("/recover")).toHaveLength(0);
+    },
+  );
+  it.each(["domain.connection_test", "domain.account_connection_test"])(
+    "clears a stale generic recovery intent for %s",
+    async (kind) => {
+      sessionStorage.setItem(
+        "adtr.pending-task",
+        JSON.stringify({
+          owner: profile.ID,
+          username: profile.username,
+          action: "recover",
+          taskUUID: task().taskUUID,
+          key: "00000000-0000-4000-8000-000000000039",
+        }),
+      );
+      override = (url) =>
+        url.startsWith("/api/tasks/detail")
+          ? response({
+              task: {
+                ...task("failed"),
+                taskName: kind,
+                domainId: "synthetic-domain-id",
+                maxAttempts: 1,
+              },
+              events: [],
+            })
+          : undefined;
+      await start();
+      click("继续核对未确认的提交");
+      await screen.findByText(/域连接诊断请在「域连接」页面查看/);
+      expect(screen.queryByRole("button", { name: "确认恢复任务" })).toBeNull();
+      expect(
+        sessionStorage.getItem(
+          `adtr.pending-task:${profile.ID}:${encodeURIComponent(profile.username)}`,
+        ),
+      ).toBeNull();
+      expect(calls("/recover")).toHaveLength(0);
+    },
+  );
+});
+
+describe("dedicated operational bundle guard", () => {
+  it.each(["running", "failed"] as const)(
+    "hides generic mutation and private results for %s bundles",
+    async (state) => {
+      override = (url) =>
+        url.startsWith("/api/tasks/detail")
+          ? response({
+              task: {
+                ...task(state),
+                taskName: "system.logs_bundle",
+                result: { unsafe: "PRIVATE_BUNDLE_RESULT" },
+                cursor: { unsafe: "PRIVATE_BUNDLE_CURSOR" },
+              },
+              events: [],
+            })
+          : undefined;
+      await detail();
+      expect(screen.getByText(/运行日志诊断包的结果和文件请在/)).toBeVisible();
+      expect(screen.queryByRole("button", { name: "请求取消任务" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "创建恢复任务" })).toBeNull();
+      expect(screen.queryByText(/PRIVATE_BUNDLE/)).toBeNull();
+      expect(calls("/cancel")).toHaveLength(0);
+      expect(calls("/recover")).toHaveLength(0);
+    },
+  );
 });

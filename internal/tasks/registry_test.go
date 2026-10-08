@@ -152,3 +152,30 @@ func TestOperationDeadlineIsBoundedAndPreservesTighterParent(t *testing.T) {
 		t.Fatal("tighter parent deadline lost")
 	}
 }
+
+func TestSingleAttemptKindCannotRetryScheduleOrClaimReplaySafety(t *testing.T) {
+	base := ProductionRegistry().kinds["infrastructure.health"]
+	base.ReplaySafe = false
+	base.SingleAttemptOnly = true
+	base.Schedulable = false
+	base.MaxAttempts = 1
+	base.RetryCodes = nil
+	if _, err := NewRegistry(base); err != nil {
+		t.Fatal(err)
+	}
+	for name, change := range map[string]func(*Kind){
+		"replay":            func(k *Kind) { k.ReplaySafe = true },
+		"multiple attempts": func(k *Kind) { k.MaxAttempts = 2 },
+		"retry code":        func(k *Kind) { k.RetryCodes = []string{"network_failed"} },
+		"scheduled":         func(k *Kind) { k.Schedulable = true },
+		"implicit":          func(k *Kind) { k.SingleAttemptOnly = false },
+	} {
+		t.Run(name, func(t *testing.T) {
+			k := base
+			change(&k)
+			if _, err := NewRegistry(k); err == nil {
+				t.Fatal("unsafe policy accepted")
+			}
+		})
+	}
+}

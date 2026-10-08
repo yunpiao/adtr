@@ -81,12 +81,33 @@ export const managementTabs: ManagementTab[] = [
   "roles",
   "permissions",
 ];
-export const marks: Mark[] = [...managementTabs, "tasks"];
+export const marks: Mark[] = [
+  ...managementTabs,
+  "tasks",
+  "audit",
+  "audit_exports",
+  "system",
+  "schedules",
+  "task_archive",
+  "domains",
+  "operation_accounts",
+  "system_logs",
+  "directory_assets",
+];
 export const labels: Record<Mark, string> = {
   users: "用户管理",
   roles: "角色管理",
   permissions: "功能权限",
   tasks: "后台任务",
+  audit: "操作审计",
+  audit_exports: "审计导出",
+  system: "系统健康",
+  system_logs: "运行日志与诊断包",
+  schedules: "周期计划",
+  task_archive: "任务归档",
+  domains: "域连接",
+  operation_accounts: "管理操作账户",
+  directory_assets: "目录资产",
 };
 export const operations = [
   "GET /api/access/users",
@@ -167,7 +188,7 @@ export const accessMessages: Record<string, string> = {
 };
 export function errorText(error: unknown) {
   return error instanceof ApiError
-    ? (accessMessages[error.code] ?? `${messages.internal}（${error.code}）`)
+    ? (accessMessages[error.code] ?? messages.internal)
     : messages.internal;
 }
 export type QueryValue = string | number | boolean | string[] | undefined;

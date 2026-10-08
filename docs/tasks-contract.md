@@ -4,11 +4,13 @@ Refs Issue #12, AD-F-189/191/192, task-contract.md, source FLD-3131–3149,
 DTL-030/051. This is a PostgreSQL queue/API/worker foundation with one real
 infrastructure executor. Detection, export, management restart, notifications,
 AD operations and Windows integration are not silently registered or accepted.
-Their task schemas, credentials, effects and laboratory gates remain open.
+Their task schemas, credentials, effects and laboratory gates remain open. F39
+adds the separately documented `audit.export` database-artifact executor in
+[audit-contract.md](audit-contract.md); this does not implement AD exports.
 
 ## Explicit executable scope
 
-The production registry contains exactly `infrastructure.health`, payload
+The original infrastructure kind is `infrastructure.health`, payload
 version 1, platform scope, domain ID `platform`, and payload `{}`. It performs a
 real context-aware PostgreSQL query checking schema metadata and queue existence.
 Success returns `{"database":"ready","queue":"ready"}`. It accepts no URL,
@@ -30,7 +32,7 @@ and rollback cleanup are bounded separately, so a pre-execution blackhole cannot
 pin a worker polling slot indefinitely.
 
 No network subprocess or external side-effect executor can be registered: all
-registered kinds must explicitly declare read-only/idempotent safe replay.
+registered kinds must declare safe replay or the explicit SingleAttemptOnly policy described below.
 Future subprocess work needs process-group termination and reconciliation support
 before registration, rather than inheriting this executor's cancellation claim.
 
@@ -136,7 +138,8 @@ Heartbeat, progress and completion require owner/token, live database-clock leas
 expected state and result version. Checkpoint writes progress/result/cursor in
 one transaction. Stale updates are rejected; progress cannot move backwards.
 The engine fences persistence, not an unsupported exactly-once external effect.
-Only safe read-only replay is admitted, so an expired executor cannot authorize
+Automatic replay is limited to explicitly safe operations or fenced immutable
+database artifact staging. An expired executor cannot authorize
 new effects. Expired running leases enter retry_wait or dead_letter within the
 attempt budget; queued claims can be reacquired without consuming an attempt.
 
@@ -172,3 +175,33 @@ Local environment has no Docker/PostgreSQL: actual database, separate process,
 and browser chains must run in authorized CI against the exact integrated head.
 No 209-function acceptance, original source parity, notification recovery,
 production readiness or Windows/AD laboratory acceptance is implied by this slice.
+
+## F39 private artifact integration
+
+`audit.export` is owner-scoped. Same-key replay cannot cross actors or revive an
+old authorization epoch; list counts and pages exclude other actors and stale
+epochs before pagination. Generic task responses expose control state only,
+with artifact result/cursor replaced by empty objects. Generic creation/recovery
+rejects this kind: the dedicated audit submission route writes its protected
+audit event atomically. Generic cancellation remains supported. A failed export
+is retried as a new dedicated submission.
+
+`Execution.WithTx` is the only fenced module-write path for registered
+artifact executors. It checks schema, authorization epoch, owner/fencing token,
+DB-clock lease, state and result version; callback writes and the checkpoint
+commit together, or roll back together. Its context is bounded to five seconds.
+Callbacks cannot manage the transaction through Commit/Rollback/Begin/Conn.
+Registered code is trusted and must not issue transaction-control SQL.
+
+An artifact kind's `CancelDiscardsResult` policy resolves a cancel request that
+arrives before final publication as cancelled with no result. This policy is
+only for staged artifacts, never for concealing completed external effects.
+Private snapshot metadata and bytes are available only through the dedicated
+audit endpoint's current creator, permission, epoch, domain and visibility
+checks. Time-based domain expiry is checked live, not inferred from epochs.
+
+## Single-attempt domain diagnostics
+
+`domain.connection_test` is not marked replay-safe: even an authentication bind can affect directory lockout/audit state. Its explicit `SingleAttemptOnly` policy requires MaxAttempts=1, no retry codes, ReplaySafe=false and Schedulable=false. A lost started worker records failed/executor_lost; the engine rejects recovery after current authorization checks. A fresh dedicated domain submission needs new proof and a new idempotency key. Replaying the same key returns the original task and cannot start a second bind. Claim alone still does not execute or authorize side effects; Start and each probe stage check the live epoch and pinned revisions. Generic task result/cursor are masked for this kind; the domain endpoint publishes only fenced terminal evidence.
+
+The executor commits short WithTx checks before network stages and again before staging the result; no database transaction spans network I/O. Joined socket cancellation bounds stopping, but cannot revoke bytes already sent or roll back server authentication counters.

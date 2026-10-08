@@ -142,8 +142,16 @@ test("real browser → API → PostgreSQL users and function permissions", async
     await expect(page.getByRole("button", { name, exact: true })).toBeVisible();
   const adminMenu = await readJSON(context, "/api/access/menu");
   expect(adminMenu.menu.map((node: Permission) => node.mark).sort()).toEqual([
+    "audit",
+    "audit_exports",
+    "domains",
+    "operation_accounts",
     "permissions",
     "roles",
+    "schedules",
+    "system",
+    "system_logs",
+    "task_archive",
     "tasks",
     "users",
   ]);
@@ -194,6 +202,14 @@ test("real browser → API → PostgreSQL users and function permissions", async
     { mark: "roles", auth: { readable: false, writeable: false } },
     { mark: "permissions", auth: { readable: false, writeable: false } },
     { mark: "tasks", auth: { readable: false, writeable: false } },
+    { mark: "audit", auth: { readable: false, writeable: false } },
+    { mark: "audit_exports", auth: { readable: false, writeable: false } },
+    { mark: "system", auth: { readable: false, writeable: false } },
+    { mark: "schedules", auth: { readable: false, writeable: false } },
+    { mark: "task_archive", auth: { readable: false, writeable: false } },
+    { mark: "domains", auth: { readable: false, writeable: false } },
+    { mark: "operation_accounts", auth: { readable: false, writeable: false } },
+    { mark: "system_logs", auth: { readable: false, writeable: false } },
   ]);
   expect(persistedRole.permissions).toEqual(permissions.permissions);
 

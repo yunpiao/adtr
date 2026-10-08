@@ -59,6 +59,8 @@ export async function request<T>(
   return data as T;
 }
 export const messages: Record<string, string> = {
+  credential_use_governance_required:
+    "此变更涉及凭据使用授权，需要具有相应域范围的平台管理员重新验证。请先核对或撤销相关授权。",
   invalid_input: "请检查输入格式后重试。",
   unauthenticated: "登录已失效，请重新登录。",
   forbidden: "当前账户没有执行此操作的权限。",

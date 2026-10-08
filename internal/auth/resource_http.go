@@ -15,6 +15,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/yunpiao/adtr/internal/credentialuse"
 )
 
 // ServeResources handles local scope management. A /check response is not a bearer
@@ -23,7 +24,7 @@ func (s *Service) ServeResources(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
-	ctx = context.WithValue(ctx, auditContextKey{}, &auditContext{tenant: "system"})
+	ctx = context.WithValue(ctx, auditContextKey{}, newAuditContext(r))
 	r = r.WithContext(ctx)
 	path, prefixed := strings.CutPrefix(r.URL.Path, "/api/resources")
 	route, ok := resourceRoutes[path]
@@ -59,6 +60,9 @@ func (s *Service) ServeResources(w http.ResponseWriter, r *http.Request) {
 	value, err := s.handleResource(ctx, r, path, route, in)
 	if err != nil {
 		s.recordFailure(ctx, "resource"+path)
+		if credentialuse.IsGovernanceError(err) {
+			err = fail(403, "credential_use_governance_required")
+		}
 		var f failure
 		var p *pgconn.PgError
 		if errors.As(err, &f) {
@@ -198,6 +202,13 @@ func (s *Service) handleResource(ctx context.Context, r *http.Request, path stri
 	}
 	if route.write {
 		if err = s.requireAccessProof(ctx, tx, &actor, in.ActorPassword, in.TOTPCode); err != nil {
+			return nil, err
+		}
+		op := credentialuse.ManageRoles
+		if path == "/tenant/save" {
+			op = credentialuse.ManageTenant
+		}
+		if err = setCredentialGovernance(ctx, tx, actor, op); err != nil {
 			return nil, err
 		}
 	}

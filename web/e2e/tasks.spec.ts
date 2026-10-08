@@ -288,6 +288,14 @@ test("real browser → API → Worker → PostgreSQL task result, idempotency an
     { mark: "roles", auth: { readable: false, writeable: false } },
     { mark: "permissions", auth: { readable: false, writeable: false } },
     { mark: "tasks", auth: { readable: true, writeable: false } },
+    { mark: "audit", auth: { readable: false, writeable: false } },
+    { mark: "audit_exports", auth: { readable: false, writeable: false } },
+    { mark: "system", auth: { readable: false, writeable: false } },
+    { mark: "schedules", auth: { readable: false, writeable: false } },
+    { mark: "task_archive", auth: { readable: false, writeable: false } },
+    { mark: "domains", auth: { readable: false, writeable: false } },
+    { mark: "operation_accounts", auth: { readable: false, writeable: false } },
+    { mark: "system_logs", auth: { readable: false, writeable: false } },
   ]);
   await page.getByRole("button", { name: "用户管理", exact: true }).click();
   await page.getByRole("button", { name: "新增用户", exact: true }).click();

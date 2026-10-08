@@ -18,21 +18,56 @@ import {
 
 import AccessWorkspace from "./AccessWorkspace";
 import ResourcesWorkspace from "./ResourcesWorkspace";
-import TaskWorkspace, { discardTaskIntent } from "./TaskWorkspace";
+import TaskWorkspace, { forgetTaskSession } from "./TaskWorkspace";
+import { forgetMaintenanceSession } from "./maintenance-intent";
+import AuditWorkspace from "./AuditWorkspace";
+import { forgetAuditSession } from "./audit-intent";
+import SystemWorkspace from "./SystemWorkspace";
+import OperationalLogsWorkspace from "./OperationalLogsWorkspace";
+import { forgetBundleSession } from "./operational-log-intent";
+import DomainsWorkspace from "./DomainsWorkspace";
+import { forgetDomainSession } from "./domain-intent";
+import OperationAccountsWorkspace from "./OperationAccountsWorkspace";
+import ProfileWorkspace from "./ProfileWorkspace";
+import CredentialUseWorkspace from "./CredentialUseWorkspace";
+import DirectoryWorkspace from "./DirectoryWorkspace";
+import DirectoryCredentialUseWorkspace from "./DirectoryCredentialUseWorkspace";
+import {
+  listenForSessionInvalidation,
+  type SessionInvalidation,
+} from "./session-invalidation";
 
 type Page =
   | "account"
+  | "profile"
   | "password"
   | "mfa"
   | "reset"
   | "access"
   | "resources"
-  | "tasks";
+  | "tasks"
+  | "audit"
+  | "system"
+  | "operational-logs"
+  | "domains"
+  | "operation-accounts"
+  | "credential-use"
+  | "directory"
+  | "directory-credential-use";
 type Run = <T>(
   path: string,
   body: unknown | undefined,
   success: (value: T) => void,
 ) => void;
+function pageFromHash(): Page {
+  if (window.location.hash === "#directory") return "directory";
+  if (window.location.hash === "#directory-credential-use")
+    return "directory-credential-use";
+  if (/^#audit(?:$|\/)/.test(window.location.hash)) return "audit";
+  if (/^#operational-logs(?:$|\/)/.test(window.location.hash))
+    return "operational-logs";
+  return "account";
+}
 function Field({
   label,
   name,
@@ -107,8 +142,10 @@ export default function App() {
     [busy, setBusy] = useState(false),
     [error, setError] = useState(""),
     [notice, setNotice] = useState(""),
-    [page, setPage] = useState<Page>("account"),
+    [page, setPage] = useState<Page>(pageFromHash),
     [revision, setRevision] = useState(0);
+  const [checkingSession, setCheckingSession] = useState(false);
+  const sessionNotifications = useRef<SessionInvalidation | null>(null);
   const controller = useRef<AbortController | null>(null),
     sequence = useRef(0),
     locked = useRef(false),
@@ -122,6 +159,7 @@ export default function App() {
   }, []);
   const refresh = useCallback(() => {
     invalidate();
+    setCheckingSession(false);
     const id = sequence.current;
     const current = new AbortController();
     controller.current = current;
@@ -133,9 +171,14 @@ export default function App() {
       })
       .catch((err) => {
         if (id !== sequence.current) return;
+        setProfile(null);
+        setRevision((n) => n + 1);
         if (err instanceof ApiError && err.status === 401) {
-          discardTaskIntent();
-          setProfile(null);
+          forgetTaskSession();
+          forgetMaintenanceSession();
+          forgetAuditSession();
+          forgetBundleSession();
+          forgetDomainSession();
         } else setError(messages[err.code] ?? messages.internal);
       })
       .finally(() => {
@@ -143,18 +186,87 @@ export default function App() {
       });
   }, [invalidate]);
   useEffect(() => {
+    const resetPrivateView = () => {
+      setProfile(null);
+      setRevision((n) => n + 1);
+      setNotice("");
+      setPage("account");
+    };
+    const notifications = listenForSessionInvalidation(() => {
+      resetPrivateView();
+      refresh();
+    });
+    sessionNotifications.current = notifications;
+    const verify = () => {
+      if (document.visibilityState !== "visible") return;
+      invalidate();
+      const id = sequence.current;
+      const current = new AbortController();
+      controller.current = current;
+      setCheckingSession(true);
+      request<Profile>("/me", current.signal)
+        .then((data) => {
+          if (id !== sequence.current) return;
+          const previous = profileRef.current;
+          if (
+            !previous ||
+            previous.ID !== data.ID ||
+            previous.username !== data.username ||
+            previous.role !== data.role ||
+            previous.priv !== data.priv ||
+            previous.csrfToken !== data.csrfToken ||
+            previous.needChangePwd !== data.needChangePwd ||
+            previous.isExpired !== data.isExpired
+          ) {
+            resetPrivateView();
+            setProfile(data);
+          }
+        })
+        .catch((err) => {
+          if (id !== sequence.current) return;
+          const unauthenticated = err instanceof ApiError && err.status === 401;
+          // A verified absence of a session does not change a login draft.
+          // Notices and transitions from a previously authenticated actor do.
+          if (!unauthenticated || profileRef.current) resetPrivateView();
+          setError(
+            unauthenticated ? "" : (messages[err.code] ?? messages.internal),
+          );
+        })
+        .finally(() => {
+          if (id !== sequence.current) return;
+          setCheckingSession(false);
+          setLoading(false);
+        });
+    };
+    const focused = (event: Event) => {
+      if (!(event.target instanceof Element)) verify();
+    };
+    window.addEventListener("focus", focused);
+    document.addEventListener("visibilitychange", verify);
+    return () => {
+      notifications.close();
+      sessionNotifications.current = null;
+      window.removeEventListener("focus", focused);
+      document.removeEventListener("visibilitychange", verify);
+      sequence.current++;
+      controller.current?.abort();
+    };
+  }, [invalidate, refresh]);
+  useEffect(() => {
     refresh();
     const back = () => {
-      setPage("account");
+      setPage(pageFromHash());
       setRevision((n) => n + 1);
       setNotice("");
       refresh();
     };
     window.addEventListener("popstate", back);
+    window.addEventListener("hashchange", back);
     return () => {
       sequence.current++;
       controller.current?.abort();
       window.removeEventListener("popstate", back);
+      window.removeEventListener("hashchange", back);
     };
   }, [refresh]);
   const run: Run = (path, body, success) => {
@@ -178,7 +290,11 @@ export default function App() {
           return;
         }
         if (err instanceof ApiError && err.code === "unauthenticated") {
-          discardTaskIntent();
+          forgetTaskSession();
+          forgetMaintenanceSession();
+          forgetAuditSession();
+          forgetBundleSession();
+          forgetDomainSession();
           setProfile(null);
           setRevision((n) => n + 1);
         }
@@ -199,7 +315,7 @@ export default function App() {
       });
   };
   const navigate = (next: Page) => {
-    const pending = locked.current;
+    const pending = locked.current || checkingSession || loading;
     invalidate();
     setPage(next);
     setRevision((n) => n + 1);
@@ -210,11 +326,21 @@ export default function App() {
       pending ||
       page === "access" ||
       page === "resources" ||
-      page === "tasks"
+      page === "tasks" ||
+      page === "audit" ||
+      page === "system" ||
+      page === "operational-logs" ||
+      page === "domains" ||
+      page === "operation-accounts" ||
+      page === "credential-use" ||
+      page === "directory" ||
+      page === "directory-credential-use" ||
+      page === "profile"
     )
       refresh();
   };
   const updated = (data: Profile, message: string) => {
+    sessionNotifications.current?.publish();
     setProfile(data);
     setPage("account");
     setRevision((n) => n + 1);
@@ -238,7 +364,8 @@ export default function App() {
         </a>
         <span className="environment">账户与访问</span>
       </header>
-      <main>
+      {checkingSession && <p role="status">正在核验当前会话…</p>}
+      <main hidden={checkingSession} inert={checkingSession}>
         <div className="intro">
           <p className="eyebrow">IDENTITY SECURITY</p>
           <h1>{profile ? "账户安全" : "安全登录"}</h1>
@@ -261,7 +388,7 @@ export default function App() {
                   type="button"
                   className="text-button"
                   disabled={busy}
-                  onClick={refresh}
+                  onClick={() => refresh()}
                 >
                   刷新账户状态
                 </button>
@@ -299,17 +426,29 @@ export default function App() {
                     {(
                       [
                         "account",
+                        "profile",
                         "password",
                         "mfa",
                         "reset",
                         "access",
                         "resources",
                         "tasks",
+                        "audit",
+                        "system",
+                        "operational-logs",
+                        "domains",
+                        "operation-accounts",
+                        "credential-use",
+                        "directory",
+                        "directory-credential-use",
                       ] as Page[]
                     )
                       .filter(
                         (p) =>
-                          p !== "reset" || profile.role === "platform_admin",
+                          (p !== "reset" &&
+                            p !== "credential-use" &&
+                            p !== "directory-credential-use") ||
+                          profile.role === "platform_admin",
                       )
                       .map((p) => (
                         <button
@@ -322,12 +461,21 @@ export default function App() {
                           {
                             {
                               account: "账户概览",
+                              profile: "个人资料",
                               password: "修改密码",
                               mfa: "多因素认证",
                               reset: "重置用户密码",
                               access: "访问管理",
                               resources: "资源与租户",
                               tasks: "后台任务",
+                              audit: "操作审计",
+                              system: "系统健康",
+                              "operational-logs": "运行日志与诊断包",
+                              domains: "域连接",
+                              "operation-accounts": "管理操作账户",
+                              "credential-use": "凭据授权清理",
+                              directory: "目录资产",
+                              "directory-credential-use": "目录读取授权",
                             }[p]
                           }
                         </button>
@@ -342,7 +490,12 @@ export default function App() {
                           setError(messages.invalid_response);
                           return;
                         }
-                        discardTaskIntent();
+                        sessionNotifications.current?.publish();
+                        forgetTaskSession();
+                        forgetMaintenanceSession();
+                        forgetAuditSession();
+                        forgetBundleSession();
+                        forgetDomainSession();
                         setProfile(null);
                         setPage("account");
                         setRevision((n) => n + 1);
@@ -393,7 +546,89 @@ export default function App() {
                       }}
                     />
                   )}
+                  {active === "audit" && (
+                    <AuditWorkspace
+                      profile={profile}
+                      sessionChanged={() => {
+                        setPage("account");
+                        refresh();
+                      }}
+                    />
+                  )}
+                  {active === "domains" && (
+                    <DomainsWorkspace
+                      profile={profile}
+                      sessionChanged={() => {
+                        setPage("account");
+                        refresh();
+                      }}
+                    />
+                  )}
+                  {active === "operation-accounts" && (
+                    <OperationAccountsWorkspace
+                      profile={profile}
+                      sessionChanged={() => {
+                        setPage("account");
+                        refresh();
+                      }}
+                    />
+                  )}
+                  {active === "credential-use" && (
+                    <CredentialUseWorkspace
+                      profile={profile}
+                      sessionChanged={() => {
+                        setPage("account");
+                        refresh();
+                      }}
+                    />
+                  )}
+                  {active === "directory" && (
+                    <DirectoryWorkspace
+                      profile={profile}
+                      sessionChanged={() => {
+                        setPage("account");
+                        refresh();
+                      }}
+                    />
+                  )}
+                  {active === "directory-credential-use" &&
+                    profile.role === "platform_admin" && (
+                      <DirectoryCredentialUseWorkspace
+                        profile={profile}
+                        sessionChanged={() => {
+                          setPage("account");
+                          refresh();
+                        }}
+                      />
+                    )}
+                  {active === "operational-logs" && (
+                    <OperationalLogsWorkspace
+                      profile={profile}
+                      sessionChanged={() => {
+                        setPage("account");
+                        refresh();
+                      }}
+                    />
+                  )}
+                  {active === "system" && (
+                    <SystemWorkspace
+                      profile={profile}
+                      sessionChanged={() => {
+                        setPage("account");
+                        refresh();
+                      }}
+                    />
+                  )}
                   {active === "account" && <Account profile={profile} />}{" "}
+                  {active === "profile" && (
+                    <ProfileWorkspace
+                      profile={profile}
+                      sessionChanged={() => {
+                        setPage("account");
+                        refresh();
+                      }}
+                    />
+                  )}
                   {active === "password" && (
                     <Password
                       busy={busy}

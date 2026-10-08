@@ -57,6 +57,34 @@ jobs:
             command: python3 scripts/test_auth_e2e.py --suite resource
           - name: tasks
             command: python3 scripts/test_auth_e2e.py --suite tasks
+          - name: audit
+            command: python3 scripts/test_auth_e2e.py --suite audit
+          - name: system
+            command: python3 scripts/test_auth_e2e.py --suite system
+          - name: maintenance
+            command: python3 scripts/test_auth_e2e.py --suite maintenance
+          - name: domains
+            command: python3 scripts/test_auth_e2e.py --suite domains
+          - name: operations
+            command: python3 scripts/test_auth_e2e.py --suite operations
+          - name: profile
+            command: python3 scripts/test_auth_e2e.py --suite profile
+          - name: credential-use
+            command: python3 scripts/test_auth_e2e.py --suite credential-use
+          - name: account-references
+            command: python3 scripts/test_auth_e2e.py --suite account-references
+          - name: operational-logs
+            command: python3 scripts/test_auth_e2e.py --suite operational-logs
+          - name: session-invalidation
+            command: python3 scripts/test_auth_e2e.py --suite session-invalidation
+          - name: account-reference-barrier
+            command: python3 scripts/test_auth_e2e.py --suite account-reference-barrier
+          - name: directory
+            command: python3 scripts/test_auth_e2e.py --suite directory
+          - name: directory-controls
+            command: python3 scripts/test_auth_e2e.py --suite directory-controls
+          - name: directory-readers
+            command: python3 scripts/test_auth_e2e.py --suite directory-readers
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
@@ -76,6 +104,35 @@ jobs:
         run: cd web && npx playwright install --with-deps chromium
       - name: Run isolated real browser API database acceptance
         run: ${{ matrix.command }}
+      - name: Retain synthetic profile visual evidence
+        if: ${{ success() && matrix.name == 'profile' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: profile-visual-${{ github.run_id }}-${{ github.run_attempt }}
+          path: web/test-results/**/viewer-profile.png
+          if-no-files-found: error
+          retention-days: 7
+      - name: Retain synthetic credential source visual evidence
+        if: ${{ success() && matrix.name == 'account-references' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: account-source-visual-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            web/test-results/**/source-unconfigured.png
+            web/test-results/**/source-reference.png
+            web/test-results/**/source-custom.png
+          if-no-files-found: error
+          retention-days: 7
+      - name: Retain synthetic operational journal evidence
+        if: ${{ success() && matrix.name == 'operational-logs' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: operational-journal-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            web/test-results/**/production-journal-first-last.json
+            web/test-results/**/operational-logs.png
+          if-no-files-found: error
+          retention-days: 7
   verify:
     if: ${{ always() }}
     needs: [contracts, browser]

@@ -24,6 +24,9 @@ export const stateLabels: Record<TaskState, string> = {
   dead_letter: "死信，自动重试已停止",
   cancelled: "已取消",
 };
+export const isDomainConnectionTask = (name: unknown) =>
+  name === "domain.connection_test" ||
+  name === "domain.account_connection_test";
 export const terminal = (state: TaskState) =>
   [
     "succeeded",
@@ -50,6 +53,9 @@ export interface Task {
   cursor: unknown;
   parentTaskUUID: string;
   nextAttemptAt?: string;
+  terminalAt: string | null;
+  archived: boolean;
+  visibilityVersion: number;
 }
 export interface TaskEvent {
   id: number;
@@ -93,6 +99,14 @@ export const taskOperations = [
   "POST /api/tasks/submit",
   "POST /api/tasks/cancel",
   "POST /api/tasks/recover",
+  "GET /api/tasks/schedules",
+  "GET /api/tasks/schedules/detail",
+  "POST /api/tasks/schedules/create",
+  "POST /api/tasks/schedules/enable",
+  "POST /api/tasks/schedules/pause",
+  "GET /api/tasks/archive-candidates",
+  "POST /api/tasks/archive",
+  "POST /api/tasks/restore",
 ] as const;
 export type TaskOperation = (typeof taskOperations)[number];
 
@@ -102,10 +116,10 @@ export const supportedKind = (kind: TaskKind) =>
   kind.taskName === "infrastructure.health" &&
   kind.payloadVersion === 1 &&
   kind.scope === "platform";
-function object(value: unknown): value is Record<string, unknown> {
+export function object(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
 }
-function integer(
+export function integer(
   value: unknown,
   min: number,
   max = Number.MAX_SAFE_INTEGER,
@@ -137,6 +151,9 @@ export function validTask(value: unknown): value is Task {
     integer(value.maxAttempts, 1) &&
     integer(value.progress, 0, 100) &&
     integer(value.resultVersion, 0) &&
+    typeof value.archived === "boolean" &&
+    integer(value.visibilityVersion, 0) &&
+    (value.terminalAt === null || typeof value.terminalAt === "string") &&
     "result" in value &&
     "cursor" in value &&
     (value.nextAttemptAt === undefined ||
@@ -146,7 +163,7 @@ export function validTask(value: unknown): value is Task {
 function assertTask(value: unknown): asserts value is Task {
   if (!validTask(value)) throw new ApiError("invalid_response");
 }
-async function transport(
+export async function taskTransport(
   path: string,
   signal: AbortSignal,
   body?: unknown,
@@ -184,7 +201,7 @@ async function transport(
 }
 export const taskAPI = {
   async list(query: string, signal: AbortSignal): Promise<TaskList> {
-    const data = await transport(`?${query}`, signal);
+    const data = await taskTransport(`?${query}`, signal);
     if (
       !object(data) ||
       !object(data.page) ||
@@ -200,7 +217,7 @@ export const taskAPI = {
     return data as unknown as TaskList;
   },
   async kinds(signal: AbortSignal): Promise<TaskKind[]> {
-    const data = await transport("/kinds", signal);
+    const data = await taskTransport("/kinds", signal);
     if (
       !object(data) ||
       !Array.isArray(data.kinds) ||
@@ -217,9 +234,13 @@ export const taskAPI = {
       throw new ApiError("invalid_response");
     return data.kinds as TaskKind[];
   },
-  async detail(id: string, signal: AbortSignal): Promise<TaskDetail> {
-    const data = await transport(
-      `/detail?${new URLSearchParams({ taskUUID: id })}`,
+  async detail(
+    id: string,
+    signal: AbortSignal,
+    visibility = "active",
+  ): Promise<TaskDetail> {
+    const data = await taskTransport(
+      `/detail?${new URLSearchParams({ taskUUID: id, ...(visibility !== "active" ? { visibility } : {}) })}`,
       signal,
     );
     if (
@@ -247,7 +268,7 @@ export const taskAPI = {
     csrf: string,
     signal: AbortSignal,
   ): Promise<Submission> {
-    const data = await transport(
+    const data = await taskTransport(
       "/submit",
       signal,
       { ...input, ...proof },
@@ -264,7 +285,7 @@ export const taskAPI = {
     csrf: string,
     signal: AbortSignal,
   ): Promise<Task> {
-    const data = await transport(
+    const data = await taskTransport(
       "/cancel",
       signal,
       { taskUUID: id, ...proof },
@@ -282,7 +303,7 @@ export const taskAPI = {
     csrf: string,
     signal: AbortSignal,
   ): Promise<Submission> {
-    const data = await transport(
+    const data = await taskTransport(
       "/recover",
       signal,
       { taskUUID: id, idempotencyKey: key, ...proof },
@@ -309,6 +330,21 @@ export function taskError(error: unknown): string {
     task_not_recoverable:
       "此任务不能恢复；只有服务器允许的失败或死信任务可创建新的恢复任务。",
     unknown_task_kind: "服务器未登记此任务种类，不能提交。",
+    task_archived: "任务已归档，请先恢复可见性，再创建恢复任务。",
+    visibility_conflict: "任务可见性已改变，请重新预览并核对版本。",
+    task_not_archivable: "仅可归档已结束的平台健康任务；请重新预览。",
+    invalid_before: "截止时间必须是有效 UTC 时间，且不能晚于服务器当前时间。",
+    control_version_conflict: "计划控制版本已改变，请重新读取后核对。",
+    authorization_epoch_changed:
+      "计划授权已失效，不能重新启用；请创建新的计划。",
+    invalid_start_at: "首次时间须为 UTC 整秒，且至少比服务器当前时间晚 60 秒。",
+    unsupported_schedule_kind: "仅支持已登记的平台健康检查周期计划。",
+    domain_route_required:
+      "域连接检测须通过域连接页面明确提交，不支持通用恢复。",
+    audit_route_required:
+      "审计导出须通过操作审计页面创建，请在那里重新提交导出条件。",
+    operational_log_route_required:
+      "运行日志诊断包须通过「运行日志与诊断包」页面提交或取消，并重新核验当前权限。",
   };
   return error instanceof ApiError
     ? (specific[error.code] ??

@@ -9,11 +9,14 @@ import (
 	"time"
 )
 
+type WorkerActivity struct{ WorkerID, Cycle, Status, Code string }
+
 type WorkerConfig struct {
 	Owner        string
 	Concurrency  int
 	PollInterval time.Duration
 	OnError      func(error)
+	OnActivity   func(context.Context, WorkerActivity)
 }
 type Worker struct {
 	engine *Engine
@@ -30,7 +33,7 @@ func NewWorker(e *Engine, c WorkerConfig) (*Worker, error) {
 	if c.PollInterval == 0 {
 		c.PollInterval = 250 * time.Millisecond
 	}
-	if c.Concurrency < 1 || c.Concurrency > 32 || c.PollInterval < 10*time.Millisecond || c.PollInterval > 5*time.Second {
+	if c.Concurrency < 1 || c.Concurrency > maxQuiescenceOwners || c.PollInterval < 10*time.Millisecond || c.PollInterval > 5*time.Second {
 		return nil, errors.New("invalid worker limits")
 	}
 	return &Worker{e, c}, nil
@@ -48,7 +51,12 @@ func (w *Worker) Run(ctx context.Context) error {
 			owner := fmt.Sprintf("%s-%d", w.config.Owner, slot)
 			delay := w.config.PollInterval
 			for ctx.Err() == nil {
-				worked, err := w.engine.RunOne(ctx, owner)
+				worked, err := w.engine.runOne(ctx, owner, func(c context.Context) { w.activity(c, "queue", "progress", "") })
+				if err == nil {
+					w.activity(ctx, "queue", "success", "")
+				} else {
+					w.activity(ctx, "queue", "failure", "cycle_failed")
+				}
 				if err != nil && ctx.Err() == nil && w.config.OnError != nil {
 					w.config.OnError(errors.New("task worker cycle failed"))
 				}
@@ -71,7 +79,18 @@ func (w *Worker) Run(ctx context.Context) error {
 		}(i)
 	}
 	for ctx.Err() == nil {
-		if _, err := w.engine.RecoverExpired(ctx); err != nil && ctx.Err() == nil && w.config.OnError != nil {
+		if w.engine.PendingQuiescence() != 0 {
+			if err := w.engine.RetryQuiescence(ctx); err != nil && ctx.Err() == nil && w.config.OnError != nil {
+				w.config.OnError(errors.New("task quiescence acknowledgement failed"))
+			}
+		}
+		_, recoveryErr := w.engine.RecoverExpired(ctx)
+		if recoveryErr == nil {
+			w.activity(ctx, "recovery", "success", "")
+		} else {
+			w.activity(ctx, "recovery", "failure", "cycle_failed")
+		}
+		if recoveryErr != nil && ctx.Err() == nil && w.config.OnError != nil {
 			w.config.OnError(errors.New("task lease recovery failed"))
 		}
 		if !pause(ctx, w.config.PollInterval) {
@@ -79,8 +98,21 @@ func (w *Worker) Run(ctx context.Context) error {
 		}
 	}
 	wg.Wait()
-	return nil
+	// Cancellation stops claims first. Joining has no timeout: a live executor
+	// can never be called stopped merely because the cleanup budget expired.
+	cleanup, cancel := context.WithTimeout(context.Background(), quiescenceDrainTimeout)
+	defer cancel()
+	return w.engine.drainQuiescence(cleanup, w.config.PollInterval)
 }
+func (w *Worker) activity(ctx context.Context, cycle, status, code string) {
+	if ctx.Err() != nil || w.config.OnActivity == nil {
+		return
+	}
+	bounded, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	w.config.OnActivity(bounded, WorkerActivity{w.config.Owner, cycle, status, code})
+}
+
 func pause(ctx context.Context, d time.Duration) bool {
 	timer := time.NewTimer(d)
 	defer timer.Stop()
@@ -100,9 +132,30 @@ func runExecutor(ctx context.Context, k Kind, ex Execution) (out Outcome) {
 	return k.Execute(ctx, ex)
 }
 
-// RunOne is also the process-independent execution entrypoint used by contract
-// tests. A task failure is a persisted outcome, not a worker-process failure.
+// RunOne is the standalone execution entrypoint, sharing Worker's bounded owner
+// reservations and acknowledgement retention. A pending receipt is retried before
+// this owner may claim again. A task failure remains a persisted outcome; an
+// acknowledgement failure is returned separately and never rewrites that outcome.
 func (e *Engine) RunOne(ctx context.Context, owner string) (bool, error) {
+	return e.runOne(ctx, owner, nil)
+}
+
+func (e *Engine) runOne(ctx context.Context, owner string, activity func(context.Context)) (bool, error) {
+	slot, err := e.acquireOwner(owner)
+	if err != nil {
+		return false, err
+	}
+	defer e.releaseOwner(owner, slot)
+	// A failed receipt applies backpressure to its owner before any new claim.
+	ackCtx, ackCancel := operationContext(context.Background())
+	err = e.acknowledgeQuiescence(ackCtx, slot, e.quiescenceTx)
+	ackCancel()
+	if err != nil {
+		return false, err
+	}
+	if err = ctx.Err(); err != nil {
+		return false, err
+	}
 	lease, err := e.Claim(ctx, owner)
 	if errors.Is(err, ErrNoTask) {
 		return false, nil
@@ -125,8 +178,18 @@ func (e *Engine) RunOne(ctx context.Context, owner string) (bool, error) {
 	// Capture a stable immutable lease; checkpoint calls may run concurrently
 	// with the heartbeat without sharing mutable lease state.
 	stable := lease
-	ex := Execution{Task: lease.Task, Probe: e.probe, Checkpoint: func(c context.Context, p int, cursor, result json.RawMessage, v int64) (int64, error) {
-		return e.Progress(c, stable, p, cursor, result, v)
+	ex := Execution{Task: lease.Task, Probe: e.probe, WithTx: func(c context.Context, v int64, work FencedWork) (int64, error) {
+		version, err := e.WithTx(c, stable, v, work)
+		if err == nil && activity != nil {
+			activity(c)
+		}
+		return version, err
+	}, Checkpoint: func(c context.Context, p int, cursor, result json.RawMessage, v int64) (int64, error) {
+		version, err := e.Progress(c, stable, p, cursor, result, v)
+		if err == nil && activity != nil {
+			activity(c)
+		}
+		return version, err
 	}}
 	go func() { done <- runExecutor(executionCtx, k, ex) }()
 	ticker := time.NewTicker(k.Heartbeat)
@@ -137,15 +200,17 @@ func (e *Engine) RunOne(ctx context.Context, owner string) (bool, error) {
 	for {
 		select {
 		case outcome := <-done:
+			if k.OnQuiesced != nil {
+				// runExecutor and all executor defers have returned. Reserve the
+				// exact witness before attempting either independent transaction.
+				e.retainQuiescence(slot, stable, k)
+			}
 			if stopReason == "" && executionCtx.Err() != nil {
 				if ctx.Err() != nil {
 					stopReason = "shutdown"
 				} else {
 					stopReason = "timeout"
 				}
-			}
-			if lost {
-				return true, ErrLeaseLost
 			}
 			if outcome.State == "" {
 				outcome = Outcome{State: Failed, Code: "invalid_executor_outcome"}
@@ -170,10 +235,27 @@ func (e *Engine) RunOne(ctx context.Context, owner string) (bool, error) {
 					outcome.Retryable = true
 				}
 			}
-			// Shutdown cancellation must not prevent a stopped executor's durable ack.
-			finishCtx, finishCancel := context.WithTimeout(context.Background(), 5*time.Second)
-			_, err = e.Finish(finishCtx, stable, outcome)
-			finishCancel()
+			// Persist a legitimate result while its lease is still valid. A slow
+			// cleanup transaction must not itself expire the lease before Finish.
+			// Both transactions outlive executor/shutdown cancellation, and neither
+			// transaction's failure suppresses the other.
+			err = ErrLeaseLost
+			if !lost {
+				finishCtx, finishCancel := operationContext(context.Background())
+				_, err = e.Finish(finishCtx, stable, outcome)
+				finishCancel()
+			}
+			var ackErr error
+			if k.OnQuiesced != nil {
+				ackCtx, ackCancel := operationContext(context.Background())
+				ackErr = e.acknowledgeQuiescence(ackCtx, slot, e.quiescenceTx)
+				ackCancel()
+			}
+			// Even a known lost lease reaches OnQuiesced before this return;
+			// cleanup uses recorded attempt identity, never current lease state.
+			if ackErr != nil {
+				return true, errors.Join(err, ackErr)
+			}
 			return true, err
 		case <-executionDone:
 			executionDone = nil
@@ -191,6 +273,9 @@ func (e *Engine) RunOne(ctx context.Context, owner string) (bool, error) {
 			heartbeatCancel()
 			switch {
 			case herr == nil:
+				if activity != nil {
+					activity(executionCtx)
+				}
 			case errors.Is(herr, ErrCancelRequested):
 				stopReason = "cancel"
 				cancel()

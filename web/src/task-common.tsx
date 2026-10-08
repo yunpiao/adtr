@@ -3,12 +3,18 @@ import { ApiError, type Profile } from "./api";
 import { taskError, type TaskOperation } from "./task-api";
 export interface TaskContext {
   profile: Profile;
+  canArchiveView?: boolean;
   can: (operation: TaskOperation) => boolean;
   sessionChanged: () => void;
 }
 export const sessionError = (error: unknown) =>
   error instanceof ApiError &&
-  ["unauthenticated", "password_change_required"].includes(error.code);
+  [
+    "unauthenticated",
+    "password_change_required",
+    "credential_use_identity_changed",
+    "domain_source_identity_changed",
+  ].includes(error.code);
 const retryRead = (error: unknown) =>
   error instanceof ApiError &&
   (error.status >= 500 || ["network", "invalid_response"].includes(error.code));
@@ -19,14 +25,15 @@ export function useTaskRead<T>(
   load: (signal: AbortSignal) => Promise<T>,
   sessionChanged: () => void,
   poll: (value: T) => boolean = () => false,
+  formatError: (error: unknown) => string = taskError,
 ) {
   const [data, setData] = useState<T | null>(null),
     [error, setError] = useState(""),
     [busy, setBusy] = useState(true),
     [revision, setRevision] = useState(0);
   const currentKey = useRef(key);
-  const callbacks = useRef({ load, sessionChanged, poll });
-  callbacks.current = { load, sessionChanged, poll };
+  const callbacks = useRef({ load, sessionChanged, poll, formatError });
+  callbacks.current = { load, sessionChanged, poll, formatError };
   useEffect(() => {
     let alive = true,
       timer: ReturnType<typeof setTimeout>;
@@ -48,7 +55,7 @@ export function useTaskRead<T>(
         setData(null);
         setBusy(false);
         if (sessionError(error)) callbacks.current.sessionChanged();
-        else setError(taskError(error));
+        else setError(callbacks.current.formatError(error));
         if (retryRead(error)) timer = setTimeout(read, 2000);
       }
     }
@@ -61,7 +68,10 @@ export function useTaskRead<T>(
   }, [key, revision]);
   return { data, error, busy, refresh: () => setRevision((n) => n + 1) };
 }
-export function useTaskMutation(sessionChanged: () => void) {
+export function useTaskMutation(
+  sessionChanged: () => void,
+  formatError: (error: unknown) => string = taskError,
+) {
   const [busy, setBusy] = useState(false),
     [error, setError] = useState("");
   const sequence = useRef(0),
@@ -78,7 +88,7 @@ export function useTaskMutation(sessionChanged: () => void) {
   const run = async <T,>(
     work: (signal: AbortSignal) => Promise<T>,
     success: (value: T) => void,
-    uncertain: () => void,
+    uncertain: (error?: unknown) => void,
   ) => {
     if (locked.current) return;
     locked.current = true;
@@ -94,8 +104,8 @@ export function useTaskMutation(sessionChanged: () => void) {
       if (id !== sequence.current) return;
       if (sessionError(error)) sessionChanged();
       else {
-        setError(taskError(error));
-        uncertain();
+        setError(formatError(error));
+        uncertain(error);
       }
     } finally {
       if (id === sequence.current) {

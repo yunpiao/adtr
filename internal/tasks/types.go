@@ -73,6 +73,9 @@ type Authorizer func(context.Context, pgx.Tx, Principal, Scope, Action) (string,
 
 type Task struct {
 	ID                   string          `json:"taskUUID"`
+	TerminalAt           *time.Time      `json:"terminalAt"`
+	Archived             bool            `json:"archived"`
+	VisibilityVersion    int64           `json:"visibilityVersion"`
 	Kind                 string          `json:"taskName"`
 	DomainID             string          `json:"domainId"`
 	PayloadVersion       int             `json:"payloadVersion"`
@@ -123,6 +126,7 @@ type SubmitInput struct {
 	IdempotencyKey string          `json:"idempotencyKey"`
 }
 type Filter struct {
+	Visibility        string
 	PageIdx, PageSize int
 	DomainID          string
 	State             State
@@ -162,7 +166,12 @@ var ErrAuthorization = errors.New("task authorization revoked")
 
 // Execution is provided to a registered executor. Checkpoint atomically commits
 // cursor/result/progress and rejects stale result versions and fencing tokens.
+type FencedWork func(context.Context, pgx.Tx) (int, json.RawMessage, json.RawMessage, error)
+
 type Execution struct {
+	// WithTx atomically commits replay-safe module data with a fenced checkpoint.
+	// The callback uses its bounded context and must not manage transactions.
+	WithTx     func(context.Context, int64, FencedWork) (int64, error)
 	Task       Task
 	Probe      func(context.Context) error
 	Checkpoint func(context.Context, int, json.RawMessage, json.RawMessage, int64) (int64, error)
@@ -176,7 +185,8 @@ type Outcome struct {
 type Executor func(context.Context, Execution) Outcome
 
 // Kind policies are immutable after registry construction. Only explicitly safe
-// replayable executors may register until side-effect reconciliation is supplied.
+// replayable executors may register, or an explicit single-attempt executor whose
+// failed/lost execution cannot be replayed or recovered.
 type Kind struct {
 	Name                      string
 	Version                   int
@@ -186,8 +196,22 @@ type Kind struct {
 	RetryBase, RetryCap       time.Duration
 	RetryCodes                []string
 	ReplaySafe                bool
-	Validate                  func(json.RawMessage) (json.RawMessage, error)
-	Execute                   Executor
+	SingleAttemptOnly         bool
+	// CancelDiscardsResult is for staged artifacts whose publication is Finish.
+	// It must never be used to conceal an already completed external effect.
+	CancelDiscardsResult bool
+	// OwnerScoped protects private artifacts on every generic task API.
+	OwnerScoped bool
+	Schedulable bool
+	Validate    func(json.RawMessage) (json.RawMessage, error)
+	Execute     Executor
+	// OnQuiesced acknowledges only that this exact started executor returned,
+	// including all of its defers. It must be idempotent, honor its bounded context,
+	// and must not manage the transaction, resolve secrets, or publish task results.
+	// It runs without actor, grant, or lease authorization and may run again after
+	// any transaction error, including an uncertain commit. Only single-attempt,
+	// unschedulable kinds may register it.
+	OnQuiesced func(context.Context, pgx.Tx, QuiescedAttempt) error
 }
 type Lease struct {
 	Task  Task
@@ -198,6 +222,7 @@ type Lease struct {
 // ScheduledInput is a trusted scheduler entrypoint, never a browser request.
 type ScheduledInput struct {
 	SubmitInput
-	ScheduleID  string
-	ScheduledAt time.Time
+	ExpectedAuthorizationVersion string
+	ScheduleID                   string
+	ScheduledAt                  time.Time
 }

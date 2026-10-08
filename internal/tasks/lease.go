@@ -332,6 +332,9 @@ func (e *Engine) Finish(ctx context.Context, l Lease, o Outcome) (Task, error) {
 			result = t.Result
 		} // Keep the last atomic checkpoint unless a final result explicitly replaces it.
 		state, code := o.State, o.Code
+		if k.CancelDiscardsResult && t.State == CancelRequested && state == Succeeded {
+			state, code, result = Cancelled, "cancelled", json.RawMessage(`{}`)
+		}
 		race := t.State == CancelRequested && state != Cancelled
 		if authErr != nil || t.Error == "authorization_revoked" {
 			state = Failed

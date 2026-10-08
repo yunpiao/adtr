@@ -123,7 +123,7 @@
         "UI-0409",
         "UI-0410"
       ],
-      "status": "not_started",
+      "status": "in_progress",
       "product_accepted": false,
       "evidence": null
     },
@@ -179,7 +179,7 @@
         "UI-0409",
         "UI-0410"
       ],
-      "status": "not_started",
+      "status": "in_progress",
       "product_accepted": false,
       "evidence": null
     },
@@ -236,7 +236,7 @@
         "UI-0409",
         "UI-0410"
       ],
-      "status": "not_started",
+      "status": "in_progress",
       "product_accepted": false,
       "evidence": null
     },
@@ -289,7 +289,7 @@
         "UI-0409",
         "UI-0410"
       ],
-      "status": "not_started",
+      "status": "in_progress",
       "product_accepted": false,
       "evidence": null
     },
@@ -346,7 +346,7 @@
         "UI-0409",
         "UI-0410"
       ],
-      "status": "not_started",
+      "status": "in_progress",
       "product_accepted": false,
       "evidence": null
     },
@@ -834,7 +834,7 @@
         "UI-0718",
         "UI-0719"
       ],
-      "status": "not_started",
+      "status": "in_progress",
       "product_accepted": false,
       "evidence": null
     },
@@ -937,7 +937,7 @@
         "UI-0315",
         "UI-0316"
       ],
-      "status": "not_started",
+      "status": "in_progress",
       "product_accepted": false,
       "evidence": null
     },
@@ -962,7 +962,7 @@
         "UI-0315",
         "UI-0316"
       ],
-      "status": "not_started",
+      "status": "in_progress",
       "product_accepted": false,
       "evidence": null
     },
@@ -987,7 +987,7 @@
         "UI-0315",
         "UI-0316"
       ],
-      "status": "not_started",
+      "status": "in_progress",
       "product_accepted": false,
       "evidence": null
     },
@@ -1009,7 +1009,7 @@
         "UI-0315",
         "UI-0316"
       ],
-      "status": "not_started",
+      "status": "in_progress",
       "product_accepted": false,
       "evidence": null
     },
@@ -1781,9 +1781,23 @@
       "issue": "https://github.com/yunpiao/adtr/issues/25",
       "field_records": [],
       "ui_records": [],
-      "status": "not_started",
+      "status": "in_progress",
       "product_accepted": false,
-      "evidence": null
+      "evidence": {
+        "local_contract": "docs/directory-api-contract.md",
+        "verified": [
+          "Final local directory-reader test-slice make check: all Go race/vet/build, 15 Python contracts, 559 DOM/unit tests, TypeScript/build and zero npm audit vulnerabilities",
+          "All-package integration-tag compilation/vet; production bounded reader against isolated synthetic TLS transports in both modes, 30 objects/two pages, fixture race 7.237 seconds",
+          "Independent migration, backend/API, frontend and final receipt-fault-injection specification reviews; confirmed findings fixed with regressions"
+        ],
+        "remaining": [
+          "Actual PostgreSQL migration/governance/ledger/HTTP cases invoked but blocked at missing ADTR_TEST_DATABASE_URL; no real DB success",
+          "Real browser/API/worker/TLS-fixture/database specification and CI matrix prepared but not successfully executed; real AD and eight-version Windows validation unavailable",
+          "Real empty-observation/cancellation and custom read-only actor/cross-tab browser specifications are prepared but unexecuted; browser evidence remains open beyond DOM/database test code",
+          "Complete source field parity and capacity unresolved; AD-F-035 incremental and AD-F-041 address relations remain separate open work",
+          "Unpublished local integration; exact-head remote CI and full product acceptance remain open"
+        ]
+      }
     },
     {
       "id": "AD-F-035",
@@ -8753,7 +8767,7 @@
         "FLD-2483"
       ],
       "ui_records": [],
-      "status": "not_started",
+      "status": "in_progress",
       "product_accepted": false,
       "evidence": null
     },
@@ -8808,7 +8822,7 @@
         "UI-0538",
         "UI-0539"
       ],
-      "status": "not_started",
+      "status": "in_progress",
       "product_accepted": false,
       "evidence": null
     },
@@ -8853,7 +8867,7 @@
         "UI-0538",
         "UI-0539"
       ],
-      "status": "not_started",
+      "status": "in_progress",
       "product_accepted": false,
       "evidence": null
     },
@@ -8872,7 +8886,7 @@
         "FLD-2537"
       ],
       "ui_records": [],
-      "status": "not_started",
+      "status": "in_progress",
       "product_accepted": false,
       "evidence": null
     },
@@ -9512,7 +9526,7 @@
         "UI-0606",
         "UI-0607"
       ],
-      "status": "not_started",
+      "status": "in_progress",
       "product_accepted": false,
       "evidence": null
     },
@@ -10647,9 +10661,22 @@
         "FLD-3149"
       ],
       "ui_records": [],
-      "status": "in_progress",
+      "status": "implemented_verified_slice",
       "product_accepted": false,
-      "evidence": null
+      "evidence": {
+        "commit": "e437919967074bc544cf378d72eab51c37f351cc",
+        "pr": "https://github.com/yunpiao/adtr/pull/72",
+        "ci": "https://github.com/yunpiao/adtr/actions/runs/37596024600",
+        "verified": [
+          "persistent task list/detail/state, cancellation and recovery",
+          "real browser to API to worker/PostgreSQL health execution"
+        ],
+        "remaining": [
+          "AD detection/synchronization/business executors and real Windows/domain acceptance",
+          "reference-system field/status compatibility and engine restart",
+          "capacity, retention and production acceptance"
+        ]
+      }
     },
     {
       "id": "AD-F-190",
@@ -10663,7 +10690,7 @@
       "issue": "https://github.com/yunpiao/adtr/issues/15",
       "field_records": [],
       "ui_records": [],
-      "status": "not_started",
+      "status": "in_progress",
       "product_accepted": false,
       "evidence": null
     },
@@ -10679,9 +10706,22 @@
       "issue": "https://github.com/yunpiao/adtr/issues/12",
       "field_records": [],
       "ui_records": [],
-      "status": "in_progress",
+      "status": "implemented_verified_slice",
       "product_accepted": false,
-      "evidence": null
+      "evidence": {
+        "commit": "e437919967074bc544cf378d72eab51c37f351cc",
+        "pr": "https://github.com/yunpiao/adtr/pull/72",
+        "ci": "https://github.com/yunpiao/adtr/actions/runs/37596024600",
+        "verified": [
+          "real PostgreSQL synthetic-domain isolation and concurrent worker fairness",
+          "lease expiry, fencing and failure isolation"
+        ],
+        "remaining": [
+          "AD detection/synchronization/business executors and real Windows/domain acceptance",
+          "reference-system field/status compatibility and engine restart",
+          "capacity, retention and production acceptance"
+        ]
+      }
     },
     {
       "id": "AD-F-192",
@@ -10695,9 +10735,22 @@
       "issue": "https://github.com/yunpiao/adtr/issues/12",
       "field_records": [],
       "ui_records": [],
-      "status": "in_progress",
+      "status": "implemented_verified_slice",
       "product_accepted": false,
-      "evidence": null
+      "evidence": {
+        "commit": "e437919967074bc544cf378d72eab51c37f351cc",
+        "pr": "https://github.com/yunpiao/adtr/pull/72",
+        "ci": "https://github.com/yunpiao/adtr/actions/runs/37596024600",
+        "verified": [
+          "concurrent idempotency and durable occurrence uniqueness",
+          "live authorization epoch, revocation and exact-schema execution gates"
+        ],
+        "remaining": [
+          "AD detection/synchronization/business executors and real Windows/domain acceptance",
+          "reference-system field/status compatibility and engine restart",
+          "capacity, retention and production acceptance"
+        ]
+      }
     },
     {
       "id": "AD-F-193",
@@ -10711,7 +10764,7 @@
       "issue": "https://github.com/yunpiao/adtr/issues/15",
       "field_records": [],
       "ui_records": [],
-      "status": "not_started",
+      "status": "in_progress",
       "product_accepted": false,
       "evidence": null
     },
@@ -10796,7 +10849,7 @@
         "UI-0644",
         "UI-0645"
       ],
-      "status": "not_started",
+      "status": "in_progress",
       "product_accepted": false,
       "evidence": null
     },
@@ -10891,7 +10944,7 @@
         "UI-0654",
         "UI-0655"
       ],
-      "status": "not_started",
+      "status": "in_progress",
       "product_accepted": false,
       "evidence": null
     },
@@ -10942,7 +10995,7 @@
         "UI-0656",
         "UI-0657"
       ],
-      "status": "not_started",
+      "status": "in_progress",
       "product_accepted": false,
       "evidence": null
     },
@@ -10961,7 +11014,7 @@
         "FLD-3228"
       ],
       "ui_records": [],
-      "status": "not_started",
+      "status": "in_progress",
       "product_accepted": false,
       "evidence": null
     },
@@ -11024,7 +11077,11 @@
       "ui_records": [],
       "status": "not_started",
       "product_accepted": false,
-      "evidence": null
+      "evidence": {
+        "remaining": [
+          "Network diagnostic target, allowed ports/protocols, trust and execution authority are not frozen; no network diagnostic executor implemented"
+        ]
+      }
     },
     {
       "id": "AD-F-205",
@@ -11059,9 +11116,21 @@
         "FLD-3258"
       ],
       "ui_records": [],
-      "status": "not_started",
+      "status": "in_progress",
       "product_accepted": false,
-      "evidence": null
+      "evidence": {
+        "local_contract": "docs/operational-log-contract.md",
+        "verified": [
+          "Local make check: Go race/vet/build, 430 DOM tests, TypeScript/build, five Python contracts and zero dependency-audit vulnerabilities",
+          "All-package integration-tag compilation/vet and generic bundle metadata privacy unit regression",
+          "Independent backend, HTTP regression and frontend source reviews completed"
+        ],
+        "remaining": [
+          "Actual PostgreSQL execution blocked by missing ADTR_TEST_DATABASE_URL; browser launch blocked by missing Chromium",
+          "Only new api/worker instrumentation; historical source modules, retention/capacity policy and complete source parity remain open",
+          "Unpublished local slice; remote CI and product acceptance remain open"
+        ]
+      }
     },
     {
       "id": "AD-F-206",
@@ -11075,7 +11144,7 @@
       "issue": "https://github.com/yunpiao/adtr/issues/14",
       "field_records": [],
       "ui_records": [],
-      "status": "not_started",
+      "status": "in_progress",
       "product_accepted": false,
       "evidence": null
     },

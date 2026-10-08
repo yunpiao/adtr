@@ -30,6 +30,11 @@ type taskFixture struct {
 
 func newTaskFixture(t *testing.T) *taskFixture {
 	t.Helper()
+	return newTaskFixtureWithSchema(t, Schema)
+}
+
+func newTaskFixtureWithSchema(t *testing.T, schema string) *taskFixture {
+	t.Helper()
 	dsn := os.Getenv("ADTR_TEST_DATABASE_URL")
 	if dsn == "" {
 		t.Fatal("ADTR_TEST_DATABASE_URL required; missing PostgreSQL is a failure, not a skip")
@@ -71,7 +76,7 @@ func newTaskFixture(t *testing.T) *taskFixture {
 		t.Fatal("could not connect to fresh task-test database")
 	}
 	t.Cleanup(func() { _ = db.Close(context.Background()) })
-	if _, err = db.Exec(ctx, "CREATE SCHEMA adtr;CREATE TABLE adtr.schema_version(singleton boolean PRIMARY KEY DEFAULT true CHECK(singleton),version integer NOT NULL);INSERT INTO adtr.schema_version VALUES(true,5);"+Schema); err != nil {
+	if _, err = db.Exec(ctx, "CREATE SCHEMA adtr;CREATE TABLE adtr.schema_version(singleton boolean PRIMARY KEY DEFAULT true CHECK(singleton),version integer NOT NULL);INSERT INTO adtr.schema_version VALUES(true,5);"+schema); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = db.Exec(ctx, `CREATE TABLE adtr.synthetic_task_grants (
@@ -1070,11 +1075,13 @@ func TestTaskAuthorizationLockPrecedesTaskLockDuringCancellation(t *testing.T) {
 
 func TestTaskScheduledOccurrenceIsUniqueAndAtomic(t *testing.T) {
 	f := newTaskFixture(t)
-	e := f.engine(syntheticTaskKind(2, syntheticTaskSuccess))
+	kind := syntheticTaskKind(2, syntheticTaskSuccess)
+	kind.Schedulable = true
+	e := f.engine(kind)
 	f.grant(taskTestPrincipal, "domain-a", "synthetic")
 	f.grant(taskTestPrincipal, "domain-b", "synthetic")
 	when := time.Date(2026, 10, 7, 9, 30, 0, 123456000, time.UTC)
-	input := ScheduledInput{SubmitInput: syntheticTaskInput("domain-a", "ignored-scheduler-key"), ScheduleID: "synthetic-schedule", ScheduledAt: when}
+	input := ScheduledInput{SubmitInput: syntheticTaskInput("domain-a", "ignored-scheduler-key"), ScheduleID: "synthetic-schedule", ScheduledAt: when, ExpectedAuthorizationVersion: "synthetic-v1"}
 	submit := func(principal Principal, in ScheduledInput) (Submission, error) {
 		var out Submission
 		err := f.transact(func(tx pgx.Tx) (err error) { out, err = e.SubmitScheduledTx(f.ctx, tx, principal, in); return err })
