@@ -1405,7 +1405,9 @@ test("real empty directory reader and same-context account-switch isolation", as
           visibility: "visible",
           focused: true,
           events: expect.arrayContaining([
-            { type: "focus", visible: true, trusted: true },
+            // Chromium may deliver native focus before its visibility update.
+            // Both events must be trusted; settled focus/visibility are above.
+            expect.objectContaining({ type: "focus", trusted: true }),
             { type: "visibilitychange", visible: true, trusted: true },
           ]),
         });
