@@ -1,0 +1,115 @@
+name: Isolated real Windows AD lab (evaluation)
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/ad-lab-windows.yml'
+      - 'scripts/ad_lab/host/**'
+      - 'scripts/ad_lab/guest/**'
+      - 'tests/adlab/**'
+  workflow_dispatch:
+permissions: {}
+concurrency:
+  group: adtr-real-windows-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  real-windows:
+    # This standalone draft remains disabled until review is complete and
+    # runner allocation is usable. License acceptance is separately recorded.
+    if: >-
+      false && github.repository == 'yunpiao/adtr' &&
+      github.actor_id == '11422136' && github.actor == 'yunpiao' &&
+      github.triggering_actor == 'yunpiao' && github.run_attempt == 1 &&
+      ((github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/feat/ad-lab-windows-install') ||
+      (github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.head.ref == 'feat/ad-lab-windows-install' &&
+      github.event.pull_request.user.id == 11422136))
+    runs-on: windows-2025
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    env:
+      ADTR_SOURCE_SHA: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 2
+          persist-credentials: false
+      - name: Parse host and guest PowerShell without running it
+        shell: powershell
+        run: |
+          ./scripts/ad_lab/host/Test-HostScriptSyntax.ps1
+          ./scripts/ad_lab/guest/Test-GuestScriptSyntax.ps1
+      - uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5
+        with:
+          go-version: '1.27.1'
+          cache: false
+      - name: Reserve unique media download identity
+        shell: powershell
+        run: |
+          $id = [guid]::NewGuid().ToString('D').ToLowerInvariant()
+          "ADTR_DOWNLOAD_ID=$id" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      - name: Install and test isolated evaluation guests
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # Owner chose to continue after disclosure of the linked Server 2025 agreement
+          # for this bounded isolated evaluation installation. No production use.
+          $licenseAcceptanceConfirmed = $true
+          if (-not $licenseAcceptanceConfirmed) { throw 'Evaluation license acceptance is pending.' }
+          if ($env:ADTR_DOWNLOAD_ID -notmatch '^[a-f0-9-]{36}$') { throw 'Download identity missing.' }
+          $root = Join-Path $env:RUNNER_TEMP ('adtr-eval-download-' + $env:ADTR_DOWNLOAD_ID)
+          $media = ./scripts/ad_lab/host/Get-EvaluationMedia.ps1 -DownloadId $env:ADTR_DOWNLOAD_ID -DownloadRoot $root -SourceSha $env:ADTR_SOURCE_SHA
+          $password = [securestring]::new()
+          $rng = [Security.Cryptography.RandomNumberGenerator]::Create()
+          $bytes = New-Object byte[] 36
+          try {
+            $rng.GetBytes($bytes)
+            foreach ($c in ('Aa1!' + [Convert]::ToBase64String($bytes)).ToCharArray()) { $password.AppendChar($c) }
+            $password.MakeReadOnly()
+            $parameters = @{
+              IsoPath = $media.IsoPath
+              IsoSha256 = '7b052573ba7894c9924e3e87ba732ccd354d18cb75a883efa9b900ea125bfd51'
+              ImageIndex = 1
+              LicenseRelativePath = 'Windows\System32\en-US\Licenses\Eval\ServerStandardEval\license.rtf'
+              LicenseTermsSha256 = 'ad893f939c901f156d68c36f8180b2f2f7ff424ffba892b9cb2ac717b1b1fe58'
+              LicenseAcceptanceConfirmed = $licenseAcceptanceConfirmed
+              SourceSha = $env:ADTR_SOURCE_SHA
+              AdministratorPassword = $password
+              TrustedLicensedMedia = $true
+              DisposableLab = $true
+              LeaseMinutes = 90
+            }
+            if ($env:GITHUB_EVENT_NAME -eq 'pull_request') {
+              $event = Get-Content -LiteralPath $env:GITHUB_EVENT_PATH -Raw | ConvertFrom-Json
+              $parameters.ExpectedPullRequestHeadSha = $event.pull_request.head.sha
+              $parameters.ExpectedPullRequestHeadRef = 'feat/ad-lab-windows-install'
+              $parameters.ExpectedPullRequestNumber = [int]$event.number
+            }
+            ./scripts/ad_lab/host/Invoke-HostedLab.ps1 @parameters
+          } finally {
+            [Array]::Clear($bytes, 0, $bytes.Length)
+            $password.Dispose(); $rng.Dispose()
+          }
+      - name: Verify exact owned lab cleanup
+        if: ${{ always() }}
+        shell: powershell
+        run: ./scripts/ad_lab/host/Remove-HostedLab.ps1
+      - name: Remove only this run's downloaded ISO
+        if: ${{ always() && env.ADTR_DOWNLOAD_ID != '' }}
+        shell: powershell
+        run: |
+          $root = Join-Path $env:RUNNER_TEMP ('adtr-eval-download-' + $env:ADTR_DOWNLOAD_ID)
+          ./scripts/ad_lab/host/Get-EvaluationMedia.ps1 -DownloadId $env:ADTR_DOWNLOAD_ID -DownloadRoot $root -SourceSha $env:ADTR_SOURCE_SHA -CleanupOnly
+      - name: Retain only redacted lab and cleanup reports
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: real-ad-lab-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/adtr-real-ad-report.json
+            ${{ runner.temp }}/adtr-real-ad-cleanup.json
+          if-no-files-found: warn
+          retention-days: 7
+          include-hidden-files: false
