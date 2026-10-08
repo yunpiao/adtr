@@ -7,11 +7,11 @@
 
 [PR #77](https://github.com/yunpiao/adtr/pull/77) 精确 head `4f64d90880b28b3cf7a749a9ba1da57049736dd9` 的 [CI 37772558021](https://github.com/yunpiao/adtr/actions/runs/37772558021) 已 completed/success，25/25 job 通过：19 个隔离真实浏览器/API/PostgreSQL套件、4 个认证集成分片、contracts 和最终 verify。contracts 包含 make check、真实 PostgreSQL 非认证包集成，以及 API/worker 容器生命周期。域检测/目录读取使用隔离合成 TLS LDAP，未验证真实 AD/Windows。
 
-本条是当前版本的运行证据。下方有日期的本地检查点及旧版本契约保留原文；其中当时缺少本地数据库/浏览器、尚未发布或未运行远端 CI 的说明不再代表当前远端执行状态。F12 的 directory、directory-controls、directory-readers 已分别通过非空分页、真实空结果/取消/结束确认、只读角色/跨标签原生焦点回退场景。F38 的 Audit/XLSX 历史和 F56 的实际 api/worker 日志包链路也已执行通过。
+本条是上述固定提交的运行证据；main 目标与合并后验证另行记录。下方有日期的本地检查点及旧版本契约保留原文；其中当时缺少本地数据库/浏览器、尚未发布或未运行远端 CI 的说明不再代表当前远端执行状态。F12 的 directory、directory-controls、directory-readers 已分别通过非空分页、真实空结果/取消/结束确认、只读角色/跨标签原生焦点回退场景。F38 的 Audit/XLSX 历史和 F56 的实际 api/worker 日志包链路也已执行通过。
 
 当前应用 schema 仍为 15。F14 dictionary2 是未注册的组件，消费者能力为 false，没有生产迁移16、任务注册或版本化API/UI；组件/fragment测试通过不等于产品链路已交付。PR74/75/76尚未整合。
 
-本次台账仅将 AD-F-151/152 从 not_started 改为 in_progress；计数为19 implemented_verified_slice、26 in_progress、164 not_started。产品完整验收仍为0/209，源系统完整兼容、真实AD/Windows、容量与生产门禁仍开放；Issue、合并及部署不因本次CI通过自动完成。
+本次台账仅将 AD-F-151/152 从 not_started 改为 in_progress；计数为19 implemented_verified_slice、26 in_progress、164 not_started。产品完整验收仍为0/209，源系统完整兼容、真实AD/Windows、容量与生产门禁仍开放；Issue 关闭与部署不因本次 CI 通过自动完成；代码按下方已授权的 PR 验证与合并流程推进。
 
 ## 基线（2026-10-07）
 
@@ -40,12 +40,14 @@
 ## 每次开发与完成标准
 
 1. 读取 Issue、适用 AGENTS 和依赖；记录当前测试基线，先定跨模块接口。
-2. 在开发分支实现一个可独立验收的切片；不得直接推 main、合并或生产部署。
+2. 在开发分支实现一个可独立验收的切片并创建草稿 PR；不得直接推 main 或部署生产。
 3. 对实际变更测试正常、异常、权限边界和回归；不得删除测试、放宽阈值或将 skip 当通过。
 4. 完成后单独审查实际 diff，检查凭据泄露、授权范围、竞争条件、失败语义及文档一致性。
 5. 草稿 PR 关联 Issue，记录命令、结果、head SHA、风险与未完成项。部分工作用 Refs，不能提前 Closes。
 6. 读取最新 head 的 CI 结果；CI 不可访问时明确阻塞。外部独立审查在可用时记录审查人和 commit，
    自审不能冒称独立审查。全部子项与产品验收未完成的 Issue 不关闭。
+7. 按用户已授权的 Issue → PR → 验证 → 合并 main 流程推进。独立审查及精确 head/main 目标的全部必需检查通过后，核验 base/head 未变化，再正常合并；目标变化则重新验证，不绕过服务端规则。
+8. 合并后核对 main 的内容树与父提交并完成 main-push CI；失败时继续诊断修复，不把合并、单次 CI 或合成实验结果当作产品全部验收。生产部署和真实凭据/AD操作仍不包含在本流程中。
 
 CI 默认无权限，各 job 仅授予必要 contents: read；actions 固定完整 commit SHA，
 不向 PR 执行暴露生产凭据，不使用 pull_request_target 执行不可信分支代码。
