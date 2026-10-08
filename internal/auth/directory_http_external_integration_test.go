@@ -37,7 +37,10 @@ import (
 	"github.com/yunpiao/adtr/internal/tasks"
 )
 
-const directoryHTTPWriterRole = "directory-http-writer-01"
+const (
+	directoryHTTPWriterRole = "directory-http-writer-01"
+	directoryHTTPReaderRole = "directory-http-reader-01"
+)
 
 type directoryHTTPFixture struct {
 	*governanceHTTPFixture
@@ -55,22 +58,27 @@ func newDirectoryHTTPFixture(t *testing.T) *directoryHTTPFixture {
 	base := newGovernanceHTTPFixture(t)
 	f := &directoryHTTPFixture{governanceHTTPFixture: base}
 	key := bytes.Repeat([]byte{'h'}, 32)
-	roles := map[string]map[string]auth.AccessAuth{
-		directoryHTTPWriterRole:     {"domains": {Readable: true}, "directory_assets": {Readable: true, Writeable: true}, "tasks": {Readable: true, Writeable: true}},
-		"directory-http-reader":     {"domains": {Readable: true}, "directory_assets": {Readable: true}},
-		"directory-http-no-assets":  {"domains": {Readable: true, Writeable: true}, "tasks": {Readable: true, Writeable: true}},
-		"directory-http-no-domains": {"directory_assets": {Readable: true, Writeable: true}, "tasks": {Readable: true, Writeable: true}},
-		"directory-http-no-scope":   {"domains": {Readable: true}, "directory_assets": {Readable: true, Writeable: true}, "tasks": {Readable: true, Writeable: true}},
+	// Actor names are descriptive; custom role IDs must satisfy the production
+	// access API's 24-character grammar before permission and scope checks run.
+	roles := []struct {
+		actor, id string
+		grants    map[string]auth.AccessAuth
+	}{
+		{directoryHTTPWriterRole, directoryHTTPWriterRole, map[string]auth.AccessAuth{"domains": {Readable: true}, "directory_assets": {Readable: true, Writeable: true}, "tasks": {Readable: true, Writeable: true}}},
+		{"directory-http-reader", directoryHTTPReaderRole, map[string]auth.AccessAuth{"domains": {Readable: true}, "directory_assets": {Readable: true}}},
+		{"directory-http-no-assets", "directory-http-no-assets", map[string]auth.AccessAuth{"domains": {Readable: true, Writeable: true}, "tasks": {Readable: true, Writeable: true}}},
+		{"directory-http-no-domains", "directory-http-no-domain", map[string]auth.AccessAuth{"directory_assets": {Readable: true, Writeable: true}, "tasks": {Readable: true, Writeable: true}}},
+		{"directory-http-no-scope", "directory-http-no-scope0", map[string]auth.AccessAuth{"domains": {Readable: true}, "directory_assets": {Readable: true, Writeable: true}, "tasks": {Readable: true, Writeable: true}}},
 	}
-	for role, grants := range roles {
-		f.exec(`INSERT INTO adtr.access_roles(tenant_id,id,name) VALUES($1,$2,$2)`, governanceHTTPTenant, role)
-		for mark, grant := range grants {
-			f.exec(`INSERT INTO adtr.access_permissions(tenant_id,role_id,mark,readable,writeable) VALUES($1,$2,$3,$4,$5)`, governanceHTTPTenant, role, mark, grant.Readable, grant.Writeable)
+	for _, role := range roles {
+		f.exec(`INSERT INTO adtr.access_roles(tenant_id,id,name) VALUES($1,$2,$2)`, governanceHTTPTenant, role.id)
+		for mark, grant := range role.grants {
+			f.exec(`INSERT INTO adtr.access_permissions(tenant_id,role_id,mark,readable,writeable) VALUES($1,$2,$3,$4,$5)`, governanceHTTPTenant, role.id, mark, grant.Readable, grant.Writeable)
 		}
-		if role != "directory-http-no-scope" {
-			f.exec(`INSERT INTO adtr.resource_role_groups(tenant_id,role_id,group_id) VALUES($1,$2,'admin-group')`, governanceHTTPTenant, role)
+		if role.actor != "directory-http-no-scope" {
+			f.exec(`INSERT INTO adtr.resource_role_groups(tenant_id,role_id,group_id) VALUES($1,$2,'admin-group')`, governanceHTTPTenant, role.id)
 		}
-		f.seedActor(role, "viewer", role, false, false, false, true, key)
+		f.seedActor(role.actor, "viewer", role.id, false, false, false, true, key)
 	}
 	for _, name := range []string{"directory-admin", "directory-admin-other", "directory-bind", "directory-grant", "directory-grant-writer", "directory-cancel", "directory-detach", "directory-revoke", "directory-submit-one", "directory-submit-two", "directory-submit-three"} {
 		f.seedActor(name, "platform_admin", "", false, false, false, true, key)
@@ -668,7 +676,7 @@ func TestDirectoryMigratedHTTPStoredObservationSuccessAndPinnedPagination(t *tes
 	if !afterRevocation.Available || afterRevocation.ObservationID != first.ID {
 		t.Fatal("reading a historical successful observation depended on current producer/credential authority")
 	}
-	f.exec(`UPDATE adtr.access_permissions SET readable=false,writeable=false WHERE tenant_id=$1 AND role_id='directory-http-reader' AND mark='directory_assets'`, governanceHTTPTenant)
+	f.exec(`UPDATE adtr.access_permissions SET readable=false,writeable=false WHERE tenant_id=$1 AND role_id=$2 AND mark='directory_assets'`, governanceHTTPTenant, directoryHTTPReaderRole)
 	f.request("directory-http-reader", path+"&observationId="+first.ID, nil, 403)
 }
 

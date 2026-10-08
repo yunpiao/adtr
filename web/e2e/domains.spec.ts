@@ -186,13 +186,13 @@ test("real domain enrollment, explicit grant, TLS diagnostics, rotation and loca
     expect(text).not.toContain(ldapUser);
     expect(text).not.toContain("ciphertext");
   };
-  let submittedTests = 0;
+  let submittedTests = 0,
+    submittedCreates = 0;
   page.on("request", (request) => {
-    if (
-      new URL(request.url()).pathname === "/api/domains/test" &&
-      request.method() === "POST"
-    )
-      submittedTests++;
+    if (request.method() !== "POST") return;
+    const path = new URL(request.url()).pathname;
+    if (path === "/api/domains/test") submittedTests++;
+    if (path === "/api/domains/create") submittedCreates++;
   });
   const selectSavedSource = async (
     id: string,
@@ -311,6 +311,7 @@ test("real domain enrollment, explicit grant, TLS diagnostics, rotation and loca
   await login(page, username, password);
   await changeInitialPassword(page, password, changed);
   const auth = await enrollMfa(page, changed);
+  const actor = await readJSON(context, "/api/auth/me");
   // Runner seeds an eligible default tenant, maxAdCount=2, no catalogue domains.
   expect((await readJSON(context, "/api/resources/tenant")).maxAdCount).toBe(2);
   await openDomains();
@@ -386,18 +387,35 @@ test("real domain enrollment, explicit grant, TLS diagnostics, rotation and loca
   expect(ungrantedTasks.status()).toBe(403);
   expect(await ungrantedTasks.json()).toEqual({ error: "forbidden" });
   expect(submittedTests).toBe(0);
-  const pending = await page.evaluate(() =>
-    JSON.parse(sessionStorage.getItem("adtr.domain-intent.v1") ?? "null"),
-  );
-  expect(pending.intent).toEqual({ kind: "create", key, domain });
+  // Unknown outcomes retain only the original safe intent under its live actor.
+  const storageKey = `adtr.domain-intent.v1:${actor.ID}:${encodeURIComponent(actor.username)}`;
+  const pendingStorage = await page.evaluate(() => ({ ...sessionStorage }));
+  expect(Object.keys(pendingStorage)).toEqual([storageKey]);
+  const pending = JSON.parse(pendingStorage[storageKey]);
+  expect(pending).toEqual({
+    owner: `${actor.ID}:${actor.username}`,
+    intent: { kind: "create", key, domain },
+  });
   safe(pending);
-  await page.reload();
-  await openDomains();
+  expect(submittedCreates).toBe(1);
+  const [recoveryResponse] = await Promise.all([
+    page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return (
+        url.pathname === "/api/domains/creation" &&
+        url.searchParams.get("idempotencyKey") === key &&
+        response.request().method() === "GET"
+      );
+    }),
+    (async () => {
+      await page.reload();
+      await openDomains();
+    })(),
+  ]);
+  expect(recoveryResponse.status()).toBe(200);
+  expect(recoveryResponse.headers()["x-adtr-user-id"]).toBe(String(actor.ID));
   await expect(page.getByLabel("新域 ID", { exact: true })).toHaveValue(id);
-  const receipt = await readJSON(
-    context,
-    `/api/domains/creation?idempotencyKey=${key}`,
-  );
+  const receipt = await recoveryResponse.json();
   expect(receipt.receipt).toEqual({
     domainId: id,
     domain,
@@ -406,6 +424,7 @@ test("real domain enrollment, explicit grant, TLS diagnostics, rotation and loca
     requiresResourceAssignment: true,
   });
   safe(receipt);
+  expect(submittedCreates).toBe(1);
   expect(await page.evaluate(() => sessionStorage.length)).toBe(0);
   await openResources(page);
   await page.getByRole("button", { name: "资源组", exact: true }).click();

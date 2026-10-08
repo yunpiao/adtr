@@ -19,6 +19,8 @@ import (
 	"github.com/yunpiao/adtr/internal/tasks"
 )
 
+const sourceHTTPViewerRole = "source-view-role-0000001"
+
 func accountSourceHTTPFixture(t *testing.T) *governanceHTTPFixture {
 	t.Helper()
 	f := newGovernanceHTTPFixture(t)
@@ -28,10 +30,10 @@ func accountSourceHTTPFixture(t *testing.T) *governanceHTTPFixture {
 	for _, name := range []string{"source-bind", "source-detach", "source-custom", "source-create", "source-grant", "source-revoke", "source-expire"} {
 		f.seedActor(name, "platform_admin", "", false, false, false, true, key)
 	}
-	f.exec(`INSERT INTO adtr.access_roles(tenant_id,id,name) VALUES($1,'source-view-role','Source view only')`, governanceHTTPTenant)
-	f.exec(`INSERT INTO adtr.access_permissions(tenant_id,role_id,mark,readable,writeable) VALUES($1,'source-view-role','domains',true,true)`, governanceHTTPTenant)
-	f.exec(`INSERT INTO adtr.resource_role_groups(tenant_id,role_id,group_id) VALUES($1,'source-view-role','admin-group')`, governanceHTTPTenant)
-	f.seedActor("source-view", "viewer", "source-view-role", false, false, false, true, key)
+	f.exec(`INSERT INTO adtr.access_roles(tenant_id,id,name) VALUES($1,$2,'Source view only')`, governanceHTTPTenant, sourceHTTPViewerRole)
+	f.exec(`INSERT INTO adtr.access_permissions(tenant_id,role_id,mark,readable,writeable) VALUES($1,$2,'domains',true,true)`, governanceHTTPTenant, sourceHTTPViewerRole)
+	f.exec(`INSERT INTO adtr.resource_role_groups(tenant_id,role_id,group_id) VALUES($1,$2,'admin-group')`, governanceHTTPTenant, sourceHTTPViewerRole)
+	f.seedActor("source-view", "viewer", sourceHTTPViewerRole, false, false, false, true, key)
 	s, err := auth.New(f.conn.Config(), key, governanceHTTPOrigin, true)
 	if err != nil {
 		t.Fatal(err)

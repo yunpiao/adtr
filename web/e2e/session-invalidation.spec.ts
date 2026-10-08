@@ -7,6 +7,10 @@ import {
   type Route,
 } from "@playwright/test";
 import { createHmac } from "node:crypto";
+import {
+  requireSameNativeWindow,
+  useNativeTabLifecycle,
+} from "./native-tab-lifecycle";
 
 // Runs only against the session-invalidation harness's freshly migrated,
 // disposable API/PostgreSQL fixture. No AD connection or B2 source barrier is
@@ -246,11 +250,7 @@ async function fallbackPage(context: BrowserContext) {
       });
     });
   });
-  // Playwright normally forces every Chromium page to appear focused/visible.
-  // Restore real tab lifecycle behavior instead of dispatching synthetic DOM
-  // focus events or overriding document.visibilityState in this regression.
-  const cdp = await context.newCDPSession(page);
-  await cdp.send("Emulation.setFocusEmulationEnabled", { enabled: false });
+  await useNativeTabLifecycle(page);
   await page.goto("/");
   return page;
 }
@@ -454,6 +454,7 @@ test("real browser → API → PostgreSQL cross-tab session invalidation and foc
       .getByLabel("新密码", { exact: true })
       .fill("Unsubmitted New Password 123");
     const switchingTab = await fallbackPage(context);
+    await requireSameNativeWindow([profileTab, proofTab, switchingTab]);
     await switchingTab.bringToFront();
     await expect
       .poll(() => proofTab.evaluate(() => document.visibilityState))

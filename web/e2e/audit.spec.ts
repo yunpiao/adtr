@@ -329,18 +329,98 @@ async function postFromButton(page: Page, path: string, button: string) {
   return response.json();
 }
 
-async function filteredAudit(page: Page, keyword: string) {
+async function filteredAudit(
+  page: Page,
+  keyword: string,
+  visibility?: "visible" | "hidden" | "all",
+) {
+  const submit = page.getByRole("button", { name: "筛选审计", exact: true });
+  await expect(submit).toBeEnabled();
   await page.getByLabel("审计关键词", { exact: true }).fill(keyword);
-  const [response] = await Promise.all([
-    page.waitForResponse(
-      (candidate) =>
-        new URL(candidate.url()).pathname === "/api/audit" &&
-        candidate.request().method() === "GET",
-    ),
-    page.getByRole("button", { name: "筛选审计", exact: true }).click(),
+  if (visibility)
+    await page
+      .getByLabel("审计可见性", { exact: true })
+      .selectOption(visibility);
+  const { expectedQuery, appliedQuery } = await page
+    .locator("form")
+    .filter({ has: submit })
+    .evaluate((form) => {
+      const encode = (fields: FormData) => {
+        const query = new URLSearchParams({ pageIdx: "1" });
+        for (const [key, value] of fields) {
+          if (!value) continue;
+          query.append(
+            key,
+            key === "startTm" || key === "endTm"
+              ? new Date(`${value}Z`).toISOString()
+              : String(value),
+          );
+        }
+        query.sort();
+        return query.toString();
+      };
+      // The form remounts when an applied filter changes. Reset only a detached
+      // clone to read its committed defaults without discarding live edits.
+      const applied = form.cloneNode(true) as HTMLFormElement;
+      applied.reset();
+      return {
+        expectedQuery: encode(new FormData(form as HTMLFormElement)),
+        appliedQuery: encode(new FormData(applied)),
+      };
+    });
+  // This scenario never changes page size. A size-only change does not remount
+  // the filter form, so its defaults cannot establish the applied size.
+  expect(
+    new URLSearchParams(expectedQuery).get("pageSize"),
+    "filteredAudit requires the unchanged 20-row page size (live value)",
+  ).toBe("20");
+  expect(
+    new URLSearchParams(appliedQuery).get("pageSize"),
+    "filteredAudit requires the unchanged 20-row page size (applied default)",
+  ).toBe("20");
+  let action = submit;
+  if (expectedQuery === appliedQuery) {
+    const pagination = page.getByLabel("分页", { exact: true });
+    await expect(pagination).toBeVisible();
+    // Applying the same query cannot trigger useAuditRead. Refresh it through
+    // the real UI; a later page instead needs submit to reset pageIdx to one.
+    if (/第\s+1\s*\//.test(await pagination.innerText()))
+      action = page.getByRole("button", {
+        name: "刷新审计列表",
+        exact: true,
+      });
+  }
+  // Returning from a detail view also reads /api/audit. Match the complete
+  // submitted filter and a newly dispatched request, not that pending response.
+  const [request] = await Promise.all([
+    page.waitForRequest((candidate) => {
+      const url = new URL(candidate.url());
+      url.searchParams.sort();
+      return (
+        url.pathname === "/api/audit" &&
+        candidate.method() === "GET" &&
+        url.searchParams.toString() === expectedQuery
+      );
+    }),
+    action.click(),
   ]);
-  expect(response.status()).toBe(200);
-  return (await response.json()) as AuditList;
+  const response = await request.response();
+  expect(response, `GET /api/audit?${expectedQuery}`).not.toBeNull();
+  expect(response!.status()).toBe(200);
+  const result = (await response!.json()) as AuditList;
+  await expect(
+    page
+      .getByRole("table", { name: "操作审计记录", exact: true })
+      .getByRole("rowheader"),
+  ).toHaveText(
+    result.List.map(
+      (row) =>
+        new RegExp(
+          `^${row.ID.replaceAll(".", "\\.")}\\s*${row.deleted ? "已隐藏" : "可见"}`,
+        ),
+    ),
+  );
+  return result;
 }
 
 async function assertExportCompleted(
@@ -703,8 +783,7 @@ test("real browser audit history, visibility, XLSX worker export and persisted r
     expect((await readJSON(context, `/api/audit?${stableQuery}`)).List).toEqual(
       [],
     );
-    await page.getByLabel("审计可见性", { exact: true }).selectOption("hidden");
-    const hidden = await filteredAudit(page, username);
+    const hidden = await filteredAudit(page, username, "hidden");
     expect(hidden.List).toHaveLength(1);
     expect(hidden.List[0]).toMatchObject({
       ...loginEvent,
@@ -1213,8 +1292,7 @@ test("real browser audit history, visibility, XLSX worker export and persisted r
     await page
       .getByRole("button", { name: "返回审计列表", exact: true })
       .click();
-    await page.getByLabel("审计可见性", { exact: true }).selectOption("hidden");
-    const hidden = await filteredAudit(page, username);
+    const hidden = await filteredAudit(page, username, "hidden");
     expect(hidden.List).toHaveLength(1);
     expect(hidden.List[0]).toMatchObject({
       ID: loginEvent.ID,

@@ -10,6 +10,10 @@ import {
 } from "@playwright/test";
 import { createHmac } from "node:crypto";
 import { isIP } from "node:net";
+import {
+  requireSameNativeWindow,
+  useNativeTabLifecycle,
+} from "./native-tab-lifecycle";
 import type { Task } from "../src/task-api";
 import type {
   DirectoryInput,
@@ -581,10 +585,7 @@ async function fallbackTab(context: BrowserContext) {
       },
     });
   });
-  const cdp = await context.newCDPSession(page);
-  // Restore real Chromium tab lifecycle instead of Playwright's default
-  // always-focused emulation, as in session-invalidation.spec.ts.
-  await cdp.send("Emulation.setFocusEmulationEnabled", { enabled: false });
+  await useNativeTabLifecycle(page);
   await page.goto("/");
   const lifecycle = await page.evaluateHandle(() => {
     let events: { type: string; trusted: boolean; visible: boolean }[] = [];
@@ -615,7 +616,7 @@ async function fallbackTab(context: BrowserContext) {
       },
     };
   });
-  return { page, cdp, lifecycle };
+  return { page, lifecycle };
 }
 
 async function watchReaderDOM(
@@ -1256,6 +1257,7 @@ test("real empty directory reader and same-context account-switch isolation", as
     secrets.push((await readJSON(context, "/api/auth/me")).csrfToken);
     const fallback = await fallbackTab(context);
     const switching = await context.newPage();
+    await requireSameNativeWindow([page, fallback.page, switching]);
     collect(fallback.page);
     collect(switching);
     const oldTabs = [page, fallback.page];
@@ -1265,6 +1267,7 @@ test("real empty directory reader and same-context account-switch isolation", as
     const browserWrites: string[] = [];
     let monitorWrites = false;
     let scenarioFailure: unknown;
+    let scenarioStage = "capture privileged reads";
     let scenarioFailed = false;
     const cleanupErrors: unknown[] = [];
     const outcomes: { outcome: "delivered" | "browser_cancelled" }[] = [];
@@ -1337,10 +1340,12 @@ test("real empty directory reader and same-context account-switch isolation", as
         await held.fetched();
       }
       monitorWrites = true;
+      scenarioStage = "observe native hidden state";
       await switching.bringToFront();
       await expect
         .poll(() => fallback.page.evaluate(() => document.visibilityState))
         .toBe("hidden");
+      scenarioStage = "switch the shared session";
       await logout(switching);
       // The ordinary tab clears through a real same-origin notification while
       // still in the background. Neither click nor reload causes this check.
@@ -1370,6 +1375,7 @@ test("real empty directory reader and same-context account-switch isolation", as
       await expect(fallback.page.locator(".signed-in strong")).toHaveText(
         username,
       );
+      scenarioStage = "revalidate the fallback tab";
       await fallback.lifecycle.evaluate((value) => value.reset());
       const reread = fallback.page.waitForResponse(
         (response) =>
@@ -1408,7 +1414,9 @@ test("real empty directory reader and same-context account-switch isolation", as
       }
       // Release only now: both old views and shared-cookie /me have proved
       // reader identity, and the reader's genuine MFA login has completed.
+      scenarioStage = "release delayed privileged responses";
       for (const held of delayed) outcomes.push(await held.release());
+      scenarioStage = "verify reader-only state";
       for (const old of oldTabs) {
         await signedIn(old, readerUsername);
         const visible = await openDirectory(old);
@@ -1480,14 +1488,17 @@ test("real empty directory reader and same-context account-switch isolation", as
       await cleanup(() => notification.dispose());
       await cleanup(() => fallback.lifecycle.evaluate((value) => value.stop()));
       await cleanup(() => fallback.lifecycle.dispose());
-      await cleanup(() => fallback.cdp.detach());
       await cleanup(() => fallback.page.close());
       await cleanup(() => switching.close());
     }
+    // Preserve the original assertion and its stack in Playwright's reporter.
+    // If cleanup also fails, retain every error and a fixed, nonsecret stage.
+    if (scenarioFailed && cleanupErrors.length === 0) throw scenarioFailure;
     if (scenarioFailed || cleanupErrors.length)
       throw new AggregateError(
         [...(scenarioFailed ? [scenarioFailure] : []), ...cleanupErrors],
-        "Directory reader/session assertions or bounded cleanup failed",
+        `Directory reader/session failure at ${scenarioStage}; cleanup errors: ${cleanupErrors.length}`,
+        { cause: scenarioFailed ? scenarioFailure : cleanupErrors[0] },
       );
     await testInfo.attach("directory-reader-session-scope", {
       contentType: "application/json",

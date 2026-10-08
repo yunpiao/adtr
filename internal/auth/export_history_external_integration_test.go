@@ -248,7 +248,11 @@ func (f *historyHTTPFixture) submitHTTP(actor, key, event string) string {
 // counters to force two protected mutations into the same 30-second interval.
 func (f *historyHTTPFixture) submitEngine(c *governanceHTTPClient, key, event string) string {
 	f.t.Helper()
-	payload, _ := json.Marshal(audit.ExportPayload{StartTm: "2020-02-01T00:00:00Z", EndTm: "2020-02-02T00:00:00Z", FilterEvent: []string{event}, CreateSort: 1, SelectColumn: []string{"event", "eventArgs"}})
+	// An empty filter is an array; explicit JSON null is rejected by admission.
+	payload, err := json.Marshal(audit.ExportPayload{StartTm: "2020-02-01T00:00:00Z", EndTm: "2020-02-02T00:00:00Z", FilterEvent: []string{event}, CreateSort: 1, LogTypeList: []int{}, SelectColumn: []string{"event", "eventArgs"}})
+	if err != nil {
+		f.t.Fatal(err)
+	}
 	tx, err := f.conn.Begin(f.ctx)
 	if err != nil {
 		f.t.Fatal(err)
@@ -291,8 +295,9 @@ func (f *historyHTTPFixture) session(c *governanceHTTPClient) {
 func (f *historyHTTPFixture) foreignActor() *governanceHTTPClient {
 	f.t.Helper()
 	c := &governanceHTTPClient{}
-	err := f.conn.QueryRow(f.ctx, `INSERT INTO adtr.users(tenant_id,username,password_hash,role,password_updated_at)
- SELECT 'history-foreign','history-foreign',password_hash,'platform_admin',clock_timestamp()-interval '1 minute' FROM adtr.users WHERE username='synthetic-bootstrap' RETURNING id`).Scan(&c.id)
+	// This actor has completed password setup so requests reach ownership checks.
+	err := f.conn.QueryRow(f.ctx, `INSERT INTO adtr.users(tenant_id,username,password_hash,role,must_change,password_updated_at)
+ SELECT 'history-foreign','history-foreign',password_hash,'platform_admin',false,clock_timestamp()-interval '1 minute' FROM adtr.users WHERE username='synthetic-bootstrap' RETURNING id`).Scan(&c.id)
 	if err != nil {
 		f.t.Fatal(err)
 	}
@@ -323,7 +328,7 @@ func (f *historyHTTPFixture) seedTask(c *governanceHTTPClient, id, kind, state s
 		f.t.Fatal(err)
 	}
 	f.exec(`INSERT INTO adtr.tasks(task_id,tenant_id,domain_id,kind,payload_version,payload,payload_hash,actor_id,authorization_version,idempotency_key,state,max_attempts,created_at,updated_at,progress,attempt,result,error_code)
- SELECT $2,tenant_id,'platform',$3,1,'{}','synthetic-history',$1,authorization_version::text,$2,$4,3,$5,$5+interval '1 second',17,1,$6::jsonb,CASE WHEN $4 IN ('failed','partial_failed','dead_letter') THEN 'export_failed' ELSE '' END FROM adtr.users WHERE id=$1`, c.id, id, kind, state, created, string(raw))
+ SELECT $2,tenant_id,'platform',$3,1,'{}','synthetic-history',$1,authorization_version::text,$2,$4,3,$5::timestamptz,$5::timestamptz+interval '1 second',17,1,$6::jsonb,CASE WHEN $4 IN ('failed','partial_failed','dead_letter') THEN 'export_failed' ELSE '' END FROM adtr.users WHERE id=$1`, c.id, id, kind, state, created, string(raw))
 }
 func (f *historyHTTPFixture) seedSnapshot(c *governanceHTTPClient, id string, captured time.Time, rows int, revision int64, domain, source string) {
 	f.t.Helper()

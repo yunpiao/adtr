@@ -660,7 +660,9 @@ test("unconfigured bootstrap, explicit own-role reference, real LDAP consumption
   await expect(page.getByLabel("操作者当前密码", { exact: true })).toHaveCount(
     0,
   );
-  await page.unroute("**/api/domains/credential-source/mutation?*");
+  // Finish the genuine receipt read/abort before removing interception and
+  // reloading; otherwise unroute can handle an in-flight route first.
+  await page.unrouteAll({ behavior: "wait" });
   await page.reload();
   await page.getByRole("button", { name: "域连接", exact: true }).click();
   await expect(page.getByText(/原凭据来源操作已确认/)).toBeVisible();

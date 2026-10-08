@@ -322,12 +322,24 @@ test("real browser → Linux sampler → PostgreSQL history/settings and actual 
       revision: 1,
     },
   });
-  await expect(page.getByText("版本 1", { exact: true })).toBeVisible();
-  await expect(page.getByText("90%", { exact: true })).toBeVisible();
+  const rootStorage = page
+    .getByRole("table", { name: "实际文件系统存储" })
+    .getByRole("row")
+    .filter({
+      has: page.getByRole("rowheader", { name: "runtime-root", exact: true }),
+    });
+  // The threshold and revision share a cell, whose exact name includes both.
+  const savedThreshold = rootStorage.getByRole("cell", {
+    name: "90% 版本 1",
+    exact: true,
+  });
+  await expect(rootStorage.getByText("版本 1", { exact: true })).toBeVisible();
+  await expect(savedThreshold).toBeVisible();
   await page.reload();
   await page.getByRole("button", { name: "系统健康", exact: true }).click();
   await page.getByRole("button", { name: "存储管理", exact: true }).click();
-  await expect(page.getByText("版本 1", { exact: true })).toBeVisible();
+  await expect(rootStorage.getByText("版本 1", { exact: true })).toBeVisible();
+  await expect(savedThreshold).toBeVisible();
   const persisted: StorageView = await readJSON(
     context,
     "/api/system/storage?instance=local-api&page=1&pageSize=20",
