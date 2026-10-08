@@ -1,0 +1,51 @@
+name: Inspect official evaluation media (no installation)
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/ad-lab-media-inspect.yml'
+      - 'scripts/ad_lab/Inspect-EvaluationMedia.ps1'
+permissions: {}
+concurrency:
+  group: ad-lab-media-inspect-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  inspect-license:
+    if: github.repository == 'yunpiao/adtr' && (github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: windows-2025
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    env:
+      ADTR_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Parse inspection PowerShell without executing media
+        shell: powershell
+        run: |
+          $tokens = $null; $parseErrors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile("$PWD/scripts/ad_lab/Inspect-EvaluationMedia.ps1", [ref]$tokens, [ref]$parseErrors)
+          if ($parseErrors.Count -gt 0) { throw 'Media inspection PowerShell syntax is invalid.' }
+      - name: Download bounded public ISO and inspect actual evaluation license files
+        shell: powershell
+        run: ./scripts/ad_lab/Inspect-EvaluationMedia.ps1
+      - name: Retry cleanup of this run's exact owned mounts and media
+        if: ${{ always() }}
+        shell: powershell
+        run: ./scripts/ad_lab/Inspect-EvaluationMedia.ps1 -CleanupOnly
+      - name: Retain only small license evidence and provenance
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: evaluation-license-inspection-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/adtr-media-evidence-${{ github.run_id }}-${{ github.run_attempt }}/manifest.json
+            ${{ runner.temp }}/adtr-media-evidence-${{ github.run_id }}-${{ github.run_attempt }}/licenses/*.rtf
+            ${{ runner.temp }}/adtr-media-evidence-${{ github.run_id }}-${{ github.run_attempt }}/licenses/*.txt
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 6
+          include-hidden-files: false
