@@ -14,7 +14,7 @@ import test_auth_e2e
 
 
 PASSWORD = "123456789abcdef0" * 3
-PINNED_IMAGE = "postgres:17.6-alpine@sha256:ef257d85f76e48da1c64832459b59fcaba1a4dac97bf5d7450c77753542eee94"
+PINNED_IMAGE = "public.ecr.aws/docker/library/postgres:17.6-alpine@sha256:ef257d85f76e48da1c64832459b59fcaba1a4dac97bf5d7450c77753542eee94"
 
 
 class ContainerStartupDiagnosticsContract(unittest.TestCase):
