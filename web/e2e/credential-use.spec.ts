@@ -1,5 +1,6 @@
 import { test, expect, type BrowserContext, type Page } from "@playwright/test";
 import { createHmac } from "node:crypto";
+import { credentialUseRead } from "./credential-use-read";
 
 type Authenticator = { secret: string; lastCounter: number };
 import type { CredentialReceipt } from "../src/credential-use-api";
@@ -71,7 +72,7 @@ async function proof(page: Page, password: string, auth: Authenticator) {
 }
 
 async function readJSON(context: BrowserContext, path: string) {
-  const response = await context.request.get(path);
+  const response = await credentialUseRead(context.request, path);
   expect(response.status(), `GET ${path}`).toBe(200);
   return response.json();
 }
@@ -270,7 +271,10 @@ test("default admin deny, explicit role grant, receipt recovery, expired-tenant 
     .click();
   await expect(page.getByText("否（默认拒绝）", { exact: true })).toBeVisible();
   const getUse = async (path: string) => {
-    const response = await context.request.get(`/api/credential-use${path}`);
+    const response = await credentialUseRead(
+      context.request,
+      `/api/credential-use${path}`,
+    );
     expect(response.status()).toBe(200);
     expect(response.headers()["x-adtr-user-id"]).toBe(String(actorId));
     expect(response.headers()["cache-control"]).toBe("no-store");
@@ -451,7 +455,8 @@ test("default admin deny, explicit role grant, receipt recovery, expired-tenant 
   await expect(
     page.getByRole("heading", { name: "账户概览", exact: true }),
   ).toBeVisible();
-  const unavailable = await context.request.get(
+  const unavailable = await credentialUseRead(
+    context.request,
     `/api/credential-use/roles?accountId=${accountId}`,
   );
   expect(unavailable.status()).toBe(403);

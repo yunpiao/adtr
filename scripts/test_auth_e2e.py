@@ -18,6 +18,7 @@ from test_integration import IMAGE
 from ldap_e2e_fixture import LDAPFixture
 from account_barrier_e2e_fixture import AccountBarrierFixture
 from e2e_owned_container import OWNER_LABEL, remove_owned_container
+from e2e_runtime_diagnostics import http_handler_panicked
 
 
 REAL_TAB_LIFECYCLE_SUITES = {"session-invalidation", "directory-readers", "directory-v2-readers"}
@@ -193,7 +194,19 @@ def main():
                 ldap_fixture.close()
             except Exception as error:
                 shutdown_error = error
-        logs.close()
+        try:
+            panicked = http_handler_panicked(logs)
+        except (OSError, UnicodeError, ValueError):
+            shutdown_error = RuntimeError(
+                "browser acceptance runtime diagnostics could not be checked"
+            )
+        else:
+            if panicked:
+                shutdown_error = RuntimeError(
+                    "browser acceptance runtime observed an HTTP handler panic; raw diagnostics withheld"
+                )
+        finally:
+            logs.close()
         if creation_attempted:
             remove_owned_container(name, owner)
         if shutdown_error is not None:
