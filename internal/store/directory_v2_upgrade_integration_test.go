@@ -79,6 +79,9 @@ func TestVersionFifteenDirectoryV2UpgradePreservesBytesAndAuthority(t *testing.T
 	f.stageHistoricalDirectory(history)
 	f.finish(run, done, false)
 	reserved := f.submitDirectory(engine, "reserved")
+	// Historical unmatched results have a NULL availability projection; a v2
+	// extension must preserve that exact legacy value rather than normalize it.
+	f.exec(`INSERT INTO adtr.domain_audit(tenant_id,actor_id,domain_id,action,old_revision,new_revision,credential_revision,task_id,result) VALUES($1,$2,'history','domain_directory_result',2,2,2,'missing-historical-task','success')`, f.actor.TenantID, f.actor.ActorID)
 	before, projection := f.snapshot(), f.auditProjection()
 	delete(before, "schema_version")
 	results := make(chan error, 3)
@@ -124,6 +127,10 @@ func TestVersionFifteenDirectoryV2UpgradePreservesBytesAndAuthority(t *testing.T
 	var wrongProfileDenied bool
 	if err := f.conn.QueryRow(f.ctx, `SELECT event_result='NONE' AND NOT result_available AND NOT(event_args ? 'taskState') FROM adtr.audit_source WHERE source='domain' AND event='domain_directory_v2_result' AND event_args->>'taskUUID'=$1`, history.ID).Scan(&wrongProfileDenied); err != nil || !wrongProfileDenied {
 		t.Fatal("v2 audit borrowed success from a historical v1 task", err)
+	}
+	f.exec(`INSERT INTO adtr.domain_audit(tenant_id,actor_id,domain_id,action,old_revision,new_revision,credential_revision,task_id,result) VALUES($1,$2,'history','domain_directory_v2_result',2,2,2,'missing-v2-task','success')`, f.actor.TenantID, f.actor.ActorID)
+	if err := f.conn.QueryRow(f.ctx, `SELECT event_result='NONE' AND result_available IS FALSE AND NOT(event_args ? 'taskState') FROM adtr.audit_source WHERE source='domain' AND event='domain_directory_v2_result' AND event_args->>'taskUUID'='missing-v2-task'`).Scan(&wrongProfileDenied); err != nil || !wrongProfileDenied {
+		t.Fatal("v2 audit made a missing task result available", err)
 	}
 }
 
@@ -224,6 +231,10 @@ func TestVersionFifteenDirectoryV2UpgradeRejectsCollisionsAndUnexpectedShapes(t 
 		{"disabled-credential-audit-capture", `ALTER TABLE adtr.operation_account_use_audit DISABLE TRIGGER credential_use_audit_capture`, ErrDirectoryV2SchemaShape},
 		{"missing-immutable-guard", `DROP TRIGGER domain_directory_observations_immutable ON adtr.domain_directory_observations`, ErrDirectoryV2SchemaShape},
 		{"disabled-immutable-guard", `ALTER TABLE adtr.domain_directory_observations DISABLE TRIGGER domain_directory_observations_immutable`, ErrDirectoryV2SchemaShape},
+		{"missing-use-consistency", `DROP TRIGGER domain_directory_use_consistency ON adtr.domain_directory_task_uses`, ErrDirectoryV2SchemaShape},
+		{"disabled-use-consistency", `ALTER TABLE adtr.domain_directory_task_uses DISABLE TRIGGER domain_directory_use_consistency`, ErrDirectoryV2SchemaShape},
+		{"nondeferred-use-consistency", `DROP TRIGGER domain_directory_use_consistency ON adtr.domain_directory_task_uses; CREATE TRIGGER domain_directory_use_consistency AFTER INSERT OR UPDATE ON adtr.domain_directory_task_uses FOR EACH ROW EXECUTE FUNCTION adtr.domain_directory_use_consistency()`, ErrDirectoryV2SchemaShape},
+		{"extra-use-consistency", `CREATE CONSTRAINT TRIGGER unknown_extra_use_consistency AFTER INSERT OR UPDATE ON adtr.domain_directory_task_uses DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION adtr.domain_directory_use_consistency()`, ErrDirectoryV2SchemaShape},
 		{"extra-observation-column", `ALTER TABLE adtr.domain_directory_observations ADD unknown_original text`, ErrDirectoryV2SchemaShape},
 		{"duplicate-task-missing-account-fk", `DO $$ DECLARE n text; BEGIN SELECT conname INTO n FROM pg_constraint WHERE conrelid='adtr.domain_directory_task_uses'::regclass AND contype='f' AND confrelid='adtr.operation_accounts'::regclass; EXECUTE format('ALTER TABLE adtr.domain_directory_task_uses DROP CONSTRAINT %I',n);END; $$; ALTER TABLE adtr.domain_directory_task_uses ADD CONSTRAINT unknown_duplicate_task_fk FOREIGN KEY(task_id) REFERENCES adtr.tasks(task_id)`, ErrDirectoryV2SchemaShape},
 		{"duplicate-account-missing-task-fk", `DO $$ DECLARE n text; BEGIN SELECT conname INTO n FROM pg_constraint WHERE conrelid='adtr.domain_directory_task_uses'::regclass AND contype='f' AND confrelid='adtr.tasks'::regclass; EXECUTE format('ALTER TABLE adtr.domain_directory_task_uses DROP CONSTRAINT %I',n);END; $$; ALTER TABLE adtr.domain_directory_task_uses ADD CONSTRAINT unknown_duplicate_account_fk FOREIGN KEY(tenant_id,domain_id,account_id) REFERENCES adtr.operation_accounts(tenant_id,domain_id,account_id)`, ErrDirectoryV2SchemaShape},
@@ -231,7 +242,7 @@ func TestVersionFifteenDirectoryV2UpgradeRejectsCollisionsAndUnexpectedShapes(t 
 		{"missing-dependency-check", `ALTER TABLE adtr.operation_account_dependencies DROP CONSTRAINT operation_account_dependency_pins`, ErrDirectoryV2SchemaShape},
 		{"purpose-fragment-only", credentialuse.DirectoryV2PurposeSchema, ErrDirectoryV2SchemaShape},
 		{"audit-fragment-only", domains.DirectoryAuditV2Schema, ErrDirectoryV2SchemaShape},
-		{"reserved-audit-record", domains.DirectoryAuditV2Schema + `INSERT INTO adtr.domain_audit(tenant_id,actor_id,domain_id,action,old_revision,new_revision,credential_revision,result) SELECT tenant_id,id,'first','domain_directory_v2_submit',1,1,1,'unknown-original' FROM adtr.users`, ErrDirectoryV2ReservedCollision},
+		{"reserved-audit-record", domains.DirectoryAuditV2Schema + `INSERT INTO adtr.domain_audit(tenant_id,actor_id,domain_id,action,old_revision,new_revision,credential_revision,result) SELECT tenant_id,id,'first','domain_directory_v2_submit',1,1,1,'accepted' FROM adtr.users`, ErrDirectoryV2ReservedCollision},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newDirectoryV2UpgradeFixture(t)
@@ -345,7 +356,7 @@ func (f *operationalUpgradeFixture) grantDirectoryV2(domain string) string {
 		if err := credentialuse.SetGovernanceContext(f.ctx, tx, f.actor, credentialuse.GrantUse); err != nil {
 			return err
 		}
-		out, err := credentialuse.New().MutateForPurposeTx(f.ctx, tx, f.actor, "/v2/grant", credentialuse.Input{AccountID: domain + "-account", RoleID: "platform_admin", Purpose: credentialuse.DirectoryV2Purpose, ExpectedAccountRevision: "1", ExpectedCredentialRevision: "1", ExpectedGrantRevision: "0", IdempotencyKey: "grant-v2-" + domain}, []string{domain}, credentialuse.DirectoryV2Purpose)
+		out, err := credentialuse.New().MutateForPurposeTx(f.ctx, tx, f.actor, "/grant", credentialuse.Input{AccountID: domain + "-account", RoleID: "platform_admin", Purpose: credentialuse.DirectoryV2Purpose, ExpectedAccountRevision: "1", ExpectedCredentialRevision: "1", ExpectedGrantRevision: "0", IdempotencyKey: "grant-v2-" + domain}, []string{domain}, credentialuse.DirectoryV2Purpose)
 		revision = out.GrantRevision
 		return err
 	})

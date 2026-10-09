@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"fmt"
 	"regexp"
 	"strings"
 
@@ -70,7 +71,7 @@ func requireDirectoryV2Baseline(ctx context.Context, tx pgx.Tx) error {
  OR EXISTS(SELECT FROM pg_class WHERE relnamespace='adtr'::regnamespace AND relname IN ('domain_directory_versioned_use_identity','domain_directory_observations_versioned_latest'))
  OR EXISTS(SELECT FROM pg_proc WHERE pronamespace='adtr'::regnamespace AND proname IN ('domain_directory_observation_canonical_v2','domain_directory_observation_base64_v2'))
  OR EXISTS(SELECT FROM pg_constraint WHERE connamespace='adtr'::regnamespace AND conname IN ('domain_directory_use_profile','domain_directory_observations_dictionary_version_check'))`).Scan(&exclusive, &collision); err != nil || !exclusive {
-		return ErrDirectoryV2SchemaShape
+		return directoryV2SchemaCheckFailed(1)
 	}
 	if collision {
 		return ErrDirectoryV2ReservedCollision
@@ -84,15 +85,15 @@ func requireDirectoryV2Baseline(ctx context.Context, tx pgx.Tx) error {
 			return err
 		}
 		if _, err = tx.Exec(ctx, sql); err != nil {
-			return ErrDirectoryV2SchemaShape
+			return directoryV2SchemaCheckFailed(2)
 		}
 		for _, snapshot := range []string{directoryV2Columns, directoryV2Checks, directoryV2Indexes} {
 			var actual, expected string
 			if err = tx.QueryRow(ctx, snapshot, "adtr."+definition.table).Scan(&actual); err != nil {
-				return ErrDirectoryV2SchemaShape
+				return directoryV2SchemaCheckFailed(3)
 			}
 			if err = tx.QueryRow(ctx, snapshot, "pg_temp."+definition.reference).Scan(&expected); err != nil || actual != expected {
-				return ErrDirectoryV2SchemaShape
+				return directoryV2SchemaCheckFailed(4)
 			}
 		}
 	}
@@ -109,7 +110,7 @@ func requireDirectoryV2Baseline(ctx context.Context, tx pgx.Tx) error {
  AND (SELECT count(*)=1 AND bool_and(convalidated AND NOT condeferrable AND NOT condeferred AND confupdtype='a' AND confdeltype='a' AND confmatchtype='s' AND conkey=ARRAY[1,2,3]::smallint[] AND confrelid='adtr.domain_directory_task_uses'::regclass AND confkey=ARRAY[1,2,3]::smallint[]) FROM pg_constraint WHERE conrelid='adtr.domain_directory_observations'::regclass AND contype='f')
  AND NOT EXISTS(SELECT FROM pg_class WHERE oid IN ('adtr.domain_directory_task_uses'::regclass,'adtr.domain_directory_observations'::regclass) AND (relkind<>'r' OR relpersistence<>'p' OR relrowsecurity OR relforcerowsecurity OR relispartition))
  AND NOT EXISTS(SELECT FROM pg_inherits WHERE inhrelid IN ('adtr.domain_directory_task_uses'::regclass,'adtr.domain_directory_observations'::regclass) OR inhparent IN ('adtr.domain_directory_task_uses'::regclass,'adtr.domain_directory_observations'::regclass))`).Scan(&valid); err != nil || !valid {
-		return ErrDirectoryV2SchemaShape
+		return directoryV2SchemaCheckFailed(5)
 	}
 	if err := directoryV2PurposeChecks(ctx, tx); err != nil {
 		return err
@@ -120,13 +121,13 @@ func requireDirectoryV2Baseline(ctx context.Context, tx pgx.Tx) error {
 	const historicalView = "CREATE OR REPLACE VIEW adtr.audit_source AS"
 	index := strings.Index(audit.DirectoryViewSchema, historicalView)
 	if index < 0 {
-		return ErrDirectoryV2SchemaShape
+		return directoryV2SchemaCheckFailed(6)
 	}
 	if _, err := tx.Exec(ctx, "CREATE TEMP VIEW adtr_directory_v2_expected_audit AS"+audit.DirectoryViewSchema[index+len(historicalView):]); err != nil {
-		return ErrDirectoryV2SchemaShape
+		return directoryV2SchemaCheckFailed(7)
 	}
 	if err := tx.QueryRow(ctx, `SELECT pg_get_viewdef('adtr.audit_source'::regclass)=pg_get_viewdef('pg_temp.adtr_directory_v2_expected_audit'::regclass) AND EXISTS(SELECT FROM pg_class WHERE oid='adtr.audit_source'::regclass AND relkind='v' AND reloptions IS NULL)`).Scan(&valid); err != nil || !valid {
-		return ErrDirectoryV2SchemaShape
+		return directoryV2SchemaCheckFailed(8)
 	}
 	return nil
 }
@@ -163,7 +164,10 @@ func directoryV2ReferenceTable(schema, table, reference string) (string, error) 
 }
 
 const directoryV2Columns = `SELECT COALESCE(jsonb_agg(jsonb_build_array(a.attnum,a.attname,a.atttypid,a.atttypmod,a.attnotnull,a.attcollation,a.attidentity,a.attgenerated,a.attisdropped,pg_get_expr(d.adbin,d.adrelid)) ORDER BY a.attnum),'[]'::jsonb)::text FROM pg_attribute a LEFT JOIN pg_attrdef d ON d.adrelid=a.attrelid AND d.adnum=a.attnum WHERE a.attrelid=to_regclass($1) AND a.attnum>0`
-const directoryV2Checks = `SELECT COALESCE(jsonb_agg(v ORDER BY v::text),'[]'::jsonb)::text FROM (SELECT jsonb_build_array(contype,pg_get_constraintdef(oid),convalidated,condeferrable,condeferred,connoinherit) v FROM pg_constraint WHERE conrelid=to_regclass($1) AND contype<>'f') s`
+
+// Foreign keys and deferred constraint triggers have separate strict catalog
+// checks below. The empty reference tables intentionally contain neither.
+const directoryV2Checks = `SELECT COALESCE(jsonb_agg(v ORDER BY v::text),'[]'::jsonb)::text FROM (SELECT jsonb_build_array(contype,pg_get_constraintdef(oid),convalidated,condeferrable,condeferred,connoinherit) v FROM pg_constraint WHERE conrelid=to_regclass($1) AND contype NOT IN ('f','t')) s`
 const directoryV2Indexes = `SELECT COALESCE(jsonb_agg(v ORDER BY v::text),'[]'::jsonb)::text FROM (SELECT jsonb_build_array(c.relam,i.indisunique,i.indisprimary,i.indisexclusion,i.indisvalid,i.indisready,i.indnkeyatts,i.indnatts,i.indkey::text,i.indcollation::text,i.indclass::text,i.indoption::text,pg_get_expr(i.indexprs,i.indrelid),pg_get_expr(i.indpred,i.indrelid)) v FROM pg_index i JOIN pg_class c ON c.oid=i.indexrelid WHERE i.indrelid=to_regclass($1)) s`
 
 func directoryV2PurposeChecks(ctx context.Context, tx pgx.Tx) error {
@@ -178,15 +182,15 @@ func directoryV2PurposeChecks(ctx context.Context, tx pgx.Tx) error {
 		sql += "ALTER TABLE pg_temp.adtr_directory_v2_expected_checks ADD CONSTRAINT " + pgx.Identifier{match[2]}.Sanitize() + " CHECK(" + match[3] + ";\n"
 	}
 	if len(checks) != 5 {
-		return ErrDirectoryV2SchemaShape
+		return directoryV2SchemaCheckFailed(9)
 	}
 	if _, err := tx.Exec(ctx, sql); err != nil {
-		return ErrDirectoryV2SchemaShape
+		return directoryV2SchemaCheckFailed(10)
 	}
 	for _, check := range checks {
 		var valid bool
 		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT FROM pg_constraint a JOIN pg_constraint e ON e.conrelid='pg_temp.adtr_directory_v2_expected_checks'::regclass AND e.conname=a.conname WHERE a.conrelid=to_regclass($1) AND a.conname=$2 AND a.contype='c' AND a.convalidated AND NOT a.connoinherit AND pg_get_constraintdef(a.oid)=pg_get_constraintdef(e.oid))`, "adtr."+check.table, check.name).Scan(&valid); err != nil || !valid {
-			return ErrDirectoryV2SchemaShape
+			return directoryV2SchemaCheckFailed(11)
 		}
 	}
 	return nil
@@ -201,7 +205,7 @@ func directoryV2HistoricalFunctionsAndTriggers(ctx context.Context, tx pgx.Tx) e
 	matches := pattern.FindAllStringSubmatch(schema, -1)
 	declarations := regexp.MustCompile(`CREATE(?: OR REPLACE)? FUNCTION adtr\.[a-z_]+\(`).FindAllString(schema, -1)
 	if len(matches) == 0 || len(matches) != len(declarations) {
-		return ErrDirectoryV2SchemaShape
+		return directoryV2SchemaCheckFailed(12)
 	}
 	functions := make(map[string][]string, len(matches))
 	for _, match := range matches {
@@ -213,7 +217,7 @@ func directoryV2HistoricalFunctionsAndTriggers(ctx context.Context, tx pgx.Tx) e
 			parts := strings.Fields(arg)
 			if len(parts) > 0 {
 				if len(parts) != 2 {
-					return ErrDirectoryV2SchemaShape
+					return directoryV2SchemaCheckFailed(13)
 				}
 				argNames = append(argNames, parts[0])
 				args = append(args, parts[len(parts)-1])
@@ -227,7 +231,7 @@ func directoryV2HistoricalFunctionsAndTriggers(ctx context.Context, tx pgx.Tx) e
 		}
 		var valid bool
 		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT FROM pg_proc p JOIN pg_language l ON l.oid=p.prolang WHERE p.oid=to_regprocedure($1) AND p.prosrc=$2 AND l.lanname=$3 AND p.prorettype=to_regtype($4) AND p.provolatile::text=$5 AND p.proargnames IS NOT DISTINCT FROM $6::text[] AND p.proargmodes IS NULL AND p.proallargtypes IS NULL AND p.provariadic=0 AND NOT p.proretset AND p.proparallel='u' AND p.prokind='f' AND NOT p.prosecdef AND NOT p.proisstrict AND NOT p.proleakproof AND p.proconfig IS NULL AND p.pronargdefaults=0 AND (SELECT count(*) FROM pg_proc q WHERE q.pronamespace=p.pronamespace AND q.proname=p.proname)=1)`, "adtr."+match[1]+"("+strings.Join(args, ",")+")", match[6], strings.ToLower(match[4]), match[3], volatility, argNames).Scan(&valid); err != nil || !valid {
-			return ErrDirectoryV2SchemaShape
+			return directoryV2SchemaCheckFailed(14)
 		}
 	}
 	// The original guard remains authoritative after dictionary provenance is
@@ -237,7 +241,7 @@ func directoryV2HistoricalFunctionsAndTriggers(ctx context.Context, tx pgx.Tx) e
 	triggerMatches := triggerPattern.FindAllStringSubmatch(schema, -1)
 	triggerDeclarations := regexp.MustCompile(`CREATE(?: CONSTRAINT)? TRIGGER [a-z_]+ `).FindAllString(schema, -1)
 	if len(triggerMatches) == 0 || len(triggerMatches) != len(triggerDeclarations) {
-		return ErrDirectoryV2SchemaShape
+		return directoryV2SchemaCheckFailed(15)
 	}
 	triggers := make(map[string][]string, len(triggerMatches))
 	for _, match := range triggerMatches {
@@ -258,7 +262,7 @@ func directoryV2HistoricalFunctionsAndTriggers(ctx context.Context, tx pgx.Tx) e
 		}
 		var valid bool
 		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT FROM pg_trigger WHERE tgrelid=to_regclass($1) AND tgname=$2 AND tgfoid=to_regprocedure($3) AND tgtype=$4 AND tgenabled='O' AND NOT tgisinternal AND tgdeferrable=$5 AND tginitdeferred=$5 AND tgattr::text='' AND octet_length(tgargs)=0 AND tgqual IS NULL)`, "adtr."+match[5], match[2], "adtr."+match[8]+"()", bits, match[6] != "").Scan(&valid); err != nil || !valid {
-			return ErrDirectoryV2SchemaShape
+			return directoryV2SchemaCheckFailed(16)
 		}
 	}
 	for _, table := range []string{"domain_directory_task_uses", "domain_directory_observations", "domain_audit", "operation_account_use_grants", "operation_account_use_mutations", "operation_account_use_audit"} {
@@ -270,8 +274,15 @@ func directoryV2HistoricalFunctionsAndTriggers(ctx context.Context, tx pgx.Tx) e
 		}
 		var actual int
 		if err := tx.QueryRow(ctx, `SELECT count(*) FROM pg_trigger WHERE tgrelid=to_regclass($1) AND NOT tgisinternal`, "adtr."+table).Scan(&actual); err != nil || actual != expected {
-			return ErrDirectoryV2SchemaShape
+			return directoryV2SchemaCheckFailed(17)
 		}
 	}
 	return nil
+}
+
+// Only a fixed source-code checkpoint reaches migration diagnostics. Never wrap
+// a database error or include catalog contents, identifiers, rows or credentials.
+// Preserve errors.Is for callers and fail closed at every existing guard.
+func directoryV2SchemaCheckFailed(checkpoint uint8) error {
+	return fmt.Errorf("%w (check %d)", ErrDirectoryV2SchemaShape, checkpoint)
 }

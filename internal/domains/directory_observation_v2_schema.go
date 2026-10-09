@@ -93,7 +93,7 @@ BEGIN
  SELECT * INTO u FROM adtr.domain_directory_task_uses WHERE task_id=NEW.task_id FOR UPDATE NOWAIT;
  IF t.task_id IS NULL OR u.task_id IS NULL OR t.state<>'running' OR t.lease_until IS NULL OR t.lease_until<=clock_timestamp()
  OR NEW.dictionary_version NOT IN (1,2) OR NEW.dictionary_version IS NULL
- OR t.kind IS DISTINCT FROM CASE NEW.dictionary_version WHEN 1 THEN 'domain.directory_read' ELSE 'domain.directory_read.v2' END
+ OR t.kind IS DISTINCT FROM (CASE NEW.dictionary_version WHEN 1 THEN 'domain.directory_read' ELSE 'domain.directory_read.v2' END)
  OR t.payload_version<>1 OR u.purpose IS DISTINCT FROM t.kind OR u.dictionary_version IS DISTINCT FROM NEW.dictionary_version
  OR ROW(t.tenant_id,t.domain_id,t.actor_id,t.lease_owner,t.fencing_token,t.attempt) IS DISTINCT FROM ROW(NEW.tenant_id,NEW.domain_id,NEW.actor_id,NEW.opener_owner,NEW.opener_fencing_token,NEW.opener_attempt)
  OR ROW(u.tenant_id,u.domain_id,u.actor_id,u.opener_owner,u.opener_fencing_token,u.opener_attempt) IS DISTINCT FROM ROW(NEW.tenant_id,NEW.domain_id,NEW.actor_id,NEW.opener_owner,NEW.opener_fencing_token,NEW.opener_attempt)
