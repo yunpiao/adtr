@@ -9,6 +9,10 @@ import {
   type Route,
 } from "@playwright/test";
 import { createHmac } from "node:crypto";
+import {
+  directoryV2ResponseJSON,
+  observeDirectoryV2Responses,
+} from "./directory-v2-response-observer";
 import { isIP } from "node:net";
 import {
   requireSameNativeWindow,
@@ -205,7 +209,7 @@ async function submit(page: Page, path: string, button: string, status = 200) {
   // Never return the password/TOTP-bearing POST body to assertion reporters.
   const sent = response.request().postDataJSON();
   return {
-    value: await response.json(),
+    value: await directoryV2ResponseJSON(response),
     sent: {
       domainId: sent.domainId,
       expectedRevision: sent.expectedRevision,
@@ -249,7 +253,7 @@ async function observationAction(page: Page, action: () => Promise<unknown>) {
     200,
   );
   expect(response.headers()["cache-control"]).toBe("no-store");
-  const value = await response.json();
+  const value = await directoryV2ResponseJSON(response);
   expect(
     value.dictionaryVersion,
     "Every v2 observation carries its fixed profile",
@@ -682,6 +686,9 @@ async function watchReaderDOM(
 process.env.PLAYWRIGHT_NO_COPY_PROMPT = "1";
 test.use({ trace: "off", screenshot: "off", video: "off" });
 test.beforeAll(() => requireFixture());
+test.beforeEach(async ({ context }) => {
+  await observeDirectoryV2Responses(context);
+});
 test("real empty dictionary-v2 reader and same-context account-switch isolation", async ({
   page,
   context,
@@ -1128,6 +1135,7 @@ test("real empty dictionary-v2 reader and same-context account-switch isolation"
   const readerContext = await context
     .browser()!
     .newContext({ baseURL: process.env.ADTR_E2E_BASE_URL });
+  await observeDirectoryV2Responses(readerContext);
   const readerPage = await readerContext.newPage();
   collect(readerPage);
   let readerAuth!: Authenticator;
@@ -1562,6 +1570,7 @@ test("real empty dictionary-v2 reader and same-context account-switch isolation"
     const administrator = await context
       .browser()!
       .newContext({ baseURL: process.env.ADTR_E2E_BASE_URL });
+    await observeDirectoryV2Responses(administrator);
     const adminPage = await administrator.newPage();
     collect(adminPage);
     try {

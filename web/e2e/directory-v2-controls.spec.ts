@@ -7,6 +7,10 @@ import {
   type Response,
 } from "@playwright/test";
 import { createHmac } from "node:crypto";
+import {
+  directoryV2ResponseJSON,
+  observeDirectoryV2Responses,
+} from "./directory-v2-response-observer";
 import { isIP } from "node:net";
 import type { Task } from "../src/task-api";
 import { readDirectoryV2Use } from "./directory-v2-ledger-observer";
@@ -172,7 +176,7 @@ async function submit(page: Page, path: string, button: string, status = 200) {
   // Never return the password/TOTP-bearing POST body to assertion reporters.
   const sent = response.request().postDataJSON();
   return {
-    value: await response.json(),
+    value: await directoryV2ResponseJSON(response),
     sent: {
       domainId: sent.domainId,
       expectedRevision: sent.expectedRevision,
@@ -216,7 +220,7 @@ async function observationAction(page: Page, action: () => Promise<unknown>) {
     200,
   );
   expect(response.headers()["cache-control"]).toBe("no-store");
-  const value = await response.json();
+  const value = await directoryV2ResponseJSON(response);
   expect(
     value.dictionaryVersion,
     "Every v2 observation carries its fixed profile",
@@ -314,6 +318,9 @@ async function waitForTerminal(
 process.env.PLAYWRIGHT_NO_COPY_PROMPT = "1";
 test.use({ trace: "off", screenshot: "off", video: "off" });
 test.beforeAll(() => requireFixture());
+test.beforeEach(async ({ context }) => {
+  await observeDirectoryV2Responses(context);
+});
 test("real empty dictionary-v2 observation and cancellation during paged I/O", async ({
   page,
   context,
@@ -778,7 +785,7 @@ test("real empty dictionary-v2 observation and cancellation during paged I/O", a
     const pending = (async () => {
       if (response.status() !== 200)
         throw new Error("Real directory UI poll failed");
-      const value = await response.json();
+      const value = await directoryV2ResponseJSON(response);
       safe(value);
       polled.push({ task: value.task as Task, receivedAt: Date.now() });
     })().catch(() => {
@@ -1045,23 +1052,16 @@ test("real empty dictionary-v2 observation and cancellation during paged I/O", a
       clearTimeout(timer);
     }
   }
-  if (scenarioFailed) {
-    // Preserve the original failure without serializing any proof or response.
-    if (!responsesDrained || pollFailure)
-      throw new AggregateError(
-        [
-          scenarioError,
-          new Error("Real browser response collection failed or timed out"),
-        ],
-        "Directory assertions and response collection failed",
-      );
-    throw scenarioError;
-  }
-  expect(
-    responsesDrained,
-    "Real browser response parsing drained within two seconds",
-  ).toBe(true);
-  expect(pollFailure, "All observed browser polls succeeded").toBe(false);
+  // Soft collection assertions preserve their own diagnostics while allowing
+  // Playwright to report the original scenario assertion and source location.
+  expect
+    .soft(
+      responsesDrained,
+      "Real browser response parsing drained within two seconds",
+    )
+    .toBe(true);
+  expect.soft(pollFailure, "All observed browser polls succeeded").toBe(false);
+  if (scenarioFailed) throw scenarioError;
 
   const afterConnection = (
     await readJSON(context, `/api/domains/detail?domainId=${domainId}`, actorId)

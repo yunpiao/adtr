@@ -7,6 +7,11 @@ import {
   type Route,
 } from "@playwright/test";
 import { createHmac } from "node:crypto";
+import { directoryV2ResponseRegressions } from "./directory-v2-response-regressions";
+import {
+  directoryV2ResponseJSON,
+  observeDirectoryV2Responses,
+} from "./directory-v2-response-observer";
 import { isIP } from "node:net";
 import type { DirectoryV2Input } from "../src/directory-v2-api";
 import type { Task } from "../src/task-api";
@@ -176,7 +181,7 @@ async function submit(page: Page, path: string, button: string, status = 200) {
   expect(response.headers()["cache-control"]).toBe("no-store");
   // Setup also creates another disposable actor; never return its initial
   // password or the acting user's proof to assertion reporters.
-  return { value: await response.json() };
+  return { value: await directoryV2ResponseJSON(response) };
 }
 
 async function loseSyncResponse(
@@ -325,7 +330,7 @@ async function loseSyncResponse(
         ["idempotencyKey", committed.intent.idempotencyKey],
       ].sort(),
     );
-    const recovered = await receipt.json();
+    const recovered = await directoryV2ResponseJSON(receipt);
     safe(recovered);
     expect(Object.keys(recovered)).toEqual(["task"]);
     expect(recovered.task).toMatchObject({
@@ -404,7 +409,7 @@ async function observationAction(page: Page, action: () => Promise<unknown>) {
     200,
   );
   expect(response.headers()["cache-control"]).toBe("no-store");
-  const value = await response.json();
+  const value = await directoryV2ResponseJSON(response);
   expect(
     value.dictionaryVersion,
     "Every v2 observation carries its fixed profile",
@@ -490,6 +495,10 @@ function expectedObjects(): DirectoryObject[] {
 // reply. All API data, including receipt recovery, comes from the real server.
 test.use({ trace: "off", screenshot: "off", video: "off" });
 test.beforeAll(() => requireFixture());
+test.beforeEach(async ({ context }) => {
+  await observeDirectoryV2Responses(context);
+});
+directoryV2ResponseRegressions();
 test("real dictionary-v2 UI → authenticated API → worker → paged synthetic LDAP → PostgreSQL observation", async ({
   page,
   context,
@@ -1191,7 +1200,7 @@ test("real dictionary-v2 UI → authenticated API → worker → paged synthetic
   );
   expect(new URL(stalePin.url()).searchParams.get("pageIdx")).toBe("2");
   expect(stalePin.status()).toBe(409);
-  expect(await stalePin.json()).toEqual({
+  expect(await directoryV2ResponseJSON(stalePin)).toEqual({
     error: "directory_observation_unavailable",
   });
   await expect(page.getByRole("alert")).toContainText(
