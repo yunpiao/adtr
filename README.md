@@ -25,7 +25,7 @@ F12 当前切片包含独立目录凭据用途、逐页授权、受执行结束�
 
 ## Dictionary 2 整合范围
 
-当前分支增加独立 `domain.directory_read.v2` 任务/授权、迁移16和 `/api/directory/v2/*` 界面链路，提供 SID、mail、description 和创建时间四类事实字段。采集需要 `ADTR_DIRECTORY_READ_ENABLED=true`、`ADTR_DIRECTORY_READ_V2_ENABLED=true` 以及独立当前 v2 授权；两个开关默认关闭，旧授权不升级。当前本地检查已通过，新增真实 PostgreSQL/浏览器 CI 仍待执行，不能使用上述 PR77 检查点替代。范围与门禁见 [v2 整合检查点](docs/directory-v2-integration-status.md)。
+当前分支增加独立 `domain.directory_read.v2` 任务/授权、迁移16和 `/api/directory/v2/*` 界面链路，提供 SID、mail、description 和创建时间四类事实字段。采集需要 `ADTR_DIRECTORY_READ_ENABLED=true`、`ADTR_DIRECTORY_READ_V2_ENABLED=true` 以及独立当前 v2 授权；两个开关默认关闭，旧授权不升级。当前本地检查及隔离 PostgreSQL17.6 的非认证集成组、全部243项认证/HTTP集成测试已通过；修复尚未推送，新增浏览器与精确提交 CI 门禁仍未通过，不能使用上述 PR77 检查点替代。范围与门禁见 [v2 整合检查点](docs/directory-v2-integration-status.md)。
 
 ## 本地构建与测试
 
