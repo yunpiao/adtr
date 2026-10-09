@@ -97,14 +97,14 @@ func TestVersionFourteenDirectoryUpgradePreservesRecordsAndGrants(t *testing.T) 
 	delete(before, "schema_version")
 	results := make(chan error, 3)
 	for range 3 {
-		go func() { results <- Migrate(f.ctx, f.config) }()
+		go func() { results <- MigrateDirectoryV2BaselineForTest(f.ctx, f.config) }()
 	}
 	for range 3 {
 		if err := <-results; err != nil {
 			t.Fatal("concurrent directory upgrade", err)
 		}
 	}
-	if err := Migrate(f.ctx, f.config); err != nil {
+	if err := MigrateDirectoryV2BaselineForTest(f.ctx, f.config); err != nil {
 		t.Fatal("repeat migration", err)
 	}
 	f.assertDirectoryInstalled()
@@ -125,8 +125,8 @@ func TestVersionFourteenDirectoryUpgradePreservesRecordsAndGrants(t *testing.T) 
  AND NOT EXISTS(SELECT FROM adtr.domain_directory_observations)`).Scan(&denied); err != nil || !denied {
 		t.Fatal("migration granted or manufactured directory authority", err)
 	}
-	if err := Ready(f.ctx, f.config); err != nil {
-		t.Fatal("schema15 readiness", err)
+	if err := Ready(f.ctx, f.config); err == nil {
+		t.Fatal("schema16 runtime accepted historical schema15")
 	}
 	f.assertOldEngineRejected(engine, run.task)
 	if err := MigrateDirectoryBaselineForTest(f.ctx, f.config); err == nil {
@@ -142,7 +142,7 @@ func (f *operationalUpgradeFixture) requireDirectoryUpgradeBlocked() {
 	defer cancel()
 	results := make(chan error, 3)
 	for range 3 {
-		go func() { results <- Migrate(ctx, f.config) }()
+		go func() { results <- MigrateDirectoryV2BaselineForTest(ctx, f.config) }()
 	}
 	for range 3 {
 		if err := <-results; !errors.Is(err, ErrCredentialUseMigrationBlocked) {
@@ -168,10 +168,12 @@ func TestVersionFourteenDirectoryUpgradeRequiresActualB2ExecutorQuiescence(t *te
 	}
 	f.assertUse(task.ID, "opened", 1)
 	f.requireDirectoryUpgradeBlocked()
-	f.raceUpgradeAgainstReturn(engine, run, done, func(ctx context.Context, cfg *pgx.ConnConfig) error { return Migrate(ctx, cfg) })
+	f.raceUpgradeAgainstReturn(engine, run, done, func(ctx context.Context, cfg *pgx.ConnConfig) error {
+		return MigrateDirectoryV2BaselineForTest(ctx, cfg)
+	})
 	f.assertDirectoryBaseline()
 	f.assertUse(task.ID, "quiesced", 0)
-	if err := Migrate(f.ctx, f.config); err != nil {
+	if err := MigrateDirectoryV2BaselineForTest(f.ctx, f.config); err != nil {
 		t.Fatal("upgrade after genuine B2 return", err)
 	}
 	f.assertDirectoryInstalled()
@@ -246,7 +248,7 @@ func TestVersionFourteenDirectoryUpgradeRejectsReservedKindCollisionsAtomically(
 			before, catalog := f.snapshot(), f.catalogSnapshot()
 			results := make(chan error, 3)
 			for range 3 {
-				go func() { results <- Migrate(f.ctx, f.config) }()
+				go func() { results <- MigrateDirectoryV2BaselineForTest(f.ctx, f.config) }()
 			}
 			for range 3 {
 				if err := <-results; !errors.Is(err, want) {
@@ -261,9 +263,9 @@ func TestVersionFourteenDirectoryUpgradeRejectsReservedKindCollisionsAtomically(
 	}
 }
 
-// There is no schema16 migration. Exercise the production preflight directly
-// under the real exclusive migration gate, always rolling back without stamping
-// a future version or manufacturing a cleanup witness.
+// Retain the historical standalone preflight coverage. Production migration16
+// and its rollback/cleanup races are additionally exercised by the v2 upgrade
+// suite, without fabricating a version stamp or a cleanup witness.
 func futureDirectoryUpgradePreflight(ctx context.Context, cfg *pgx.ConnConfig) error {
 	conn, err := pgx.ConnectConfig(ctx, cfg.Copy())
 	if err != nil {
@@ -333,7 +335,7 @@ func (f *operationalUpgradeFixture) assertDirectoryUse(id, state string, depende
 
 func TestVersionFifteenFutureUpgradeRequiresBothOpenedLedgers(t *testing.T) {
 	f := newDirectoryUpgradeFixture(t)
-	if err := Migrate(f.ctx, f.config); err != nil {
+	if err := MigrateDirectoryV2BaselineForTest(f.ctx, f.config); err != nil {
 		t.Fatal(err)
 	}
 	f.schemaVersion = 15
@@ -348,7 +350,7 @@ func TestVersionFifteenFutureUpgradeRequiresBothOpenedLedgers(t *testing.T) {
 	reserved := f.submitDirectory(directory, "reserved")
 	// Re-running the current migration changes no contract, so opened uses
 	// must not prevent this idempotent invocation.
-	if err := Migrate(f.ctx, f.config); err != nil {
+	if err := MigrateDirectoryV2BaselineForTest(f.ctx, f.config); err != nil {
 		t.Fatal("current-version migration incorrectly required executor drain", err)
 	}
 	requireBlocked := func() {
@@ -390,7 +392,7 @@ func TestVersionFourteenDirectoryUpgradeRollsBackLateFragmentFailure(t *testing.
  INSERT INTO adtr.domain_directory_observations VALUES('unknown-original-object')`)
 	before, catalog := f.snapshot(), f.catalogSnapshot()
 	for range 2 {
-		if err := Migrate(f.ctx, f.config); err == nil {
+		if err := MigrateDirectoryV2BaselineForTest(f.ctx, f.config); err == nil {
 			t.Fatal("directory migration adopted an existing observation object")
 		}
 		if !reflect.DeepEqual(before, f.snapshot()) || catalog != f.catalogSnapshot() {
@@ -432,7 +434,7 @@ func TestVersionFourteenDirectoryUpgradeFencesLateB2Opening(t *testing.T) {
 	config := f.config.Copy()
 	config.RuntimeParams["application_name"] = "adtr-directory-late-open"
 	migration := make(chan error, 1)
-	go func() { migration <- Migrate(f.ctx, config) }()
+	go func() { migration <- MigrateDirectoryV2BaselineForTest(f.ctx, config) }()
 	f.awaitMigrationGate(config.RuntimeParams["application_name"])
 	called := false
 	checkpoint := make(chan error, 1)
@@ -462,7 +464,7 @@ func TestVersionFifteenDirectoryAuditResultWaitsForTaskOutcome(t *testing.T) {
 	for _, outcome := range []string{"succeeded", "cancelled", "failed"} {
 		t.Run(outcome, func(t *testing.T) {
 			f := newDirectoryUpgradeFixture(t)
-			if err := Migrate(f.ctx, f.config); err != nil {
+			if err := MigrateDirectoryV2BaselineForTest(f.ctx, f.config); err != nil {
 				t.Fatal(err)
 			}
 			f.schemaVersion = 15

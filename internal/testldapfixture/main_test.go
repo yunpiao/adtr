@@ -94,7 +94,7 @@ func TestOptionalControlConfiguration(t *testing.T) {
 func TestDirectoryConfigurationIsExplicitAndDefaultOff(t *testing.T) {
 	base := []string{"-cert", "synthetic.crt", "-key", "synthetic.key"}
 	cfg, err := readConfiguration(base, fixtureEnvironment)
-	if err != nil || cfg.directoryMode || cfg.directoryEmpty || cfg.directorySlow {
+	if err != nil || cfg.directoryMode || cfg.directoryV2 || cfg.directoryEmpty || cfg.directorySlow {
 		t.Fatal("directory enumeration must be disabled by default")
 	}
 	cfg, err = readConfiguration(append(append([]string(nil), base...), "-directory-mode"), fixtureEnvironment)
@@ -103,6 +103,35 @@ func TestDirectoryConfigurationIsExplicitAndDefaultOff(t *testing.T) {
 	}
 	if _, err = readConfiguration(append(append([]string(nil), base...), "-directory-mode=arbitrary"), fixtureEnvironment); err == nil {
 		t.Fatal("invalid directory mode accepted")
+	}
+}
+
+func TestDirectoryV2ConfigurationRequiresExplicitDirectoryMode(t *testing.T) {
+	base := []string{"-cert", "synthetic.crt", "-key", "synthetic.key"}
+	for _, modifier := range [][]string{
+		{"--directory-v2"},
+		{"--directory-v2", "--directory-empty"},
+		{"--directory-v2", "--directory-slow"},
+		{"--directory-v2", "--directory-empty", "--directory-slow"},
+	} {
+		args := append(append([]string(nil), base...), modifier...)
+		if _, err := readConfiguration(args, fixtureEnvironment); err == nil {
+			t.Fatal("dictionary 2 accepted without directory mode")
+		}
+		cfg, err := readConfiguration(append(args, "--directory-mode"), fixtureEnvironment)
+		if err != nil || !cfg.directoryMode || !cfg.directoryV2 {
+			t.Fatalf("explicit dictionary 2 rejected: %v", err)
+		}
+	}
+	for _, flag := range []string{"--directory-v2=2", "--directory-v2=arbitrary", "--dictionary-version=2", "--directory-attributes=mail"} {
+		args := append(append([]string(nil), base...), "--directory-mode", flag)
+		if _, err := readConfiguration(args, fixtureEnvironment); err == nil {
+			t.Fatalf("non-boolean or arbitrary dictionary selection accepted: %s", flag)
+		}
+	}
+	cfg, err := readConfiguration(append(append([]string(nil), base...), "--directory-mode", "--directory-v2=false"), fixtureEnvironment)
+	if err != nil || !cfg.directoryMode || cfg.directoryV2 {
+		t.Fatal("explicit false changed the legacy dictionary")
 	}
 }
 

@@ -23,6 +23,7 @@ type configuration struct {
 	cert, key, startTLSAddress, ldapsAddress string
 	controlDir                               string
 	directoryMode                            bool
+	directoryV2                              bool
 	directoryEmpty, directorySlow            bool
 	username, password                       []byte
 }
@@ -35,13 +36,14 @@ func readConfiguration(args []string, getenv func(string) string) (configuration
 	flags.StringVar(&cfg.key, "key", "", "synthetic server private key PEM path")
 	flags.StringVar(&cfg.controlDir, "control-dir", "", "optional disposable integration control directory")
 	flags.BoolVar(&cfg.directoryMode, "directory-mode", false, "enable the fixed synthetic directory dictionary for integration tests")
+	flags.BoolVar(&cfg.directoryV2, "directory-v2", false, "select the fixed eight-attribute dictionary; requires directory mode")
 	flags.BoolVar(&cfg.directoryEmpty, "directory-empty", false, "return zero synthetic objects; requires directory mode")
 	flags.BoolVar(&cfg.directorySlow, "directory-slow", false, "return five synthetic pages with a fixed two-second delay each; requires directory mode")
 	flags.StringVar(&cfg.startTLSAddress, "starttls-listen", "127.0.0.1:389", "fixture StartTLS IP:389")
 	flags.StringVar(&cfg.ldapsAddress, "ldaps-listen", "127.0.0.1:636", "fixture LDAPS IP:636")
 	if flags.Parse(args) != nil || flags.NArg() != 0 || cfg.cert == "" || cfg.key == "" ||
 		!validListenAddress(cfg.startTLSAddress, "389") || !validListenAddress(cfg.ldapsAddress, "636") ||
-		((cfg.directoryEmpty || cfg.directorySlow) && !cfg.directoryMode) {
+		((cfg.directoryV2 || cfg.directoryEmpty || cfg.directorySlow) && !cfg.directoryMode) {
 		return configuration{}, errors.New("invalid synthetic LDAP fixture configuration")
 	}
 	cfg.username = []byte(getenv("ADTR_LDAP_FIXTURE_USERNAME"))
@@ -105,6 +107,7 @@ func run(ctx context.Context, args []string, getenv func(string) string, output 
 		password:       cfg.password,
 		control:        control,
 		directoryMode:  cfg.directoryMode,
+		directoryV2:    cfg.directoryV2,
 		directoryEmpty: cfg.directoryEmpty,
 		directorySlow:  cfg.directorySlow,
 	}

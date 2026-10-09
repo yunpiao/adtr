@@ -43,3 +43,10 @@ This is synthetic protocol evidence; it is not a real AD compatibility test,
 database publication test, or browser acceptance result.
 
 Run `go test -race -count=1 -tags=integration ./internal/testldapfixture`.
+
+Dictionary 2 is separately selected with `-directory-mode -directory-v2`, or
+`LDAPFixture(directory_enabled=True, directory_v2=True)`. It accepts only the
+fixed eight-attribute request and preserves the original 30 base rows. Empty
+and slow modes remain available for either dictionary. The frozen supplemental
+data and full test boundary are documented in
+[`docs/directory-v2-test-fixture.md`](../../docs/directory-v2-test-fixture.md).

@@ -515,6 +515,62 @@ describe("source selection", () => {
   });
 });
 describe("uncertain source recovery and navigation", () => {
+  it.each(["immediate", "delayed"] as const)(
+    "restores the source route and original receipt with an %s response",
+    async (timing) => {
+      saveSourceIntent(profile, {
+        operation: "reference",
+        domainId,
+        expectedRevision: "3",
+        expectedConnectionCredentialGeneration: "2",
+        idempotencyKey: "reload-source-key",
+      });
+      window.history.replaceState({}, "", "#domains/credential-source");
+      let resolve!: (value: Response) => void;
+      const recovered = { receipt: receipt({ replayed: true }) };
+      override = (url) =>
+        url === "/api/auth/me"
+          ? response(profile)
+          : url.startsWith(`${base}/mutation?`)
+            ? timing === "immediate"
+              ? response(recovered)
+              : new Promise<Response>((done) => (resolve = done))
+            : undefined;
+      render(<App />);
+      if (timing === "immediate") {
+        // Recovery may finish before the caller observes the restored route.
+        await screen.findByText(/原凭据来源操作已确认/);
+      } else {
+        await screen.findByRole("heading", {
+          name: "核对未确认的凭据来源变更",
+        });
+        expect(screen.queryByText(/原凭据来源操作已确认/)).toBeNull();
+        expect(readSourceIntent(profile)?.idempotencyKey).toBe(
+          "reload-source-key",
+        );
+      }
+      expect(screen.getByRole("button", { name: "域连接" })).toHaveAttribute(
+        "aria-current",
+        "page",
+      );
+      expect(screen.getByRole("heading", { name: "域连接" })).toBeVisible();
+      expect(window.location.hash).toBe("#domains/credential-source");
+      if (timing === "delayed")
+        await act(async () => resolve(await response(recovered)));
+      await screen.findByText(/原凭据来源操作已确认/);
+      expect(calls("/api/auth/me")).toHaveLength(1);
+      expect(calls(`${base}/mutation`)).toHaveLength(1);
+      expect(calls(`${base}/mutation`)[0][0]).toBe(
+        `${base}/mutation?idempotencyKey=reload-source-key`,
+      );
+      expect(calls(`${base}/reference`)).toHaveLength(0);
+      expect(calls("/api/domains/test")).toHaveLength(0);
+      expect(readSourceIntent(profile)).toBeNull();
+      expect(sessionStorage.length).toBe(0);
+      expect(screen.queryByLabelText("AD 密码")).toBeNull();
+      expect(screen.queryByLabelText("操作者当前密码")).toBeNull();
+    },
+  );
   it("blocks source refresh during an unresolved POST and preserves its original key", async () => {
     let reject!: (error: Error) => void;
     override = (url) =>

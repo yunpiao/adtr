@@ -25,11 +25,12 @@ import (
 
 type directoryUseFixture struct {
 	*accountExecFixture
-	directoryGrant string
-	kind           tasks.Kind
+	directoryGrant     string
+	runtimeEnvironment map[string]string
+	kind               tasks.Kind
 }
 
-// Runtime cases use the production schema15 migration. Only the intentionally
+// Runtime cases use the current production migration. Only the intentionally
 // absent-dependency case uses historical14 plus partial fragments, without
 // forging a version. The synthetic executor never resolves or uses credentials.
 func fixtureForDirectoryUse(t *testing.T, dependencies bool, execute tasks.Executor) *directoryUseFixture {
@@ -38,6 +39,11 @@ func fixtureForDirectoryUse(t *testing.T, dependencies bool, execute tasks.Execu
 	if !dependencies {
 		version = 14
 	}
+	return fixtureForDirectoryUseAtVersion(t, dependencies, execute, version)
+}
+
+func fixtureForDirectoryUseAtVersion(t *testing.T, dependencies bool, execute tasks.Executor, version int) *directoryUseFixture {
+	t.Helper()
 	a := fixtureForAccountExecutorAtVersion(t, func(context.Context, ldapconnection.Config, ldapconnection.Credential) (ldapconnection.Result, error) {
 		t.Error("ledger component reached a network adapter")
 		return ldapconnection.Result{}, errors.New("unexpected network adapter")

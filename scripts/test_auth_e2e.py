@@ -18,9 +18,14 @@ from test_integration import IMAGE
 from ldap_e2e_fixture import LDAPFixture
 from account_barrier_e2e_fixture import AccountBarrierFixture
 from e2e_owned_container import OWNER_LABEL, remove_owned_container
+from e2e_runtime_diagnostics import http_handler_panicked
 
 
-REAL_TAB_LIFECYCLE_SUITES = {"session-invalidation", "directory-readers"}
+REAL_TAB_LIFECYCLE_SUITES = {"session-invalidation", "directory-readers", "directory-v2-readers"}
+DIRECTORY_V2_SUITES = {"directory-v2", "directory-v2-controls", "directory-v2-readers"}
+DIRECTORY_SUITES = {"directory", "directory-controls", "directory-readers"} | DIRECTORY_V2_SUITES
+EMPTY_DIRECTORY_SUITES = {"directory-controls", "directory-readers", "directory-v2-controls", "directory-v2-readers"}
+SLOW_DIRECTORY_SUITES = {"directory-controls", "directory-v2-controls"}
 
 
 def browser_command(suite):
@@ -43,7 +48,7 @@ def browser_command(suite):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--suite", choices=["auth", "access", "resource", "tasks", "audit", "system", "maintenance", "domains", "operations", "profile", "credential-use", "account-references", "operational-logs", "session-invalidation", "account-reference-barrier", "directory", "directory-controls", "directory-readers"], default="auth")
+    parser.add_argument("--suite", choices=["auth", "access", "resource", "tasks", "audit", "system", "maintenance", "domains", "operations", "profile", "credential-use", "account-references", "operational-logs", "session-invalidation", "account-reference-barrier", "directory", "directory-controls", "directory-readers", "directory-v2", "directory-v2-controls", "directory-v2-readers"], default="auth")
     parser.add_argument("--expired", action="store_true")
     args = parser.parse_args()
     # Check display support before creating a disposable database or fixtures.
@@ -77,7 +82,7 @@ def main():
         base = f"http://127.0.0.1:{port}"
         env.update(ADTR_DATABASE_URL=f"postgres://postgres:{password}@{db_address}/adtr_e2e?sslmode=disable",
                    ADTR_AUTH_KEY=base64.b64encode(secrets.token_bytes(32)).decode(),
-                   ADTR_DEVELOPMENT="true", ADTR_DIRECTORY_READ_ENABLED="false", ADTR_ORIGIN=base, ADTR_LISTEN_ADDR=f"127.0.0.1:{port}",
+                   ADTR_DEVELOPMENT="true", ADTR_DIRECTORY_READ_ENABLED="false", ADTR_DIRECTORY_READ_V2_ENABLED="false", ADTR_ORIGIN=base, ADTR_LISTEN_ADDR=f"127.0.0.1:{port}",
                    ADTR_WEB_DIR=str(Path("web/dist").resolve()), ADTR_BOOTSTRAP_USERNAME="e2e-admin",
                    ADTR_BOOTSTRAP_PASSWORD=secrets.token_urlsafe(24), ADTR_E2E_BASE_URL=base)
         env["ADTR_E2E_USERNAME"] = env["ADTR_BOOTSTRAP_USERNAME"]
@@ -95,21 +100,24 @@ def main():
                             "UPDATE adtr.users SET must_change=false,password_updated_at=now()-interval '91 days' WHERE username='e2e-admin'"],
                            check=True, capture_output=True, timeout=30)
             env["ADTR_E2E_EXPIRED"] = "1"
-        if args.suite in {"domains", "operations", "credential-use", "account-references", "account-reference-barrier", "directory", "directory-controls", "directory-readers"}:
+        if args.suite in {"domains", "operations", "credential-use", "account-references", "account-reference-barrier"} | DIRECTORY_SUITES:
             subprocess.run(["docker", "exec", name, "psql", "-U", "postgres", "-d", "adtr_e2e", "-v", "ON_ERROR_STOP=1", "-c",
                             "INSERT INTO adtr.resource_tenant_config(tenant_id,max_ad_count,expire_time,uid,name) VALUES('default',2,extract(epoch FROM clock_timestamp())::bigint+86400,'synthetic-e2e','Synthetic tenant')"],
                            check=True, capture_output=True, timeout=30)
-            if args.suite in {"domains", "account-references", "account-reference-barrier", "directory", "directory-controls", "directory-readers"}:
+            if args.suite in {"domains", "account-references", "account-reference-barrier"} | DIRECTORY_SUITES:
                 ldap_fixture = LDAPFixture(control_enabled=args.suite == "account-reference-barrier",
-                                           directory_enabled=args.suite in {"directory", "directory-controls", "directory-readers"},
-                                           directory_empty=args.suite in {"directory-controls", "directory-readers"},
-                                           directory_slow=args.suite == "directory-controls")
+                                           directory_enabled=args.suite in DIRECTORY_SUITES,
+                                           directory_empty=args.suite in EMPTY_DIRECTORY_SUITES,
+                                           directory_slow=args.suite in SLOW_DIRECTORY_SUITES,
+                                           directory_v2=args.suite in DIRECTORY_V2_SUITES)
                 ldap_fixture.start(env)
-                if args.suite in {"directory", "directory-controls", "directory-readers"}:
+                if args.suite in DIRECTORY_SUITES:
                     env["ADTR_DIRECTORY_READ_ENABLED"] = "true"
-                if args.suite in {"directory-controls", "directory-readers"}:
+                if args.suite in DIRECTORY_V2_SUITES:
+                    env["ADTR_DIRECTORY_READ_V2_ENABLED"] = "true"
+                if args.suite in EMPTY_DIRECTORY_SUITES:
                     env["ADTR_E2E_DB_CONTAINER"] = name
-                if args.suite == "directory-readers":
+                if args.suite in {"directory-readers", "directory-v2-readers"}:
                     env["ADTR_E2E_LDAP_DIRECTORY_SLOW"] = "false"
                 if args.suite == "account-reference-barrier":
                     account_barrier = AccountBarrierFixture()
@@ -133,7 +141,7 @@ def main():
             time.sleep(0.1)
         else:
             raise RuntimeError("authentication API failed readiness")
-        if args.suite in {"tasks", "audit", "system", "maintenance", "domains", "account-references", "operational-logs", "account-reference-barrier", "directory", "directory-controls", "directory-readers"}:
+        if args.suite in {"tasks", "audit", "system", "maintenance", "domains", "account-references", "operational-logs", "account-reference-barrier"} | DIRECTORY_SUITES:
             with socket.socket() as listener:
                 listener.bind(("127.0.0.1", 0))
                 worker_port = listener.getsockname()[1]
@@ -160,7 +168,7 @@ def main():
         # DOM snapshot. Suppress that separate artifact so proof fields cannot
         # enter an error-context prompt; explicit safe screenshots remain intact.
         env["PLAYWRIGHT_NO_COPY_PROMPT"] = "1"
-        subprocess.run(command, env=env, check=True, timeout=930 if args.suite in {"directory-controls", "directory-readers"} else 660 if args.suite == "directory" else 600 if args.suite == "audit" else 540 if args.suite in {"maintenance", "domains", "operations", "credential-use", "account-references", "operational-logs", "account-reference-barrier"} else 480 if args.suite == "system" else 420)
+        subprocess.run(command, env=env, check=True, timeout=930 if args.suite in EMPTY_DIRECTORY_SUITES else 660 if args.suite in {"directory", "directory-v2"} else 600 if args.suite == "audit" else 540 if args.suite in {"maintenance", "domains", "operations", "credential-use", "account-references", "operational-logs", "account-reference-barrier"} else 480 if args.suite == "system" else 420)
         chain = "real browser -> API -> worker/PostgreSQL" if worker is not None else "real browser -> API -> PostgreSQL"
     finally:
         shutdown_error = None
@@ -186,7 +194,19 @@ def main():
                 ldap_fixture.close()
             except Exception as error:
                 shutdown_error = error
-        logs.close()
+        try:
+            panicked = http_handler_panicked(logs)
+        except (OSError, UnicodeError, ValueError):
+            shutdown_error = RuntimeError(
+                "browser acceptance runtime diagnostics could not be checked"
+            )
+        else:
+            if panicked:
+                shutdown_error = RuntimeError(
+                    "browser acceptance runtime observed an HTTP handler panic; raw diagnostics withheld"
+                )
+        finally:
+            logs.close()
         if creation_attempted:
             remove_owned_container(name, owner)
         if shutdown_error is not None:

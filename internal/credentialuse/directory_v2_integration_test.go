@@ -10,17 +10,12 @@ import (
 	"github.com/yunpiao/adtr/internal/credentialuse"
 )
 
-// This explicit component fixture installs only the new fragment on a real
-// historical schema15. It does not claim full migration16/runtime integration.
-func newDirectoryV2FragmentFixture(t *testing.T) *governanceFixture {
+// Ordinary v2 governance behavior uses the complete production migration16.
+// The explicit history/rollback test below keeps its real schema15 fixture.
+func newDirectoryV2Fixture(t *testing.T) *governanceFixture {
 	t.Helper()
-	f := newGovernanceFixtureAtVersion(t, 15)
+	f := newGovernanceFixture(t)
 	seedDirectoryRole(t, f)
-	tx := f.begin(t)
-	f.exec(t, tx, credentialuse.DirectoryV2PurposeSchema)
-	if err := tx.Commit(f.ctx); err != nil {
-		t.Fatal(err)
-	}
 	return f
 }
 
@@ -109,7 +104,7 @@ func TestDirectoryV2PurposeFragmentPreservesHistoryAndRollsBack(t *testing.T) {
 // These are real PostgreSQL fragment cases, not mocked grant/receipt results.
 // Integration-tag compilation is not execution or migration16 acceptance.
 func TestDirectoryV2PurposeDefaultDenyAndEligibility(t *testing.T) {
-	f := newDirectoryV2FragmentFixture(t)
+	f := newDirectoryV2Fixture(t)
 	v1 := f.directoryGrant(t, directoryRole, "v1-only")
 	s := credentialuse.New()
 	tx := f.begin(t)
@@ -181,7 +176,7 @@ func TestDirectoryV2PurposeDefaultDenyAndEligibility(t *testing.T) {
 }
 
 func TestDirectoryV2PurposeGrantReceiptAndReplayIsolation(t *testing.T) {
-	f := newDirectoryV2FragmentFixture(t)
+	f := newDirectoryV2Fixture(t)
 	f.allowDirectoryRole(t, cuRole)
 	v1 := f.directoryGrant(t, cuRole, "v1-allow")
 	v2 := f.directoryV2Grant(t, cuRole, "v2-allow")
@@ -245,7 +240,7 @@ func TestDirectoryV2PurposeGrantReceiptAndReplayIsolation(t *testing.T) {
 }
 
 func TestDirectoryV2PurposeRevokeRegrantAndPairInvalidation(t *testing.T) {
-	f := newDirectoryV2FragmentFixture(t)
+	f := newDirectoryV2Fixture(t)
 	f.allowDirectoryRole(t, cuRole)
 	v1 := f.directoryGrant(t, cuRole, "v1-pair")
 	v2 := f.directoryV2Grant(t, cuRole, "v2-pair")
@@ -298,7 +293,7 @@ func TestDirectoryV2PurposeRevokeRegrantAndPairInvalidation(t *testing.T) {
 }
 
 func TestDirectoryV2PurposeSQLGuardsRemainExact(t *testing.T) {
-	f := newDirectoryV2FragmentFixture(t)
+	f := newDirectoryV2Fixture(t)
 	f.allowDirectoryRole(t, cuRole)
 	v1 := f.directoryGrant(t, cuRole, "v1-guard")
 	v2 := f.directoryV2Grant(t, cuRole, "v2-guard")
@@ -347,7 +342,7 @@ func TestDirectoryV2PurposeSQLGuardsRemainExact(t *testing.T) {
 }
 
 func TestDirectoryV2PurposeDormantGrantManagementAndEpochs(t *testing.T) {
-	f := newDirectoryV2FragmentFixture(t)
+	f := newDirectoryV2Fixture(t)
 	r := f.directoryV2Grant(t, directoryRole, "v2-only-governed")
 	for _, tc := range []struct {
 		name, query string

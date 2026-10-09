@@ -27,8 +27,8 @@ func reserveDirectoryUseForProfileTx(ctx context.Context, tx pgx.Tx, profile dir
 	if err != nil || pins != p || t.State != tasks.Queued || t.Attempt != 0 {
 		return errDirectoryUseEvidence
 	}
-	// The old wrapper must still operate before the deliberately unapplied
-	// schema-16 fragment. The new fragment defaults old inserts to dictionary 1.
+	// The old wrapper preserves historical INSERTs; migration 16 defaults
+	// absent provenance to dictionary 1. V2 always records its explicit pin.
 	statement := `INSERT INTO adtr.domain_directory_task_uses(tenant_id,domain_id,task_id,account_id,account_credential_revision,connection_revision,connection_credential_generation,policy_revision,grant_role_id,grant_revision,actor_id,purpose,state)
  VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'reserved')`
 	if profile == directoryTaskV2 {
@@ -247,6 +247,12 @@ func quiesceDirectoryUseTx(ctx context.Context, tx pgx.Tx, t tasks.Task, u direc
 // process loss; only an in-process executor-return witness may acknowledge them.
 func (s *Store) ReconcileReservedDirectoryUses(ctx context.Context, cfg *pgx.ConnConfig, limit int) (int, error) {
 	return s.reconcileReservedDirectoryUsesForProfile(ctx, cfg, directoryTaskV1, limit)
+}
+
+// ReconcileReservedDirectoryV2Uses has an independent bounded candidate set so
+// a backlog in one profile cannot starve the other profile's terminal cleanup.
+func (s *Store) ReconcileReservedDirectoryV2Uses(ctx context.Context, cfg *pgx.ConnConfig, limit int) (int, error) {
+	return s.reconcileReservedDirectoryUsesForProfile(ctx, cfg, directoryTaskV2, limit)
 }
 
 func (s *Store) reconcileReservedDirectoryUsesForProfile(ctx context.Context, cfg *pgx.ConnConfig, profile directoryTaskProfile, limit int) (int, error) {

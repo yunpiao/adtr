@@ -14,6 +14,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"math/big"
 	"net/http"
@@ -27,6 +28,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/yunpiao/adtr/internal/auth"
 	"github.com/yunpiao/adtr/internal/credentialuse"
 	"github.com/yunpiao/adtr/internal/directoryassets"
@@ -502,22 +504,16 @@ type directoryHTTPSyntheticRun struct {
 // HTTP admission precedes real tasks.Engine claim/start/fencing, and real SQL
 // guards accept the opened-use/observation transitions. Production OnQuiesced
 // receives only the witness issued after this executor actually returns.
-// Corrupt bodies are inserted at the storage boundary, with all guards enabled,
-// to test reader defense in depth; no immutable observation is later rewritten.
-func (f *directoryHTTPFixture) stage(observation ldapconnection.DirectoryObservation, corruption string) *directoryHTTPSyntheticRun {
+// Reader defence against out-of-band corruption is tested separately after a
+// valid guarded publication; it is not a producer acceptance path.
+func (f *directoryHTTPFixture) stage(observation ldapconnection.DirectoryObservation) *directoryHTTPSyntheticRun {
 	f.t.Helper()
 	raw, err := json.Marshal(observation)
 	if err != nil {
 		f.t.Fatal(err)
 	}
-	if corruption == "noncanonical" {
-		raw = append([]byte(" "), raw...)
-	}
 	digest := sha256.Sum256(raw)
 	hash := hex.EncodeToString(digest[:])
-	if corruption == "digest" {
-		hash = strings.Repeat("0", 64)
-	}
 	staged, release, done := make(chan error, 1), make(chan struct{}), make(chan error, 1)
 	var once sync.Once
 	run := &directoryHTTPSyntheticRun{release: func() { once.Do(func() { close(release) }) }, done: done}
@@ -625,7 +621,7 @@ func TestDirectoryMigratedHTTPStoredObservationSuccessAndPinnedPagination(t *tes
 		directoryassets.Object{GUID: "ffffffff-0000-0000-0000-000000000001", DN: "CN=Synthetic Group,DC=one,DC=invalid", Kind: directoryassets.Group, Classes: []string{"group", "top"}},
 		directoryassets.Object{GUID: "ffffffff-0000-0000-0000-000000000002", DN: "CN=Synthetic Computer,DC=one,DC=invalid", Kind: directoryassets.Computer, Classes: []string{"computer", "top", "user"}},
 	)
-	run := f.stage(observation, "")
+	run := f.stage(observation)
 	if f.count(`SELECT count(*) FROM adtr.domain_directory_observations WHERE task_id=$1`, first.ID) != 1 || f.count(`SELECT count(*) FROM adtr.tasks WHERE task_id=$1 AND state='running'`, first.ID) != 1 {
 		t.Fatal("test did not reach a real committed staged observation on a running task")
 	}
@@ -653,7 +649,7 @@ func TestDirectoryMigratedHTTPStoredObservationSuccessAndPinnedPagination(t *tes
 	}
 	f.request("directory-foreign", "/api/directory/observation?domainId=domain-one&observationId="+first.ID, nil, 409)
 	second := f.submit("directory-submit-two", "snapshot-two")
-	run = f.stage(directoryHTTPObservation(1), "")
+	run = f.stage(directoryHTTPObservation(1))
 	f.finish(run, second, tasks.Succeeded)
 	pinned := operationalDecode[domains.DirectoryList](t, f.request("directory-http-reader", path+"&pageIdx=2&observationId="+first.ID, nil, 200).Body.Bytes())
 	if pinned.ObservationID != first.ID || pinned.Page.Total != 30 || len(pinned.List) != 5 || pinned.List[0].GUID != "00000000-0000-0000-0000-00000000001a" {
@@ -691,7 +687,7 @@ func TestDirectoryMigratedHTTPStoredEmptyCancellationAndCurrentSource(t *testing
 			if scenario == "empty" {
 				observation = directoryHTTPObservation(0)
 			}
-			run := f.stage(observation, "")
+			run := f.stage(observation)
 			if scenario == "cancelled" {
 				out := operationalDecode[struct {
 					Task tasks.Task `json:"task"`
@@ -734,16 +730,84 @@ func TestDirectoryMigratedHTTPStoredCorruptionFailsClosed(t *testing.T) {
 			f.grant("directory-grant", "platform_admin")
 			task := f.submit("directory-submit-one", "corrupt-"+corruption)
 			observation := directoryHTTPObservation(1)
+			run := f.stage(observation)
+			corrupted := observation
+			corrupted.Objects = append([]directoryassets.Object(nil), observation.Objects...)
 			if corruption == "cross-domain-object" {
-				observation.Objects[0].DN = "CN=Synthetic,DC=other,DC=invalid"
+				corrupted.Objects[0].DN = "CN=Synthetic,DC=other,DC=invalid"
 			}
-			run := f.stage(observation, corruption)
+			raw, err := json.Marshal(corrupted)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if corruption == "noncanonical" {
+				raw = append([]byte(" "), raw...)
+			}
+			defer clear(raw)
+			digest := sha256.Sum256(raw)
+			hash := hex.EncodeToString(digest[:])
+			if corruption == "digest" {
+				hash = strings.Repeat("0", 64)
+			}
+			denied := func(statement, state, message string, args ...any) {
+				t.Helper()
+				tx, err := f.conn.Begin(f.ctx)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer tx.Rollback(f.ctx)
+				_, err = tx.Exec(f.ctx, statement, args...)
+				var pgerr *pgconn.PgError
+				if !errors.As(err, &pgerr) || pgerr.Code != state || pgerr.Message != message {
+					t.Fatalf("corruption defence wanted SQLSTATE %s and %q, got %v", state, message, err)
+				}
+			}
+			if corruption != "cross-domain-object" {
+				message := "invalid directory observation digest or bound"
+				if corruption == "noncanonical" {
+					message = "noncanonical directory observation"
+				}
+				// Schema16 rejects malformed publication before its duplicate task
+				// key is considered. A mere uniqueness error is not this defence.
+				denied(`INSERT INTO adtr.domain_directory_observations(tenant_id,domain_id,task_id,actor_id,opener_owner,opener_fencing_token,opener_attempt,object_count,body,sha256)
+ SELECT tenant_id,domain_id,task_id,actor_id,opener_owner,opener_fencing_token,opener_attempt,object_count,$2,$3 FROM adtr.domain_directory_observations WHERE task_id=$1`, "23514", message, task.ID, raw, hash)
+			}
 			f.finish(run, task, tasks.Succeeded)
+			valid := operationalDecode[domains.DirectoryList](t, f.request("directory-http-reader", "/api/directory/observation?domainId=domain-one", nil, 200).Body.Bytes())
+			if !valid.Available || valid.ObservationID != task.ID || len(valid.List) != 1 {
+				t.Fatal("valid guarded publication was unavailable before corruption")
+			}
+			denied(`UPDATE adtr.domain_directory_observations SET body=$2,sha256=$3 WHERE task_id=$1`, "P0001", "audit records are append-only", task.ID, raw, hash)
+			// Deliberately model out-of-band database-owner corruption, not an
+			// application write or successful producer. Restore the single update
+			// guard in the same transaction before the HTTP read-defence checks.
+			tx, err := f.conn.Begin(f.ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer tx.Rollback(f.ctx)
+			if _, err = tx.Exec(f.ctx, `ALTER TABLE adtr.domain_directory_observations DISABLE TRIGGER domain_directory_observations_immutable`); err != nil {
+				t.Fatal(err)
+			}
+			tag, err := tx.Exec(f.ctx, `UPDATE adtr.domain_directory_observations SET body=$2,sha256=$3 WHERE task_id=$1`, task.ID, raw, hash)
+			if err != nil || tag.RowsAffected() != 1 {
+				t.Fatal("owner-level corruption fixture did not update exactly one observation", err)
+			}
+			if _, err = tx.Exec(f.ctx, `ALTER TABLE adtr.domain_directory_observations ENABLE TRIGGER domain_directory_observations_immutable`); err != nil {
+				t.Fatal(err)
+			}
+			var enabled bool
+			if err = tx.QueryRow(f.ctx, `SELECT tgenabled='O' FROM pg_trigger WHERE tgrelid='adtr.domain_directory_observations'::regclass AND tgname='domain_directory_observations_immutable' AND NOT tgisinternal`).Scan(&enabled); err != nil || !enabled {
+				t.Fatal("observation immutability guard was not restored", err)
+			}
+			if err = tx.Commit(f.ctx); err != nil {
+				t.Fatal(err)
+			}
 			for _, pin := range []string{"", "&observationId=" + task.ID} {
 				f.error(f.request("directory-http-reader", "/api/directory/observation?domainId=domain-one"+pin, nil, 409), "directory_observation_unavailable")
 			}
 			if f.count(`SELECT count(*) FROM adtr.domain_directory_observations WHERE task_id=$1`, task.ID) != 1 {
-				t.Fatal("corruption test failed to persist bytes behind real SQL guards")
+				t.Fatal("owner-level corruption fixture did not preserve its single stored row")
 			}
 		})
 	}

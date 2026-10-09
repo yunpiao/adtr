@@ -70,6 +70,12 @@ jobs:
       max-parallel: 2
       matrix:
         include:
+          - name: directory-v2
+            command: python3 scripts/test_auth_e2e.py --suite directory-v2
+          - name: directory-v2-controls
+            command: python3 scripts/test_auth_e2e.py --suite directory-v2-controls
+          - name: directory-v2-readers
+            command: python3 scripts/test_auth_e2e.py --suite directory-v2-readers
           - name: directory-readers
             command: python3 scripts/test_auth_e2e.py --suite directory-readers
           - name: authentication

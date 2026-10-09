@@ -718,11 +718,15 @@ describe("dedicated domain connection task guard", () => {
       click("继续核对未确认的提交");
       await screen.findByText(/域连接诊断请在「域连接」页面查看/);
       expect(screen.queryByRole("button", { name: "确认恢复任务" })).toBeNull();
-      expect(
-        sessionStorage.getItem(
-          `adtr.pending-task:${profile.ID}:${encodeURIComponent(profile.username)}`,
-        ),
-      ).toBeNull();
+      // Clearing a stale intent is a post-render effect; wait for that effect,
+      // not merely the detail text that can appear before it under worker load.
+      await waitFor(() =>
+        expect(
+          sessionStorage.getItem(
+            `adtr.pending-task:${profile.ID}:${encodeURIComponent(profile.username)}`,
+          ),
+        ).toBeNull(),
+      );
       expect(calls("/recover")).toHaveLength(0);
     },
   );
@@ -751,6 +755,42 @@ describe("dedicated operational bundle guard", () => {
       expect(screen.queryByText(/PRIVATE_BUNDLE/)).toBeNull();
       expect(calls("/cancel")).toHaveLength(0);
       expect(calls("/recover")).toHaveLength(0);
+    },
+  );
+});
+
+describe("dedicated dictionary task guards", () => {
+  it.each([
+    ["domain.directory_read", "running"],
+    ["domain.directory_read", "failed"],
+    ["domain.directory_read.v2", "running"],
+    ["domain.directory_read.v2", "failed"],
+  ] as const)(
+    "keeps %s %s mutation and private result inspection on its dedicated route",
+    async (kind, state) => {
+      override = (url) =>
+        url.startsWith("/api/tasks/detail")
+          ? response({
+              task: {
+                ...task(state),
+                taskName: kind,
+                domainId: "synthetic-domain-id",
+                maxAttempts: 1,
+                result: { unsafe: "DIRECTORY_PRIVATE_RESULT" },
+                cursor: { unsafe: "DIRECTORY_PRIVATE_CURSOR" },
+              },
+              events: [],
+            })
+          : undefined;
+      await detail();
+      expect(screen.getByText(/目录任务请在/)).toHaveTextContent(
+        kind.endsWith(".v2") ? "补充目录资产" : "目录资产",
+      );
+      expect(screen.queryByRole("button", { name: "创建恢复任务" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "请求取消任务" })).toBeNull();
+      expect(screen.queryByText(/DIRECTORY_PRIVATE/)).toBeNull();
+      expect(calls("/recover")).toHaveLength(0);
+      expect(calls("/cancel")).toHaveLength(0);
     },
   );
 });

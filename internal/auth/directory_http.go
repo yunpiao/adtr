@@ -46,7 +46,15 @@ func (directoryRequest) MarshalJSON() ([]byte, error) { return []byte(`"[directo
 // Introspection and execution share the same exact route/permission boundary.
 // Reading stored objects conveys no authority to use an operation credential.
 func directoryPathAllowed(method, path string, grants map[string]AccessAuth) bool {
-	suffix, prefixed := strings.CutPrefix(path, "/api/directory")
+	return directoryPathAllowedForProfile(method, path, grants, directoryHTTPV1)
+}
+
+func directoryPathAllowedForProfile(method, path string, grants map[string]AccessAuth, profile directoryHTTPProfile) bool {
+	prefix, _ := directoryHTTPEndpoint(profile)
+	if prefix == "" {
+		return false
+	}
+	suffix, prefixed := strings.CutPrefix(path, prefix)
 	route, known := directoryRoutes[suffix]
 	if !prefixed || !known || method != route.method || !grants["domains"].Readable || !grants["directory_assets"].Readable {
 		return false
@@ -67,10 +75,15 @@ func (s *Service) DirectoryHandler(store *domains.Store, engine *tasks.Engine) h
 }
 
 func (s *Service) ServeDirectory(w http.ResponseWriter, r *http.Request, store *domains.Store, engine *tasks.Engine) {
+	s.serveDirectoryForProfile(w, r, store, engine, directoryHTTPV1)
+}
+
+func (s *Service) serveDirectoryForProfile(w http.ResponseWriter, r *http.Request, store *domains.Store, engine *tasks.Engine, profile directoryHTTPProfile) {
 	w.Header().Set("Cache-Control", "no-store")
-	path, prefixed := strings.CutPrefix(r.URL.Path, "/api/directory")
+	prefix, _ := directoryHTTPEndpoint(profile)
+	path, prefixed := strings.CutPrefix(r.URL.Path, prefix)
 	route, known := directoryRoutes[path]
-	if !prefixed || !known {
+	if prefix == "" || !prefixed || !known {
 		write(w, http.StatusNotFound, map[string]string{"error": "not_found"})
 		return
 	}
@@ -116,9 +129,28 @@ func (s *Service) ServeDirectory(w http.ResponseWriter, r *http.Request, store *
 	defer cancel()
 	ctx = context.WithValue(ctx, auditContextKey{}, newAuditContext(r))
 	r = r.WithContext(ctx)
-	out, err := s.handleDirectory(ctx, r, store, engine, path, route, in, filter, q)
+	out, err := s.handleDirectoryForProfile(ctx, r, store, engine, path, route, in, filter, q, profile)
 	if err != nil {
-		s.writeDirectoryError(w, ctx, path, err)
+		s.writeDirectoryErrorForProfile(w, ctx, path, err, profile)
+		return
+	}
+	if profile == directoryHTTPV2 && path == "/observation" {
+		// Bound the complete encoded response before writing headers or bytes.
+		raw, encodeErr := json.Marshal(out.value)
+		defer clear(raw)
+		if encodeErr != nil {
+			s.writeDirectoryErrorForProfile(w, ctx, path, fail(503, "directory_observation_unavailable"), profile)
+			return
+		}
+		if len(raw) > domains.DirectoryV2PageMaxBytes {
+			s.writeDirectoryErrorForProfile(w, ctx, path, fail(422, "directory_limit_exceeded"), profile)
+			return
+		}
+		w.Header().Set("X-ADTR-User-ID", strconv.FormatInt(out.actorID, 10))
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(raw)
 		return
 	}
 	w.Header().Set("X-ADTR-User-ID", strconv.FormatInt(out.actorID, 10))
@@ -212,6 +244,13 @@ func decodeDirectoryRequest(w http.ResponseWriter, r *http.Request, path string,
 }
 
 func (s *Service) writeDirectoryError(w http.ResponseWriter, ctx context.Context, path string, err error) {
+	s.writeDirectoryErrorForProfile(w, ctx, path, err, directoryHTTPV1)
+}
+
+func (s *Service) writeDirectoryErrorForProfile(w http.ResponseWriter, ctx context.Context, path string, err error, profile directoryHTTPProfile) {
+	if profile == directoryHTTPV2 {
+		path = "/v2" + path
+	}
 	status, code := domainHTTPError(err)
 	// A failed schema gate must never trigger writes through failure attribution.
 	if status != http.StatusServiceUnavailable {
@@ -231,6 +270,14 @@ func directorySchemaError(err error) error {
 }
 
 func (s *Service) handleDirectory(ctx context.Context, r *http.Request, store *domains.Store, engine *tasks.Engine, path string, route taskRoute, in directoryRequest, filter domains.DirectoryFilter, q url.Values) (*credentialUseResult, error) {
+	return s.handleDirectoryForProfile(ctx, r, store, engine, path, route, in, filter, q, directoryHTTPV1)
+}
+
+func (s *Service) handleDirectoryForProfile(ctx context.Context, r *http.Request, store *domains.Store, engine *tasks.Engine, path string, route taskRoute, in directoryRequest, filter domains.DirectoryFilter, q url.Values, profile directoryHTTPProfile) (*credentialUseResult, error) {
+	_, kind := directoryHTTPEndpoint(profile)
+	if kind == "" {
+		return nil, fail(404, "not_found")
+	}
 	conn, err := pgx.ConnectConfig(ctx, s.database.Copy())
 	if err != nil {
 		return nil, directorySchemaError(err)
@@ -255,7 +302,7 @@ func (s *Service) handleDirectory(ctx context.Context, r *http.Request, store *d
 	if err != nil {
 		return nil, err
 	}
-	if !directoryPathAllowed(r.Method, r.URL.Path, grants) {
+	if !directoryPathAllowedForProfile(r.Method, r.URL.Path, grants, profile) {
 		return nil, fail(http.StatusForbidden, "forbidden")
 	}
 	if _, _, err = domains.EnrollmentEligible(ctx, tx, actor.tenant, s.now()); err != nil {
@@ -284,26 +331,42 @@ func (s *Service) handleDirectory(ctx context.Context, r *http.Request, store *d
 	var value any
 	switch path {
 	case "/observation":
-		value, err = store.DirectoryListTx(ctx, tx, actor.tenant, allowed, filter)
+		if profile == directoryHTTPV2 {
+			value, err = store.DirectoryV2ListTx(ctx, tx, actor.tenant, allowed, filter)
+		} else {
+			value, err = store.DirectoryListTx(ctx, tx, actor.tenant, allowed, filter)
+		}
 	case "/receipt":
 		var task tasks.Task
-		task, err = store.DirectoryReceiptTx(ctx, tx, engine, p, filter.DomainID, q.Get("idempotencyKey"))
+		if profile == directoryHTTPV2 {
+			task, err = store.DirectoryV2ReceiptTx(ctx, tx, engine, p, filter.DomainID, q.Get("idempotencyKey"))
+		} else {
+			task, err = store.DirectoryReceiptTx(ctx, tx, engine, p, filter.DomainID, q.Get("idempotencyKey"))
+		}
 		value = map[string]any{"task": publicTask(task)}
 	case "/task":
 		var detail tasks.Detail
 		detail, err = engine.DetailTx(ctx, tx, p, q.Get("taskUUID"))
-		if err == nil && (detail.Task.Kind != domains.DirectoryKindName || !slices.Contains(allowed, detail.Task.DomainID)) {
+		if err == nil && (detail.Task.Kind != kind || !slices.Contains(allowed, detail.Task.DomainID)) {
 			return nil, fail(http.StatusNotFound, "not_found")
 		}
 		value = map[string]any{"task": publicTask(detail.Task)}
 	case "/sync":
-		value, err = store.SubmitDirectoryTx(ctx, tx, engine, p, in.DirectoryInput)
+		if profile == directoryHTTPV2 {
+			value, err = store.SubmitDirectoryV2Tx(ctx, tx, engine, p, in.DirectoryInput)
+		} else {
+			value, err = store.SubmitDirectoryTx(ctx, tx, engine, p, in.DirectoryInput)
+		}
 		if err == nil {
 			value = publicTaskValue(value)
 		}
 	case "/cancel":
 		var task tasks.Task
-		task, err = store.CancelDirectoryTx(ctx, tx, engine, p, in.TaskUUID, allowed)
+		if profile == directoryHTTPV2 {
+			task, err = store.CancelDirectoryV2Tx(ctx, tx, engine, p, in.TaskUUID, allowed)
+		} else {
+			task, err = store.CancelDirectoryTx(ctx, tx, engine, p, in.TaskUUID, allowed)
+		}
 		value = map[string]any{"task": publicTask(task)}
 	default:
 		return nil, fail(http.StatusNotFound, "not_found")

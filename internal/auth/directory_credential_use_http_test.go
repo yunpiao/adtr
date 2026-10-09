@@ -71,8 +71,8 @@ func TestDirectoryCredentialUseRouteAuthorization(t *testing.T) {
 }
 
 func TestDirectoryCredentialUseStrictTrustedPurpose(t *testing.T) {
-	for _, trusted := range []string{credentialuse.Purpose, credentialuse.DirectoryPurpose} {
-		for _, supplied := range []string{credentialuse.Purpose, credentialuse.DirectoryPurpose, "", "domain.install", "Domain.directory_read", " domain.directory_read", "domain.directory_read "} {
+	for _, trusted := range []string{credentialuse.Purpose, credentialuse.DirectoryPurpose, credentialuse.DirectoryV2Purpose} {
+		for _, supplied := range []string{credentialuse.Purpose, credentialuse.DirectoryPurpose, credentialuse.DirectoryV2Purpose, "", "domain.install", "Domain.directory_read", " domain.directory_read", "domain.directory_read "} {
 			for _, path := range []string{"/grant", "/revoke"} {
 				t.Run(trusted+"/"+supplied+path, func(t *testing.T) {
 					body := strings.Replace(credentialUseValidBody, credentialuse.Purpose, supplied, 1)
@@ -111,6 +111,7 @@ func TestDirectoryCredentialUseHTTPTrustedPrefixIsolation(t *testing.T) {
 	}{
 		{"/api/credential-use", credentialuse.Purpose, s.CredentialUseHandler(credentialuse.New())},
 		{"/api/directory-credential-use", credentialuse.DirectoryPurpose, s.DirectoryCredentialUseHandler(credentialuse.New())},
+		{"/api/directory-credential-use/v2", credentialuse.DirectoryV2Purpose, s.DirectoryV2CredentialUseHandler(credentialuse.New())},
 	}
 	for _, serving := range endpoints {
 		for _, requested := range endpoints {
@@ -143,7 +144,7 @@ func TestDirectoryCredentialUseHTTPTrustedPrefixIsolation(t *testing.T) {
 				})
 			}
 		}
-		for _, supplied := range []string{credentialuse.Purpose, credentialuse.DirectoryPurpose} {
+		for _, supplied := range []string{credentialuse.Purpose, credentialuse.DirectoryPurpose, credentialuse.DirectoryV2Purpose} {
 			body := strings.Replace(credentialUseValidBody, credentialuse.Purpose, supplied, 1)
 			r := httptest.NewRequest(http.MethodPost, serving.prefix+"/grant", strings.NewReader(body))
 			r.Header.Set("Origin", s.origin)

@@ -626,3 +626,6 @@ td dl {
 .profile-workspace dd {
   overflow-wrap: anywhere;
 }
+.directory-v2-observation td {
+  white-space: pre-wrap;
+}

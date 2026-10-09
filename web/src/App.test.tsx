@@ -209,6 +209,8 @@ describe("workspace history routing", () => {
     ["#credential-use", "凭据授权清理"],
     ["#directory", "目录资产"],
     ["#directory-credential-use", "目录读取授权"],
+    ["#directory-v2", "补充目录资产"],
+    ["#directory-credential-use-v2", "补充目录凭据授权"],
   ])(
     "restores %s only after verifying the current session",
     async (hash, name) => {
@@ -237,6 +239,9 @@ describe("workspace history routing", () => {
     "#operation-accounts-extra",
     "#credential-use-extra",
     "#directory-extra",
+    "#directory-v2-extra",
+    "#directory-v2/unknown",
+    "#directory-credential-use-v2/unknown",
     "#unknown/domains",
     "#profile/edit",
     "#password",

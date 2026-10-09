@@ -293,7 +293,7 @@ func (s *Service) handleAccess(ctx context.Context, r *http.Request, path string
 			rt, known := accessRoutes[suffix]
 			results[i] = ok && prefix && known && method == rt.method && grantAllows(grants, rt)
 			if ok && !prefix {
-				results[i] = resourcePathAllowed(method, url, roleID, grants) || taskPathAllowed(method, url, grants) || auditPathAllowed(method, url, grants) || systemPathAllowed(method, url, u.tenant, grants) || schedulePathAllowed(method, url, grants) || archivePathAllowed(method, url, grants) || credentialUsePathAllowed(method, url, roleID, grants) || operationAccountPathAllowed(method, url, grants) || domainSelectionPathAllowed(method, url, grants) || domainAccessPathAllowed(method, url, roleID, grants) || operationalLogPathAllowed(method, url, u.tenant, grants) || directoryPathAllowed(method, url, grants) || directoryCredentialUsePathAllowed(method, url, roleID, grants)
+				results[i] = resourcePathAllowed(method, url, roleID, grants) || taskPathAllowed(method, url, grants) || auditPathAllowed(method, url, grants) || systemPathAllowed(method, url, u.tenant, grants) || schedulePathAllowed(method, url, grants) || archivePathAllowed(method, url, grants) || credentialUsePathAllowed(method, url, roleID, grants) || operationAccountPathAllowed(method, url, grants) || domainSelectionPathAllowed(method, url, grants) || domainAccessPathAllowed(method, url, roleID, grants) || operationalLogPathAllowed(method, url, u.tenant, grants) || directoryPathAllowed(method, url, grants) || directoryCredentialUsePathAllowed(method, url, roleID, grants) || directoryV2PathAllowed(method, url, grants) || directoryV2CredentialUsePathAllowed(method, url, roleID, grants)
 			}
 		}
 		value = map[string]any{"results": results}
@@ -426,6 +426,7 @@ func permissionNodes(grants map[string]AccessAuth, onlyReadable bool) []AccessPe
 					name = "Own directory-use eligibility"
 				}
 				paths = append(paths, AccessPath{name, rt.method + " /api/directory-credential-use" + path, mode})
+				paths = append(paths, AccessPath{"Dictionary 2: " + name, rt.method + " /api/directory-credential-use/v2" + path, mode})
 			}
 			keys := []string{}
 			for path := range directoryRoutes {
@@ -439,6 +440,7 @@ func permissionNodes(grants map[string]AccessAuth, onlyReadable bool) []AccessPe
 					mode = "writeable"
 				}
 				paths = append(paths, AccessPath{rt.method + " " + path, rt.method + " /api/directory" + path, mode})
+				paths = append(paths, AccessPath{"Dictionary 2: " + rt.method + " " + path, rt.method + " /api/directory/v2" + path, mode})
 			}
 		}
 		if mark == "system_logs" {

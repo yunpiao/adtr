@@ -176,6 +176,15 @@ func migrateTo(ctx context.Context, config *pgx.ConnConfig, target int) error {
 		}
 		version = 15
 	}
+	if version < 16 && target >= 16 {
+		if err := requireDirectoryV2Baseline(ctx, tx); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, credentialuse.DirectoryV2PurposeSchema+domains.DirectoryDependencyV2Schema+domains.DirectoryUseV2Schema+domains.DirectoryObservationV2Schema+domains.DirectoryAuditV2Schema+audit.DirectoryV2ViewSchema); err != nil {
+			return errors.New("directory v2 schema migration failed")
+		}
+		version = 16
+	}
 
 	if _, err := tx.Exec(ctx, "UPDATE adtr.schema_version SET version=$1 WHERE singleton=true", version); err != nil {
 		return errors.New("schema version update failed")

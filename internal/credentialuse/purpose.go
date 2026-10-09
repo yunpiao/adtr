@@ -13,9 +13,9 @@ const DirectoryV2Purpose = "domain.directory_read.v2"
 // switch and an explicit current purpose grant; it is not runtime verification.
 const DirectoryConsumerEnabled = true
 
-// DirectoryV2ConsumerEnabled remains false until the versioned producer and its
-// protected routes are registered. Compiled support never grants credential use.
-const DirectoryV2ConsumerEnabled = false
+// DirectoryV2ConsumerEnabled reports registered versioned producer/routes.
+// Both startup gates and an explicit live purpose grant are still required.
+const DirectoryV2ConsumerEnabled = true
 
 func validatePurpose(purpose string) error {
 	if purpose != Purpose && purpose != DirectoryPurpose && purpose != DirectoryV2Purpose {

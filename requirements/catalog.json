@@ -125,7 +125,38 @@
       ],
       "status": "in_progress",
       "product_accepted": false,
-      "evidence": null
+      "evidence": {
+        "commit": "4f64d90880b28b3cf7a749a9ba1da57049736dd9",
+        "pr": "https://github.com/yunpiao/adtr/pull/77",
+        "ci": "https://github.com/yunpiao/adtr/actions/runs/37772558021",
+        "verified": [
+          "持久化租户/域配置列表与详情、明确资源范围、最新成功诊断及未验证/失败状态"
+        ],
+        "runtime_suites": [
+          {
+            "name": "domains",
+            "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296038470",
+            "test_file": "web/e2e/domains.spec.ts"
+          },
+          {
+            "name": "account-references",
+            "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296040521",
+            "test_file": "web/e2e/account-references.spec.ts"
+          },
+          {
+            "name": "account-reference-barrier",
+            "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296040480",
+            "test_file": "web/e2e/account-reference-barrier.spec.ts"
+          }
+        ],
+        "runtime_scope_note": "Issue-level supporting suites; specific implemented scope is stated above. Passing shared suites does not verify every source field or all acceptance gates.",
+        "remaining": [
+          "真实AD与八版本Windows环境、完整源系统字段和行为兼容尚未验收；检测证据来自隔离合成LDAP",
+          "域控/采集器/远端操作、生产密钥轮换与灾难恢复不属于该切片；崩溃后未获结束证明的opened使用继续阻断，无强制释放入口",
+          "通用跨标签与目录读取者隔离已有浏览器证据；B2特定凭据来源跨账户切换仍缺独立浏览器场景"
+        ],
+        "local_contract": "docs/domain-contract.md"
+      }
     },
     {
       "id": "AD-F-002",
@@ -181,7 +212,38 @@
       ],
       "status": "in_progress",
       "product_accepted": false,
-      "evidence": null
+      "evidence": {
+        "commit": "4f64d90880b28b3cf7a749a9ba1da57049736dd9",
+        "pr": "https://github.com/yunpiao/adtr/pull/77",
+        "ci": "https://github.com/yunpiao/adtr/actions/runs/37772558021",
+        "verified": [
+          "本地新增独立凭据或未配置连接；创建回执支持响应丢失恢复，创建不自动授域权限"
+        ],
+        "runtime_suites": [
+          {
+            "name": "domains",
+            "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296038470",
+            "test_file": "web/e2e/domains.spec.ts"
+          },
+          {
+            "name": "account-references",
+            "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296040521",
+            "test_file": "web/e2e/account-references.spec.ts"
+          },
+          {
+            "name": "account-reference-barrier",
+            "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296040480",
+            "test_file": "web/e2e/account-reference-barrier.spec.ts"
+          }
+        ],
+        "runtime_scope_note": "Issue-level supporting suites; specific implemented scope is stated above. Passing shared suites does not verify every source field or all acceptance gates.",
+        "remaining": [
+          "真实AD与八版本Windows环境、完整源系统字段和行为兼容尚未验收；检测证据来自隔离合成LDAP",
+          "域控/采集器/远端操作、生产密钥轮换与灾难恢复不属于该切片；崩溃后未获结束证明的opened使用继续阻断，无强制释放入口",
+          "通用跨标签与目录读取者隔离已有浏览器证据；B2特定凭据来源跨账户切换仍缺独立浏览器场景"
+        ],
+        "local_contract": "docs/domain-contract.md"
+      }
     },
     {
       "id": "AD-F-003",
@@ -238,7 +300,38 @@
       ],
       "status": "in_progress",
       "product_accepted": false,
-      "evidence": null
+      "evidence": {
+        "commit": "4f64d90880b28b3cf7a749a9ba1da57049736dd9",
+        "pr": "https://github.com/yunpiao/adtr/pull/77",
+        "ci": "https://github.com/yunpiao/adtr/actions/runs/37772558021",
+        "verified": [
+          "带版本比较的连接编辑、凭据替换及独立凭据/已登记账户/未配置三种来源转换"
+        ],
+        "runtime_suites": [
+          {
+            "name": "domains",
+            "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296038470",
+            "test_file": "web/e2e/domains.spec.ts"
+          },
+          {
+            "name": "account-references",
+            "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296040521",
+            "test_file": "web/e2e/account-references.spec.ts"
+          },
+          {
+            "name": "account-reference-barrier",
+            "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296040480",
+            "test_file": "web/e2e/account-reference-barrier.spec.ts"
+          }
+        ],
+        "runtime_scope_note": "Issue-level supporting suites; specific implemented scope is stated above. Passing shared suites does not verify every source field or all acceptance gates.",
+        "remaining": [
+          "真实AD与八版本Windows环境、完整源系统字段和行为兼容尚未验收；检测证据来自隔离合成LDAP",
+          "域控/采集器/远端操作、生产密钥轮换与灾难恢复不属于该切片；崩溃后未获结束证明的opened使用继续阻断，无强制释放入口",
+          "通用跨标签与目录读取者隔离已有浏览器证据；B2特定凭据来源跨账户切换仍缺独立浏览器场景"
+        ],
+        "local_contract": "docs/domain-contract.md"
+      }
     },
     {
       "id": "AD-F-004",
@@ -291,7 +384,38 @@
       ],
       "status": "in_progress",
       "product_accepted": false,
-      "evidence": null
+      "evidence": {
+        "commit": "4f64d90880b28b3cf7a749a9ba1da57049736dd9",
+        "pr": "https://github.com/yunpiao/adtr/pull/77",
+        "ci": "https://github.com/yunpiao/adtr/actions/runs/37772558021",
+        "verified": [
+          "本地删除连接、撤除资源关联及依赖阻断；不执行远端AD删除"
+        ],
+        "runtime_suites": [
+          {
+            "name": "domains",
+            "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296038470",
+            "test_file": "web/e2e/domains.spec.ts"
+          },
+          {
+            "name": "account-references",
+            "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296040521",
+            "test_file": "web/e2e/account-references.spec.ts"
+          },
+          {
+            "name": "account-reference-barrier",
+            "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296040480",
+            "test_file": "web/e2e/account-reference-barrier.spec.ts"
+          }
+        ],
+        "runtime_scope_note": "Issue-level supporting suites; specific implemented scope is stated above. Passing shared suites does not verify every source field or all acceptance gates.",
+        "remaining": [
+          "真实AD与八版本Windows环境、完整源系统字段和行为兼容尚未验收；检测证据来自隔离合成LDAP",
+          "域控/采集器/远端操作、生产密钥轮换与灾难恢复不属于该切片；崩溃后未获结束证明的opened使用继续阻断，无强制释放入口",
+          "通用跨标签与目录读取者隔离已有浏览器证据；B2特定凭据来源跨账户切换仍缺独立浏览器场景"
+        ],
+        "local_contract": "docs/domain-contract.md"
+      }
     },
     {
       "id": "AD-F-005",
@@ -348,7 +472,38 @@
       ],
       "status": "in_progress",
       "product_accepted": false,
-      "evidence": null
+      "evidence": {
+        "commit": "4f64d90880b28b3cf7a749a9ba1da57049736dd9",
+        "pr": "https://github.com/yunpiao/adtr/pull/77",
+        "ci": "https://github.com/yunpiao/adtr/actions/runs/37772558021",
+        "verified": [
+          "单次异步StartTLS/LDAPS连接检测，证书/域RootDSE校验；账户引用消费需精确用途授权与执行结束证明"
+        ],
+        "runtime_suites": [
+          {
+            "name": "domains",
+            "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296038470",
+            "test_file": "web/e2e/domains.spec.ts"
+          },
+          {
+            "name": "account-references",
+            "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296040521",
+            "test_file": "web/e2e/account-references.spec.ts"
+          },
+          {
+            "name": "account-reference-barrier",
+            "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296040480",
+            "test_file": "web/e2e/account-reference-barrier.spec.ts"
+          }
+        ],
+        "runtime_scope_note": "Issue-level supporting suites; specific implemented scope is stated above. Passing shared suites does not verify every source field or all acceptance gates.",
+        "remaining": [
+          "真实AD与八版本Windows环境、完整源系统字段和行为兼容尚未验收；检测证据来自隔离合成LDAP",
+          "域控/采集器/远端操作、生产密钥轮换与灾难恢复不属于该切片；崩溃后未获结束证明的opened使用继续阻断，无强制释放入口",
+          "通用跨标签与目录读取者隔离已有浏览器证据；B2特定凭据来源跨账户切换仍缺独立浏览器场景"
+        ],
+        "local_contract": "docs/domain-contract.md"
+      }
     },
     {
       "id": "AD-F-006",
@@ -836,7 +991,28 @@
       ],
       "status": "in_progress",
       "product_accepted": false,
-      "evidence": null
+      "evidence": {
+        "commit": "4f64d90880b28b3cf7a749a9ba1da57049736dd9",
+        "pr": "https://github.com/yunpiao/adtr/pull/77",
+        "ci": "https://github.com/yunpiao/adtr/actions/runs/37772558021",
+        "verified": [
+          "根据当前持久化F01配置、F47精确域授权和历史检测状态查询/筛选/分页，选择后重新resolve版本并进入现有详情"
+        ],
+        "runtime_suites": [
+          {
+            "name": "domains",
+            "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296038470",
+            "test_file": "web/e2e/domains.spec.ts"
+          }
+        ],
+        "runtime_scope_note": "Issue-level supporting suites; specific implemented scope is stated above. Passing shared suites does not verify every source field or all acceptance gates.",
+        "remaining": [
+          "AD-F-007保持not_started：单个配置DC的主机信息不等于域控库存与选择功能",
+          "AD-F-006的应用号、授权许可、模块/扫描/采集器过滤来源不完整，当前明确拒绝不支持的筛选",
+          "完整源系统兼容、真实AD/Windows及容量仍未验收"
+        ],
+        "local_contract": "docs/domain-selection-contract.md"
+      }
     },
     {
       "id": "AD-F-007",
@@ -939,7 +1115,43 @@
       ],
       "status": "in_progress",
       "product_accepted": false,
-      "evidence": null
+      "evidence": {
+        "commit": "4f64d90880b28b3cf7a749a9ba1da57049736dd9",
+        "pr": "https://github.com/yunpiao/adtr/pull/77",
+        "ci": "https://github.com/yunpiao/adtr/actions/runs/37772558021",
+        "verified": [
+          "租户/域限定的本地操作账户元数据列表/详情，查询范围先于分页；不公开凭据"
+        ],
+        "runtime_suites": [
+          {
+            "name": "operations",
+            "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296038117",
+            "test_file": "web/e2e/operations.spec.ts"
+          },
+          {
+            "name": "credential-use",
+            "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296040315",
+            "test_file": "web/e2e/credential-use.spec.ts"
+          },
+          {
+            "name": "account-references",
+            "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296040521",
+            "test_file": "web/e2e/account-references.spec.ts"
+          },
+          {
+            "name": "account-reference-barrier",
+            "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296040480",
+            "test_file": "web/e2e/account-reference-barrier.spec.ts"
+          }
+        ],
+        "runtime_scope_note": "Issue-level supporting suites; specific implemented scope is stated above. Passing shared suites does not verify every source field or all acceptance gates.",
+        "remaining": [
+          "源系统账户所有权/radio字段含义与1:1兼容尚未冻结；当前登记成功不代表远端账户已验证",
+          "安装、WinRM/SMB、远端账户创建/改密/删除、自动验证均未实现；连接检测授权不授权这些用途",
+          "生产密钥轮换/恢复、崩溃opened使用的恢复流程及B2特定来源跨账户浏览器场景仍开放"
+        ],
+        "local_contract": "docs/operation-accounts-contract.md"
+      }
     },
     {
       "id": "AD-F-009",
@@ -964,7 +1176,43 @@
       ],
       "status": "in_progress",
       "product_accepted": false,
-      "evidence": null
+      "evidence": {
+        "commit": "4f64d90880b28b3cf7a749a9ba1da57049736dd9",
+        "pr": "https://github.com/yunpiao/adtr/pull/77",
+        "ci": "https://github.com/yunpiao/adtr/actions/runs/37772558021",
+        "verified": [
+          "登记已存在域账户的加密凭据，创建幂等回执支持响应丢失恢复；不创建远端AD账户"
+        ],
+        "runtime_suites": [
+          {
+            "name": "operations",
+            "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296038117",
+            "test_file": "web/e2e/operations.spec.ts"
+          },
+          {
+            "name": "credential-use",
+            "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296040315",
+            "test_file": "web/e2e/credential-use.spec.ts"
+          },
+          {
+            "name": "account-references",
+            "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296040521",
+            "test_file": "web/e2e/account-references.spec.ts"
+          },
+          {
+            "name": "account-reference-barrier",
+            "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296040480",
+            "test_file": "web/e2e/account-reference-barrier.spec.ts"
+          }
+        ],
+        "runtime_scope_note": "Issue-level supporting suites; specific implemented scope is stated above. Passing shared suites does not verify every source field or all acceptance gates.",
+        "remaining": [
+          "源系统账户所有权/radio字段含义与1:1兼容尚未冻结；当前登记成功不代表远端账户已验证",
+          "安装、WinRM/SMB、远端账户创建/改密/删除、自动验证均未实现；连接检测授权不授权这些用途",
+          "生产密钥轮换/恢复、崩溃opened使用的恢复流程及B2特定来源跨账户浏览器场景仍开放"
+        ],
+        "local_contract": "docs/operation-accounts-contract.md"
+      }
     },
     {
       "id": "AD-F-010",
@@ -989,7 +1237,43 @@
       ],
       "status": "in_progress",
       "product_accepted": false,
-      "evidence": null
+      "evidence": {
+        "commit": "4f64d90880b28b3cf7a749a9ba1da57049736dd9",
+        "pr": "https://github.com/yunpiao/adtr/pull/77",
+        "ci": "https://github.com/yunpiao/adtr/actions/runs/37772558021",
+        "verified": [
+          "标签与存储凭据的版本化修改；精确角色/域/凭据版本/用途授权与已打开使用阻断"
+        ],
+        "runtime_suites": [
+          {
+            "name": "operations",
+            "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296038117",
+            "test_file": "web/e2e/operations.spec.ts"
+          },
+          {
+            "name": "credential-use",
+            "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296040315",
+            "test_file": "web/e2e/credential-use.spec.ts"
+          },
+          {
+            "name": "account-references",
+            "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296040521",
+            "test_file": "web/e2e/account-references.spec.ts"
+          },
+          {
+            "name": "account-reference-barrier",
+            "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296040480",
+            "test_file": "web/e2e/account-reference-barrier.spec.ts"
+          }
+        ],
+        "runtime_scope_note": "Issue-level supporting suites; specific implemented scope is stated above. Passing shared suites does not verify every source field or all acceptance gates.",
+        "remaining": [
+          "源系统账户所有权/radio字段含义与1:1兼容尚未冻结；当前登记成功不代表远端账户已验证",
+          "安装、WinRM/SMB、远端账户创建/改密/删除、自动验证均未实现；连接检测授权不授权这些用途",
+          "生产密钥轮换/恢复、崩溃opened使用的恢复流程及B2特定来源跨账户浏览器场景仍开放"
+        ],
+        "local_contract": "docs/operation-accounts-contract.md"
+      }
     },
     {
       "id": "AD-F-011",
@@ -1011,7 +1295,43 @@
       ],
       "status": "in_progress",
       "product_accepted": false,
-      "evidence": null
+      "evidence": {
+        "commit": "4f64d90880b28b3cf7a749a9ba1da57049736dd9",
+        "pr": "https://github.com/yunpiao/adtr/pull/77",
+        "ci": "https://github.com/yunpiao/adtr/actions/runs/37772558021",
+        "verified": [
+          "删除本地登记，存在引用或未确认停止的使用时拒绝；不删除或禁用远端AD账户"
+        ],
+        "runtime_suites": [
+          {
+            "name": "operations",
+            "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296038117",
+            "test_file": "web/e2e/operations.spec.ts"
+          },
+          {
+            "name": "credential-use",
+            "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296040315",
+            "test_file": "web/e2e/credential-use.spec.ts"
+          },
+          {
+            "name": "account-references",
+            "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296040521",
+            "test_file": "web/e2e/account-references.spec.ts"
+          },
+          {
+            "name": "account-reference-barrier",
+            "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296040480",
+            "test_file": "web/e2e/account-reference-barrier.spec.ts"
+          }
+        ],
+        "runtime_scope_note": "Issue-level supporting suites; specific implemented scope is stated above. Passing shared suites does not verify every source field or all acceptance gates.",
+        "remaining": [
+          "源系统账户所有权/radio字段含义与1:1兼容尚未冻结；当前登记成功不代表远端账户已验证",
+          "安装、WinRM/SMB、远端账户创建/改密/删除、自动验证均未实现；连接检测授权不授权这些用途",
+          "生产密钥轮换/恢复、崩溃opened使用的恢复流程及B2特定来源跨账户浏览器场景仍开放"
+        ],
+        "local_contract": "docs/operation-accounts-contract.md"
+      }
     },
     {
       "id": "AD-F-012",
@@ -1784,19 +2104,53 @@
       "status": "in_progress",
       "product_accepted": false,
       "evidence": {
-        "local_contract": "docs/directory-api-contract.md",
+        "commit": "4f64d90880b28b3cf7a749a9ba1da57049736dd9",
+        "pr": "https://github.com/yunpiao/adtr/pull/77",
+        "ci": "https://github.com/yunpiao/adtr/actions/runs/37772558021",
         "verified": [
-          "Final local directory-reader test-slice make check: all Go race/vet/build, 15 Python contracts, 559 DOM/unit tests, TypeScript/build and zero npm audit vulnerabilities",
-          "All-package integration-tag compilation/vet; production bounded reader against isolated synthetic TLS transports in both modes, 30 objects/two pages, fixture race 7.237 seconds",
-          "Independent migration, backend/API, frontend and final receipt-fault-injection specification reviews; confirmed findings fixed with regressions"
+          "schema15接入单次有界directory v1任务、独立目录用途授权/使用账本、真实TLS LDAP分页读取、不可变完整观测、成功任务可见性、稳定分页/类型过滤、回执与取消UI；部署开关默认关闭"
         ],
+        "runtime_suites": [
+          {
+            "name": "directory",
+            "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296040542",
+            "test_file": "web/e2e/directory.spec.ts"
+          },
+          {
+            "name": "directory-controls",
+            "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296040500",
+            "test_file": "web/e2e/directory-controls.spec.ts"
+          },
+          {
+            "name": "directory-readers",
+            "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296038191",
+            "test_file": "web/e2e/directory-readers.spec.ts"
+          }
+        ],
+        "runtime_scope_note": "Issue-level supporting suites; specific implemented scope is stated above. Passing shared suites does not verify every source field or all acceptance gates.",
         "remaining": [
-          "Actual PostgreSQL migration/governance/ledger/HTTP cases invoked but blocked at missing ADTR_TEST_DATABASE_URL; no real DB success",
-          "Real browser/API/worker/TLS-fixture/database specification and CI matrix prepared but not successfully executed; real AD and eight-version Windows validation unavailable",
-          "Real empty-observation/cancellation and custom read-only actor/cross-tab browser specifications are prepared but unexecuted; browser evidence remains open beyond DOM/database test code",
-          "Complete source field parity and capacity unresolved; AD-F-035 incremental and AD-F-041 address relations remain separate open work",
-          "Unpublished local integration; exact-head remote CI and full product acceptance remain open"
-        ]
+          "AD-F-034维持in_progress：仅既定dictionary1字段的有界完整观测，不是AD时间点快照或全部资产字段的全量同步验收",
+          "AD-F-035/041仍not_started；成员/ACL/IP关联、增量和缺席删除语义未交付",
+          "真实AD/八版本Windows、源字段完整兼容和容量目标仍未验收；v2组件未注册生产者，不能计入本运行切片",
+          "默认关闭的ADTR_DIRECTORY_READ_ENABLED与独立用途授权仍须分别满足；CI使用隔离合成目标"
+        ],
+        "local_contract": "docs/directory-api-contract.md",
+        "previous_evidence": {
+          "local_contract": "docs/directory-api-contract.md",
+          "verified": [
+            "Final local directory-reader test-slice make check: all Go race/vet/build, 15 Python contracts, 559 DOM/unit tests, TypeScript/build and zero npm audit vulnerabilities",
+            "All-package integration-tag compilation/vet; production bounded reader against isolated synthetic TLS transports in both modes, 30 objects/two pages, fixture race 7.237 seconds",
+            "Independent migration, backend/API, frontend and final receipt-fault-injection specification reviews; confirmed findings fixed with regressions"
+          ],
+          "remaining": [
+            "Actual PostgreSQL migration/governance/ledger/HTTP cases invoked but blocked at missing ADTR_TEST_DATABASE_URL; no real DB success",
+            "Real browser/API/worker/TLS-fixture/database specification and CI matrix prepared but not successfully executed; real AD and eight-version Windows validation unavailable",
+            "Real empty-observation/cancellation and custom read-only actor/cross-tab browser specifications are prepared but unexecuted; browser evidence remains open beyond DOM/database test code",
+            "Complete source field parity and capacity unresolved; AD-F-035 incremental and AD-F-041 address relations remain separate open work",
+            "Unpublished local integration; exact-head remote CI and full product acceptance remain open"
+          ]
+        },
+        "previous_evidence_note": "Preserved local historical checkpoint. Its unpublished/missing local DB/browser execution limits were superseded by the exact-head CI linked above; open product/compatibility gates remain current."
       }
     },
     {
@@ -8725,9 +9079,30 @@
         "UI-0549",
         "UI-0550"
       ],
-      "status": "not_started",
+      "status": "in_progress",
       "product_accepted": false,
-      "evidence": null
+      "evidence": {
+        "commit": "4f64d90880b28b3cf7a749a9ba1da57049736dd9",
+        "pr": "https://github.com/yunpiao/adtr/pull/77",
+        "ci": "https://github.com/yunpiao/adtr/actions/runs/37772558021",
+        "verified": [
+          "查询当前创建者的已有audit.export持久化任务、精确状态/进度、创建时间/状态过滤和授权后分页，区分任务成功与文件元数据可下载性"
+        ],
+        "runtime_suites": [
+          {
+            "name": "audit",
+            "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296038257",
+            "test_file": "web/e2e/audit.spec.ts"
+          }
+        ],
+        "runtime_scope_note": "Issue-level supporting suites; specific implemented scope is stated above. Passing shared suites does not verify every source field or all acceptance gates.",
+        "remaining": [
+          "只支持Audit/XLSX；Alert、Bashline、System、Leak、其他格式/转换及appType尚未实现",
+          "元数据eligible不代表已逐块校验或保证未来下载，实际下载时才检查完整内容；没有全租户历史或新归档权限",
+          "源系统状态别名/时间格式/文件参数/全部字段兼容与容量仍未验收；不能据此关闭F38"
+        ],
+        "local_contract": "docs/export-history-contract.md"
+      }
     },
     {
       "id": "AD-F-152",
@@ -8744,9 +9119,30 @@
         "FLD-2477"
       ],
       "ui_records": [],
-      "status": "not_started",
+      "status": "in_progress",
       "product_accepted": false,
-      "evidence": null
+      "evidence": {
+        "commit": "4f64d90880b28b3cf7a749a9ba1da57049736dd9",
+        "pr": "https://github.com/yunpiao/adtr/pull/77",
+        "ci": "https://github.com/yunpiao/adtr/actions/runs/37772558021",
+        "verified": [
+          "从历史进入受鉴权详情并下载已有实际XLSX产物，下载重新核对创建者/授权版本/全部快照域/可见性及完整块摘要"
+        ],
+        "runtime_suites": [
+          {
+            "name": "audit",
+            "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296038257",
+            "test_file": "web/e2e/audit.spec.ts"
+          }
+        ],
+        "runtime_scope_note": "Issue-level supporting suites; specific implemented scope is stated above. Passing shared suites does not verify every source field or all acceptance gates.",
+        "remaining": [
+          "只支持Audit/XLSX；Alert、Bashline、System、Leak、其他格式/转换及appType尚未实现",
+          "元数据eligible不代表已逐块校验或保证未来下载，实际下载时才检查完整内容；没有全租户历史或新归档权限",
+          "源系统状态别名/时间格式/文件参数/全部字段兼容与容量仍未验收；不能据此关闭F38"
+        ],
+        "local_contract": "docs/export-history-contract.md"
+      }
     },
     {
       "id": "AD-F-153",
@@ -8769,7 +9165,28 @@
       "ui_records": [],
       "status": "in_progress",
       "product_accepted": false,
-      "evidence": null
+      "evidence": {
+        "commit": "4f64d90880b28b3cf7a749a9ba1da57049736dd9",
+        "pr": "https://github.com/yunpiao/adtr/pull/77",
+        "ci": "https://github.com/yunpiao/adtr/actions/runs/37772558021",
+        "verified": [
+          "汇总已接入auth/resource/task/audit/domain等真实生产者控制事件，保存可信请求元数据，缺失历史字段保留NULL而不伪造"
+        ],
+        "runtime_suites": [
+          {
+            "name": "audit",
+            "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296038257",
+            "test_file": "web/e2e/audit.spec.ts"
+          }
+        ],
+        "runtime_scope_note": "Issue-level supporting suites; specific implemented scope is stated above. Passing shared suites does not verify every source field or all acceptance gates.",
+        "remaining": [
+          "AD-F-156仅可恢复隐藏；原物理删除/留存语义未确认，未执行证据清除",
+          "来源枚举/时间格式/第九列等兼容差异仍开放；已接入生产者不能代表未实现业务模块已产生日志",
+          "10001行真实分批测试不等于100000行容量验收；真实AD/Windows联动和产品验收未完成"
+        ],
+        "local_contract": "docs/audit-contract.md"
+      }
     },
     {
       "id": "AD-F-154",
@@ -8824,7 +9241,28 @@
       ],
       "status": "in_progress",
       "product_accepted": false,
-      "evidence": null
+      "evidence": {
+        "commit": "4f64d90880b28b3cf7a749a9ba1da57049736dd9",
+        "pr": "https://github.com/yunpiao/adtr/pull/77",
+        "ci": "https://github.com/yunpiao/adtr/actions/runs/37772558021",
+        "verified": [
+          "当前租户及精确域范围内的筛选、字面关键词、UTC时间/类型/事件、稳定分页与可见性读取"
+        ],
+        "runtime_suites": [
+          {
+            "name": "audit",
+            "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296038257",
+            "test_file": "web/e2e/audit.spec.ts"
+          }
+        ],
+        "runtime_scope_note": "Issue-level supporting suites; specific implemented scope is stated above. Passing shared suites does not verify every source field or all acceptance gates.",
+        "remaining": [
+          "AD-F-156仅可恢复隐藏；原物理删除/留存语义未确认，未执行证据清除",
+          "来源枚举/时间格式/第九列等兼容差异仍开放；已接入生产者不能代表未实现业务模块已产生日志",
+          "10001行真实分批测试不等于100000行容量验收；真实AD/Windows联动和产品验收未完成"
+        ],
+        "local_contract": "docs/audit-contract.md"
+      }
     },
     {
       "id": "AD-F-155",
@@ -8869,7 +9307,28 @@
       ],
       "status": "in_progress",
       "product_accepted": false,
-      "evidence": null
+      "evidence": {
+        "commit": "4f64d90880b28b3cf7a749a9ba1da57049736dd9",
+        "pr": "https://github.com/yunpiao/adtr/pull/77",
+        "ci": "https://github.com/yunpiao/adtr/actions/runs/37772558021",
+        "verified": [
+          "audit.export异步冻结授权快照并生成实际XLSX，按所选列顺序、零行表头、分批/容量上限、完整摘要及当前授权复核"
+        ],
+        "runtime_suites": [
+          {
+            "name": "audit",
+            "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296038257",
+            "test_file": "web/e2e/audit.spec.ts"
+          }
+        ],
+        "runtime_scope_note": "Issue-level supporting suites; specific implemented scope is stated above. Passing shared suites does not verify every source field or all acceptance gates.",
+        "remaining": [
+          "AD-F-156仅可恢复隐藏；原物理删除/留存语义未确认，未执行证据清除",
+          "来源枚举/时间格式/第九列等兼容差异仍开放；已接入生产者不能代表未实现业务模块已产生日志",
+          "10001行真实分批测试不等于100000行容量验收；真实AD/Windows联动和产品验收未完成"
+        ],
+        "local_contract": "docs/audit-contract.md"
+      }
     },
     {
       "id": "AD-F-156",
@@ -8888,7 +9347,28 @@
       "ui_records": [],
       "status": "in_progress",
       "product_accepted": false,
-      "evidence": null
+      "evidence": {
+        "commit": "4f64d90880b28b3cf7a749a9ba1da57049736dd9",
+        "pr": "https://github.com/yunpiao/adtr/pull/77",
+        "ci": "https://github.com/yunpiao/adtr/actions/runs/37772558021",
+        "verified": [
+          "可恢复隐藏/还原与不可变控制账本；不是物理删除或保留期清理"
+        ],
+        "runtime_suites": [
+          {
+            "name": "audit",
+            "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296038257",
+            "test_file": "web/e2e/audit.spec.ts"
+          }
+        ],
+        "runtime_scope_note": "Issue-level supporting suites; specific implemented scope is stated above. Passing shared suites does not verify every source field or all acceptance gates.",
+        "remaining": [
+          "AD-F-156仅可恢复隐藏；原物理删除/留存语义未确认，未执行证据清除",
+          "来源枚举/时间格式/第九列等兼容差异仍开放；已接入生产者不能代表未实现业务模块已产生日志",
+          "10001行真实分批测试不等于100000行容量验收；真实AD/Windows联动和产品验收未完成"
+        ],
+        "local_contract": "docs/audit-contract.md"
+      }
     },
     {
       "id": "AD-F-157",
@@ -9388,7 +9868,42 @@
         "remaining": [
           "reference-system field compatibility",
           "production deployment acceptance"
-        ]
+        ],
+        "latest_regression": {
+          "commit": "4f64d90880b28b3cf7a749a9ba1da57049736dd9",
+          "pr": "https://github.com/yunpiao/adtr/pull/77",
+          "ci": "https://github.com/yunpiao/adtr/actions/runs/37772558021",
+          "verified": [
+            "持久化登录/退出、无效凭据与会话拒绝、刷新保持；新增同源跨标签会话变更及焦点回退隔离"
+          ],
+          "runtime_suites": [
+            {
+              "name": "authentication",
+              "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296038302",
+              "test_file": "web/e2e/auth.spec.ts"
+            },
+            {
+              "name": "expired-password",
+              "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296038322",
+              "test_file": "web/e2e/auth.spec.ts"
+            },
+            {
+              "name": "access",
+              "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296038273",
+              "test_file": "web/e2e/access.spec.ts"
+            },
+            {
+              "name": "session-invalidation",
+              "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296040520",
+              "test_file": "web/e2e/session-invalidation.spec.ts"
+            }
+          ],
+          "runtime_scope_note": "Issue-level supporting suites; specific implemented scope is stated above. Passing shared suites does not verify every source field or all acceptance gates.",
+          "remaining": [
+            "保留原PR69/运行37576255887历史证据；最新CI仅追加回归证据",
+            "源字段和原密码到期策略兼容、生产密钥/运行数据库角色等部署门禁未验收；既有implemented_verified_slice不等于accepted"
+          ]
+        }
       }
     },
     {
@@ -9421,7 +9936,42 @@
         ],
         "remaining": [
           "reference-system expiry policy parity"
-        ]
+        ],
+        "latest_regression": {
+          "commit": "4f64d90880b28b3cf7a749a9ba1da57049736dd9",
+          "pr": "https://github.com/yunpiao/adtr/pull/77",
+          "ci": "https://github.com/yunpiao/adtr/actions/runs/37772558021",
+          "verified": [
+            "首次登录强制改密和90天到期策略门禁、真实过期密码浏览器路径"
+          ],
+          "runtime_suites": [
+            {
+              "name": "authentication",
+              "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296038302",
+              "test_file": "web/e2e/auth.spec.ts"
+            },
+            {
+              "name": "expired-password",
+              "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296038322",
+              "test_file": "web/e2e/auth.spec.ts"
+            },
+            {
+              "name": "access",
+              "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296038273",
+              "test_file": "web/e2e/access.spec.ts"
+            },
+            {
+              "name": "session-invalidation",
+              "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296040520",
+              "test_file": "web/e2e/session-invalidation.spec.ts"
+            }
+          ],
+          "runtime_scope_note": "Issue-level supporting suites; specific implemented scope is stated above. Passing shared suites does not verify every source field or all acceptance gates.",
+          "remaining": [
+            "保留原PR69/运行37576255887历史证据；最新CI仅追加回归证据",
+            "源字段和原密码到期策略兼容、生产密钥/运行数据库角色等部署门禁未验收；既有implemented_verified_slice不等于accepted"
+          ]
+        }
       }
     },
     {
@@ -9474,7 +10024,26 @@
         "remaining": [
           "MFA recovery and key rotation",
           "production operational acceptance"
-        ]
+        ],
+        "latest_regression": {
+          "commit": "4f64d90880b28b3cf7a749a9ba1da57049736dd9",
+          "pr": "https://github.com/yunpiao/adtr/pull/77",
+          "ci": "https://github.com/yunpiao/adtr/actions/runs/37772558021",
+          "verified": [
+            "加密TOTP登记/启用/禁用、MFA登录、时效/重复码及并发重用拒绝"
+          ],
+          "runtime_suites": [
+            {
+              "name": "authentication",
+              "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296038302",
+              "test_file": "web/e2e/auth.spec.ts"
+            }
+          ],
+          "runtime_scope_note": "Issue-level supporting suites; specific implemented scope is stated above. Passing shared suites does not verify every source field or all acceptance gates.",
+          "remaining": [
+            "保留原PR69证据并追加当前回归；MFA恢复、密钥轮换和生产运行验收仍未完成"
+          ]
+        }
       }
     },
     {
@@ -9528,7 +10097,28 @@
       ],
       "status": "in_progress",
       "product_accepted": false,
-      "evidence": null
+      "evidence": {
+        "commit": "4f64d90880b28b3cf7a749a9ba1da57049736dd9",
+        "pr": "https://github.com/yunpiao/adtr/pull/77",
+        "ci": "https://github.com/yunpiao/adtr/actions/runs/37772558021",
+        "verified": [
+          "读取当前用户持久化资料；上传PNG/JPEG后验证尺寸/字节并重新编码为私有PNG；自有头像读取、替换、可信审计及账号切换清理"
+        ],
+        "runtime_suites": [
+          {
+            "name": "profile",
+            "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296038262",
+            "test_file": "web/e2e/profile.spec.ts"
+          }
+        ],
+        "runtime_scope_note": "Issue-level supporting suites; specific implemented scope is stated above. Passing shared suites does not verify every source field or all acceptance gates.",
+        "remaining": [
+          "原21字段/14控件与源角色名称等1:1运行兼容仍需核验；产品验收保持未完成",
+          "资料文本修改、第三方授权、密码/MFA变更属于其他范围，未借此声称实现",
+          "CI已生成并要求保留viewer-profile.png；本次证据对账未打开图片，不能声称已完成人工视觉审查"
+        ],
+        "local_contract": "docs/profile-contract.md"
+      }
     },
     {
       "id": "AD-F-171",
@@ -9630,7 +10220,27 @@
           "reference-system field/status compatibility",
           "exhaustive browser filter and bulk combinations",
           "capacity and production acceptance"
-        ]
+        ],
+        "latest_regression": {
+          "commit": "4f64d90880b28b3cf7a749a9ba1da57049736dd9",
+          "pr": "https://github.com/yunpiao/adtr/pull/77",
+          "ci": "https://github.com/yunpiao/adtr/actions/runs/37772558021",
+          "verified": [
+            "持久化用户列表、字面搜索/过滤与分页"
+          ],
+          "runtime_suites": [
+            {
+              "name": "access",
+              "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296038273",
+              "test_file": "web/e2e/access.spec.ts"
+            }
+          ],
+          "runtime_scope_note": "Issue-level supporting suites; specific implemented scope is stated above. Passing shared suites does not verify every source field or all acceptance gates.",
+          "remaining": [
+            "保留PR69原证据；批量分配/所有过滤组合的证据以PostgreSQL集成为主，不能声称每个组合已有浏览器覆盖",
+            "源字段/状态兼容、容量和生产验收尚未完成"
+          ]
+        }
       }
     },
     {
@@ -9731,7 +10341,27 @@
           "reference-system field/status compatibility",
           "exhaustive browser filter and bulk combinations",
           "capacity and production acceptance"
-        ]
+        ],
+        "latest_regression": {
+          "commit": "4f64d90880b28b3cf7a749a9ba1da57049736dd9",
+          "pr": "https://github.com/yunpiao/adtr/pull/77",
+          "ci": "https://github.com/yunpiao/adtr/actions/runs/37772558021",
+          "verified": [
+            "用户新增/编辑/删除、租户边界与最后管理员保护；管理员密码重置衔接会话撤销"
+          ],
+          "runtime_suites": [
+            {
+              "name": "access",
+              "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296038273",
+              "test_file": "web/e2e/access.spec.ts"
+            }
+          ],
+          "runtime_scope_note": "Issue-level supporting suites; specific implemented scope is stated above. Passing shared suites does not verify every source field or all acceptance gates.",
+          "remaining": [
+            "保留PR69原证据；批量分配/所有过滤组合的证据以PostgreSQL集成为主，不能声称每个组合已有浏览器覆盖",
+            "源字段/状态兼容、容量和生产验收尚未完成"
+          ]
+        }
       }
     },
     {
@@ -9794,7 +10424,42 @@
         ],
         "remaining": [
           "reference-system field compatibility"
-        ]
+        ],
+        "latest_regression": {
+          "commit": "4f64d90880b28b3cf7a749a9ba1da57049736dd9",
+          "pr": "https://github.com/yunpiao/adtr/pull/77",
+          "ci": "https://github.com/yunpiao/adtr/actions/runs/37772558021",
+          "verified": [
+            "本人改密、同租户管理员重置、跨租户拒绝及目标既有会话撤销"
+          ],
+          "runtime_suites": [
+            {
+              "name": "authentication",
+              "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296038302",
+              "test_file": "web/e2e/auth.spec.ts"
+            },
+            {
+              "name": "expired-password",
+              "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296038322",
+              "test_file": "web/e2e/auth.spec.ts"
+            },
+            {
+              "name": "access",
+              "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296038273",
+              "test_file": "web/e2e/access.spec.ts"
+            },
+            {
+              "name": "session-invalidation",
+              "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296040520",
+              "test_file": "web/e2e/session-invalidation.spec.ts"
+            }
+          ],
+          "runtime_scope_note": "Issue-level supporting suites; specific implemented scope is stated above. Passing shared suites does not verify every source field or all acceptance gates.",
+          "remaining": [
+            "保留原PR69/运行37576255887历史证据；最新CI仅追加回归证据",
+            "源字段和原密码到期策略兼容、生产密钥/运行数据库角色等部署门禁未验收；既有implemented_verified_slice不等于accepted"
+          ]
+        }
       }
     },
     {
@@ -9893,7 +10558,27 @@
           "reference-system field/status compatibility",
           "exhaustive browser filter and bulk combinations",
           "capacity and production acceptance"
-        ]
+        ],
+        "latest_regression": {
+          "commit": "4f64d90880b28b3cf7a749a9ba1da57049736dd9",
+          "pr": "https://github.com/yunpiao/adtr/pull/77",
+          "ci": "https://github.com/yunpiao/adtr/actions/runs/37772558021",
+          "verified": [
+            "持久化角色列表/详情，内置角色和租户隔离"
+          ],
+          "runtime_suites": [
+            {
+              "name": "access",
+              "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296038273",
+              "test_file": "web/e2e/access.spec.ts"
+            }
+          ],
+          "runtime_scope_note": "Issue-level supporting suites; specific implemented scope is stated above. Passing shared suites does not verify every source field or all acceptance gates.",
+          "remaining": [
+            "保留PR69原证据；批量分配/所有过滤组合的证据以PostgreSQL集成为主，不能声称每个组合已有浏览器覆盖",
+            "源字段/状态兼容、容量和生产验收尚未完成"
+          ]
+        }
       }
     },
     {
@@ -9971,7 +10656,27 @@
           "reference-system field/status compatibility",
           "exhaustive browser filter and bulk combinations",
           "capacity and production acceptance"
-        ]
+        ],
+        "latest_regression": {
+          "commit": "4f64d90880b28b3cf7a749a9ba1da57049736dd9",
+          "pr": "https://github.com/yunpiao/adtr/pull/77",
+          "ci": "https://github.com/yunpiao/adtr/actions/runs/37772558021",
+          "verified": [
+            "角色保存/删除、自定义角色创建及已分配/内置角色保护"
+          ],
+          "runtime_suites": [
+            {
+              "name": "access",
+              "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296038273",
+              "test_file": "web/e2e/access.spec.ts"
+            }
+          ],
+          "runtime_scope_note": "Issue-level supporting suites; specific implemented scope is stated above. Passing shared suites does not verify every source field or all acceptance gates.",
+          "remaining": [
+            "保留PR69原证据；批量分配/所有过滤组合的证据以PostgreSQL集成为主，不能声称每个组合已有浏览器覆盖",
+            "源字段/状态兼容、容量和生产验收尚未完成"
+          ]
+        }
       }
     },
     {
@@ -10047,7 +10752,27 @@
           "reference-system field/status compatibility",
           "exhaustive browser filter and bulk combinations",
           "capacity and production acceptance"
-        ]
+        ],
+        "latest_regression": {
+          "commit": "4f64d90880b28b3cf7a749a9ba1da57049736dd9",
+          "pr": "https://github.com/yunpiao/adtr/pull/77",
+          "ci": "https://github.com/yunpiao/adtr/actions/runs/37772558021",
+          "verified": [
+            "原子单个/批量角色分配、授权上限、失败审计回滚与会话失效"
+          ],
+          "runtime_suites": [
+            {
+              "name": "access",
+              "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296038273",
+              "test_file": "web/e2e/access.spec.ts"
+            }
+          ],
+          "runtime_scope_note": "Issue-level supporting suites; specific implemented scope is stated above. Passing shared suites does not verify every source field or all acceptance gates.",
+          "remaining": [
+            "保留PR69原证据；批量分配/所有过滤组合的证据以PostgreSQL集成为主，不能声称每个组合已有浏览器覆盖",
+            "源字段/状态兼容、容量和生产验收尚未完成"
+          ]
+        }
       }
     },
     {
@@ -10116,7 +10841,32 @@
           "reference-system field/status compatibility",
           "exhaustive browser filter and bulk combinations",
           "capacity and production acceptance"
-        ]
+        ],
+        "latest_regression": {
+          "commit": "4f64d90880b28b3cf7a749a9ba1da57049736dd9",
+          "pr": "https://github.com/yunpiao/adtr/pull/77",
+          "ci": "https://github.com/yunpiao/adtr/actions/runs/37772558021",
+          "verified": [
+            "显式功能权限持久化、默认拒绝与授权委派上限"
+          ],
+          "runtime_suites": [
+            {
+              "name": "access",
+              "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296038273",
+              "test_file": "web/e2e/access.spec.ts"
+            },
+            {
+              "name": "directory-readers",
+              "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296038191",
+              "test_file": "web/e2e/directory-readers.spec.ts"
+            }
+          ],
+          "runtime_scope_note": "Issue-level supporting suites; specific implemented scope is stated above. Passing shared suites does not verify every source field or all acceptance gates.",
+          "remaining": [
+            "保留PR69证据；新切片已增加具体权限回归，不将共享访问控制测试外推为全部209项业务权限均已验收",
+            "源权限标识/菜单字段兼容、完整浏览器组合与容量/生产验收仍开放"
+          ]
+        }
       }
     },
     {
@@ -10166,7 +10916,32 @@
           "reference-system field/status compatibility",
           "exhaustive browser filter and bulk combinations",
           "capacity and production acceptance"
-        ]
+        ],
+        "latest_regression": {
+          "commit": "4f64d90880b28b3cf7a749a9ba1da57049736dd9",
+          "pr": "https://github.com/yunpiao/adtr/pull/77",
+          "ci": "https://github.com/yunpiao/adtr/actions/runs/37772558021",
+          "verified": [
+            "服务端生成菜单/页面操作权限，并按精确路径/方法在后端执行校验；实际有效身份仍不可越权"
+          ],
+          "runtime_suites": [
+            {
+              "name": "access",
+              "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296038273",
+              "test_file": "web/e2e/access.spec.ts"
+            },
+            {
+              "name": "directory-readers",
+              "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296038191",
+              "test_file": "web/e2e/directory-readers.spec.ts"
+            }
+          ],
+          "runtime_scope_note": "Issue-level supporting suites; specific implemented scope is stated above. Passing shared suites does not verify every source field or all acceptance gates.",
+          "remaining": [
+            "保留PR69证据；新切片已增加具体权限回归，不将共享访问控制测试外推为全部209项业务权限均已验收",
+            "源权限标识/菜单字段兼容、完整浏览器组合与容量/生产验收仍开放"
+          ]
+        }
       }
     },
     {
@@ -10209,7 +10984,42 @@
           "real AD catalogue and downstream business-query enforcement",
           "reference-system numeric applications/resourceType compatibility",
           "capacity and production acceptance"
-        ]
+        ],
+        "latest_regression": {
+          "commit": "4f64d90880b28b3cf7a749a9ba1da57049736dd9",
+          "pr": "https://github.com/yunpiao/adtr/pull/77",
+          "ci": "https://github.com/yunpiao/adtr/actions/runs/37772558021",
+          "verified": [
+            "明确角色→资源组→域范围，管理员无隐式域绕过；已接入F01/F02/F12/F39等具体消费者按当前范围执行"
+          ],
+          "runtime_suites": [
+            {
+              "name": "resources",
+              "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296038462",
+              "test_file": "web/e2e/resource.spec.ts"
+            },
+            {
+              "name": "domains",
+              "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296038470",
+              "test_file": "web/e2e/domains.spec.ts"
+            },
+            {
+              "name": "audit",
+              "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296038257",
+              "test_file": "web/e2e/audit.spec.ts"
+            },
+            {
+              "name": "directory-readers",
+              "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296038191",
+              "test_file": "web/e2e/directory-readers.spec.ts"
+            }
+          ],
+          "runtime_scope_note": "Issue-level supporting suites; specific implemented scope is stated above. Passing shared suites does not verify every source field or all acceptance gates.",
+          "remaining": [
+            "保留PR70原证据；原remaining中笼统的下游查询未接入需细化为已有上述消费者，其他未实现模块仍未证明",
+            "真实AD库存、源numeric applications/resourceType等兼容、外部客户/许可绑定语义、容量及生产验收仍开放"
+          ]
+        }
       }
     },
     {
@@ -10270,7 +11080,42 @@
           "real AD catalogue and downstream business-query enforcement",
           "reference-system numeric applications/resourceType compatibility",
           "capacity and production acceptance"
-        ]
+        ],
+        "latest_regression": {
+          "commit": "4f64d90880b28b3cf7a749a9ba1da57049736dd9",
+          "pr": "https://github.com/yunpiao/adtr/pull/77",
+          "ci": "https://github.com/yunpiao/adtr/actions/runs/37772558021",
+          "verified": [
+            "资源组列表/详情、筛选/分页与持久化"
+          ],
+          "runtime_suites": [
+            {
+              "name": "resources",
+              "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296038462",
+              "test_file": "web/e2e/resource.spec.ts"
+            },
+            {
+              "name": "domains",
+              "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296038470",
+              "test_file": "web/e2e/domains.spec.ts"
+            },
+            {
+              "name": "audit",
+              "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296038257",
+              "test_file": "web/e2e/audit.spec.ts"
+            },
+            {
+              "name": "directory-readers",
+              "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296038191",
+              "test_file": "web/e2e/directory-readers.spec.ts"
+            }
+          ],
+          "runtime_scope_note": "Issue-level supporting suites; specific implemented scope is stated above. Passing shared suites does not verify every source field or all acceptance gates.",
+          "remaining": [
+            "保留PR70原证据；原remaining中笼统的下游查询未接入需细化为已有上述消费者，其他未实现模块仍未证明",
+            "真实AD库存、源numeric applications/resourceType等兼容、外部客户/许可绑定语义、容量及生产验收仍开放"
+          ]
+        }
       }
     },
     {
@@ -10315,7 +11160,42 @@
           "real AD catalogue and downstream business-query enforcement",
           "reference-system numeric applications/resourceType compatibility",
           "capacity and production acceptance"
-        ]
+        ],
+        "latest_regression": {
+          "commit": "4f64d90880b28b3cf7a749a9ba1da57049736dd9",
+          "pr": "https://github.com/yunpiao/adtr/pull/77",
+          "ci": "https://github.com/yunpiao/adtr/actions/runs/37772558021",
+          "verified": [
+            "资源组创建/编辑/删除，新鲜证明及原子审计"
+          ],
+          "runtime_suites": [
+            {
+              "name": "resources",
+              "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296038462",
+              "test_file": "web/e2e/resource.spec.ts"
+            },
+            {
+              "name": "domains",
+              "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296038470",
+              "test_file": "web/e2e/domains.spec.ts"
+            },
+            {
+              "name": "audit",
+              "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296038257",
+              "test_file": "web/e2e/audit.spec.ts"
+            },
+            {
+              "name": "directory-readers",
+              "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296038191",
+              "test_file": "web/e2e/directory-readers.spec.ts"
+            }
+          ],
+          "runtime_scope_note": "Issue-level supporting suites; specific implemented scope is stated above. Passing shared suites does not verify every source field or all acceptance gates.",
+          "remaining": [
+            "保留PR70原证据；原remaining中笼统的下游查询未接入需细化为已有上述消费者，其他未实现模块仍未证明",
+            "真实AD库存、源numeric applications/resourceType等兼容、外部客户/许可绑定语义、容量及生产验收仍开放"
+          ]
+        }
       }
     },
     {
@@ -10362,7 +11242,42 @@
           "real AD catalogue and downstream business-query enforcement",
           "reference-system numeric applications/resourceType compatibility",
           "capacity and production acceptance"
-        ]
+        ],
+        "latest_regression": {
+          "commit": "4f64d90880b28b3cf7a749a9ba1da57049736dd9",
+          "pr": "https://github.com/yunpiao/adtr/pull/77",
+          "ci": "https://github.com/yunpiao/adtr/actions/runs/37772558021",
+          "verified": [
+            "角色资源组关联、委派上限及移除范围时撤销受影响会话"
+          ],
+          "runtime_suites": [
+            {
+              "name": "resources",
+              "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296038462",
+              "test_file": "web/e2e/resource.spec.ts"
+            },
+            {
+              "name": "domains",
+              "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296038470",
+              "test_file": "web/e2e/domains.spec.ts"
+            },
+            {
+              "name": "audit",
+              "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296038257",
+              "test_file": "web/e2e/audit.spec.ts"
+            },
+            {
+              "name": "directory-readers",
+              "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296038191",
+              "test_file": "web/e2e/directory-readers.spec.ts"
+            }
+          ],
+          "runtime_scope_note": "Issue-level supporting suites; specific implemented scope is stated above. Passing shared suites does not verify every source field or all acceptance gates.",
+          "remaining": [
+            "保留PR70原证据；原remaining中笼统的下游查询未接入需细化为已有上述消费者，其他未实现模块仍未证明",
+            "真实AD库存、源numeric applications/resourceType等兼容、外部客户/许可绑定语义、容量及生产验收仍开放"
+          ]
+        }
       }
     },
     {
@@ -10396,7 +11311,42 @@
           "real AD catalogue and downstream business-query enforcement",
           "reference-system numeric applications/resourceType compatibility",
           "capacity and production acceptance"
-        ]
+        ],
+        "latest_regression": {
+          "commit": "4f64d90880b28b3cf7a749a9ba1da57049736dd9",
+          "pr": "https://github.com/yunpiao/adtr/pull/77",
+          "ci": "https://github.com/yunpiao/adtr/actions/runs/37772558021",
+          "verified": [
+            "租户配置持久化、域容量与实际时钟到期约束"
+          ],
+          "runtime_suites": [
+            {
+              "name": "resources",
+              "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296038462",
+              "test_file": "web/e2e/resource.spec.ts"
+            },
+            {
+              "name": "domains",
+              "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296038470",
+              "test_file": "web/e2e/domains.spec.ts"
+            },
+            {
+              "name": "audit",
+              "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296038257",
+              "test_file": "web/e2e/audit.spec.ts"
+            },
+            {
+              "name": "directory-readers",
+              "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296038191",
+              "test_file": "web/e2e/directory-readers.spec.ts"
+            }
+          ],
+          "runtime_scope_note": "Issue-level supporting suites; specific implemented scope is stated above. Passing shared suites does not verify every source field or all acceptance gates.",
+          "remaining": [
+            "保留PR70原证据；原remaining中笼统的下游查询未接入需细化为已有上述消费者，其他未实现模块仍未证明",
+            "真实AD库存、源numeric applications/resourceType等兼容、外部客户/许可绑定语义、容量及生产验收仍开放"
+          ]
+        }
       }
     },
     {
@@ -10675,7 +11625,42 @@
           "AD detection/synchronization/business executors and real Windows/domain acceptance",
           "reference-system field/status compatibility and engine restart",
           "capacity, retention and production acceptance"
-        ]
+        ],
+        "latest_regression": {
+          "commit": "4f64d90880b28b3cf7a749a9ba1da57049736dd9",
+          "pr": "https://github.com/yunpiao/adtr/pull/77",
+          "ci": "https://github.com/yunpiao/adtr/actions/runs/37772558021",
+          "verified": [
+            "任务列表/详情/状态、取消及允许类型的恢复；已接入健康检查、审计导出、域诊断、日志包与目录v1具体执行器"
+          ],
+          "runtime_suites": [
+            {
+              "name": "tasks",
+              "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296038377",
+              "test_file": "web/e2e/tasks.spec.ts"
+            },
+            {
+              "name": "maintenance",
+              "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296038309",
+              "test_file": "web/e2e/maintenance.spec.ts"
+            },
+            {
+              "name": "account-reference-barrier",
+              "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296040480",
+              "test_file": "web/e2e/account-reference-barrier.spec.ts"
+            },
+            {
+              "name": "directory-controls",
+              "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296040500",
+              "test_file": "web/e2e/directory-controls.spec.ts"
+            }
+          ],
+          "runtime_scope_note": "Issue-level supporting suites; specific implemented scope is stated above. Passing shared suites does not verify every source field or all acceptance gates.",
+          "remaining": [
+            "保留PR72原证据；原笼统“所有同步/业务执行器未实现”更新为已接入的上述有界切片，其他检测/关联/AD变更执行器继续开放",
+            "真实多AD/Windows、源任务状态/字段兼容与engineRestart、容量/保留期/生产验收仍未完成"
+          ]
+        }
       }
     },
     {
@@ -10692,7 +11677,28 @@
       "ui_records": [],
       "status": "in_progress",
       "product_accepted": false,
-      "evidence": null
+      "evidence": {
+        "commit": "4f64d90880b28b3cf7a749a9ba1da57049736dd9",
+        "pr": "https://github.com/yunpiao/adtr/pull/77",
+        "ci": "https://github.com/yunpiao/adtr/actions/runs/37772558021",
+        "verified": [
+          "仅infrastructure.health固定UTC间隔调度，创建即暂停、启用/暂停、发生记录、漏执行合并和重叠阻断；当前授权与epoch每次检查"
+        ],
+        "runtime_suites": [
+          {
+            "name": "maintenance",
+            "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296038309",
+            "test_file": "web/e2e/maintenance.spec.ts"
+          }
+        ],
+        "runtime_scope_note": "Issue-level supporting suites; specific implemented scope is stated above. Passing shared suites does not verify every source field or all acceptance gates.",
+        "remaining": [
+          "AD-F-190不包括检测、同步、关联分析、AD/Windows业务任务调度或cron；现仅健康检查注册可调度",
+          "AD-F-193没有自动到期、物理删除、消息清理或空间回收；不可把不可变task_events/outbox当可丢弃消息",
+          "消息定义/投递确认/重放窗/保留期、源调度字段、容量和完整产品验收尚未冻结或验证"
+        ],
+        "local_contract": "docs/schedules-contract.md"
+      }
     },
     {
       "id": "AD-F-191",
@@ -10720,7 +11726,42 @@
           "AD detection/synchronization/business executors and real Windows/domain acceptance",
           "reference-system field/status compatibility and engine restart",
           "capacity, retention and production acceptance"
-        ]
+        ],
+        "latest_regression": {
+          "commit": "4f64d90880b28b3cf7a749a9ba1da57049736dd9",
+          "pr": "https://github.com/yunpiao/adtr/pull/77",
+          "ci": "https://github.com/yunpiao/adtr/actions/runs/37772558021",
+          "verified": [
+            "数据库域租约/并发worker公平性、失效租约fencing与单域失败隔离；跨域证据使用隔离合成域"
+          ],
+          "runtime_suites": [
+            {
+              "name": "tasks",
+              "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296038377",
+              "test_file": "web/e2e/tasks.spec.ts"
+            },
+            {
+              "name": "maintenance",
+              "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296038309",
+              "test_file": "web/e2e/maintenance.spec.ts"
+            },
+            {
+              "name": "account-reference-barrier",
+              "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296040480",
+              "test_file": "web/e2e/account-reference-barrier.spec.ts"
+            },
+            {
+              "name": "directory-controls",
+              "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296040500",
+              "test_file": "web/e2e/directory-controls.spec.ts"
+            }
+          ],
+          "runtime_scope_note": "Issue-level supporting suites; specific implemented scope is stated above. Passing shared suites does not verify every source field or all acceptance gates.",
+          "remaining": [
+            "保留PR72原证据；原笼统“所有同步/业务执行器未实现”更新为已接入的上述有界切片，其他检测/关联/AD变更执行器继续开放",
+            "真实多AD/Windows、源任务状态/字段兼容与engineRestart、容量/保留期/生产验收仍未完成"
+          ]
+        }
       }
     },
     {
@@ -10749,7 +11790,42 @@
           "AD detection/synchronization/business executors and real Windows/domain acceptance",
           "reference-system field/status compatibility and engine restart",
           "capacity, retention and production acceptance"
-        ]
+        ],
+        "latest_regression": {
+          "commit": "4f64d90880b28b3cf7a749a9ba1da57049736dd9",
+          "pr": "https://github.com/yunpiao/adtr/pull/77",
+          "ci": "https://github.com/yunpiao/adtr/actions/runs/37772558021",
+          "verified": [
+            "并发幂等、持久化occurrence唯一性、当前授权epoch及精确schema执行门禁；固定单次任务禁止误用业务重试"
+          ],
+          "runtime_suites": [
+            {
+              "name": "tasks",
+              "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296038377",
+              "test_file": "web/e2e/tasks.spec.ts"
+            },
+            {
+              "name": "maintenance",
+              "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296038309",
+              "test_file": "web/e2e/maintenance.spec.ts"
+            },
+            {
+              "name": "account-reference-barrier",
+              "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296040480",
+              "test_file": "web/e2e/account-reference-barrier.spec.ts"
+            },
+            {
+              "name": "directory-controls",
+              "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296040500",
+              "test_file": "web/e2e/directory-controls.spec.ts"
+            }
+          ],
+          "runtime_scope_note": "Issue-level supporting suites; specific implemented scope is stated above. Passing shared suites does not verify every source field or all acceptance gates.",
+          "remaining": [
+            "保留PR72原证据；原笼统“所有同步/业务执行器未实现”更新为已接入的上述有界切片，其他检测/关联/AD变更执行器继续开放",
+            "真实多AD/Windows、源任务状态/字段兼容与engineRestart、容量/保留期/生产验收仍未完成"
+          ]
+        }
       }
     },
     {
@@ -10766,7 +11842,28 @@
       "ui_records": [],
       "status": "in_progress",
       "product_accepted": false,
-      "evidence": null
+      "evidence": {
+        "commit": "4f64d90880b28b3cf7a749a9ba1da57049736dd9",
+        "pr": "https://github.com/yunpiao/adtr/pull/77",
+        "ci": "https://github.com/yunpiao/adtr/actions/runs/37772558021",
+        "verified": [
+          "明确选择的终态健康任务可恢复归档/还原，保留任务结果、幂等、occurrence与不可变事件"
+        ],
+        "runtime_suites": [
+          {
+            "name": "maintenance",
+            "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296038309",
+            "test_file": "web/e2e/maintenance.spec.ts"
+          }
+        ],
+        "runtime_scope_note": "Issue-level supporting suites; specific implemented scope is stated above. Passing shared suites does not verify every source field or all acceptance gates.",
+        "remaining": [
+          "AD-F-190不包括检测、同步、关联分析、AD/Windows业务任务调度或cron；现仅健康检查注册可调度",
+          "AD-F-193没有自动到期、物理删除、消息清理或空间回收；不可把不可变task_events/outbox当可丢弃消息",
+          "消息定义/投递确认/重放窗/保留期、源调度字段、容量和完整产品验收尚未冻结或验证"
+        ],
+        "local_contract": "docs/schedules-contract.md"
+      }
     },
     {
       "id": "AD-F-194",
@@ -10851,7 +11948,28 @@
       ],
       "status": "in_progress",
       "product_accepted": false,
-      "evidence": null
+      "evidence": {
+        "commit": "4f64d90880b28b3cf7a749a9ba1da57049736dd9",
+        "pr": "https://github.com/yunpiao/adtr/pull/77",
+        "ci": "https://github.com/yunpiao/adtr/actions/runs/37772558021",
+        "verified": [
+          "本运行实例的Go运行时/VCS构建信息和Linux资源信息；产品majorVersion/engineVersion保持null，其他无来源字段返回null/未配置"
+        ],
+        "runtime_suites": [
+          {
+            "name": "system",
+            "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296038424",
+            "test_file": "web/e2e/system.spec.ts"
+          }
+        ],
+        "runtime_scope_note": "Issue-level supporting suites; specific implemented scope is stated above. Passing shared suites does not verify every source field or all acceptance gates.",
+        "remaining": [
+          "范围仅local-api及它看到的内核/根文件系统，不代表容器配额、PG数据卷、多节点或整个平台集群",
+          "存储日志/自动清理、缓存/外部引擎、许可/升级未实现；旧文档schema7为历史引入版本，当前共享schema15",
+          "源字段单位/别名/空值兼容、容量/保留期、生产最小权限DB与Windows/AD联动尚未验收"
+        ],
+        "local_contract": "docs/system-health-contract.md"
+      }
     },
     {
       "id": "AD-F-197",
@@ -10946,7 +12064,28 @@
       ],
       "status": "in_progress",
       "product_accepted": false,
-      "evidence": null
+      "evidence": {
+        "commit": "4f64d90880b28b3cf7a749a9ba1da57049736dd9",
+        "pr": "https://github.com/yunpiao/adtr/pull/77",
+        "ci": "https://github.com/yunpiao/adtr/actions/runs/37772558021",
+        "verified": [
+          "API进程根文件系统statfs数据与85–90%存储告警阈值的持久化CAS修改"
+        ],
+        "runtime_suites": [
+          {
+            "name": "system",
+            "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296038424",
+            "test_file": "web/e2e/system.spec.ts"
+          }
+        ],
+        "runtime_scope_note": "Issue-level supporting suites; specific implemented scope is stated above. Passing shared suites does not verify every source field or all acceptance gates.",
+        "remaining": [
+          "范围仅local-api及它看到的内核/根文件系统，不代表容器配额、PG数据卷、多节点或整个平台集群",
+          "存储日志/自动清理、缓存/外部引擎、许可/升级未实现；旧文档schema7为历史引入版本，当前共享schema15",
+          "源字段单位/别名/空值兼容、容量/保留期、生产最小权限DB与Windows/AD联动尚未验收"
+        ],
+        "local_contract": "docs/system-health-contract.md"
+      }
     },
     {
       "id": "AD-F-200",
@@ -10997,7 +12136,28 @@
       ],
       "status": "in_progress",
       "product_accepted": false,
-      "evidence": null
+      "evidence": {
+        "commit": "4f64d90880b28b3cf7a749a9ba1da57049736dd9",
+        "pr": "https://github.com/yunpiao/adtr/pull/77",
+        "ci": "https://github.com/yunpiao/adtr/actions/runs/37772558021",
+        "verified": [
+          "local-api的真实/proc CPU/RAM及文件系统采样、持久化历史和缺口/陈旧状态"
+        ],
+        "runtime_suites": [
+          {
+            "name": "system",
+            "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296038424",
+            "test_file": "web/e2e/system.spec.ts"
+          }
+        ],
+        "runtime_scope_note": "Issue-level supporting suites; specific implemented scope is stated above. Passing shared suites does not verify every source field or all acceptance gates.",
+        "remaining": [
+          "范围仅local-api及它看到的内核/根文件系统，不代表容器配额、PG数据卷、多节点或整个平台集群",
+          "存储日志/自动清理、缓存/外部引擎、许可/升级未实现；旧文档schema7为历史引入版本，当前共享schema15",
+          "源字段单位/别名/空值兼容、容量/保留期、生产最小权限DB与Windows/AD联动尚未验收"
+        ],
+        "local_contract": "docs/system-health-contract.md"
+      }
     },
     {
       "id": "AD-F-201",
@@ -11016,7 +12176,28 @@
       "ui_records": [],
       "status": "in_progress",
       "product_accepted": false,
-      "evidence": null
+      "evidence": {
+        "commit": "4f64d90880b28b3cf7a749a9ba1da57049736dd9",
+        "pr": "https://github.com/yunpiao/adtr/pull/77",
+        "ci": "https://github.com/yunpiao/adtr/actions/runs/37772558021",
+        "verified": [
+          "实际服务目录与worker队列/恢复/调度完成活动；停止worker后转为不健康"
+        ],
+        "runtime_suites": [
+          {
+            "name": "system",
+            "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296038424",
+            "test_file": "web/e2e/system.spec.ts"
+          }
+        ],
+        "runtime_scope_note": "Issue-level supporting suites; specific implemented scope is stated above. Passing shared suites does not verify every source field or all acceptance gates.",
+        "remaining": [
+          "范围仅local-api及它看到的内核/根文件系统，不代表容器配额、PG数据卷、多节点或整个平台集群",
+          "存储日志/自动清理、缓存/外部引擎、许可/升级未实现；旧文档schema7为历史引入版本，当前共享schema15",
+          "源字段单位/别名/空值兼容、容量/保留期、生产最小权限DB与Windows/AD联动尚未验收"
+        ],
+        "local_contract": "docs/system-health-contract.md"
+      }
     },
     {
       "id": "AD-F-202",
@@ -11119,17 +12300,40 @@
       "status": "in_progress",
       "product_accepted": false,
       "evidence": {
-        "local_contract": "docs/operational-log-contract.md",
+        "commit": "4f64d90880b28b3cf7a749a9ba1da57049736dd9",
+        "pr": "https://github.com/yunpiao/adtr/pull/77",
+        "ci": "https://github.com/yunpiao/adtr/actions/runs/37772558021",
         "verified": [
-          "Local make check: Go race/vet/build, 430 DOM tests, TypeScript/build, five Python contracts and zero dependency-audit vulnerabilities",
-          "All-package integration-tag compilation/vet and generic bundle metadata privacy unit regression",
-          "Independent backend, HTTP regression and frontend source reviews completed"
+          "实际api/worker有限枚举事件、非阻塞队列及明确缺口/未知确认计数、安装所有者限定查询，冻结快照后生成真实ZIP(manifest.json + events.jsonl)并受保护下载"
         ],
+        "runtime_suites": [
+          {
+            "name": "operational-logs",
+            "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296040349",
+            "test_file": "web/e2e/operational-logs.spec.ts"
+          }
+        ],
+        "runtime_scope_note": "Issue-level supporting suites; specific implemented scope is stated above. Passing shared suites does not verify every source field or all acceptance gates.",
         "remaining": [
-          "Actual PostgreSQL execution blocked by missing ADTR_TEST_DATABASE_URL; browser launch blocked by missing Chromium",
-          "Only new api/worker instrumentation; historical source modules, retention/capacity policy and complete source parity remain open",
-          "Unpublished local slice; remote CI and product acceptance remain open"
-        ]
+          "AD-F-204维持not_started；没有网络探测或任意命令/路径入口",
+          "AD-F-205只从部署后记录api/worker事件，best-effort允许崩溃/过载缺口；不代表历史stdout/文件日志或原系统全部模块",
+          "历史模块、容量/保留期策略、完整源系统兼容及产品验收未完成；16MiB/10000条是安全预算而非容量承诺"
+        ],
+        "local_contract": "docs/operational-log-contract.md",
+        "previous_evidence": {
+          "local_contract": "docs/operational-log-contract.md",
+          "verified": [
+            "Local make check: Go race/vet/build, 430 DOM tests, TypeScript/build, five Python contracts and zero dependency-audit vulnerabilities",
+            "All-package integration-tag compilation/vet and generic bundle metadata privacy unit regression",
+            "Independent backend, HTTP regression and frontend source reviews completed"
+          ],
+          "remaining": [
+            "Actual PostgreSQL execution blocked by missing ADTR_TEST_DATABASE_URL; browser launch blocked by missing Chromium",
+            "Only new api/worker instrumentation; historical source modules, retention/capacity policy and complete source parity remain open",
+            "Unpublished local slice; remote CI and product acceptance remain open"
+          ]
+        },
+        "previous_evidence_note": "Preserved local historical checkpoint. Its unpublished/missing local DB/browser execution limits were superseded by the exact-head CI linked above; open product/compatibility gates remain current."
       }
     },
     {
@@ -11146,7 +12350,28 @@
       "ui_records": [],
       "status": "in_progress",
       "product_accepted": false,
-      "evidence": null
+      "evidence": {
+        "commit": "4f64d90880b28b3cf7a749a9ba1da57049736dd9",
+        "pr": "https://github.com/yunpiao/adtr/pull/77",
+        "ci": "https://github.com/yunpiao/adtr/actions/runs/37772558021",
+        "verified": [
+          "当前已认证API、真实PG协议/schema、采样与worker证据健康汇总；缓存/引擎未配置明确返回"
+        ],
+        "runtime_suites": [
+          {
+            "name": "system",
+            "job_url": "https://github.com/yunpiao/adtr/actions/runs/37772558021/job/113296038424",
+            "test_file": "web/e2e/system.spec.ts"
+          }
+        ],
+        "runtime_scope_note": "Issue-level supporting suites; specific implemented scope is stated above. Passing shared suites does not verify every source field or all acceptance gates.",
+        "remaining": [
+          "范围仅local-api及它看到的内核/根文件系统，不代表容器配额、PG数据卷、多节点或整个平台集群",
+          "存储日志/自动清理、缓存/外部引擎、许可/升级未实现；旧文档schema7为历史引入版本，当前共享schema15",
+          "源字段单位/别名/空值兼容、容量/保留期、生产最小权限DB与Windows/AD联动尚未验收"
+        ],
+        "local_contract": "docs/system-health-contract.md"
+      }
     },
     {
       "id": "AD-F-207",

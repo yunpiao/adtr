@@ -34,6 +34,9 @@ import {
 } from "./TaskMaintenance";
 import { maintenanceIntent } from "./maintenance-intent";
 
+const isDirectoryTask = (name: unknown) =>
+  name === "domain.directory_read" || name === "domain.directory_read.v2";
+
 interface Intent {
   action: "submit" | "recover";
   key: string;
@@ -775,7 +778,8 @@ function TaskDetails({
     if (
       task?.taskName === "audit.export" ||
       task?.taskName === "system.logs_bundle" ||
-      isDomainConnectionTask(task?.taskName)
+      isDomainConnectionTask(task?.taskName) ||
+      isDirectoryTask(task?.taskName)
     ) {
       if (old?.action === "recover" && old.taskUUID === id) clearIntent(old);
       setAction((current) => (current === "recover" ? null : current));
@@ -859,6 +863,14 @@ function TaskDetails({
             <p>
               运行日志诊断包的结果和文件请在「运行日志与诊断包」页面查看；提交、取消和下载均需该页面重新核验权限。
             </p>
+          ) : isDirectoryTask(task.taskName) ? (
+            <p>
+              目录任务请在「
+              {task.taskName === "domain.directory_read.v2"
+                ? "补充目录资产"
+                : "目录资产"}
+              」页面查看；读取观察、查询回执、取消和原编号重试均需在对应页面核验权限。
+            </p>
           ) : isDomainConnectionTask(task.taskName) ? (
             <p>
               域连接诊断请在「域连接」页面查看；重新检测须在那里明确提交保存版本，不能创建通用恢复任务。
@@ -883,6 +895,7 @@ function TaskDetails({
               !terminal(task.state) &&
               task.state !== "cancel_requested" &&
               task.taskName !== "system.logs_bundle" &&
+              !isDirectoryTask(task.taskName) &&
               context.can("POST /api/tasks/cancel") && (
                 <button
                   className="secondary danger"
@@ -896,7 +909,8 @@ function TaskDetails({
               !(
                 task.taskName === "audit.export" ||
                 task.taskName === "system.logs_bundle" ||
-                isDomainConnectionTask(task.taskName)
+                isDomainConnectionTask(task.taskName) ||
+                isDirectoryTask(task.taskName)
               ) &&
               ["failed", "dead_letter"].includes(task.state) &&
               context.can("POST /api/tasks/recover") && (
@@ -926,12 +940,14 @@ function TaskDetails({
           )}
           {action &&
             task.taskName !== "system.logs_bundle" &&
+            !isDirectoryTask(task.taskName) &&
             !task.archived &&
             !(
               action === "recover" &&
               (task.taskName === "audit.export" ||
                 task.taskName === "system.logs_bundle" ||
-                isDomainConnectionTask(task.taskName))
+                isDomainConnectionTask(task.taskName) ||
+                isDirectoryTask(task.taskName))
             ) && (
               <TaskAction
                 key={`${id}-${action}`}
@@ -1011,13 +1027,15 @@ function TaskAction({
   const allowed =
     !task.archived &&
     task.taskName !== "system.logs_bundle" &&
+    !isDirectoryTask(task.taskName) &&
     context.can(`POST /api/tasks/${action}`) &&
     (action === "cancel"
       ? !terminal(task.state)
       : !(
           task.taskName === "audit.export" ||
           task.taskName === "system.logs_bundle" ||
-          isDomainConnectionTask(task.taskName)
+          isDomainConnectionTask(task.taskName) ||
+          isDirectoryTask(task.taskName)
         ) && ["failed", "dead_letter"].includes(task.state));
   return (
     <form

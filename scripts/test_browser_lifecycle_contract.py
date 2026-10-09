@@ -11,7 +11,7 @@ class BrowserLifecycleContract(unittest.TestCase):
         with patch.object(test_auth_e2e.sys, "platform", "linux"), \
              patch.dict(os.environ, {}, clear=True), \
              patch.object(test_auth_e2e.shutil, "which", return_value="/usr/bin/xvfb-run"):
-            for suite in ["session-invalidation", "directory-readers"]:
+            for suite in ["session-invalidation", "directory-readers", "directory-v2-readers"]:
                 with self.subTest(suite=suite):
                     self.assertEqual(test_auth_e2e.browser_command(suite), [
                         "xvfb-run", "-a", "npm", "run", "test:e2e", "--prefix",
@@ -54,7 +54,7 @@ class BrowserLifecycleContract(unittest.TestCase):
         with patch.object(test_auth_e2e.sys, "platform", "linux"), \
              patch.dict(os.environ, {}, clear=True), \
              patch.object(test_auth_e2e.shutil, "which") as lookup:
-            for suite in ["auth", "profile", "directory", "directory-controls"]:
+            for suite in ["auth", "profile", "directory", "directory-controls", "directory-v2", "directory-v2-controls"]:
                 with self.subTest(suite=suite):
                     self.assertEqual(test_auth_e2e.browser_command(suite), [
                         "npm", "run", "test:e2e", "--prefix", "web", "--",

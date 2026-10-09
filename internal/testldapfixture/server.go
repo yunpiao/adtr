@@ -25,6 +25,7 @@ type server struct {
 	username, password []byte
 	control            *fixtureControl
 	directoryMode      bool
+	directoryV2        bool
 	directoryEmpty     bool
 	directorySlow      bool
 }
@@ -116,7 +117,7 @@ func (s *server) handle(ctx context.Context, raw net.Conn, ldaps bool) {
 	conn := raw
 	secure, bound := false, false
 	rootRead := false
-	directory := directorySession{empty: s.directoryEmpty, slow: s.directorySlow}
+	directory := directorySession{v2: s.directoryV2, empty: s.directoryEmpty, slow: s.directorySlow}
 	defer directory.reset()
 	upgrade := func() bool {
 		tlsConn := tls.Server(raw, s.tlsConfig)

@@ -32,6 +32,8 @@ import ProfileWorkspace from "./ProfileWorkspace";
 import CredentialUseWorkspace from "./CredentialUseWorkspace";
 import DirectoryWorkspace from "./DirectoryWorkspace";
 import DirectoryCredentialUseWorkspace from "./DirectoryCredentialUseWorkspace";
+import DirectoryV2Workspace from "./DirectoryV2Workspace";
+import DirectoryV2CredentialUseWorkspace from "./DirectoryV2CredentialUseWorkspace";
 import {
   listenForSessionInvalidation,
   type SessionInvalidation,
@@ -53,7 +55,9 @@ type Page =
   | "operation-accounts"
   | "credential-use"
   | "directory"
-  | "directory-credential-use";
+  | "directory-credential-use"
+  | "directory-v2"
+  | "directory-credential-use-v2";
 type Run = <T>(
   path: string,
   body: unknown | undefined,
@@ -69,6 +73,8 @@ function pageFromHash(): Page {
       "credential-use",
       "directory",
       "directory-credential-use",
+      "directory-v2",
+      "directory-credential-use-v2",
     ] as const
   ).find((name) => hash === `#${name}`);
   if (exact) return exact;
@@ -355,6 +361,8 @@ export default function App() {
       page === "credential-use" ||
       page === "directory" ||
       page === "directory-credential-use" ||
+      page === "directory-v2" ||
+      page === "directory-credential-use-v2" ||
       page === "profile"
     )
       refresh();
@@ -461,13 +469,16 @@ export default function App() {
                         "credential-use",
                         "directory",
                         "directory-credential-use",
+                        "directory-v2",
+                        "directory-credential-use-v2",
                       ] as Page[]
                     )
                       .filter(
                         (p) =>
                           (p !== "reset" &&
                             p !== "credential-use" &&
-                            p !== "directory-credential-use") ||
+                            p !== "directory-credential-use" &&
+                            p !== "directory-credential-use-v2") ||
                           profile.role === "platform_admin",
                       )
                       .map((p) => (
@@ -496,6 +507,8 @@ export default function App() {
                               "credential-use": "凭据授权清理",
                               directory: "目录资产",
                               "directory-credential-use": "目录读取授权",
+                              "directory-v2": "补充目录资产",
+                              "directory-credential-use-v2": "补充目录凭据授权",
                             }[p]
                           }
                         </button>
@@ -611,6 +624,25 @@ export default function App() {
                       }}
                     />
                   )}
+                  {active === "directory-v2" && (
+                    <DirectoryV2Workspace
+                      profile={profile}
+                      sessionChanged={() => {
+                        setPage("account");
+                        refresh();
+                      }}
+                    />
+                  )}
+                  {active === "directory-credential-use-v2" &&
+                    profile.role === "platform_admin" && (
+                      <DirectoryV2CredentialUseWorkspace
+                        profile={profile}
+                        sessionChanged={() => {
+                          setPage("account");
+                          refresh();
+                        }}
+                      />
+                    )}
                   {active === "directory-credential-use" &&
                     profile.role === "platform_admin" && (
                       <DirectoryCredentialUseWorkspace

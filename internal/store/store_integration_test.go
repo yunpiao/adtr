@@ -64,6 +64,17 @@ func TestMigrationAndReadiness(t *testing.T) {
 	if err := conn.QueryRow(ctx, "SELECT to_regclass('adtr.users') IS NOT NULL").Scan(&authTable); err != nil || !authTable {
 		t.Fatal("identity migration missing", err)
 	}
+	var directoryV2 bool
+	if err := conn.QueryRow(ctx, `SELECT version=16
+ AND to_regclass('adtr.domain_directory_versioned_use_identity') IS NOT NULL
+ AND to_regclass('adtr.domain_directory_observations_versioned_latest') IS NOT NULL
+ AND to_regprocedure('adtr.domain_directory_observation_canonical_v2(jsonb)') IS NOT NULL
+ AND NOT EXISTS(SELECT FROM adtr.operation_account_use_grants)
+ AND NOT EXISTS(SELECT FROM adtr.domain_directory_task_uses)
+ AND NOT EXISTS(SELECT FROM adtr.domain_directory_observations)
+ FROM adtr.schema_version`).Scan(&directoryV2); err != nil || !directoryV2 {
+		t.Fatal("clean production install did not install schema16 without inventing authority/data", err)
+	}
 	if _, err := conn.Exec(ctx, "UPDATE adtr.schema_version SET version=$1", SchemaVersion+1); err != nil {
 		t.Fatal(err)
 	}
