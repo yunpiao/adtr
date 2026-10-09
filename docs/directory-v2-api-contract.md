@@ -18,7 +18,7 @@ Disabling collection does not remove authorized stored reads, receipts, task ins
 
 Add `/api/directory/v2/{observation,receipt,task,sync,cancel}` with the same corresponding v1 methods, query/body shapes and `{error: code}` envelope. Route choice fixes the profile. Sync accepts domainId, expectedRevision, expectedCredentialGeneration, idempotencyKey, actorPassword, totpCode; no caller dictionary pin. Cancel accepts taskUUID and proof. Task/receipt endpoints accept only the matching v2 kind, with no v1 fallback.
 
-Add `/api/directory-credential-use/v2/{accounts,grants,roles,effective,mutation,grant,revoke}` with existing methods/envelopes and exact v2 purpose. Grant receipts and recovery identifiers are separately scoped.
+Add `/api/directory-credential-use/v2/{accounts,grants,roles,effective,mutation,grant,revoke}` with existing methods/envelopes and exact v2 purpose. Receipt lookup is exact-purpose scoped, and the browser keeps separate profile recovery identifiers. The existing durable mutation key remains tenant/actor/key scoped: reusing a committed key for another purpose returns 409 idempotency_conflict without consuming fresh proof; callers create a distinct key for a new profile intent.
 
 Observation query retains domainId, optional observationId/kind, pageIdx default1 and pageSize default50 (25/50/100). Page2+ requires an exact snapshot pin. Sort by GUID. Select only v2 observations matching current source/policy and a succeeded v2 task. Missing current observation is available:false; observed empty is available:true/list:[]. Stale explicit pins retain409 directory_observation_unavailable and require explicit first-page refresh.
 

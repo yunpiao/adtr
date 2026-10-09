@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/yunpiao/adtr/internal/auth"
 	"github.com/yunpiao/adtr/internal/credentialuse"
 	"github.com/yunpiao/adtr/internal/directoryassets"
@@ -131,10 +132,17 @@ func directoryV2HTTPGrantBody(role, revision, key string) map[string]any {
 	return body
 }
 
+// Mutation responses flatten the durable receipt and add the fixed consumer
+// capability. Keep strict decoding; do not discard other unknown fields.
+type directoryV2HTTPGrantReceipt struct {
+	credentialuse.Receipt
+	ConsumerEnabled bool `json:"consumerEnabled"`
+}
+
 func (f *directoryV2HTTPFixture) grantV2(actor, role, key string) string {
 	f.t.Helper()
-	out := operationalDecode[credentialuse.Receipt](f.t, f.request(actor, directoryV2HTTPUsePrefix+"/grant", f.proof(actor, directoryV2HTTPGrantBody(role, "0", key)), 200).Body.Bytes())
-	if !out.Allowed || out.Purpose != credentialuse.DirectoryV2Purpose || out.GrantRevision == "" || out.GrantRevision == "0" || out.Replayed {
+	out := operationalDecode[directoryV2HTTPGrantReceipt](f.t, f.request(actor, directoryV2HTTPUsePrefix+"/grant", f.proof(actor, directoryV2HTTPGrantBody(role, "0", key)), 200).Body.Bytes())
+	if !out.ConsumerEnabled || !out.Allowed || out.Purpose != credentialuse.DirectoryV2Purpose || out.GrantRevision == "" || out.GrantRevision == "0" || out.Replayed {
 		f.t.Fatal("v2 HTTP grant did not commit its exact purpose")
 	}
 	return out.GrantRevision
@@ -228,23 +236,29 @@ func TestDirectoryV2MigratedHTTPReadAndPurposeBoundaries(t *testing.T) {
 		t.Fatal("denied v2 admission left a task")
 	}
 	body = f.proof("directory-grant", directoryV2HTTPGrantBody(directoryHTTPWriterRole, "0", "separate-grant-receipt"))
-	granted := operationalDecode[credentialuse.Receipt](t, f.request("directory-grant", directoryV2HTTPUsePrefix+"/grant", body, 200).Body.Bytes())
+	beforeConflict := f.count(`SELECT mfa_last_step FROM adtr.users WHERE id=$1`, f.clients["directory-grant"].id)
+	f.error(f.request("directory-grant", directoryV2HTTPUsePrefix+"/grant", body, 409), "idempotency_conflict")
+	if f.count(`SELECT mfa_last_step FROM adtr.users WHERE id=$1`, f.clients["directory-grant"].id) != beforeConflict || f.count(`SELECT count(*) FROM adtr.operation_account_use_grants WHERE purpose='domain.directory_read.v2'`) != 0 {
+		t.Fatal("cross-purpose actor/key reuse changed v2 authority or consumed proof")
+	}
+	body = f.proof("directory-grant", directoryV2HTTPGrantBody(directoryHTTPWriterRole, "0", "separate-v2-grant-receipt"))
+	granted := operationalDecode[directoryV2HTTPGrantReceipt](t, f.request("directory-grant", directoryV2HTTPUsePrefix+"/grant", body, 200).Body.Bytes())
 	step := f.count(`SELECT mfa_last_step FROM adtr.users WHERE id=$1`, f.clients["directory-grant"].id)
-	replay := operationalDecode[credentialuse.Receipt](t, f.request("directory-grant", directoryV2HTTPUsePrefix+"/grant", body, 200).Body.Bytes())
-	if granted.Purpose != credentialuse.DirectoryV2Purpose || !replay.Replayed || granted.GrantRevision != replay.GrantRevision || f.count(`SELECT mfa_last_step FROM adtr.users WHERE id=$1`, f.clients["directory-grant"].id) != step {
+	replay := operationalDecode[directoryV2HTTPGrantReceipt](t, f.request("directory-grant", directoryV2HTTPUsePrefix+"/grant", body, 200).Body.Bytes())
+	if !granted.ConsumerEnabled || !replay.ConsumerEnabled || granted.Purpose != credentialuse.DirectoryV2Purpose || !replay.Replayed || granted.GrantRevision != replay.GrantRevision || f.count(`SELECT mfa_last_step FROM adtr.users WHERE id=$1`, f.clients["directory-grant"].id) != step {
 		t.Fatal("v2 committed grant replay changed purpose/revision or consumed proof twice")
 	}
-	for _, version := range []struct{ prefix, purpose string }{{"/api/directory-credential-use", credentialuse.DirectoryPurpose}, {directoryV2HTTPUsePrefix, credentialuse.DirectoryV2Purpose}} {
+	for _, version := range []struct{ prefix, purpose, key string }{{"/api/directory-credential-use", credentialuse.DirectoryPurpose, "separate-grant-receipt"}, {directoryV2HTTPUsePrefix, credentialuse.DirectoryV2Purpose, "separate-v2-grant-receipt"}} {
 		receipt := operationalDecode[struct {
 			Receipt         credentialuse.Receipt `json:"receipt"`
 			ConsumerEnabled bool                  `json:"consumerEnabled"`
-		}](t, f.request("directory-grant", version.prefix+"/mutation?idempotencyKey=separate-grant-receipt", nil, 200).Body.Bytes())
+		}](t, f.request("directory-grant", version.prefix+"/mutation?idempotencyKey="+version.key, nil, 200).Body.Bytes())
 		if receipt.Receipt.Purpose != version.purpose || !receipt.ConsumerEnabled {
-			t.Fatal("same-key grant receipts crossed the trusted purpose")
+			t.Fatal("grant receipts crossed the trusted purpose")
 		}
 	}
-	f.request("directory-admin-other", directoryV2HTTPUsePrefix+"/mutation?idempotencyKey=separate-grant-receipt", nil, 404)
-	f.request("directory-grant", "/api/credential-use/mutation?idempotencyKey=separate-grant-receipt", nil, 404)
+	f.request("directory-admin-other", directoryV2HTTPUsePrefix+"/mutation?idempotencyKey=separate-v2-grant-receipt", nil, 404)
+	f.request("directory-grant", "/api/credential-use/mutation?idempotencyKey=separate-v2-grant-receipt", nil, 404)
 	allowed := operationalDecode[credentialuse.Effective](t, f.request(directoryHTTPWriterRole, effective, nil, 200).Body.Bytes())
 	if !allowed.ExplicitlyGranted || !allowed.Eligible || allowed.Purpose != credentialuse.DirectoryV2Purpose {
 		t.Fatal("qualified writer could not inspect its explicit v2 grant")
@@ -413,6 +427,18 @@ func (f *directoryV2HTTPFixture) stageV2(observation ldapconnection.DirectoryV2O
 		if err == nil {
 			_, err = ex.WithTx(ctx, version, func(ctx context.Context, tx pgx.Tx) (int, json.RawMessage, json.RawMessage, error) {
 				_, err := tx.Exec(ctx, `INSERT INTO adtr.domain_directory_observations(tenant_id,domain_id,task_id,actor_id,opener_owner,opener_fencing_token,opener_attempt,object_count,body,sha256,dictionary_version) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,2)`, ex.Task.TenantID, ex.Task.DomainID, ex.Task.ID, ex.Task.ActorID, ex.Task.LeaseOwner, ex.Task.FencingToken, ex.Task.Attempt, len(observation.Objects), raw, hex.EncodeToString(digest[:]))
+				if err == nil {
+					// This synthetic executor stages both outputs that the real LDAP
+					// producer commits atomically. The audit view must still wait for
+					// the real engine finish before exposing a successful result.
+					var tag pgconn.CommandTag
+					tag, err = tx.Exec(ctx, `INSERT INTO adtr.domain_audit(tenant_id,actor_id,domain_id,action,old_revision,new_revision,credential_revision,task_id,result)
+ SELECT tenant_id,actor_id,domain_id,'domain_directory_v2_result',(payload->>'connectionRevision')::bigint,(payload->>'connectionRevision')::bigint,(payload->>'connectionCredentialGeneration')::bigint,task_id,'success'
+ FROM adtr.tasks WHERE task_id=$1 AND kind='domain.directory_read.v2'`, ex.Task.ID)
+					if err == nil && tag.RowsAffected() != 1 {
+						err = fmt.Errorf("synthetic v2 audit stage did not match the admitted task")
+					}
+				}
 				return 95, json.RawMessage(`{"policyRevision":"synthetic-v2-private-cursor"}`), json.RawMessage(`{"objectGUID":"synthetic-v2-private-result"}`), err
 			})
 		}
@@ -489,6 +515,9 @@ func TestDirectoryV2MigratedHTTPLosslessStoredReadsAndDisabledGates(t *testing.T
 	defer o.Discard()
 	run := f.stageV2(o)
 	f.unavailableV2(task.ID)
+	if f.count(`SELECT count(*) FROM adtr.audit_source WHERE source='domain' AND event='domain_directory_v2_result' AND event_args->>'taskUUID'=$1 AND event_result='NONE' AND result_available IS FALSE`, task.ID) != 1 {
+		t.Fatal("synthetic staged audit was exposed before the actual task finish")
+	}
 	if f.count(`SELECT count(*) FROM adtr.tasks WHERE task_id=$1 AND cursor->>'policyRevision'='synthetic-v2-private-cursor' AND result->>'objectGUID'='synthetic-v2-private-result'`, task.ID) != 1 {
 		t.Fatal("privacy test lacks actual persisted private result/cursor")
 	}
@@ -518,6 +547,7 @@ func TestDirectoryV2MigratedHTTPLosslessStoredReadsAndDisabledGates(t *testing.T
 		t.Fatal("requested-but-absent supplemental fields stopped being null")
 	}
 	shape := operationalDecode[struct {
+		domains.DirectoryV2List
 		List []map[string]json.RawMessage `json:"list"`
 	}](t, w.Body.Bytes())
 	for _, object := range shape.List {
@@ -543,8 +573,8 @@ func TestDirectoryV2MigratedHTTPLosslessStoredReadsAndDisabledGates(t *testing.T
 		t.Fatal("storage envelope parsed public NUL text instead of canonical raw base64")
 	}
 	clear(stored)
-	if f.count(`SELECT count(*) FROM adtr.domain_audit WHERE task_id=$1 AND action='domain_directory_v2_result'`, task.ID) != 1 {
-		t.Fatal("v2 result audit was not projected from the actual finish")
+	if f.count(`SELECT count(*) FROM adtr.domain_audit WHERE task_id=$1 AND action='domain_directory_v2_result'`, task.ID) != 1 || f.count(`SELECT count(*) FROM adtr.audit_source WHERE source='domain' AND event='domain_directory_v2_result' AND event_args->>'taskUUID'=$1 AND event_result='SUCCESS' AND result_available IS TRUE`, task.ID) != 1 {
+		t.Fatal("v2 staged audit was not projected from the actual task finish")
 	}
 	second := operationalDecode[domains.DirectoryV2List](t, f.request("directory-http-reader", path+"&pageIdx=2&observationId="+task.ID, nil, 200).Body.Bytes())
 	if len(second.List) != 5 || second.List[0].GUID <= page.List[24].GUID || second.ObservationID != task.ID {
