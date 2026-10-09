@@ -1003,7 +1003,14 @@ test("real dictionary-v2 UI → authenticated API → worker → paged synthetic
   await expect(
     table.locator("tbody tr").nth(23).getByRole("cell").nth(5),
   ).toHaveText("未返回");
+  await expect(table.getByRole("columnheader")).toHaveCount(10);
   for (const field of [
+    "对象 GUID",
+    "类型",
+    "名称",
+    "可分辨名称",
+    "对象类",
+    "账户控制值",
     "objectSid",
     "mail",
     "description",

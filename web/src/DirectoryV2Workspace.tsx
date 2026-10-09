@@ -285,16 +285,16 @@ function Observation({
                 <caption>目录对象观察</caption>
                 <thead>
                   <tr>
-                    <th>对象 GUID</th>
-                    <th>类型</th>
-                    <th>名称</th>
-                    <th>可分辨名称</th>
-                    <th>对象类</th>
-                    <th>账户控制值</th>
-                    <th>objectSid</th>
-                    <th>mail</th>
-                    <th>description</th>
-                    <th>whenCreated（UTC）</th>
+                    <th scope="col">对象 GUID</th>
+                    <th scope="col">类型</th>
+                    <th scope="col">名称</th>
+                    <th scope="col">可分辨名称</th>
+                    <th scope="col">对象类</th>
+                    <th scope="col">账户控制值</th>
+                    <th scope="col">objectSid</th>
+                    <th scope="col">mail</th>
+                    <th scope="col">description</th>
+                    <th scope="col">whenCreated（UTC）</th>
                   </tr>
                 </thead>
                 <tbody>

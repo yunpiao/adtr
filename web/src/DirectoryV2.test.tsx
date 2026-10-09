@@ -632,6 +632,10 @@ describe("directory observations and access", () => {
       "description",
       "whenCreated（UTC）",
     ]);
+    // Explicit scope keeps native column associations and browser role queries
+    // consistent; Testing Library's implicit TH role accepts unscoped headers.
+    for (const header of within(table).getAllByRole("columnheader"))
+      expect(header).toHaveAttribute("scope", "col");
     expect(screen.queryByRole("button", { name: /导出/ })).toBeNull();
   });
   it.each(["available", "absent", "empty", "error"])(
