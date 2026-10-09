@@ -19,6 +19,7 @@ from ldap_e2e_fixture import LDAPFixture
 from account_barrier_e2e_fixture import AccountBarrierFixture
 from e2e_owned_container import OWNER_LABEL, remove_owned_container
 from e2e_runtime_diagnostics import http_handler_panicked
+from e2e_container_startup_diagnostics import report_container_startup_failure
 
 
 REAL_TAB_LIFECYCLE_SUITES = {"session-invalidation", "directory-readers", "directory-v2-readers"}
@@ -65,10 +66,14 @@ def main():
     logs = tempfile.TemporaryFile(mode="w+")
     try:
         creation_attempted = True
-        subprocess.run(["docker", "run", "--detach", "--rm", "--name", name,
-                        "--label", f"{OWNER_LABEL}={owner}",
-                        "-e", "POSTGRES_PASSWORD", "-e", "POSTGRES_DB=adtr_e2e",
-                        "-p", "127.0.0.1::5432", IMAGE], env=env, check=True, capture_output=True, timeout=60)
+        try:
+            subprocess.run(["docker", "run", "--detach", "--rm", "--name", name,
+                            "--label", f"{OWNER_LABEL}={owner}",
+                            "-e", "POSTGRES_PASSWORD", "-e", "POSTGRES_DB=adtr_e2e",
+                            "-p", "127.0.0.1::5432", IMAGE], env=env, check=True, capture_output=True, timeout=60)
+        except subprocess.CalledProcessError as error:
+            report_container_startup_failure(error, password)
+            raise
         for _ in range(60):
             if subprocess.run(["docker", "exec", name, "pg_isready", "-h", "127.0.0.1", "-U", "postgres", "-d", "adtr_e2e"], capture_output=True, timeout=5).returncode == 0:
                 break
