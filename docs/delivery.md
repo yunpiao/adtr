@@ -3,7 +3,17 @@
 总路线图：https://github.com/yunpiao/adtr/issues/1 。全部 209 项均在范围内。
 工程文档、代码、PR、最新 head CI、合并、产品验收分别记录；任一阶段不能代表后续阶段完成。
 
-## 最新集成运行证据（2026-10-08）
+## 当前合并与运行证据（2026-10-09）
+
+[PR #81](https://github.com/yunpiao/adtr/pull/81) 的精确 head `d6b6063f5fa5407779f465789e652a3dc24ff7c2` 已在 [CI 37945689472](https://github.com/yunpiao/adtr/actions/runs/37945689472) completed/success，28/28 job 通过：22 个隔离真实浏览器/API/PostgreSQL套件、4 个认证集成分片、contracts 和最终 verify。新增 directory-v2、directory-v2-controls、directory-v2-readers 均通过，目录生产者使用真实 Worker 与隔离合成 TLS LDAP；未验证真实 AD/Windows。
+
+实际 main 合并提交为 [`4faafb552a5c7887a62930f7563b22d3cbcdfbf9`](https://github.com/yunpiao/adtr/commit/4faafb552a5c7887a62930f7563b22d3cbcdfbf9)，内容树 `69faa19f15cb7da6a937399340a1d8dc454614b8` 与已审查/测试的 PR head 相同；父提交按序为原 main `9d31a7308c6dfb8b7ef0ce0c97b2f59fe89e7a46` 和 PR head。该合并提交的 [main-push CI 37954766457](https://github.com/yunpiao/adtr/actions/runs/37954766457) 已在 attempt 1 completed/success，28/28 job 全部通过。这是上述实际 main 提交的独立合并后验证结果，未用 PR CI 成功替代。
+
+本次仅更新发布、合并和运行事实；不修改需求状态或验收计数。产品验收仍为 **0/209**，保留 19 implemented_verified_slice、26 in_progress、164 not_started。[F12 #25](https://github.com/yunpiao/adtr/issues/25)、[F14 #30](https://github.com/yunpiao/adtr/issues/30) 及其更广依赖仍开放；v2 的默认关闭开关与独立授权保持。增量/删除语义、完整资产页面/关系/业务导出、源系统字段兼容、真实 AD/八版本 Windows、容量/恢复及生产门禁不因本次合并完成。没有生产部署。
+
+下面有日期的历史记录保留原结果及证据身份；“尚未推送”“未通过门禁”等描述对应当时检查点，不表示当前合并状态。v2 最新范围和具体证据见 [directory-v2-integration-status.md](directory-v2-integration-status.md)。
+
+## 历史集成运行证据（2026-10-08）
 
 [PR #77](https://github.com/yunpiao/adtr/pull/77) 精确 head `4f64d90880b28b3cf7a749a9ba1da57049736dd9` 的 [CI 37772558021](https://github.com/yunpiao/adtr/actions/runs/37772558021) 已 completed/success，25/25 job 通过：19 个隔离真实浏览器/API/PostgreSQL套件、4 个认证集成分片、contracts 和最终 verify。contracts 包含 make check、真实 PostgreSQL 非认证包集成，以及 API/worker 容器生命周期。域检测/目录读取使用隔离合成 TLS LDAP，未验证真实 AD/Windows。
 
