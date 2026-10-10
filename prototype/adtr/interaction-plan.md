@@ -1,5 +1,8 @@
 # ADTR 原型交互与验证计划
 
+> 本轮实现已扩展为 9 个一级导航与 49 个业务子页，具体路由和逐项呈现见 [工作区返工说明](docs/workspace-revision.md) 与 [209 项追溯矩阵](docs/coverage-matrix.json)。本文保留交互设计目标；目标条目不自动等于当前实现或已验证结果。开发说明不在产品页面展示。
+
+
 状态：交互设计与验证计划，未完成项继续待评审。方案 [#88](https://github.com/yunpiao/adtr/pull/88) 已按用户授权合入 main `5ca5ea513933d673ef87613fd0a863500a50b92a`，本目录现已有独立可运行的合成原型。实际实现、启动、局部模拟范围与已运行证据见 [README](README.md)、[coverage.js](coverage.js) 和 [validation.md](validation.md)。本文的 10 个闭环、20 种状态与 V01～V28 保留为完整设计目标，不能据此声称全部已实现或全部测试通过。原型关联 [#87](https://github.com/yunpiao/adtr/issues/87)，产品验收仍为 0/209。
 
 本文定义未来原型应如何演示和检查，不报告未执行的测试通过。`Nxx` 是候选导航，`Kxx` 是跨页闭环，`I-Fxx` 是功能组交互，`Sxx` 是界面状态，`Vxx` 是验证场景。所有页面路径只是未来原型路由；不是已存在的生产 URL、API 或权限标记。

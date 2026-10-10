@@ -1,3 +1,7 @@
+/* DEPRECATED historical mapping for the first prototype revision.
+ * Not loaded by index.html. Current scope and representation: docs/coverage-matrix.json.
+ * The legacy partial_simulation labels below must not be used as current coverage evidence.
+ */
 // Requirement scope and bounded local simulation coverage. Never product acceptance.
 window.ADTR_COVERAGE = {
   "baseline": "5ca5ea513933d673ef87613fd0a863500a50b92a",
