@@ -6,9 +6,10 @@ import {
   type Locator,
   type APIResponse,
   type Request,
-  type Route,
 } from "@playwright/test";
-import { createHmac, randomUUID } from "node:crypto";
+import { createHmac } from "node:crypto";
+import { fixtureGET } from "./fixture-get";
+import { holdAssetResponse as holdGenuineAssetResponse } from "./user-assets-v2-held-response";
 import { installUserAssetAbortIsolation } from "./user-assets-v2-abort-isolation";
 import { isIP } from "node:net";
 import {
@@ -180,7 +181,7 @@ async function readJSON(
   path: string,
   actorId?: number,
 ) {
-  const response = await context.request.get(path);
+  const response = await fixtureGET(context.request, path);
   expect(response.status(), `GET ${path}`).toBe(200);
   expect(response.headers()["cache-control"]).toBe("no-store");
   if (actorId !== undefined)
@@ -412,157 +413,10 @@ async function searchAssets(page: Page, text: string) {
 // Hold genuine authenticated bytes, not a fabricated success body. A narrowly
 // armed controller can ignore cancellation; the genuine body still crosses the
 // production actor check and bounded parser. UI generations reject late values.
-// Both native completion and the exact consumed browser body are required.
-async function bounded<T>(
-  promise: Promise<T>,
-  milliseconds: number,
-  message: string,
-): Promise<T> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    return await Promise.race([
-      promise,
-      new Promise<never>((_, reject) => {
-        timer = setTimeout(() => reject(new Error(message)), milliseconds);
-      }),
-    ]);
-  } finally {
-    clearTimeout(timer);
-  }
-}
-async function holdAssetResponse(page: Page, path: string, actorId: number) {
-  let ready!: () => void, release!: () => void, finish!: () => void;
-  let reject!: (error: unknown) => void;
-  const fetched = new Promise<void>((resolve, fail) => {
-    ready = resolve;
-    reject = fail;
-  });
-  void fetched.catch(() => {});
-  const gate = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  const completed = new Promise<void>((resolve) => {
-    finish = resolve;
-  });
-  let held: Request | undefined;
-  let response: APIResponse | undefined;
-  let genuineBody: unknown;
-  const token = randomUUID();
-  let error: unknown;
-  let outcome = "pending";
-  let releaseResult: Promise<string> | undefined;
-  const ended = (candidate: Request) => {
-    if (candidate === held) outcome = "delivered";
-  };
-  const failed = (candidate: Request) => {
-    if (candidate === held)
-      outcome = /aborted|cancelled|canceled/iu.test(
-        candidate.failure()?.errorText ?? "",
-      )
-        ? "browser_cancelled"
-        : "failed";
-  };
-  page.on("requestfinished", ended);
-  page.on("requestfailed", failed);
-  const predicate = (url: URL) => url.pathname === path;
-  const handler = async (route: Route) => {
-    try {
-      held = route.request();
-      response = await route.fetch({
-        maxRedirects: 0,
-        maxRetries: 0,
-        timeout: 15_000,
-      });
-      expect(response.status()).toBe(200);
-      expect(response.headers()["cache-control"]).toBe("no-store");
-      expect(response.headers()["x-adtr-user-id"]).toBe(String(actorId));
-      const body = await response.json();
-      genuineBody = body;
-      expect(body.dictionaryVersion).toBe(2);
-      expect(body.observationId).toBeTruthy();
-      if (path.endsWith("/detail"))
-        expect(body.object).toEqual(expectedUser(1));
-      ready();
-      await bounded(
-        gate,
-        120_000,
-        "Held genuine user response was not released",
-      );
-      await route.fulfill({ response });
-    } catch (cause) {
-      error = cause;
-      reject(cause);
-      await route.abort().catch(() => {});
-    } finally {
-      try {
-        await response?.dispose();
-      } catch (cause) {
-        error ??= cause;
-      }
-      finish();
-    }
-  };
-  await page.route(predicate, handler, { times: 1 });
-  await page.evaluate(
-    ({ path, token }) => {
-      (window as any).__adtrUserAssetAbortIsolation.arm(path, token);
-    },
-    { path, token },
-  );
-  return {
-    fetched: () =>
-      bounded(fetched, 20_000, "No genuine user asset response captured"),
-    release() {
-      if (!releaseResult)
-        releaseResult = (async () => {
-          release();
-          try {
-            if (!held) return "not_requested";
-            await bounded(
-              completed,
-              20_000,
-              "Held user asset route failed to finish",
-            );
-            if (error) throw error;
-            await expect
-              .poll(() => outcome, { timeout: 15_000 })
-              .not.toBe("pending");
-            if (outcome === "delivered") {
-              const browserResponse = await held.response();
-              if (!browserResponse)
-                throw new Error("Held delivery has no browser response");
-              // Require the actual bounded app read, not just fulfilled headers.
-              expect(await directoryV2ResponseJSON(browserResponse)).toEqual(
-                genuineBody,
-              );
-              const witness = await page.evaluate(
-                (token) =>
-                  (window as any).__adtrUserAssetAbortIsolation.witness(token),
-                token,
-              );
-              expect(witness).toMatchObject({
-                path,
-                requestURL: held.url(),
-                aborted: false,
-              });
-              expect(witness.suppressed).toBeGreaterThan(0);
-            }
-            return outcome;
-          } finally {
-            await page.evaluate(
-              (token) =>
-                (window as any).__adtrUserAssetAbortIsolation.disarm(token),
-              token,
-            );
-            page.off("requestfinished", ended);
-            page.off("requestfailed", failed);
-            await page.unroute(predicate, handler);
-          }
-        })();
-      return releaseResult;
-    },
-  };
-}
+// Exact original-reader consumption is required on both engines; the fixed
+// engine additionally requires native completion. Facts are never conflated.
+const holdAssetResponse = (page: Page, path: string, actorId: number) =>
+  holdGenuineAssetResponse(page, path, actorId, expectedUser(1));
 async function ignoreAssetAbort(page: Page) {
   await page.addInitScript(installUserAssetAbortIsolation);
 }
@@ -1214,7 +1068,9 @@ test("UserAssetsV2 real worker TLS LDAP PostgreSQL search and pinned detail", as
       await page
         .getByRole("button", { name: "关闭用户详情", exact: true })
         .click();
-      expect(await held.release()).toBe("delivered");
+      expect(await held.release()).toMatchObject({
+        application: "complete-consumed",
+      });
       await expect(panel).toHaveCount(0);
     } finally {
       await held.release();
@@ -1231,7 +1087,9 @@ test("UserAssetsV2 real worker TLS LDAP PostgreSQL search and pinned detail", as
         page.getByLabel("用户资产关键词", { exact: true }).press("Enter"),
       );
       expect(current.value.list).toEqual([expected[10]]);
-      expect(await held.release()).toBe("delivered");
+      expect(await held.release()).toMatchObject({
+        application: "complete-consumed",
+      });
       await expect(table).toContainText("user-11");
       await expect(table).not.toContainText("user-02");
     } finally {
