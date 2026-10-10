@@ -105,6 +105,10 @@ function Workspace({ profile, sessionChanged }: Props) {
           数据来自已完成并保存的目录观测。观测不是 AD
           时间点快照，未观察到对象不表示删除。“未返回”表示已请求但未返回，不推断原因。
         </p>
+        <p id="asset-search-help">
+          按 SAM、SID、mail 或 DN 搜索；最多 50 个 UTF-16
+          单元，保留空白，按字面匹配。
+        </p>
       </details>
       <ErrorNotice error={gate.error || notice} />
       {gate.busy && <p role="status">正在核对用户资产访问权限…</p>}
@@ -471,14 +475,23 @@ function Assets({
         {list?.available && (
           <span className="asset-count">{list.page.total} 个匹配用户</span>
         )}
+        <button
+          type="button"
+          className="secondary asset-refresh"
+          aria-label="刷新用户资产观测"
+          onClick={() => {
+            const { observationId: _pin, ...latest } = queryRef.current;
+            loadList({ ...latest, pageIdx: 1 });
+          }}
+        >
+          刷新观测
+        </button>
       </div>
       <form className="filters asset-search-toolbar" onSubmit={submit}>
-        <Field
-          label="用户资产关键词"
-          help="按 SAM、SID、mail 或 DN 搜索；最多 50 个 UTF-16 单元，保留空白，按字面匹配"
-        >
+        <Field label="用户资产关键词">
           <input
             ref={searchInput}
+            aria-describedby="asset-search-help"
             placeholder="按 SAM、SID、mail 或 DN 搜索"
             value={draft}
             onChange={(event) => {
@@ -488,8 +501,10 @@ function Assets({
             }}
           />
         </Field>
-        <Field label="用户资产每页条数">
+        <label className="field asset-page-size">
+          <span>每页条数</span>
           <select
+            aria-label="用户资产每页条数"
             value={query.pageSize}
             disabled={busy || stale}
             onChange={(event) =>
@@ -506,7 +521,7 @@ function Assets({
               </option>
             ))}
           </select>
-        </Field>
+        </label>
         <button disabled={stale || (busy && !dirty)}>搜索用户</button>
         <button
           type="button"
@@ -531,15 +546,6 @@ function Assets({
         <p role="status">搜索已编辑，尚未应用；请提交搜索后查看详情或翻页。</p>
       )}
       <ErrorNotice error={inputError || error} />
-      <button
-        className="secondary"
-        onClick={() => {
-          const { observationId: _pin, ...latest } = queryRef.current;
-          loadList({ ...latest, pageIdx: 1 });
-        }}
-      >
-        刷新用户资产观测
-      </button>
       {error && !stale && (
         <button
           className="secondary"

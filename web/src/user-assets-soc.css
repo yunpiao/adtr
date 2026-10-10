@@ -21,7 +21,7 @@
   margin: 0;
 }
 .asset-data-help {
-  margin: 12px 0 20px;
+  margin: 8px 0 12px;
   font-size: 12px;
   color: var(--asset-muted);
 }
@@ -103,16 +103,18 @@
   gap: 10px;
   padding: 0 18px 12px;
   margin: 0;
+  border: 0;
+  border-radius: 0;
 }
-.asset-search-toolbar > .field {
+.user-assets-workspace .asset-search-toolbar > .field {
   margin: 0;
   gap: 6px;
 }
-.asset-search-toolbar > .field:first-child {
+.user-assets-workspace .asset-search-toolbar > .field:first-child {
   flex: 1 1 280px;
 }
-.asset-search-toolbar > .field:nth-child(2) {
-  flex: 0 1 110px;
+.user-assets-workspace .asset-search-toolbar > .field:nth-child(2) {
+  flex: 0 0 82px;
 }
 .asset-search-toolbar .field small {
   font-size: 12px;
@@ -361,7 +363,7 @@
   #asset-source-picker {
     padding: 0 12px 12px;
   }
-  .asset-search-toolbar > .field:first-child {
+  .user-assets-workspace .asset-search-toolbar > .field:first-child {
     flex-basis: 100%;
   }
   .asset-table {
@@ -430,4 +432,63 @@
 }
 .asset-detail-body {
   min-height: 0;
+}
+
+/* Compact field rules intentionally outrank the legacy generic form styles. */
+.user-assets-workspace .asset-search-toolbar > .field:first-child > span {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.user-assets-workspace .asset-search-toolbar input,
+.user-assets-workspace .asset-search-toolbar select {
+  min-height: 36px;
+  height: 36px;
+  padding: 7px 10px;
+}
+.user-assets-workspace .asset-search-toolbar .asset-page-size > span {
+  font-size: 12px;
+  white-space: nowrap;
+}
+.asset-queue-heading .asset-refresh {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+.user-assets-workspace button:not(.secondary):not(.asset-detail-button) {
+  background: #2463e8;
+}
+.user-assets-workspace
+  button:not(.secondary):not(.asset-detail-button):hover:not(:disabled) {
+  background: #1c50c4;
+}
+@media (max-width: 760px) {
+  .asset-page-heading > p:last-child {
+    font-size: 13px;
+  }
+  .asset-source-heading {
+    padding: 10px 14px;
+  }
+  .asset-source-revisions {
+    margin-bottom: 10px;
+  }
+  .asset-queue-heading {
+    padding: 12px 14px;
+    gap: 8px;
+  }
+  .asset-queue-heading h3 {
+    font-size: 14px;
+  }
+  .user-assets-workspace .asset-search-toolbar {
+    padding: 0 14px 10px;
+    gap: 8px;
+  }
+  .user-assets-workspace .asset-search-toolbar > .field:first-child {
+    flex-basis: 100%;
+  }
+  .asset-applied-search {
+    margin: 0 14px 10px;
+  }
 }

@@ -829,7 +829,7 @@ test("UserAssetsV2 real worker TLS LDAP PostgreSQL search and pinned detail", as
   await test.step("SOC desktop and mobile use real disclosures, routes and asset data", async () => {
     const soc = await context.newPage();
     try {
-      await soc.setViewportSize({ width: 1440, height: 960 });
+      await soc.setViewportSize({ width: 1440, height: 900 });
       await soc.goto("/#user-assets-v2");
       await signedIn(soc, producerUsername);
       for (const name of ["用户资产", "后台任务", "操作审计"])
@@ -857,6 +857,18 @@ test("UserAssetsV2 real worker TLS LDAP PostgreSQL search and pinned detail", as
         exact: true,
       });
       await expect(socTable.locator("tbody tr")).toHaveCount(10);
+      // Measure the unscrolled first screen; the first complete user row must
+      // fit at the approved desktop viewport without scrolling it into view.
+      expect(await soc.evaluate(() => scrollY)).toBe(0);
+      const firstRowBounds = await socTable
+        .locator("tbody tr")
+        .first()
+        .boundingBox();
+      expect(firstRowBounds).not.toBeNull();
+      expect(firstRowBounds!.y).toBeGreaterThanOrEqual(0);
+      expect(firstRowBounds!.y + firstRowBounds!.height).toBeLessThanOrEqual(
+        900,
+      );
       await expect(
         soc.getByRole("button", { name: "更换数据源", exact: true }),
       ).toBeVisible();
@@ -867,11 +879,15 @@ test("UserAssetsV2 real worker TLS LDAP PostgreSQL search and pinned detail", as
         ),
       ).toBe(true);
       await soc.screenshot({
-        path: testInfo.outputPath("soc-desktop-user-assets-list.png"),
+        path: testInfo.outputPath(
+          "user-assets-v2-soc-desktop-user-assets-list.png",
+        ),
         fullPage: true,
       });
       await soc.screenshot({
-        path: testInfo.outputPath("soc-desktop-user-assets-first-screen.png"),
+        path: testInfo.outputPath(
+          "user-assets-v2-soc-desktop-user-assets-first-screen.png",
+        ),
         fullPage: false,
       });
 
@@ -890,9 +906,11 @@ test("UserAssetsV2 real worker TLS LDAP PostgreSQL search and pinned detail", as
       });
       await expect(desktopDrawer).toHaveAttribute("aria-modal", "true");
       const desktopBounds = await desktopDrawer.boundingBox();
-      expect(desktopBounds).toEqual({ x: 920, y: 0, width: 520, height: 960 });
+      expect(desktopBounds).toEqual({ x: 920, y: 0, width: 520, height: 900 });
       await soc.screenshot({
-        path: testInfo.outputPath("soc-desktop-user-asset-detail.png"),
+        path: testInfo.outputPath(
+          "user-assets-v2-soc-desktop-user-asset-detail.png",
+        ),
         fullPage: false,
       });
       await soc
@@ -949,7 +967,9 @@ test("UserAssetsV2 real worker TLS LDAP PostgreSQL search and pinned detail", as
       await management.locator("summary").click();
       await expect(management).not.toHaveAttribute("open", "");
       await soc.screenshot({
-        path: testInfo.outputPath("soc-mobile-navigation-open.png"),
+        path: testInfo.outputPath(
+          "user-assets-v2-soc-mobile-navigation-open.png",
+        ),
         fullPage: false,
       });
       await soc.keyboard.press("Escape");
@@ -965,17 +985,36 @@ test("UserAssetsV2 real worker TLS LDAP PostgreSQL search and pinned detail", as
       expect(mobile.value).toEqual(first.value);
       await expect(soc.locator("#soc-navigation-panel")).toBeHidden();
       await expect(socTable.locator("tbody tr")).toHaveCount(10);
+      // A complete first SAM value must be readable on the untouched mobile
+      // first screen, not just the first card's border below the toolbar.
+      expect(await soc.evaluate(() => scrollY)).toBe(0);
+      const firstMobileSAM = socTable
+        .locator("tbody tr")
+        .first()
+        .locator('td[data-label="SAM"]');
+      await expect(firstMobileSAM).toHaveText("user-01");
+      await expect(firstMobileSAM).toBeVisible();
+      const firstMobileSAMBounds = await firstMobileSAM.boundingBox();
+      expect(firstMobileSAMBounds).not.toBeNull();
+      expect(firstMobileSAMBounds!.y).toBeGreaterThanOrEqual(0);
+      expect(
+        firstMobileSAMBounds!.y + firstMobileSAMBounds!.height,
+      ).toBeLessThanOrEqual(844);
       expect(
         await soc.evaluate(
           () => document.documentElement.scrollWidth <= innerWidth,
         ),
       ).toBe(true);
       await soc.screenshot({
-        path: testInfo.outputPath("soc-mobile-user-assets-list.png"),
+        path: testInfo.outputPath(
+          "user-assets-v2-soc-mobile-user-assets-list.png",
+        ),
         fullPage: true,
       });
       await soc.screenshot({
-        path: testInfo.outputPath("soc-mobile-user-assets-first-screen.png"),
+        path: testInfo.outputPath(
+          "user-assets-v2-soc-mobile-user-assets-first-screen.png",
+        ),
         fullPage: false,
       });
 
@@ -998,24 +1037,43 @@ test("UserAssetsV2 real worker TLS LDAP PostgreSQL search and pinned detail", as
       expect(bounds!.x).toBeGreaterThanOrEqual(0);
       expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(390);
       expect(bounds!.height).toBe(844);
-      await expect(
-        soc.getByRole("button", { name: "搜索用户", exact: true }),
-      ).toHaveCount(0);
+      // Playwright 1.56's role selector still matches inert descendants.
+      // Prove the browser's actual focus barrier, rather than DOM absence.
+      const searchForm = soc.locator("form.asset-search-toolbar");
+      await expect(searchForm).toHaveAttribute("inert", "");
+      await expect(searchForm).toHaveJSProperty("inert", true);
+      const backgroundSearch = searchForm.getByRole("button", {
+        name: "搜索用户",
+        exact: true,
+      });
+      const identity = soc.getByRole("region", {
+        name: "用户身份",
+        exact: true,
+      });
+      await identity.focus();
+      await expect(identity).toBeFocused();
+      await backgroundSearch.evaluate((button) =>
+        (button as HTMLButtonElement).focus(),
+      );
+      await expect(identity).toBeFocused();
+      expect(
+        await drawer.evaluate((element) =>
+          element.contains(document.activeElement),
+        ),
+      ).toBe(true);
       expect(
         await soc.evaluate(
           () => document.documentElement.scrollWidth <= innerWidth,
         ),
       ).toBe(true);
       await soc.screenshot({
-        path: testInfo.outputPath("soc-mobile-user-asset-detail.png"),
+        path: testInfo.outputPath(
+          "user-assets-v2-soc-mobile-user-asset-detail.png",
+        ),
         fullPage: false,
       });
       const close = soc.getByRole("button", {
         name: "关闭用户详情",
-        exact: true,
-      });
-      const identity = soc.getByRole("region", {
-        name: "用户身份",
         exact: true,
       });
       await identity.focus();
