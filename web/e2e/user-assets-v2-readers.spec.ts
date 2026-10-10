@@ -13,6 +13,7 @@ import { installUserAssetAbortIsolation } from "./user-assets-v2-abort-isolation
 import { isIP } from "node:net";
 import {
   directoryV2ResponseJSON,
+  directoryV2RequestDiagnostic,
   observeDirectoryV2Responses,
 } from "./directory-v2-response-observer";
 import {
@@ -456,23 +457,106 @@ async function holdAssetResponse(page: Page, path: string, actorId: number) {
   let error: unknown;
   let outcome = "pending";
   let releaseResult: Promise<string> | undefined;
+  let phase = "armed";
+  let nativeFailure: string | null = null;
+  let responseHeadersReceived = false;
+  const started = Date.now();
+  const events: {
+    event: string;
+    phase: string;
+    elapsedMilliseconds: number;
+  }[] = [];
+  const record = (event: string) => {
+    events.push({ event, phase, elapsedMilliseconds: Date.now() - started });
+  };
   const ended = (candidate: Request) => {
-    if (candidate === held) outcome = "delivered";
+    if (candidate === held) {
+      outcome = "delivered";
+      record("requestfinished");
+    }
   };
   const failed = (candidate: Request) => {
-    if (candidate === held)
-      outcome = /aborted|cancelled|canceled/iu.test(
-        candidate.failure()?.errorText ?? "",
-      )
+    if (candidate === held) {
+      const code = candidate.failure()?.errorText ?? "";
+      outcome = /aborted|cancelled|canceled/iu.test(code)
         ? "browser_cancelled"
         : "failed";
+      // Never log arbitrary browser errors, request URLs, headers or bodies.
+      nativeFailure = [
+        "net::ERR_ABORTED",
+        "net::ERR_FAILED",
+        "net::ERR_CONNECTION_CLOSED",
+        "net::ERR_CONNECTION_RESET",
+        "net::ERR_EMPTY_RESPONSE",
+        "net::ERR_TIMED_OUT",
+        "net::ERR_NETWORK_CHANGED",
+      ].includes(code)
+        ? code
+        : "other";
+      record("requestfailed");
+    }
+  };
+  const headers = (candidate: import("@playwright/test").Response) => {
+    if (candidate.request() === held) {
+      responseHeadersReceived = true;
+      record("response headers");
+    }
+  };
+  const diagnose = async (
+    stage:
+      | "genuine detail captured"
+      | "API list401 observed"
+      | "native session401 observed"
+      | "release started"
+      | "release settled",
+  ) => {
+    if (!held) throw new Error("Held diagnostic has no browser request");
+    const snapshot = await page.evaluate(
+      ({ token, url, path }) => {
+        const witness = (window as any).__adtrUserAssetAbortIsolation.witness(
+          token,
+        );
+        return {
+          pathMatches: witness.path === path,
+          requestMatches: witness.requestURL === url,
+          suppressed: witness.suppressed,
+          aborted: witness.aborted,
+        };
+      },
+      { token, url: held.url(), path },
+    );
+    const observer = await directoryV2RequestDiagnostic(held);
+    // Safe diagnostics only: fixed stages/codes, booleans and counters. The
+    // passive observer is read without consuming or changing the real body.
+    console.log(
+      `UserAssetsV2 held diagnostic: ${JSON.stringify({
+        stage,
+        phase,
+        outcome,
+        nativeFailure,
+        responseHeadersReceived,
+        events,
+        ...snapshot,
+        observer,
+      })}`,
+    );
+    // A missed arm or an unrelated request can never count as held evidence,
+    // even when the browser cancelled rather than delivered the request.
+    expect(snapshot).toMatchObject({
+      pathMatches: true,
+      requestMatches: true,
+    });
+    expect(observer).toMatchObject({ registered: true, sameDocument: true });
   };
   page.on("requestfinished", ended);
   page.on("requestfailed", failed);
+  page.on("response", headers);
   const predicate = (url: URL) => url.pathname === path;
   const handler = async (route: Route) => {
     try {
       held = route.request();
+      phase = "capturing upstream";
+      record("request intercepted");
       response = await route.fetch({
         maxRedirects: 0,
         maxRetries: 0,
@@ -487,13 +571,19 @@ async function holdAssetResponse(page: Page, path: string, actorId: number) {
       expect(body.observationId).toBeTruthy();
       if (path.endsWith("/detail"))
         expect(body.object).toEqual(expectedUser(1));
+      phase = "holding genuine response";
+      record("upstream body captured");
       ready();
       await bounded(
         gate,
         120_000,
         "Held genuine user response was not released",
       );
+      phase = "fulfilling";
+      record("fulfill started");
       await route.fulfill({ response });
+      phase = "fulfilled";
+      record("fulfill finished");
     } catch (cause) {
       error = cause;
       reject(cause);
@@ -517,12 +607,17 @@ async function holdAssetResponse(page: Page, path: string, actorId: number) {
   return {
     fetched: () =>
       bounded(fetched, 20_000, "No genuine user asset response captured"),
+    diagnose,
     release() {
       if (!releaseResult)
         releaseResult = (async () => {
-          release();
           try {
-            if (!held) return "not_requested";
+            if (!held) {
+              release();
+              return "not_requested";
+            }
+            await diagnose("release started");
+            release();
             await bounded(
               completed,
               20_000,
@@ -532,6 +627,7 @@ async function holdAssetResponse(page: Page, path: string, actorId: number) {
             await expect
               .poll(() => outcome, { timeout: 15_000 })
               .not.toBe("pending");
+            await diagnose("release settled");
             if (outcome === "delivered") {
               const browserResponse = await held.response();
               if (!browserResponse)
@@ -554,6 +650,7 @@ async function holdAssetResponse(page: Page, path: string, actorId: number) {
             }
             return outcome;
           } finally {
+            release();
             await page.evaluate(
               (token) =>
                 (window as any).__adtrUserAssetAbortIsolation.disarm(token),
@@ -561,6 +658,7 @@ async function holdAssetResponse(page: Page, path: string, actorId: number) {
             );
             page.off("requestfinished", ended);
             page.off("requestfailed", failed);
+            page.off("response", headers);
             await page.unroute(predicate, handler);
           }
         })();
@@ -1563,6 +1661,7 @@ test("UserAssetsV2 real scoped reader revocation and native cross-tab held-respo
         .getByRole("button", { name: "查看用户 user-01", exact: true })
         .click();
       await held.fetched();
+      await held.diagnose("genuine detail captured");
       await adminPage.bringToFront();
       await expect
         .poll(() => page.evaluate(() => document.hasFocus()))
@@ -1598,6 +1697,7 @@ test("UserAssetsV2 real scoped reader revocation and native cross-tab held-respo
       );
       expect(expired.status()).toBe(401);
       expect(await expired.json()).toEqual({ error: "unauthenticated" });
+      await held.diagnose("API list401 observed");
       // The list's genuine API denial above proves revoked read authority.
       // Native focus now performs a distinct genuine /auth/me revalidation.
       // Do not click an old unfocused view and claim that its list401 cleared it.
@@ -1626,6 +1726,7 @@ test("UserAssetsV2 real scoped reader revocation and native cross-tab held-respo
       await expect(
         page.getByRole("heading", { name: "登录账户", exact: true }),
       ).toBeVisible();
+      await held.diagnose("native session401 observed");
       expect(await held.release()).toBe("delivered");
       await testInfo.attach("user-assets-v2-revocation-native-evidence", {
         body: JSON.stringify({
