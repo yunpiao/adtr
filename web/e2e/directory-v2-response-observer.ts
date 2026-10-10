@@ -30,6 +30,8 @@ export function installDirectoryV2ResponseObserver() {
   };
   const records = new Map<string, Record[]>();
   const paths = new Set([
+    "/api/user-assets/v2",
+    "/api/user-assets/v2/detail",
     "/api/directory/v2/observation",
     "/api/directory/v2/receipt",
     "/api/directory/v2/task",
@@ -189,6 +191,9 @@ const documents = new WeakMap<
   { epoch: string; counts: Map<string, number> }
 >();
 const directoryPath = (url: URL) =>
+  ["/api/user-assets/v2", "/api/user-assets/v2/detail"].includes(
+    url.pathname,
+  ) ||
   /^\/api\/directory\/v2\/(?:observation|receipt|task|sync|cancel)$/u.test(
     url.pathname,
   ) ||

@@ -3,6 +3,32 @@
 总路线图：https://github.com/yunpiao/adtr/issues/1 。全部 209 项均在范围内。
 工程文档、代码、PR、最新 head CI、合并、产品验收分别记录；任一阶段不能代表后续阶段完成。
 
+## F14 用户资产搜索与固定详情（2026-10-10 开发切片）
+
+Refs [#30](https://github.com/yunpiao/adtr/issues/30)、AD-F-038/039。基于已合并
+main `26f1463e98d2064182ad3f89e8663af7a0d9ef24` 开发只读 `/api/user-assets/v2`
+用户列表和 `/detail`，使用同一经过完整校验的 dictionary2 不可变观测；当前域与凭据
+版本在同一授权事务核对。支持 SAM/SID/mail/DN 字面量搜索、用户专属稳定分页、
+观测/GUID 固定详情；十个事实字段保留真实 null/0/UTC 年份与原始文本。
+范围、原始字段映射、错误/重试及剩余门禁见 [用户资产契约](user-assets-v2-contract.md)。
+
+本地清洁基线 make check 通过759项DOM；新增候选完整 make check 已通过845项DOM、
+Go race/vet/build、58项Python契约和依赖审计（0漏洞）。全部非认证集成包已通过本地
+真实PostgreSQL17.6；新增域查询/HTTP测试独立覆盖实际持久化、撤权、固定观测、
+完整损坏拒绝及来源变化。最终逐提交检查与独立实际diff审查结果另附PR证据。
+四个认证集成分片、最终源码复核、精确head CI和当前main兼容性仍分别核验。
+
+Docker容器版集成/生命周期脚本在当前dot云执行环境实际尝试后因没有docker可执行文件
+阻塞；不能将本地PostgreSQL版本的成功当作容器门禁通过。新增两个真实浏览器套件
+`user-assets-v2`、`user-assets-v2-readers` 已登记CI，需在精确head运行后才记录成功。
+其独立合成TLS LDAP模式包含12用户及组/计算机干扰项；原v1/v2夹具未改变。
+网页截图、原生跨标签撤权及Worker→TLS LDAP→PostgreSQL→API链路依其实际CI结果验收。
+
+没有schema迁移、生产部署、真实AD/凭据接入、默认开关或权限放宽。AD-F-038/039仅从
+not_started改为in_progress；19 verified slices、28 in_progress、162 not_started，
+产品验收仍0/209。其余字段/筛选、风险/登录/关系/导出、源系统1:1、真实AD/八版本Windows、
+容量与生产门禁仍开放；不关闭Issue30，也不以本切片宣称完整F14或依赖功能已验收。
+
 ## 当前合并与运行证据（2026-10-09）
 
 [PR #81](https://github.com/yunpiao/adtr/pull/81) 的精确 head `d6b6063f5fa5407779f465789e652a3dc24ff7c2` 已在 [CI 37945689472](https://github.com/yunpiao/adtr/actions/runs/37945689472) completed/success，28/28 job 通过：22 个隔离真实浏览器/API/PostgreSQL套件、4 个认证集成分片、contracts 和最终 verify。新增 directory-v2、directory-v2-controls、directory-v2-readers 均通过，目录生产者使用真实 Worker 与隔离合成 TLS LDAP；未验证真实 AD/Windows。

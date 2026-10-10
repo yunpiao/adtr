@@ -293,7 +293,7 @@ func (s *Service) handleAccess(ctx context.Context, r *http.Request, path string
 			rt, known := accessRoutes[suffix]
 			results[i] = ok && prefix && known && method == rt.method && grantAllows(grants, rt)
 			if ok && !prefix {
-				results[i] = resourcePathAllowed(method, url, roleID, grants) || taskPathAllowed(method, url, grants) || auditPathAllowed(method, url, grants) || systemPathAllowed(method, url, u.tenant, grants) || schedulePathAllowed(method, url, grants) || archivePathAllowed(method, url, grants) || credentialUsePathAllowed(method, url, roleID, grants) || operationAccountPathAllowed(method, url, grants) || domainSelectionPathAllowed(method, url, grants) || domainAccessPathAllowed(method, url, roleID, grants) || operationalLogPathAllowed(method, url, u.tenant, grants) || directoryPathAllowed(method, url, grants) || directoryCredentialUsePathAllowed(method, url, roleID, grants) || directoryV2PathAllowed(method, url, grants) || directoryV2CredentialUsePathAllowed(method, url, roleID, grants)
+				results[i] = resourcePathAllowed(method, url, roleID, grants) || taskPathAllowed(method, url, grants) || auditPathAllowed(method, url, grants) || systemPathAllowed(method, url, u.tenant, grants) || schedulePathAllowed(method, url, grants) || archivePathAllowed(method, url, grants) || credentialUsePathAllowed(method, url, roleID, grants) || operationAccountPathAllowed(method, url, grants) || domainSelectionPathAllowed(method, url, grants) || domainAccessPathAllowed(method, url, roleID, grants) || operationalLogPathAllowed(method, url, u.tenant, grants) || directoryPathAllowed(method, url, grants) || directoryCredentialUsePathAllowed(method, url, roleID, grants) || directoryV2PathAllowed(method, url, grants) || directoryV2CredentialUsePathAllowed(method, url, roleID, grants) || userAssetsV2PathAllowed(method, url, grants)
 			}
 		}
 		value = map[string]any{"results": results}
@@ -410,6 +410,7 @@ func permissionNodes(grants map[string]AccessAuth, onlyReadable bool) []AccessPe
 			}
 		}
 		if mark == "directory_assets" {
+			paths = append(paths, AccessPath{"User assets: list", "GET /api/user-assets/v2", "readable"}, AccessPath{"User assets: detail", "GET /api/user-assets/v2/detail", "readable"})
 			useKeys := []string{}
 			for path := range credentialUseRoutes {
 				useKeys = append(useKeys, path)
