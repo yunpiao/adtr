@@ -85,6 +85,7 @@ let override: (url: string, init: RequestInit) => Promise<Response> | undefined;
 let fetcher: ReturnType<typeof vi.fn>;
 let counter = 0;
 beforeEach(() => {
+  vi.spyOn(window, "scrollTo").mockImplementation(() => {});
   discardTaskIntent({ ID: 1, username: "admin" });
   sessionStorage.clear();
   profile = {
@@ -149,7 +150,7 @@ async function start() {
 async function detail() {
   await start();
   click(`详情 ${task().taskUUID}`);
-  await screen.findByRole("table", { name: "持久化任务事件" });
+  await screen.findByRole("list", { name: "持久化任务事件" });
 }
 
 describe("task transport", () => {
@@ -251,6 +252,7 @@ describe("task workspace", () => {
     await revealNavigation("后台任务");
     click("后台任务");
     await screen.findByRole("table", { name: "任务列表" });
+    fireEvent.click(screen.getByText("任务范围与结果说明"));
     expect(screen.getByText(/域连接检测请使用域连接页面/)).toBeVisible();
     expect(
       JSON.parse(
@@ -392,7 +394,7 @@ describe("task workspace", () => {
       resolve(await response({ task: task("succeeded"), replayed: false })),
     );
     expect(
-      screen.queryByRole("table", { name: "持久化任务事件" }),
+      screen.queryByRole("list", { name: "持久化任务事件" }),
     ).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "提交健康检查" })).toBeDisabled();
     click("继续核对未确认的提交");
@@ -519,7 +521,7 @@ describe("task workspace", () => {
     render(<TaskWorkspace profile={profile} sessionChanged={changed} />);
     await screen.findByRole("table", { name: "任务列表" });
     click(`详情 ${task().taskUUID}`);
-    await screen.findByRole("table", { name: "持久化任务事件" });
+    await screen.findByRole("list", { name: "持久化任务事件" });
     denied = true;
     click("刷新任务详情");
     await screen.findByRole("alert");
