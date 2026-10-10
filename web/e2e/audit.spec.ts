@@ -5,10 +5,12 @@ import {
   type BrowserContext,
   type Locator,
   type Page,
+  type TestInfo,
 } from "@playwright/test";
-import { createHmac, randomUUID } from "node:crypto";
+import { createHash, createHmac, randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { resolve } from "node:path";
 
 const test = base.extend<{ managerContext: BrowserContext }>({
   managerContext: async ({ browser, baseURL }, use) => {
@@ -330,6 +332,39 @@ async function postFromButton(page: Page, path: string, button: string) {
   return response.json();
 }
 
+type AuditVisual = {
+  file: string;
+  sha256: string;
+  viewport: { width: number; height: number } | null;
+};
+async function captureAuditView(
+  page: Page,
+  testInfo: TestInfo,
+  file: string,
+  visuals: AuditVisual[],
+) {
+  // Explicit read-only views only. Never retain proof-bearing captures.
+  await expect(page.locator('input[type="password"]')).toHaveCount(0);
+  await expect(
+    page.getByLabel("未使用的认证器验证码", { exact: true }),
+  ).toHaveCount(0);
+  const bytes = await page.screenshot({
+    path: testInfo.outputPath(file),
+    fullPage: true,
+  });
+  visuals.push({
+    file,
+    sha256: createHash("sha256").update(bytes).digest("hex"),
+    viewport: page.viewportSize(),
+  });
+}
+
+async function openAuditFilters(page: Page) {
+  const details = page.locator(".audit-advanced-filters");
+  if (!(await details.evaluate((node) => (node as HTMLDetailsElement).open)))
+    await details.getByText("更多筛选与分页设置", { exact: true }).click();
+}
+
 async function filteredAudit(
   page: Page,
   keyword: string,
@@ -547,6 +582,198 @@ test("real browser audit history, visibility, XLSX worker export and persisted r
       exact: true,
     });
     await expect(table).toBeVisible();
+    await test.step("SOC desktop and mobile inline audit fields use actual persisted rows", async () => {
+      const visuals: AuditVisual[] = [];
+      await page.setViewportSize({ width: 1440, height: 900 });
+      const firstToggle = table
+        .getByRole("button", { name: /^查看元数据 / })
+        .first();
+      const id = (await firstToggle.innerText()).replace("查看元数据 ", "");
+      const toggle = table.locator(`[id="audit-record-toggle-${id}"]`);
+      const fields = page.getByRole("region", {
+        name: `审计记录字段 ${id}`,
+        exact: true,
+      });
+      const region = page.getByRole("region", {
+        name: "操作审计记录表格，可横向滚动",
+        exact: true,
+      });
+      await expect(page.getByLabel("审计查询结果摘要")).toContainText("匹配");
+      await expect(page.locator('input[type="password"]')).toHaveCount(0);
+      await expect(
+        page.getByLabel("未使用的认证器验证码", { exact: true }),
+      ).toHaveCount(0);
+      await page.evaluate(() => window.scrollTo(0, 0));
+      expect((await table.boundingBox())!.y).toBeLessThan(800);
+      await captureAuditView(
+        page,
+        testInfo,
+        "audit-soc-desktop-list.png",
+        visuals,
+      );
+      await toggle.focus();
+      await page.keyboard.press("Enter");
+      await expect(toggle).toHaveAttribute("aria-expanded", "true");
+      await expect(fields).toBeVisible();
+      const persisted = (await readJSON(
+        context,
+        "/api/audit?pageSize=20",
+      )) as AuditList;
+      const row = persisted.List.find((item) => item.ID === id);
+      expect(row).toBeDefined();
+      await expect(fields.locator("pre")).toHaveText(row!.eventArgs);
+      await captureAuditView(
+        page,
+        testInfo,
+        "audit-soc-desktop-fields.png",
+        visuals,
+      );
+      await fields
+        .getByRole("button", { name: `收起记录字段 ${id}`, exact: true })
+        .click();
+      await expect(fields).toHaveCount(0);
+      await expect(toggle).toBeFocused();
+      await page.setViewportSize({ width: 390, height: 844 });
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth),
+      ).toBeLessThanOrEqual(390);
+      await region.scrollIntoViewIfNeeded();
+      await region.evaluate((node) => {
+        node.scrollLeft = node.scrollWidth;
+      });
+      expect(await region.evaluate((node) => node.scrollLeft)).toBeGreaterThan(
+        0,
+      );
+      await toggle.click();
+      await expect(fields).toBeVisible();
+      const viewport = (await region.boundingBox())!;
+      const detail = (await fields.boundingBox())!;
+      expect(detail.x).toBeGreaterThanOrEqual(viewport.x - 1);
+      expect(detail.x + detail.width).toBeLessThanOrEqual(
+        viewport.x + viewport.width + 1,
+      );
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth),
+      ).toBeLessThanOrEqual(390);
+      await fields.scrollIntoViewIfNeeded();
+      await captureAuditView(
+        page,
+        testInfo,
+        "audit-soc-mobile-fields.png",
+        visuals,
+      );
+      await fields
+        .getByRole("button", { name: `收起记录字段 ${id}`, exact: true })
+        .click();
+      await expect(fields).toHaveCount(0);
+      await expect(toggle).toBeFocused();
+      await region.evaluate((node) => {
+        node.scrollLeft = 0;
+      });
+      await page.evaluate(() => window.scrollTo(0, 0));
+      await captureAuditView(
+        page,
+        testInfo,
+        "audit-soc-mobile-list.png",
+        visuals,
+      );
+      await page.setViewportSize({ width: 1440, height: 900 });
+      // A clean CI checkout, source digests and explicit image digests bind the
+      // visual review to this run. Do not serialize credentials or HTTP headers.
+      const root = execFileSync("git", ["rev-parse", "--show-toplevel"], {
+        encoding: "utf8",
+      }).trim();
+      const hashFile = (file: string) =>
+        createHash("sha256")
+          .update(readFileSync(resolve(root, file)))
+          .digest("hex");
+      expect(visuals).toHaveLength(4);
+      const frontendAssets = readdirSync(resolve(root, "web/dist/assets"), {
+        withFileTypes: true,
+      });
+      // Reject a changed build layout rather than silently omit nested bytes.
+      expect(frontendAssets.length).toBeGreaterThan(0);
+      expect(frontendAssets.every((entry) => entry.isFile())).toBe(true);
+      const manifest = {
+        formatVersion: 1,
+        suite: "audit",
+        chain: "real browser → authenticated audit API → PostgreSQL",
+        recordedAt: new Date().toISOString(),
+        checkoutCommit: execFileSync("git", ["rev-parse", "HEAD"], {
+          encoding: "utf8",
+        }).trim(),
+        dirty:
+          execFileSync("git", ["status", "--porcelain"], {
+            encoding: "utf8",
+          }).trim() !== "",
+        workflowCommit: process.env.GITHUB_SHA ?? null,
+        workflowRun: process.env.GITHUB_RUN_ID ?? null,
+        workflowAttempt: process.env.GITHUB_RUN_ATTEMPT ?? null,
+        runtime: {
+          node: process.version,
+          browserVersion: context.browser()!.version(),
+          nativeStreamMode: process.env.ADTR_E2E_NATIVE_STREAM_MODE ?? null,
+        },
+        sourceSHA256: Object.fromEntries(
+          [
+            "web/e2e/audit.spec.ts",
+            "web/src/AuditWorkspace.tsx",
+            "web/src/audit-presentation.tsx",
+            "web/src/audit-soc.css",
+            "web/src/audit-api.ts",
+            "web/src/audit-common.tsx",
+            "web/src/audit-intent.ts",
+            "web/src/AuditExports.tsx",
+            "web/src/AuditHistory.tsx",
+            "web/src/audit-history.ts",
+            "web/src/App.tsx",
+            "web/src/SocNavigation.tsx",
+            "web/src/style.css",
+            "web/src/soc-shell.css",
+            "web/package-lock.json",
+            ".github/workflows/ci.yml",
+          ].map((file) => [file, hashFile(file)]),
+        ),
+        artifactsSHA256: {
+          apiWorker: hashFile("bin/adtr"),
+          frontendEntry: hashFile("web/dist/index.html"),
+        },
+        frontendAssetsSHA256: Object.fromEntries(
+          frontendAssets.map((entry) => {
+            const file = `web/dist/assets/${entry.name}`;
+            return [file, hashFile(file)];
+          }),
+        ),
+        selectedRecord: {
+          ID: row!.ID,
+          source: row!.source,
+          event: row!.event,
+          eventArgsSHA256: createHash("sha256")
+            .update(row!.eventArgs)
+            .digest("hex"),
+        },
+        authorizedPage: persisted.page,
+        mobileExpansion: {
+          scrollRegion: viewport,
+          recordFields: detail,
+          documentOverflow: false,
+        },
+        checks: [
+          "desktop keyboard expansion",
+          "close returns focus to stable row control",
+          "390px horizontally scrolled expansion fits scroll container",
+          "no document horizontal overflow",
+          "expanded parameters match actual persisted row",
+        ],
+        screenshots: visuals,
+      };
+      const manifestPath = testInfo.outputPath("audit-soc-evidence.json");
+      writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + "\n");
+      await testInfo.attach("audit-soc-evidence", {
+        path: manifestPath,
+        contentType: "application/json",
+      });
+    });
     expect(await readExportHistory(context, me.ID)).toEqual({
       page: { pageIdx: 1, pageSize: 20, total: 0, totalPage: 0 },
       list: [],
@@ -643,6 +870,7 @@ test("real browser audit history, visibility, XLSX worker export and persisted r
     await expect(
       page.getByLabel("审计关键词", { exact: true }),
     ).toHaveAttribute("maxlength", "50");
+    await openAuditFilters(page);
     await page
       .getByLabel("审计事件筛选", { exact: true })
       .selectOption(["login"]);
@@ -762,6 +990,7 @@ test("real browser audit history, visibility, XLSX worker export and persisted r
       mfa = managerMfa,
       headers = managerHeaders;
     await navigateTo(page, "操作审计");
+    await openAuditFilters(page);
     await page
       .getByLabel("审计事件筛选", { exact: true })
       .selectOption(["login"]);
@@ -860,6 +1089,7 @@ test("real browser audit history, visibility, XLSX worker export and persisted r
     await expect(page.getByLabel("审计可见性", { exact: true })).toHaveValue(
       "visible",
     );
+    await openAuditFilters(page);
     await page
       .getByLabel("审计事件筛选", { exact: true })
       .selectOption(["login"]);
@@ -898,6 +1128,7 @@ test("real browser audit history, visibility, XLSX worker export and persisted r
     for (const selected of [exportColumns, [exportColumns[4]]]) {
       // The preceding export leaves/reopens the workspace, resetting its record
       // filters. Keep the next real submission bound to the same known row.
+      await openAuditFilters(page);
       await page
         .getByLabel("审计事件筛选", { exact: true })
         .selectOption(["login"]);
@@ -1048,6 +1279,7 @@ test("real browser audit history, visibility, XLSX worker export and persisted r
   await test.step("worker audit retains missing login and request metadata", async () => {
     // These records come from the real export worker, whose transaction has no
     // HTTP metadata. The task actor ID must not fabricate a login username.
+    await openAuditFilters(page);
     await page
       .getByLabel("审计事件筛选", { exact: true })
       .selectOption(["finished"]);
@@ -1097,10 +1329,16 @@ test("real browser audit history, visibility, XLSX worker export and persisted r
       await missingRow
         .getByText(`查看元数据 ${row.ID}`, { exact: true })
         .click();
-      await expect(missingRow).toContainText(
+      await expect(
+        page.getByRole("region", {
+          name: `审计记录字段 ${row.ID}`,
+          exact: true,
+        }),
+      ).toContainText(
         "未记录：登录用户、登录IP、请求路径、请求标识。历史缺失信息不会用当前账户信息补写。",
       );
     }
+    await openAuditFilters(page);
     await page.getByLabel("审计事件筛选", { exact: true }).selectOption([]);
     await page.getByLabel("审计类型筛选", { exact: true }).selectOption([]);
     await filteredAudit(page, "");

@@ -1,4 +1,6 @@
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
+import { AuditRecordDetails, AuditResult } from "./audit-presentation";
+import "./audit-soc.css";
 import { ApiError, type Profile } from "./api";
 import { accessRequest, validText, type Permission } from "./access-api";
 import {
@@ -126,11 +128,18 @@ function AuditWorkspaceSession({
   const pending = auditIntent(profile);
   return (
     <div className="audit-workspace">
-      <h2>操作审计</h2>
-      <p className="muted">
-        查询当前授权范围内的真实平台操作记录。历史未采集的用户、IP
-        和请求信息会明确标为缺失。
-      </p>
+      <div className="audit-page-heading">
+        <p className="audit-eyebrow">PLATFORM AUDIT</p>
+        <h2>操作审计</h2>
+        <p>查询当前授权范围内的真实平台操作记录</p>
+      </div>
+      <details className="audit-data-help">
+        <summary>记录范围与历史信息说明</summary>
+        <p>
+          查询先由服务器核验当前租户与域权限。历史未采集的用户、IP
+          和请求信息会明确标为缺失，不使用当前账户补写。隐藏可恢复，原始记录保留。
+        </p>
+      </details>
       <ErrorNotice error={gate.error} />
       {gate.busy && <p role="status">正在确认审计权限…</p>}
       {gate.error && (
@@ -164,11 +173,13 @@ function AuditWorkspaceSession({
           )}
           {view.type === "list" &&
             context.can("GET /api/audit/exports/history") && (
-              <AuditHistorySummary
-                key={`history-${revision}`}
-                context={context}
-                open={() => open({ type: "history" })}
-              />
+              <div className="audit-history-strip">
+                <AuditHistorySummary
+                  key={`history-${revision}`}
+                  context={context}
+                  open={() => open({ type: "history" })}
+                />
+              </div>
             )}
           {view.type === "history" &&
             (context.can("GET /api/audit/exports/history") ? (
@@ -250,6 +261,7 @@ function AuditList({
   const [pageIdx, setPage] = useState(1),
     [pageSize, setSize] = useState(20),
     [selected, setSelected] = useState<string[]>([]),
+    [expanded, setExpanded] = useState<string[]>([]),
     [formError, setError] = useState("");
   const query = auditQuery(filter, pageIdx, pageSize);
   const read = useAuditRead(
@@ -271,10 +283,17 @@ function AuditList({
     ) ?? [];
   const hidden = targets.filter((row) => row.deleted),
     visible = targets.filter((row) => !row.deleted);
-  const clearSelection = () => setSelected([]);
+  const clearSelection = () => {
+    setSelected([]);
+    setExpanded([]);
+  };
   return (
-    <>
-      <div className="actions compact">
+    <section className="audit-list-panel" aria-label="审计查询工作区">
+      <div className="audit-list-heading">
+        <h3>操作记录</h3>
+        <span className="audit-scope-label">当前授权范围 · UTC</span>
+      </div>
+      <div className="actions compact audit-list-toolbar">
         {context.can("POST /api/audit/exports") &&
           context.can("POST /api/tasks/submit") &&
           context.can("GET /api/audit/columns") &&
@@ -307,30 +326,9 @@ function AuditList({
           当前仅支持导出未隐藏记录。请切换为未隐藏记录并应用筛选后导出。
         </p>
       )}
-      {context.can("GET /api/audit/exports/detail") && (
-        <form
-          className="filters"
-          onSubmit={(event) => {
-            const values = readValues(event);
-            if (!validExportID(values.taskUUID)) {
-              setError("请输入完整的导出任务 UUID。");
-              return;
-            }
-            open({ type: "detail", id: values.taskUUID });
-          }}
-        >
-          <Field
-            label="导出任务 ID"
-            help="输入已提交的任务 ID，读取持久化进度及可下载文件"
-          >
-            <input name="taskUUID" required pattern="[0-9a-f-]{36}" />
-          </Field>
-          <button className="secondary">查看导出任务</button>
-        </form>
-      )}
       <form
         key={JSON.stringify(filter)}
-        className="filters"
+        className="filters audit-filter-form"
         onSubmit={(event) => {
           event.preventDefault();
           const values = new FormData(event.currentTarget);
@@ -405,57 +403,62 @@ function AuditList({
               <option value="all">全部记录</option>
             </select>
           </Field>
-          <Field label="审计排序">
-            <select name="createSort" defaultValue={filter.createSort}>
-              <option value={-1}>时间降序</option>
-              <option value={1}>时间升序</option>
-            </select>
-          </Field>
-          <Field label="每页审计数">
-            <select name="pageSize" defaultValue={pageSize}>
-              {[10, 20, 30, 40, 50, 100].map((n) => (
-                <option key={n}>{n}</option>
-              ))}
-              <option value={-1}>全部（最多 1,000 条）</option>
-            </select>
-          </Field>
-          <Field label="审计类型筛选" help="可多选；未选择表示所有类型">
-            <select
-              key={types.data ? "ready" : "loading"}
-              name="logTypeList"
-              multiple
-              defaultValue={filter.logTypeList.map(String)}
-              disabled={!types.data}
-            >
-              {types.data?.List.map((item) => (
-                <option key={item.logType} value={item.logType}>
-                  {item.logTypeName}
-                </option>
-              ))}
-            </select>
-          </Field>
-          <Field
-            label="审计事件筛选"
-            help="可多选；候选值来自当前授权范围内的事件"
-          >
-            <select
-              key={types.data ? "ready" : "loading"}
-              name="filterEvent"
-              multiple
-              defaultValue={filter.filterEvent}
-              disabled={!types.data}
-            >
-              {[
-                ...new Set([
-                  ...(types.data?.events ?? []),
-                  ...filter.filterEvent,
-                ]),
-              ].map((event) => (
-                <option key={event}>{event}</option>
-              ))}
-            </select>
-          </Field>
         </div>
+        <details className="audit-advanced-filters">
+          <summary>更多筛选与分页设置</summary>
+          <div className="form-grid">
+            <Field label="审计排序">
+              <select name="createSort" defaultValue={filter.createSort}>
+                <option value={-1}>时间降序</option>
+                <option value={1}>时间升序</option>
+              </select>
+            </Field>
+            <Field label="每页审计数">
+              <select name="pageSize" defaultValue={pageSize}>
+                {[10, 20, 30, 40, 50, 100].map((n) => (
+                  <option key={n}>{n}</option>
+                ))}
+                <option value={-1}>全部（最多 1,000 条）</option>
+              </select>
+            </Field>
+            <Field label="审计类型筛选" help="可多选；未选择表示所有类型">
+              <select
+                key={types.data ? "ready" : "loading"}
+                name="logTypeList"
+                multiple
+                defaultValue={filter.logTypeList.map(String)}
+                disabled={!types.data}
+              >
+                {types.data?.List.map((item) => (
+                  <option key={item.logType} value={item.logType}>
+                    {item.logTypeName}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field
+              label="审计事件筛选"
+              help="可多选；候选值来自当前授权范围内的事件"
+            >
+              <select
+                key={types.data ? "ready" : "loading"}
+                name="filterEvent"
+                multiple
+                defaultValue={filter.filterEvent}
+                disabled={!types.data}
+              >
+                {[
+                  ...new Set([
+                    ...(types.data?.events ?? []),
+                    ...filter.filterEvent,
+                  ]),
+                ].map((event) => (
+                  <option key={event}>{event}</option>
+                ))}
+              </select>
+            </Field>
+          </div>
+        </details>
         <div className="actions compact">
           <button disabled={!types.data}>筛选审计</button>
           <button
@@ -475,9 +478,21 @@ function AuditList({
       </form>
       <ErrorNotice error={formError || read.error || types.error} />
       {read.busy && <p role="status">正在读取审计记录…</p>}
-      {read.data && (
+      {read.data && !read.busy && (
         <>
-          <div className="actions compact">
+          <div className="audit-query-summary" aria-label="审计查询结果摘要">
+            <strong>匹配 {read.data.page.total} 条</strong>
+            <span>
+              本页 {read.data.List.length} 条 ·{" "}
+              {filter.visibility === "visible"
+                ? "未隐藏记录"
+                : filter.visibility === "hidden"
+                  ? "已隐藏记录"
+                  : "全部记录"}
+            </span>
+            <span>{filter.createSort === -1 ? "时间降序" : "时间升序"}</span>
+          </div>
+          <div className="actions compact audit-selection-toolbar">
             {context.can("POST /api/audit/delete") && (
               <button
                 disabled={
@@ -505,7 +520,12 @@ function AuditList({
             )}
             <span>已选择 {targets.length} 条；每次最多 100 条</span>
           </div>
-          <div className="table-scroll">
+          <div
+            className="table-scroll audit-table-scroll"
+            role="region"
+            aria-label="操作审计记录表格，可横向滚动"
+            tabIndex={0}
+          >
             <table>
               <caption>操作审计记录</caption>
               <thead>
@@ -517,79 +537,105 @@ function AuditList({
                   <th>类型 / 事件</th>
                   <th>结果</th>
                   <th>审计时间（UTC）</th>
-                  <th>事件与历史元数据</th>
+                  <th>记录字段</th>
                 </tr>
               </thead>
               <tbody>
                 {read.data.List.map((row) => (
-                  <tr key={row.ID}>
-                    <td>
-                      {(context.can("POST /api/audit/delete") ||
-                        context.can("POST /api/audit/restore")) && (
-                        <input
-                          type="checkbox"
-                          aria-label={`选择 ${row.ID}`}
-                          checked={selected.includes(row.ID)}
-                          disabled={
-                            !row.deletable ||
-                            [
-                              "audit",
-                              "credential_use",
-                              "operational_log",
-                            ].includes(row.source) ||
-                            (!selected.includes(row.ID) &&
-                              selected.length >= 100)
-                          }
-                          onChange={(event) =>
-                            setSelected(
-                              event.target.checked
-                                ? [...selected, row.ID]
-                                : selected.filter((id) => id !== row.ID),
+                  <Fragment key={row.ID}>
+                    <tr>
+                      <td>
+                        {(context.can("POST /api/audit/delete") ||
+                          context.can("POST /api/audit/restore")) && (
+                          <input
+                            type="checkbox"
+                            aria-label={`选择 ${row.ID}`}
+                            checked={selected.includes(row.ID)}
+                            disabled={
+                              !row.deletable ||
+                              [
+                                "audit",
+                                "credential_use",
+                                "operational_log",
+                              ].includes(row.source) ||
+                              (!selected.includes(row.ID) &&
+                                selected.length >= 100)
+                            }
+                            onChange={(event) =>
+                              setSelected(
+                                event.target.checked
+                                  ? [...selected, row.ID]
+                                  : selected.filter((id) => id !== row.ID),
+                              )
+                            }
+                          />
+                        )}
+                      </td>
+                      <th scope="row">
+                        {row.ID}
+                        <small className="block">
+                          {row.deleted ? "已隐藏" : "可见"}
+                          {[
+                            "audit",
+                            "credential_use",
+                            "operational_log",
+                          ].includes(row.source) && " · 受保护控制记录"}
+                        </small>
+                      </th>
+                      <td>
+                        {row.loginUser ?? "未记录（历史数据缺失）"}
+                        <small className="block">
+                          用户 ID：{row.userId ?? "未记录"}
+                        </small>
+                      </td>
+                      <td>{row.sourceIp ?? "未记录（历史数据缺失）"}</td>
+                      <td>
+                        {row.logTypeName}
+                        <small className="block">{row.event}</small>
+                      </td>
+                      <td>
+                        <AuditResult row={row} />
+                      </td>
+                      <td>{row.CreateTm}</td>
+                      <td>
+                        <button
+                          id={`audit-record-toggle-${row.ID}`}
+                          className="secondary audit-record-toggle"
+                          aria-expanded={expanded.includes(row.ID)}
+                          aria-controls={`audit-record-${row.ID}`}
+                          onClick={() =>
+                            setExpanded((ids) =>
+                              ids.includes(row.ID)
+                                ? ids.filter((id) => id !== row.ID)
+                                : [...ids, row.ID],
                             )
                           }
-                        />
-                      )}
-                    </td>
-                    <th scope="row">
-                      {row.ID}
-                      <small className="block">
-                        {row.deleted ? "已隐藏" : "可见"}
-                        {[
-                          "audit",
-                          "credential_use",
-                          "operational_log",
-                        ].includes(row.source) && " · 受保护控制记录"}
-                      </small>
-                    </th>
-                    <td>
-                      {row.loginUser ?? "未记录（历史数据缺失）"}
-                      <small className="block">
-                        用户 ID：{row.userId ?? "未记录"}
-                      </small>
-                    </td>
-                    <td>{row.sourceIp ?? "未记录（历史数据缺失）"}</td>
-                    <td>
-                      {row.logTypeName}
-                      <small className="block">{row.event}</small>
-                    </td>
-                    <td>
-                      {row.availability.eventResult
-                        ? row.eventResult
-                        : "未记录（历史数据缺失）"}
-                    </td>
-                    <td>{row.CreateTm}</td>
-                    <td>
-                      <details>
-                        <summary>查看元数据 {row.ID}</summary>
-                        <p>
-                          来源：{row.source} · 域：
-                          {row.domainId ?? "未记录 / 平台操作"}
-                        </p>
-                        <pre className="task-json">{row.eventArgs}</pre>
-                        <MetadataAvailability row={row} />
-                      </details>
-                    </td>
-                  </tr>
+                        >
+                          {expanded.includes(row.ID)
+                            ? "收起元数据"
+                            : "查看元数据"}{" "}
+                          {row.ID}
+                        </button>
+                      </td>
+                    </tr>
+                    {expanded.includes(row.ID) && (
+                      <tr className="audit-expanded-row">
+                        <td colSpan={8}>
+                          <AuditRecordDetails
+                            row={row}
+                            close={() => {
+                              setExpanded((ids) =>
+                                ids.filter((id) => id !== row.ID),
+                              );
+                              document
+                                .getElementById(`audit-record-toggle-${row.ID}`)
+                                ?.focus({ preventScroll: true });
+                            }}
+                          />
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
                 ))}
               </tbody>
             </table>
@@ -608,26 +654,28 @@ function AuditList({
           />
         </>
       )}
-    </>
-  );
-}
-function MetadataAvailability({ row }: { row: AuditRow }) {
-  const labels = {
-    loginUser: "登录用户",
-    sourceIp: "登录IP",
-    path: "请求路径",
-    requestId: "请求标识",
-    eventResult: "事件结果",
-  };
-  const missing = (Object.keys(labels) as (keyof typeof labels)[])
-    .filter((key) => !row.availability[key])
-    .map((key) => labels[key]);
-  return (
-    <p>
-      {missing.length
-        ? `未记录：${missing.join("、")}。历史缺失信息不会用当前账户信息补写。`
-        : "当前记录已采集全部请求元数据。"}
-    </p>
+      {context.can("GET /api/audit/exports/detail") && (
+        <form
+          className="filters audit-export-lookup"
+          onSubmit={(event) => {
+            const values = readValues(event);
+            if (!validExportID(values.taskUUID)) {
+              setError("请输入完整的导出任务 UUID。");
+              return;
+            }
+            open({ type: "detail", id: values.taskUUID });
+          }}
+        >
+          <Field
+            label="导出任务 ID"
+            help="输入已提交的任务 ID，读取持久化进度及可下载文件"
+          >
+            <input name="taskUUID" required pattern="[0-9a-f-]{36}" />
+          </Field>
+          <button className="secondary">查看导出任务</button>
+        </form>
+      )}
+    </section>
   );
 }
 function VisibilityForm({
