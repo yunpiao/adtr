@@ -637,11 +637,15 @@ describe("audit export tasks use their dedicated creation route", () => {
       screen.queryByRole("button", { name: "确认恢复任务" }),
     ).not.toBeInTheDocument();
     expect(screen.queryByLabelText("恢复幂等键")).not.toBeInTheDocument();
-    expect(
-      sessionStorage.getItem(
-        `adtr.pending-task:${profile.ID}:${encodeURIComponent(profile.username)}`,
-      ),
-    ).toBeNull();
+    // The warning is rendered before TaskDetails' passive effect reconciles
+    // the saved intent. Wait for that cleanup itself, not only its warning.
+    await waitFor(() =>
+      expect(
+        sessionStorage.getItem(
+          `adtr.pending-task:${profile.ID}:${encodeURIComponent(profile.username)}`,
+        ),
+      ).toBeNull(),
+    );
     expect(calls("/recover")).toHaveLength(0);
     click("返回任务列表");
     await screen.findByRole("table", { name: "任务列表" });
