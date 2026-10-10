@@ -480,13 +480,21 @@ describe("raw-byte witness lifecycle and document budgets", () => {
       }
       controller.abort(new Error("private abort reason"));
       const record = await takeRecord(identity, 0);
-      expect(record).toMatchObject({
-        state: "failed",
-        signalAborted: true,
-        failure: "signal aborted",
-        text: "",
-        sha256: null,
-      });
+      expect(record.signalAborted).toBe(true);
+      if (when === "pending")
+        expect(record).toMatchObject({
+          state: "failed",
+          failure: "signal aborted",
+          text: "",
+          sha256: null,
+        });
+      else
+        expect(record).toMatchObject({
+          state: "complete",
+          completedRead: true,
+          text: "{}",
+          sha256: digest("{}"),
+        });
       expect(JSON.stringify(record)).not.toContain("private abort reason");
       if (when === "pending") await native.body!.cancel();
     },
@@ -746,7 +754,7 @@ describe("raw-byte witness lifecycle and document budgets", () => {
     });
   });
 
-  it("charges aborted hash staging until settlement and rejects concurrent hash overflow", async () => {
+  it("charges cancelled hash staging until settlement and rejects concurrent hash overflow", async () => {
     let finish!: (value: ArrayBuffer) => void;
     const digestMock = vi.fn(
       () =>
@@ -766,16 +774,17 @@ describe("raw-byte witness lifecycle and document budgets", () => {
         .mockResolvedValueOnce(response(raw)),
     );
     const controller = new AbortController();
-    await readDirectoryV2JSON(
-      await window.fetch(path, { signal: controller.signal }),
-      controller.signal,
-    );
+    const native = await window.fetch(path, { signal: controller.signal });
+    await readDirectoryV2JSON(native, controller.signal);
     expect(observer().buffers()).toMatchObject({
       chunks: 0,
       hashing: raw.length,
       text: raw.length,
     });
     controller.abort();
+    // A late abort alone retains historical JSON; actual cancellation must
+    // invalidate it while pending WebCrypto memory stays charged.
+    await native.body!.cancel();
     expect(observer().buffers()).toMatchObject({
       chunks: 0,
       hashing: raw.length,
@@ -1007,7 +1016,7 @@ describe("host directory response identity", () => {
         released: 1,
         signalAborted: true,
         cancelCalls: 0,
-        completedErrorRead: true,
+        completedRead: true,
         text: errorBody,
       });
       expect(observer().buffers()).toMatchObject({
@@ -1061,33 +1070,36 @@ describe("host directory response identity", () => {
     });
   });
 
-  it("rejects an error signal abort between EOF and native reader release in both APIs", async () => {
-    const { latest } = await harness({ status: 404, body: errorBody });
-    const controller = new AbortController();
-    const reader = (
-      await window.fetch(path, { signal: controller.signal })
-    ).body!.getReader();
-    await reader.read();
-    await reader.read();
-    expect(observer().peek(identity, 0)).toMatchObject({
-      eof: true,
-      released: 0,
-    });
-    controller.abort();
-    reader.releaseLock();
-    await expect(directoryV2ResponseJSON(latest())).rejects.toThrow(
-      "body observation failed",
-    );
-    await expect(directoryV2ResponseWitness(latest())).rejects.toThrow(
-      "body observation failed",
-    );
-    expect(observer().peek(identity, 0)).toMatchObject({
-      state: "failed",
-      signalAborted: true,
-      text: "",
-      sha256: null,
-    });
-  });
+  it.each([200, 404])(
+    "rejects HTTP %i signal abort between EOF and native reader release in both APIs",
+    async (status) => {
+      const { latest } = await harness({ status, body: errorBody });
+      const controller = new AbortController();
+      const reader = (
+        await window.fetch(path, { signal: controller.signal })
+      ).body!.getReader();
+      await reader.read();
+      await reader.read();
+      expect(observer().peek(identity, 0)).toMatchObject({
+        eof: true,
+        released: 0,
+      });
+      controller.abort();
+      reader.releaseLock();
+      await expect(directoryV2ResponseJSON(latest())).rejects.toThrow(
+        "body observation failed",
+      );
+      await expect(directoryV2ResponseWitness(latest())).rejects.toThrow(
+        "body observation failed",
+      );
+      expect(observer().peek(identity, 0)).toMatchObject({
+        state: "failed",
+        signalAborted: true,
+        text: "",
+        sha256: null,
+      });
+    },
+  );
 
   it.each(["cancel", "read rejection", "malformed", "wrong receiver"])(
     "does not preserve an ordinary error artifact for %s",
@@ -1147,43 +1159,46 @@ describe("host directory response identity", () => {
     },
   );
 
-  it("rejects a 404 abort during a pending read even after the complete JSON prefix arrived", async () => {
-    const stream = new ReadableStream(
-      {
-        start(controller) {
-          controller.enqueue(new TextEncoder().encode(errorBody));
+  it.each([200, 404])(
+    "rejects HTTP %i abort during a pending read even after the complete JSON prefix arrived",
+    async (status) => {
+      const stream = new ReadableStream(
+        {
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode(errorBody));
+          },
         },
-      },
-      { highWaterMark: 0 },
-    );
-    const { latest } = await harness({ status: 404, body: stream });
-    const controller = new AbortController();
-    const reading = readDirectoryV2JSON(
-      await window.fetch(path, { signal: controller.signal }),
-      controller.signal,
-    );
-    const rejected = expect(reading).rejects.toMatchObject({
-      name: "AbortError",
-    });
-    await vi.waitFor(
-      () => expect(observer().peek(identity, 0)?.text).toBe(errorBody),
-      { interval: 1 },
-    );
-    controller.abort();
-    await rejected;
-    await expect(directoryV2ResponseJSON(latest())).rejects.toThrow(
-      "body observation failed",
-    );
-    await expect(directoryV2ResponseWitness(latest())).rejects.toThrow(
-      "body observation failed",
-    );
-    expect(observer().peek(identity, 0)).toMatchObject({
-      state: "failed",
-      eof: false,
-      text: "",
-      sha256: null,
-    });
-  });
+        { highWaterMark: 0 },
+      );
+      const { latest } = await harness({ status, body: stream });
+      const controller = new AbortController();
+      const reading = readDirectoryV2JSON(
+        await window.fetch(path, { signal: controller.signal }),
+        controller.signal,
+      );
+      const rejected = expect(reading).rejects.toMatchObject({
+        name: "AbortError",
+      });
+      await vi.waitFor(
+        () => expect(observer().peek(identity, 0)?.text).toBe(errorBody),
+        { interval: 1 },
+      );
+      controller.abort();
+      await rejected;
+      await expect(directoryV2ResponseJSON(latest())).rejects.toThrow(
+        "body observation failed",
+      );
+      await expect(directoryV2ResponseWitness(latest())).rejects.toThrow(
+        "body observation failed",
+      );
+      expect(observer().peek(identity, 0)).toMatchObject({
+        state: "failed",
+        eof: false,
+        text: "",
+        sha256: null,
+      });
+    },
+  );
 
   it.each(["body cancel", "second reader"])(
     "invalidates a completed historical error candidate after later %s",
@@ -1229,8 +1244,8 @@ describe("host directory response identity", () => {
     },
   );
 
-  it.each([200, 302])(
-    "does not retain a post-completion abort artifact for HTTP %i",
+  it.each([200, 201, 302])(
+    "retains only historical JSON after a completed HTTP %i cleanup abort",
     async (status) => {
       const { latest } = await harness({ status, body: errorBody });
       const controller = new AbortController();
@@ -1239,9 +1254,10 @@ describe("host directory response identity", () => {
         controller.signal,
       );
       controller.abort();
-      await expect(directoryV2ResponseJSON(latest())).rejects.toThrow(
-        "body observation failed",
-      );
+      await settle(identity, 0);
+      await expect(directoryV2ResponseJSON(latest())).resolves.toEqual({
+        error: "not_found",
+      });
       await expect(directoryV2ResponseWitness(latest())).rejects.toThrow(
         "body observation failed",
       );
@@ -1271,6 +1287,72 @@ describe("host directory response identity", () => {
           : "response metadata did not match",
       );
       await expect(directoryV2ResponseWitness(latest())).rejects.toThrow();
+    },
+  );
+
+  it.each(["failed", "PRIVATE_STATE"])(
+    "reports only fixed flags for untrusted observation state %s",
+    async (state) => {
+      const { consume } = await harness();
+      const response = await consume();
+      const record = observer().peek(identity, 0)!;
+      Object.assign(record, {
+        state,
+        sha256: null,
+        failure: "PRIVATE_NATIVE_ERROR",
+        text: "PRIVATE_RAW_BODY",
+        actor: "PRIVATE_ACTOR",
+        cache: "PRIVATE_CACHE",
+      });
+      record.identity.url = "https://private.invalid/PRIVATE_QUERY";
+      let message = "";
+      try {
+        await directoryV2ResponseWitness(response);
+      } catch (error) {
+        message = (error as Error).message;
+      }
+      expect(message).toContain("Directory browser body observation failed");
+      expect(message).toContain(
+        `state=${state === "failed" ? "failed" : "missing"};eof=true;signal_aborted=false;completed_read=true`,
+      );
+      expect(message).toContain(
+        "readers_one=true;released_once=true;cancel_free=true",
+      );
+      expect(message).toContain("hash_valid=false;reason=other");
+      expect(message).not.toContain("PRIVATE_");
+      expect(message).not.toContain("private.invalid");
+      expect(message).not.toContain(origin);
+      expect(message).not.toContain("x-adtr-user-id");
+    },
+  );
+
+  it.each(["identity", "metadata", "JSON"])(
+    "censors private %s fields in final validation diagnostics",
+    async (kind) => {
+      const { consume } = await harness();
+      const response = await consume();
+      const record = observer().peek(identity, 0)!;
+      if (kind === "identity")
+        record.identity.url = "https://private.invalid/PRIVATE_QUERY";
+      else if (kind === "metadata") record.actor = "PRIVATE_ACTOR_HEADER";
+      else record.text = "{PRIVATE_RAW_BODY";
+      let message = "";
+      try {
+        await directoryV2ResponseJSON(response);
+      } catch (error) {
+        message = (error as Error).message;
+      }
+      expect(message).toContain("Directory browser");
+      expect(message).toContain(
+        kind === "identity"
+          ? "url_match=false"
+          : kind === "metadata"
+            ? "actor_match=false"
+            : "json_valid=false",
+      );
+      expect(message).not.toContain("PRIVATE_");
+      expect(message).not.toContain("private.invalid");
+      expect(message).not.toContain(origin);
     },
   );
 
@@ -1313,11 +1395,18 @@ describe("host directory response identity", () => {
     );
     expect(take).toHaveBeenCalledOnce();
     expect(take.mock.results[0]?.value).toMatchObject({
-      state: "failed",
+      state: "complete",
+      completedRead: true,
       signalAborted: true,
-      text: "",
-      sha256: null,
+      text: '{"sequence":1}',
+      sha256: expect.stringMatching(/^[0-9a-f]{64}$/u),
     });
+    await expect(directoryV2ResponseJSON(response)).resolves.toEqual({
+      sequence: 1,
+    });
+    await expect(directoryV2ResponseWitness(response)).rejects.toThrow(
+      "signal_aborted=true",
+    );
   });
 
   it.each(["JSON", "witness"])(

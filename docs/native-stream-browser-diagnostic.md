@@ -98,18 +98,59 @@ SHA-256、完整 JSON 和元数据逐项匹配；不以 JSON 重编码摘要代�
 业务 schema 校验成功仍由已知真实数据、未改动的控制流和 UI/安全断言支持。
 独立探针则直接等待生产解析器 Promise，二者的证明范围明确区分。
 
-普通 4xx/5xx JSON 断言另有窄边界：生产界面在完整解析错误响应并释放 reader 后，
-会为清空来源/详情再 abort 控制器（真实 detail404 就属于此路径）。观察器保留
-这份已完成的有界历史错误体及精确身份/元数据，同时如实记录后来 signalAborted=true；
-普通 JSON helper 可断言历史错误内容。严格 held witness 即使经过普通 JSON 缓存，
-仍拒绝这个已 abort 的状态。EOF 之前的 abort、实际 reader/body cancel、未释放
-reader、无效内容及身份不一致均不能使用该例外；所有正向 held 原始字节证明不变。
+普通历史 JSON 与严格实时 witness 的资格不同，且不由 HTTP 成功/失败状态划分。
+`directoryV2ResponseJSON` 仅在原始 reader 已取得有效 UTF-8/JSON 的真实 EOF、
+全程无实际 cancel，并且原生 `releaseLock()` 成功返回时 signal 仍未 abort，
+才锁定一次已完成读取的历史事实。随后成功回调引起组件卸载，或错误处理清空来源/详情，
+都可能再 abort 控制器；历史 JSON 可保留该有界完整响应及精确身份/元数据，
+同时如实记录后来 signalAborted=true。摘要尚在计算时也必须先具备上述 release-time 证明，
+不能只凭 done=true 保留响应。
+
+`directoryV2ResponseWitness` 每次都检查实时状态；即使普通 JSON 已读取或缓存，
+任何后来 abort 仍使严格 witness 失败。两者共用一次原子 body take，不能借用别的请求，
+也不能把历史 JSON 当成业务 API Promise 成功或原生网络完成证明。EOF 前 abort、
+实际 reader/body cancel、失败或缺失的原生释放、无效内容及身份不一致仍失败；
+所有正向 held 原始字节与严格原生完成要求不变。
 
 `verify` 同时要求全部旧 suite、两套完整 fixed-engine suite、旧引擎应用读取探针和
 固定引擎严格原生探针成功。没有删除场景、continue-on-error、跳过或增加超时。
 Dev 是官方预发布渠道，不是稳定版；新增兼容性证据不能证明所有稳定版浏览器已修复。
 默认浏览器、包锁、生产代码、缓存策略和 8 MiB 上限不变。上述最终分配还需本次精确提交
 CI 与独立审查；不能沿用较早五用例对照的成功声称新完整套件已通过。
+
+## 完整套件的 grant 清理回归与本地修正
+
+提交 `999ba5fab0655f79a5307eb1930727ac426b6f31` 的
+[CI 38030405086](https://github.com/yunpiao/adtr/actions/runs/38030405086)
+中，旧引擎与固定引擎的两个独立探针均通过，但四个完整资产 job 均失败：
+
+- 141：[普通资产](https://github.com/yunpiao/adtr/actions/runs/38030405086/job/114150012228)、
+  [只读/跨标签资产](https://github.com/yunpiao/adtr/actions/runs/38030405086/job/114150012193)
+- 157：[普通资产](https://github.com/yunpiao/adtr/actions/runs/38030405086/job/114150012060)、
+  [只读/跨标签资产](https://github.com/yunpiao/adtr/actions/runs/38030405086/job/114150012216)
+
+四者均在目录凭据 grant 设置阶段的普通响应验证中失败，尚未执行 held-response
+正向证明，不能把独立探针通过当作完整套件通过，也不能把这些失败记为 held 原生完成失败。
+同一 head 的 [directory-v2](https://github.com/yunpiao/adtr/actions/runs/38030405086/job/114150012195)
+与 [directory-v2-controls](https://github.com/yunpiao/adtr/actions/runs/38030405086/job/114150012252)
+也在成功 grant 提交后的观察器验证位置失败。旧日志没有 signal 等内部标记，
+只证明这些验证位置失败；下面的同生产路径回归独立复现清理 abort 的缺口，
+不能据此声称每个旧 CI 运行的 abort 状态已被实际记录。
+旧提交的历史 JSON 仅允许完成错误响应后的清理 abort，遗漏了成功响应后的同类生命周期。
+
+`DirectoryResponseObserverLifecycle.test.tsx` 使用实际生产
+`directoryV2CredentialUseAPI.mutate` 和 `useTaskMutation`，在成功回调中改变 React key
+触发真实 hook 卸载清理，并明确延迟摘要计算。两个调用顺序（先普通 JSON、先严格 witness）
+在旧 head999 上均稳定失败；修正后普通 JSON 返回原始完整 grant 响应，严格 witness
+在两种顺序和缓存重读中仍拒绝后来的 abort，且 body 只原子提取一次。
+这是实际生产 API/React hook 配合合成 Fetch 响应的本地回归，不是新的真实浏览器/数据库运行。
+
+当前本地修正只去除已完成历史读取的 HTTP 状态限制；完成标记仍在成功原生释放之后锁定，
+其余字节、身份、取消与实时 witness 门禁保留。验证失败新增固定枚举和布尔标记，
+区分完成状态、EOF、signal、释放次数、取消、字节/摘要合法性及身份/元数据匹配；
+不输出响应正文、头部、URL、请求参数、原始异常文本或认证证明。
+旧 head999 的失败日志与 red 回归保留。当前修正提交仍须独立审查和精确 head 的完整 CI；
+本地 red→green 与较早固定引擎五用例成功均不替代这个门禁。
 
 ## 独立的只读 fixture GET 恢复
 

@@ -47,7 +47,7 @@ export function installDirectoryV2ResponseObserver() {
     released: number;
     cancelCalls: number;
     signalAborted: boolean;
-    completedErrorRead: boolean;
+    completedRead: boolean;
     taken: boolean;
     failure?: string;
   };
@@ -110,7 +110,7 @@ export function installDirectoryV2ResponseObserver() {
         released: 0,
         cancelCalls: 0,
         signalAborted: false,
-        completedErrorRead: false,
+        completedRead: false,
         taken: false,
       };
       list.push(record);
@@ -131,11 +131,11 @@ export function installDirectoryV2ResponseObserver() {
       };
       const aborted = () => {
         record.signalAborted = true;
-        // An ordinary error response may already have been parsed and released
-        // before UI error cleanup aborts its controller. Preserve that bounded
+        // An ordinary response may already have been parsed and released
+        // before success/error UI cleanup aborts its controller. Preserve that bounded
         // historical body only; the live strict witness still rejects abort.
         if (
-          record.completedErrorRead &&
+          record.completedRead &&
           (record.state === "hashing" || record.state === "complete")
         ) {
           signal?.removeEventListener("abort", aborted);
@@ -147,7 +147,7 @@ export function installDirectoryV2ResponseObserver() {
         if (record.state === "failed") return;
         record.state = "failed";
         record.failure = failure;
-        record.completedErrorRead = false;
+        record.completedRead = false;
         record.sha256 = null;
         clearChunks();
         clearText();
@@ -298,7 +298,7 @@ export function installDirectoryV2ResponseObserver() {
                   refresh();
                   // Latch only after successful native release with the signal
                   // still live, never merely on observing done:true. WebCrypto
-                  // may still be pending when the production API rejects 4xx/5xx.
+                  // may still be pending when success/error UI cleanup unmounts.
                   if (
                     (record.state === "hashing" ||
                       record.state === "complete") &&
@@ -306,12 +306,9 @@ export function installDirectoryV2ResponseObserver() {
                     record.readers === 1 &&
                     record.released === 1 &&
                     record.cancelCalls === 0 &&
-                    record.signalAborted === false &&
-                    record.status !== undefined &&
-                    record.status >= 400 &&
-                    record.status <= 599
+                    record.signalAborted === false
                   )
-                    record.completedErrorRead = true;
+                    record.completedRead = true;
                   finalize();
                   return value;
                 } catch (error) {
@@ -607,7 +604,7 @@ export function directoryV2RequestIdentity(
 }
 
 // Both APIs share one atomic historical body take. Ordinary JSON can retain a
-// fully parsed/released 4xx/5xx body through later UI error-cleanup abort. It is
+// fully parsed/released body through later UI cleanup abort. This historical data is
 // never itself live-delivery proof; the strict witness revalidates on EVERY call.
 type ObservedBody = {
   value: any;
@@ -673,24 +670,92 @@ export async function directoryV2ResponseWitness(
   return witness;
 }
 
+// Fixed enums and booleans only. Never put response bodies, headers, URLs,
+// request parameters, native error messages or authentication proof in errors.
+function observationError(
+  prefix: string,
+  record: any,
+  comparisons: { [key: string]: boolean } = {},
+) {
+  const boolean = (value: unknown) =>
+    value === true ? "true" : value === false ? "false" : "invalid";
+  const state = ["pending", "hashing", "complete", "failed"].includes(
+    record?.state,
+  )
+    ? record.state
+    : "missing";
+  const reasons = [
+    "fetch rejected",
+    "cancelled before EOF",
+    "cancelled after EOF",
+    "body read rejected",
+    "body limit exceeded",
+    "invalid UTF-8 or JSON",
+    "observer setup failed",
+    "missing body",
+    "unsupported reader mode",
+    "document registration failed",
+    "signal aborted",
+    "hash failed",
+    "hash quota exceeded",
+    "observer byte quota exceeded",
+    "observer record limit exceeded",
+    "reader acquisition failed",
+    "multiple readers",
+    "reader released before EOF",
+    "reader released more than once",
+    "reader release failed",
+    "read after EOF",
+    "transport binding failed",
+    "foreign body receiver",
+    "foreign reader receiver",
+  ];
+  const reason =
+    record?.failure === undefined
+      ? "none"
+      : reasons.includes(record.failure)
+        ? record.failure.replaceAll(" ", "_")
+        : "other";
+  const flags = {
+    state,
+    eof: boolean(record?.eof),
+    signal_aborted: boolean(record?.signalAborted),
+    completed_read: boolean(record?.completedRead),
+    readers_one: record?.readers === 1,
+    released_once: record?.released === 1,
+    cancel_free: record?.cancelCalls === 0,
+    byte_count_valid:
+      Number.isSafeInteger(record?.byteLength) &&
+      record.byteLength >= 0 &&
+      record.byteLength <= 8 * 1024 * 1024,
+    hash_valid:
+      typeof record?.sha256 === "string" &&
+      /^[0-9a-f]{64}$/u.test(record.sha256),
+    reason,
+    ...comparisons,
+  };
+  return new Error(
+    `${prefix} (${Object.entries(flags)
+      .map(([key, value]) => `${key}=${value}`)
+      .join(";")})`,
+  );
+}
+
 function validateRecord(
   response: Response,
   record: any,
   identity: DirectoryV2RequestIdentity,
-  allowHistoricalErrorAbort: boolean,
+  allowHistoricalAbort: boolean,
 ) {
-  const historicalErrorAbort =
-    allowHistoricalErrorAbort &&
+  const historicalAbort =
+    allowHistoricalAbort &&
     record?.signalAborted === true &&
-    record.completedErrorRead === true &&
-    Number.isInteger(record.status) &&
-    record.status >= 400 &&
-    record.status <= 599;
+    record.completedRead === true;
   if (
     !record ||
     record.state !== "complete" ||
     record.eof !== true ||
-    (record.signalAborted !== false && !historicalErrorAbort) ||
+    (record.signalAborted !== false && !historicalAbort) ||
     record.cancelCalls !== 0 ||
     record.readers !== 1 ||
     record.released !== 1 ||
@@ -700,20 +765,39 @@ function validateRecord(
     typeof record.sha256 !== "string" ||
     !/^[0-9a-f]{64}$/u.test(record.sha256)
   )
-    throw new Error("Directory browser body observation failed");
+    throw observationError("Directory browser body observation failed", record);
   if (
     record.identity?.epoch !== identity.epoch ||
     record.identity?.ordinal !== identity.ordinal ||
     record.identity?.method !== identity.method ||
     record.identity?.url !== identity.url
   )
-    throw new Error("Directory browser request identity did not match");
+    throw observationError(
+      "Directory browser request identity did not match",
+      record,
+      {
+        epoch_match: record.identity?.epoch === identity.epoch,
+        ordinal_match: record.identity?.ordinal === identity.ordinal,
+        method_match: record.identity?.method === identity.method,
+        url_match: record.identity?.url === identity.url,
+      },
+    );
   if (
     record.status !== response.status() ||
     record.actor !== (response.headers()["x-adtr-user-id"] ?? null) ||
     record.cache !== (response.headers()["cache-control"] ?? null)
   )
-    throw new Error("Directory browser response metadata did not match");
+    throw observationError(
+      "Directory browser response metadata did not match",
+      record,
+      {
+        status_match: record.status === response.status(),
+        actor_match:
+          record.actor === (response.headers()["x-adtr-user-id"] ?? null),
+        cache_match:
+          record.cache === (response.headers()["cache-control"] ?? null),
+      },
+    );
 }
 async function finalRecord(response: Response, take: boolean) {
   const request = response.request();
@@ -780,7 +864,18 @@ async function readObservedBody(response: Response): Promise<ObservedBody> {
   const final = await finalRecord(response, true);
   validateRecord(response, final.record, final.identity, true);
   const record = final.record;
-  const value = JSON.parse(record.text);
-  record.text = ""; // Keep only parsed value and bounded final evidence on the host.
+  let value: unknown;
+  try {
+    value = JSON.parse(record.text);
+  } catch {
+    throw observationError(
+      "Directory browser body observation failed",
+      record,
+      { json_valid: false },
+    );
+  } finally {
+    // Keep only parsed value and bounded final evidence on the host.
+    record.text = "";
+  }
   return { value, record, identity: final.identity };
 }
