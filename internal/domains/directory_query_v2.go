@@ -77,11 +77,34 @@ func (s *Store) DirectoryV2ListTx(ctx context.Context, tx pgx.Tx, tenant string,
 	if _, err := getRow(ctx, tx, tenant, f.DomainID, false); err != nil {
 		return DirectoryV2List{}, err
 	}
-	var id, digest, domain, server string
+	id, observation, err := s.loadDirectoryV2ObservationTx(ctx, tx, tenant, f.DomainID, f.ObservationID)
+	defer observation.Discard()
+	if err != nil {
+		return DirectoryV2List{}, err
+	}
+	if id == "" {
+		return DirectoryV2List{DictionaryVersion: 2, List: []directoryassets.PublicObjectV2{}, Page: Page{Index: f.PageIdx, Size: f.PageSize}}, nil
+	}
+	return directoryV2Page(id, observation, f)
+}
+
+// loadDirectoryV2ObservationTx is the one eligible immutable-observation loader
+// for stored dictionary-2 reads. Callers first establish live tenant/domain
+// authority under the schema/tenant/actor locks. Success transfers ownership of
+// the decoded observation; callers must defer Discard immediately. Absence is
+// represented by an empty id; a supplied pin never falls back to another row.
+// Raw database bytes and decoded failure values are cleared on every exit.
+func (s *Store) loadDirectoryV2ObservationTx(ctx context.Context, tx pgx.Tx, tenant, domainID, observationID string) (id string, observation ldapconnection.DirectoryV2Observation, err error) {
+	defer func() {
+		if err != nil {
+			observation.Discard()
+		}
+	}()
+	var digest, domain, server string
 	var body []byte
 	defer func() { clear(body) }()
 	var count int
-	err := tx.QueryRow(ctx, `SELECT o.task_id,o.body,o.sha256,o.object_count,c.canonical_domain,c.dc_hostname
+	err = tx.QueryRow(ctx, `SELECT o.task_id,o.body,o.sha256,o.object_count,c.canonical_domain,c.dc_hostname
  FROM adtr.domain_directory_observations o JOIN adtr.tasks t ON t.task_id=o.task_id AND t.tenant_id=o.tenant_id AND t.domain_id=o.domain_id AND t.actor_id=o.actor_id
  JOIN adtr.domain_directory_task_uses u ON u.task_id=o.task_id AND u.tenant_id=o.tenant_id AND u.domain_id=o.domain_id
  JOIN adtr.domain_connections c ON c.tenant_id=o.tenant_id AND c.domain_id=o.domain_id
@@ -93,23 +116,22 @@ func (s *Store) DirectoryV2ListTx(ctx context.Context, tx pgx.Tx, tenant string,
  AND c.deleted_at IS NULL AND c.credential_mode='operation_account'
  AND u.connection_revision=c.connection_revision AND u.connection_credential_generation=c.credential_revision
  AND u.account_id=c.operation_account_id AND u.account_credential_revision=c.operation_account_credential_revision AND u.policy_revision=$4
- ORDER BY o.created_at DESC,o.task_id DESC LIMIT 1`, tenant, f.DomainID, f.ObservationID, s.policyRevision()).Scan(&id, &body, &digest, &count, &domain, &server)
+ ORDER BY o.created_at DESC,o.task_id DESC LIMIT 1`, tenant, domainID, observationID, s.policyRevision()).Scan(&id, &body, &digest, &count, &domain, &server)
 	if errors.Is(err, pgx.ErrNoRows) {
-		if f.ObservationID != "" {
-			return DirectoryV2List{}, problem(409, "directory_observation_unavailable")
+		if observationID != "" {
+			return "", observation, problem(409, "directory_observation_unavailable")
 		}
-		return DirectoryV2List{DictionaryVersion: 2, List: []directoryassets.PublicObjectV2{}, Page: Page{Index: f.PageIdx, Size: f.PageSize}}, nil
+		return "", observation, nil
 	}
 	if err != nil {
-		return DirectoryV2List{}, err
+		return "", observation, err
 	}
-	observation, err := decodeDirectoryObservationV2(body, digest, count)
-	defer observation.Discard()
+	observation, err = decodeDirectoryObservationV2(body, digest, count)
 	if err != nil {
-		return DirectoryV2List{}, err
+		return "", observation, err
 	}
 	if observation.Source.Domain != domain || observation.Source.ServerName != server {
-		return DirectoryV2List{}, problem(409, "directory_observation_unavailable")
+		return "", observation, problem(409, "directory_observation_unavailable")
 	}
-	return directoryV2Page(id, observation, f)
+	return id, observation, nil
 }

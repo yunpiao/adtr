@@ -14,7 +14,7 @@ class LDAPFixtureContract(unittest.TestCase):
     def started_fixture(self, **modes):
         fixture = ldap_e2e_fixture.LDAPFixture(**modes)
         env = {"ADTR_E2E_LDAP_DIRECTORY_" + suffix: "inherited"
-               for suffix in ("MODE", "EMPTY", "SLOW", "V2")}
+               for suffix in ("MODE", "EMPTY", "SLOW", "V2", "USER_ASSETS_V2")}
 
         def output(command, **options):
             self.assertEqual(options["timeout"], 5)
@@ -45,7 +45,7 @@ class LDAPFixtureContract(unittest.TestCase):
             ldap_e2e_fixture.LDAPFixture(False, True, False, False, True)
 
     def test_all_directory_flags_require_booleans_before_allocating_resources(self):
-        for name in ("directory_enabled", "directory_empty", "directory_slow", "directory_v2"):
+        for name in ("directory_enabled", "directory_empty", "directory_slow", "directory_v2", "user_assets_v2"):
             for value in (None, 0, 1, "true", [], {}):
                 with self.subTest(name=name, value=value), \
                      patch.object(ldap_e2e_fixture.tempfile, "TemporaryDirectory") as allocate:
@@ -114,6 +114,34 @@ class LDAPFixtureContract(unittest.TestCase):
             command = next(call.args[0] for call in run.call_args_list if call.args[0][:2] == ["docker", "run"])
             self.assertFalse(any(arg.startswith("-directory-") for arg in command))
             self.assertFalse(any(key.startswith("ADTR_E2E_LDAP_DIRECTORY_") for key in env))
+
+    def test_user_assets_mode_requires_v2_nonempty_fast_before_allocating(self):
+        for enabled, v2, empty, slow in product((False, True), repeat=4):
+            if enabled and v2 and not empty and not slow:
+                continue
+            with self.subTest(enabled=enabled, v2=v2, empty=empty, slow=slow), \
+                 patch.object(ldap_e2e_fixture.tempfile, "TemporaryDirectory") as allocate:
+                with self.assertRaises(ValueError):
+                    ldap_e2e_fixture.LDAPFixture(directory_enabled=enabled, directory_v2=v2,
+                                                directory_empty=empty, directory_slow=slow,
+                                                user_assets_v2=True)
+                allocate.assert_not_called()
+
+    def test_user_assets_mode_wires_only_explicit_fixture_flag(self):
+        with self.started_fixture(directory_enabled=True, directory_v2=True,
+                                  user_assets_v2=True) as (fixture, env, run):
+            command = next(call.args[0] for call in run.call_args_list if call.args[0][:2] == ["docker", "run"])
+            self.assertIn("-user-assets-v2", command)
+            self.assertEqual(env["ADTR_E2E_LDAP_DIRECTORY_USER_ASSETS_V2"], "true")
+            self.assertEqual(env["ADTR_E2E_LDAP_DIRECTORY_V2"], "true")
+            self.assertNotIn("ADTR_E2E_LDAP_DIRECTORY_EMPTY", env)
+            self.assertNotIn("ADTR_E2E_LDAP_DIRECTORY_SLOW", env)
+            self.assertNotIn("ADTR_DIRECTORY_READ_ENABLED", env)
+            self.assertNotIn("ADTR_DIRECTORY_READ_V2_ENABLED", env)
+        with self.started_fixture(directory_enabled=True, directory_v2=True) as (_, env, run):
+            command = next(call.args[0] for call in run.call_args_list if call.args[0][:2] == ["docker", "run"])
+            self.assertNotIn("-user-assets-v2", command)
+            self.assertNotIn("ADTR_E2E_LDAP_DIRECTORY_USER_ASSETS_V2", env)
 
     def test_v2_can_keep_existing_b2_control_mount_and_cleanup(self):
         with self.started_fixture(control_enabled=True, directory_enabled=True, directory_v2=True) as (fixture, env, run):

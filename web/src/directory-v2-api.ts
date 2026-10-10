@@ -501,3 +501,9 @@ export function directoryV2Error(e: unknown) {
         : "目录请求失败，请重新核对服务器状态。"
     : "目录请求失败，请重试读取。";
 }
+
+// Shared factual validators; existing directory parsers retain their contracts.
+export {
+  validObject as validDirectoryV2Object,
+  validSource as validDirectoryV2Source,
+};

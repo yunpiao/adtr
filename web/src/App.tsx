@@ -33,6 +33,7 @@ import CredentialUseWorkspace from "./CredentialUseWorkspace";
 import DirectoryWorkspace from "./DirectoryWorkspace";
 import DirectoryCredentialUseWorkspace from "./DirectoryCredentialUseWorkspace";
 import DirectoryV2Workspace from "./DirectoryV2Workspace";
+import UserAssetsV2Workspace from "./UserAssetsV2Workspace";
 import DirectoryV2CredentialUseWorkspace from "./DirectoryV2CredentialUseWorkspace";
 import {
   listenForSessionInvalidation,
@@ -57,6 +58,7 @@ type Page =
   | "directory"
   | "directory-credential-use"
   | "directory-v2"
+  | "user-assets-v2"
   | "directory-credential-use-v2";
 type Run = <T>(
   path: string,
@@ -74,6 +76,7 @@ function pageFromHash(): Page {
       "directory",
       "directory-credential-use",
       "directory-v2",
+      "user-assets-v2",
       "directory-credential-use-v2",
     ] as const
   ).find((name) => hash === `#${name}`);
@@ -362,6 +365,7 @@ export default function App() {
       page === "directory" ||
       page === "directory-credential-use" ||
       page === "directory-v2" ||
+      page === "user-assets-v2" ||
       page === "directory-credential-use-v2" ||
       page === "profile"
     )
@@ -470,6 +474,7 @@ export default function App() {
                         "directory",
                         "directory-credential-use",
                         "directory-v2",
+                        "user-assets-v2",
                         "directory-credential-use-v2",
                       ] as Page[]
                     )
@@ -508,6 +513,7 @@ export default function App() {
                               directory: "目录资产",
                               "directory-credential-use": "目录读取授权",
                               "directory-v2": "补充目录资产",
+                              "user-assets-v2": "用户资产",
                               "directory-credential-use-v2": "补充目录凭据授权",
                             }[p]
                           }
@@ -617,6 +623,15 @@ export default function App() {
                   )}
                   {active === "directory" && (
                     <DirectoryWorkspace
+                      profile={profile}
+                      sessionChanged={() => {
+                        setPage("account");
+                        refresh();
+                      }}
+                    />
+                  )}
+                  {active === "user-assets-v2" && (
+                    <UserAssetsV2Workspace
                       profile={profile}
                       sessionChanged={() => {
                         setPage("account");

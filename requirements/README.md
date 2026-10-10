@@ -15,10 +15,13 @@ Statuses are deliberately distinct:
 - `accepted`: all feature acceptance gates have been verified, with no remaining
   items; this is not the same as a PR, merge or deploy status
 
-Current product acceptance remains 0/209: 19 verified slices, 26 in-progress
-requirements and 164 with no implementation evidence recorded. Only AD-F-151/152
-change status in this reconciliation, to reflect the existing audit-only export
-history slice. Exact-head [PR #77 CI](https://github.com/yunpiao/adtr/actions/runs/37772558021)
+Current product acceptance remains 0/209: 19 verified slices, 28 in-progress
+requirements and 162 with no implementation evidence recorded. AD-F-038/039
+are now in progress for the narrow stored-v2 user search/detail slice; its
+[contract](../docs/user-assets-v2-contract.md) keeps broader fields, filters,
+relations, export and real AD acceptance open. This does not increase accepted
+requirements or borrow earlier CI as evidence for new code. AD-F-151/152
+previously changed to in_progress for the audit-only export history slice. Exact-head [PR #77 CI](https://github.com/yunpiao/adtr/actions/runs/37772558021)
 passed all 25 jobs at `4f64d90880b28b3cf7a749a9ba1da57049736dd9`.
 The catalog records narrow implemented scope and remaining gates; passing a shared
 suite does not verify every source field. Original evidence is retained in

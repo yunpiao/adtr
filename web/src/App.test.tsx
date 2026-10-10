@@ -210,6 +210,7 @@ describe("workspace history routing", () => {
     ["#directory", "目录资产"],
     ["#directory-credential-use", "目录读取授权"],
     ["#directory-v2", "补充目录资产"],
+    ["#user-assets-v2", "用户资产"],
     ["#directory-credential-use-v2", "补充目录凭据授权"],
   ])(
     "restores %s only after verifying the current session",
@@ -241,6 +242,8 @@ describe("workspace history routing", () => {
     "#directory-extra",
     "#directory-v2-extra",
     "#directory-v2/unknown",
+    "#user-assets-v2-extra",
+    "#user-assets-v2/unknown",
     "#directory-credential-use-v2/unknown",
     "#unknown/domains",
     "#profile/edit",

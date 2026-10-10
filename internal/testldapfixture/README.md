@@ -50,3 +50,23 @@ fixed eight-attribute request and preserves the original 30 base rows. Empty
 and slow modes remain available for either dictionary. The frozen supplemental
 data and full test boundary are documented in
 [`docs/directory-v2-test-fixture.md`](../../docs/directory-v2-test-fixture.md).
+
+User-asset browser evidence selects the independent opt-in combination
+`-directory-mode -directory-v2 -user-assets-v2`, or
+`LDAPFixture(directory_enabled=True, directory_v2=True, user_assets_v2=True)`.
+It rejects empty/slow mode and preserves the existing v1/v2 dictionary bytes.
+The same two LDAP pages contain 12 users, 12 groups and 6 user-inheriting computer
+decoys. User row 12 omits SAM, UAC and all four supplemental attributes; row 1
+contains present UAC zero, year 0001, and literal hostile HTML-looking, control,
+format, whitespace and supplementary-plane text. Row 11 supplies distinct SAM,
+SID, mail and DN search witnesses after the first ten users. Exact bytes are in
+`directory_v2.go:userAssetsV2Entry` and `user_assets_v2_test.go`.
+
+`scripts/test_auth_e2e.py --suite user-assets-v2` runs real producer/search/detail
+browser evidence; `--suite user-assets-v2-readers` adds genuine headed native-tab
+and current-reader revocation evidence. Both require a fresh owned Docker
+PostgreSQL, real API/worker and this TLS LDAP fixture. The fixture marker
+`ADTR_E2E_LDAP_DIRECTORY_USER_ASSETS_V2=true` only identifies data; it grants no
+application capability. Browser publication/execution is a separate check from
+the local protocol tests above. Synthetic screenshots are captured only after
+leaving credential-entry forms and retained by the pinned CI artifact action.
