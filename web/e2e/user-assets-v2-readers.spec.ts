@@ -8,7 +8,8 @@ import {
   type Request,
   type Route,
 } from "@playwright/test";
-import { createHmac } from "node:crypto";
+import { createHmac, randomUUID } from "node:crypto";
+import { installUserAssetAbortIsolation } from "./user-assets-v2-abort-isolation";
 import { isIP } from "node:net";
 import {
   directoryV2ResponseJSON,
@@ -414,8 +415,9 @@ async function searchAssets(page: Page, text: string) {
 }
 
 // Hold genuine authenticated bytes, not a fabricated success body. A narrowly
-// injected fetch transport can ignore AbortSignal; application generations and
-// actor binding must still reject late deliveries. Network outcome is recorded.
+// armed controller can ignore cancellation; the genuine body still crosses the
+// production actor check and bounded parser. UI generations reject late values.
+// Both native completion and the exact consumed browser body are required.
 async function bounded<T>(
   promise: Promise<T>,
   milliseconds: number,
@@ -449,6 +451,8 @@ async function holdAssetResponse(page: Page, path: string, actorId: number) {
   });
   let held: Request | undefined;
   let response: APIResponse | undefined;
+  let genuineBody: unknown;
+  const token = randomUUID();
   let error: unknown;
   let outcome = "pending";
   let releaseResult: Promise<string> | undefined;
@@ -478,6 +482,7 @@ async function holdAssetResponse(page: Page, path: string, actorId: number) {
       expect(response.headers()["cache-control"]).toBe("no-store");
       expect(response.headers()["x-adtr-user-id"]).toBe(String(actorId));
       const body = await response.json();
+      genuineBody = body;
       expect(body.dictionaryVersion).toBe(2);
       expect(body.observationId).toBeTruthy();
       if (path.endsWith("/detail"))
@@ -503,6 +508,12 @@ async function holdAssetResponse(page: Page, path: string, actorId: number) {
     }
   };
   await page.route(predicate, handler, { times: 1 });
+  await page.evaluate(
+    ({ path, token }) => {
+      (window as any).__adtrUserAssetAbortIsolation.arm(path, token);
+    },
+    { path, token },
+  );
   return {
     fetched: () =>
       bounded(fetched, 20_000, "No genuine user asset response captured"),
@@ -521,8 +532,33 @@ async function holdAssetResponse(page: Page, path: string, actorId: number) {
             await expect
               .poll(() => outcome, { timeout: 15_000 })
               .not.toBe("pending");
+            if (outcome === "delivered") {
+              const browserResponse = await held.response();
+              if (!browserResponse)
+                throw new Error("Held delivery has no browser response");
+              // Require the actual bounded app read, not just fulfilled headers.
+              expect(await directoryV2ResponseJSON(browserResponse)).toEqual(
+                genuineBody,
+              );
+              const witness = await page.evaluate(
+                (token) =>
+                  (window as any).__adtrUserAssetAbortIsolation.witness(token),
+                token,
+              );
+              expect(witness).toMatchObject({
+                path,
+                requestURL: held.url(),
+                aborted: false,
+              });
+              expect(witness.suppressed).toBeGreaterThan(0);
+            }
             return outcome;
           } finally {
+            await page.evaluate(
+              (token) =>
+                (window as any).__adtrUserAssetAbortIsolation.disarm(token),
+              token,
+            );
             page.off("requestfinished", ended);
             page.off("requestfailed", failed);
             await page.unroute(predicate, handler);
@@ -533,23 +569,7 @@ async function holdAssetResponse(page: Page, path: string, actorId: number) {
   };
 }
 async function ignoreAssetAbort(page: Page) {
-  await page.addInitScript(() => {
-    const original = window.fetch;
-    window.fetch = function (input, init) {
-      const url = new URL(
-        input instanceof Request ? input.url : String(input),
-        location.href,
-      );
-      if (
-        url.origin === location.origin &&
-        ["/api/user-assets/v2", "/api/user-assets/v2/detail"].includes(
-          url.pathname,
-        )
-      )
-        return original.call(this, input, { ...init, signal: undefined });
-      return original.call(this, input, init);
-    };
-  });
+  await page.addInitScript(installUserAssetAbortIsolation);
 }
 async function fallbackTab(context: BrowserContext) {
   const page = await context.newPage();
@@ -1233,6 +1253,22 @@ test("UserAssetsV2 real scoped reader revocation and native cross-tab held-respo
     const outcomes: string[] = [];
     const mutations: string[] = [];
     let monitor = false;
+    let scenarioStage = "prepare native tabs";
+    const scenarioStarted = Date.now();
+    const stages: { stage: string; elapsedMilliseconds: number }[] = [];
+    const mark = (stage: string) => {
+      scenarioStage = stage;
+      const elapsedMilliseconds = Date.now() - scenarioStarted;
+      stages.push({ stage, elapsedMilliseconds });
+      // Fixed stage labels and durations only; never identities, proof values,
+      // responses, raw errors or DOM snapshots in diagnostic output.
+      console.log(
+        `UserAssetsV2 native stage: ${stage}; elapsed=${elapsedMilliseconds}ms`,
+      );
+    };
+    let scenarioFailed = false;
+    let scenarioFailure: unknown;
+    const cleanupErrors: unknown[] = [];
     const watchers = oldTabs.map((old) => {
       const listener = (request: Request) => {
         const path = new URL(request.url()).pathname;
@@ -1248,11 +1284,20 @@ test("UserAssetsV2 real scoped reader revocation and native cross-tab held-respo
       return { old, listener };
     });
     try {
+      mark("open switching tab");
       await switching.goto("/");
       await signedIn(switching, producerUsername);
-      await openAssets(fallback.page);
-      for (const old of oldTabs) {
+      for (const [index, old] of oldTabs.entries()) {
+        mark(
+          index === 0 ? "capture primary detail" : "capture fallback detail",
+        );
         await old.bringToFront();
+        if (old === fallback.page)
+          await bounded(
+            openAssets(old),
+            30_000,
+            "Foreground fallback source did not open",
+          );
         const pending = await holdAssetResponse(
           old,
           "/api/user-assets/v2/detail",
@@ -1265,10 +1310,12 @@ test("UserAssetsV2 real scoped reader revocation and native cross-tab held-respo
         await pending.fetched();
       }
       monitor = true;
+      mark("observe native background state");
       await switching.bringToFront();
       await expect
         .poll(() => fallback.lifecycle.evaluate((value) => value.read()))
         .toMatchObject({ visibility: "hidden", focused: false });
+      mark("logout shared session");
       await logout(switching);
       await expect(
         page.getByRole("heading", { name: "登录账户", exact: true }),
@@ -1279,6 +1326,7 @@ test("UserAssetsV2 real scoped reader revocation and native cross-tab held-respo
       await expect(
         page.getByRole("region", { name: "用户详情", exact: true }),
       ).toHaveCount(0);
+      mark("login shared reader session");
       await loginMfa(switching, readerUsername, readerPassword, readerAuth);
       await signedIn(page, readerUsername);
       expect((await readJSON(context, "/api/auth/me")).ID).toBe(readerID);
@@ -1287,11 +1335,19 @@ test("UserAssetsV2 real scoped reader revocation and native cross-tab held-respo
       await expect(fallback.page.locator(".signed-in strong")).toHaveText(
         producerUsername,
       );
+      mark("revalidate fallback by native foreground");
+      // Native visibility and blur settle independently. Require both again
+      // immediately before resetting this lifecycle witness.
+      await expect
+        .poll(() => fallback.lifecycle.evaluate((value) => value.read()))
+        .toMatchObject({ visibility: "hidden", focused: false });
       await fallback.lifecycle.evaluate((value) => value.reset());
       const authenticated = fallback.page.waitForResponse(
         (response) =>
           new URL(response.url()).pathname === "/api/auth/me" &&
+          response.request().method() === "GET" &&
           response.status() === 200,
+        { timeout: 15_000 },
       );
       await fallback.page.bringToFront();
       expect(identity(await (await authenticated).json())).toEqual({
@@ -1321,9 +1377,18 @@ test("UserAssetsV2 real scoped reader revocation and native cross-tab held-respo
       }
       // Abort is ignored by the injected transport: these must actually finish
       // delivery after revalidation, not count cancellation as stale-body proof.
+      mark("release genuine held details");
       for (const pending of held) outcomes.push(await pending.release());
       expect(outcomes).toEqual(["delivered", "delivered"]);
-      for (const old of oldTabs) {
+      for (const [index, old] of oldTabs.entries()) {
+        mark(
+          index === 0
+            ? "reopen primary reader view"
+            : "reopen fallback reader view",
+        );
+        // Native tabs must be foregrounded before any click/fill. With the
+        // visibility capturer disabled, hidden tabs cannot run stable-position rAF.
+        await old.bringToFront();
         await expect(
           old.getByRole("table", { name: "用户资产列表", exact: true }),
         ).toHaveCount(0);
@@ -1331,12 +1396,19 @@ test("UserAssetsV2 real scoped reader revocation and native cross-tab held-respo
           old.getByRole("region", { name: "用户详情", exact: true }),
         ).toHaveCount(0);
         await expect(old.getByText(guid(1), { exact: false })).toHaveCount(0);
-        const reopened = await openAssets(old);
+        const reopened = await bounded(
+          openAssets(old),
+          30_000,
+          "Foreground reader source did not reopen",
+        );
         expect(reopened.actorId).toBe(String(readerID));
         expect(reopened.value).toEqual(observation);
         await readerView(old, readerUsername, accountLabel);
       }
       expect(mutations).toEqual([]);
+      mark("capture native reader evidence");
+      await page.bringToFront();
+      await readerView(page, readerUsername, accountLabel);
       await page.screenshot({
         path: testInfo.outputPath("user-assets-v2-reader-native-tab.png"),
         fullPage: true,
@@ -1344,20 +1416,43 @@ test("UserAssetsV2 real scoped reader revocation and native cross-tab held-respo
       await testInfo.attach("user-assets-v2-native-transport-outcomes", {
         body: JSON.stringify({
           outcomes,
+          stages,
           nativeLifecycle: await fallback.lifecycle.evaluate((value) =>
             value.read(),
           ),
         }),
         contentType: "application/json",
       });
+    } catch (error) {
+      scenarioFailed = true;
+      scenarioFailure = error;
     } finally {
       monitor = false;
-      for (const pending of held) await pending.release();
+      const cleanup = async (operation: () => Promise<unknown>) => {
+        try {
+          await bounded(
+            operation(),
+            25_000,
+            "User asset native cleanup exceeded its bound",
+          );
+        } catch (error) {
+          cleanupErrors.push(error);
+        }
+      };
+      for (const pending of held) await cleanup(() => pending.release());
       for (const { old, listener } of watchers) old.off("request", listener);
-      await fallback.lifecycle.evaluate((value) => value.stop());
-      await fallback.page.close();
-      await switching.close();
+      await cleanup(() => fallback.lifecycle.evaluate((value) => value.stop()));
+      await cleanup(() => fallback.lifecycle.dispose());
+      await cleanup(() => fallback.page.close());
+      await cleanup(() => switching.close());
     }
+    if (scenarioFailed && cleanupErrors.length === 0) throw scenarioFailure;
+    if (scenarioFailed || cleanupErrors.length)
+      throw new AggregateError(
+        [...(scenarioFailed ? [scenarioFailure] : []), ...cleanupErrors],
+        `User asset native failure at ${scenarioStage}; cleanup errors: ${cleanupErrors.length}`,
+        { cause: scenarioFailed ? scenarioFailure : cleanupErrors[0] },
+      );
   });
 
   await test.step("collection grant revocation preserves stored reads; domain-scope revocation clears them", async () => {
@@ -1367,6 +1462,24 @@ test("UserAssetsV2 real scoped reader revocation and native cross-tab held-respo
     await observeDirectoryV2Responses(administrator);
     const adminPage = await administrator.newPage();
     let held: Awaited<ReturnType<typeof holdAssetResponse>> | undefined;
+    let native:
+      | Awaited<
+          ReturnType<
+            typeof page.evaluateHandle<{
+              read(): {
+                visible: boolean;
+                focused: boolean;
+                focusEvents: { trusted: boolean }[];
+              };
+              reset(): void;
+              stop(): void;
+            }>
+          >
+        >
+      | undefined;
+    let failed = false;
+    let failure: unknown;
+    const cleanupErrors: unknown[] = [];
     try {
       await adminPage.goto("/");
       await loginMfa(adminPage, producerUsername, producerPassword, auth);
@@ -1406,6 +1519,29 @@ test("UserAssetsV2 real scoped reader revocation and native cross-tab held-respo
           readerID,
         ),
       ).toEqual(observation);
+      // The producer editor is a different native window. Explicitly return
+      // to this reader BEFORE capturing a response, while its session is live.
+      await page.bringToFront();
+      await readerView(page, readerUsername, accountLabel);
+      native = await page.evaluateHandle(() => {
+        const focusEvents: { trusted: boolean }[] = [];
+        const record = (event: Event) => {
+          if (event.target === window)
+            focusEvents.push({ trusted: event.isTrusted });
+        };
+        window.addEventListener("focus", record);
+        return {
+          read: () => ({
+            visible: document.visibilityState === "visible",
+            focused: document.hasFocus(),
+            focusEvents,
+          }),
+          reset: () => {
+            focusEvents.length = 0;
+          },
+          stop: () => window.removeEventListener("focus", record),
+        };
+      });
       const detail = await assetAction(
         page,
         () =>
@@ -1427,6 +1563,10 @@ test("UserAssetsV2 real scoped reader revocation and native cross-tab held-respo
         .getByRole("button", { name: "查看用户 user-01", exact: true })
         .click();
       await held.fetched();
+      await adminPage.bringToFront();
+      await expect
+        .poll(() => page.evaluate(() => document.hasFocus()))
+        .toBe(false);
       await adminPage
         .getByRole("button", { name: "资源与租户", exact: true })
         .click();
@@ -1457,21 +1597,45 @@ test("UserAssetsV2 real scoped reader revocation and native cross-tab held-respo
         `/api/user-assets/v2?${new URLSearchParams(common)}`,
       );
       expect(expired.status()).toBe(401);
-      // A real rejected list read clears the old private view before held data
-      // arrives; the late detail transport is intentionally still alive.
-      await assetAction(
-        page,
-        () =>
-          page
-            .getByRole("button", { name: "刷新用户资产观测", exact: true })
-            .click(),
-        false,
-        401,
+      expect(await expired.json()).toEqual({ error: "unauthenticated" });
+      // The list's genuine API denial above proves revoked read authority.
+      // Native focus now performs a distinct genuine /auth/me revalidation.
+      // Do not click an old unfocused view and claim that its list401 cleared it.
+      await expect
+        .poll(() => native!.evaluate((value) => value.read()))
+        .toMatchObject({ focused: false });
+      await native.evaluate((value) => value.reset());
+      const invalidated = page.waitForResponse(
+        (response) =>
+          new URL(response.url()).pathname === "/api/auth/me" &&
+          response.request().method() === "GET" &&
+          response.status() === 401,
+        { timeout: 15_000 },
       );
+      await page.bringToFront();
+      expect(await (await invalidated).json()).toEqual({
+        error: "unauthenticated",
+      });
+      await expect
+        .poll(() => native!.evaluate((value) => value.read()))
+        .toMatchObject({
+          visible: true,
+          focused: true,
+          focusEvents: expect.arrayContaining([{ trusted: true }]),
+        });
       await expect(
         page.getByRole("heading", { name: "登录账户", exact: true }),
       ).toBeVisible();
       expect(await held.release()).toBe("delivered");
+      await testInfo.attach("user-assets-v2-revocation-native-evidence", {
+        body: JSON.stringify({
+          apiListStatus: expired.status(),
+          nativeSessionStatus: 401,
+          native: await native.evaluate((value) => value.read()),
+          heldDetailOutcome: "delivered",
+        }),
+        contentType: "application/json",
+      });
       await expect(
         page.getByRole("table", { name: "用户资产列表", exact: true }),
       ).toHaveCount(0);
@@ -1504,10 +1668,35 @@ test("UserAssetsV2 real scoped reader revocation and native cross-tab held-respo
         path: testInfo.outputPath("user-assets-v2-reader-revoked.png"),
         fullPage: true,
       });
+    } catch (error) {
+      failed = true;
+      failure = error;
     } finally {
-      await held?.release();
-      await administrator.close();
+      const cleanup = async (operation: () => Promise<unknown>) => {
+        try {
+          await bounded(
+            operation(),
+            25_000,
+            "User asset revocation cleanup exceeded its bound",
+          );
+        } catch (error) {
+          cleanupErrors.push(error);
+        }
+      };
+      if (held) await cleanup(() => held!.release());
+      if (native) {
+        await cleanup(() => native!.evaluate((value) => value.stop()));
+        await cleanup(() => native!.dispose());
+      }
+      await cleanup(() => administrator.close());
     }
+    if (failed && cleanupErrors.length === 0) throw failure;
+    if (failed || cleanupErrors.length)
+      throw new AggregateError(
+        [...(failed ? [failure] : []), ...cleanupErrors],
+        `User asset revocation failure; cleanup errors: ${cleanupErrors.length}`,
+        { cause: failed ? failure : cleanupErrors[0] },
+      );
   });
   safe(consoles);
   expect(

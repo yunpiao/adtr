@@ -8,7 +8,8 @@ import {
   type Request,
   type Route,
 } from "@playwright/test";
-import { createHmac } from "node:crypto";
+import { createHmac, randomUUID } from "node:crypto";
+import { installUserAssetAbortIsolation } from "./user-assets-v2-abort-isolation";
 import { isIP } from "node:net";
 import {
   directoryV2ResponseJSON,
@@ -409,8 +410,9 @@ async function searchAssets(page: Page, text: string) {
 }
 
 // Hold genuine authenticated bytes, not a fabricated success body. A narrowly
-// injected fetch transport can ignore AbortSignal; application generations and
-// actor binding must still reject late deliveries. Network outcome is recorded.
+// armed controller can ignore cancellation; the genuine body still crosses the
+// production actor check and bounded parser. UI generations reject late values.
+// Both native completion and the exact consumed browser body are required.
 async function bounded<T>(
   promise: Promise<T>,
   milliseconds: number,
@@ -444,6 +446,8 @@ async function holdAssetResponse(page: Page, path: string, actorId: number) {
   });
   let held: Request | undefined;
   let response: APIResponse | undefined;
+  let genuineBody: unknown;
+  const token = randomUUID();
   let error: unknown;
   let outcome = "pending";
   let releaseResult: Promise<string> | undefined;
@@ -473,6 +477,7 @@ async function holdAssetResponse(page: Page, path: string, actorId: number) {
       expect(response.headers()["cache-control"]).toBe("no-store");
       expect(response.headers()["x-adtr-user-id"]).toBe(String(actorId));
       const body = await response.json();
+      genuineBody = body;
       expect(body.dictionaryVersion).toBe(2);
       expect(body.observationId).toBeTruthy();
       if (path.endsWith("/detail"))
@@ -498,6 +503,12 @@ async function holdAssetResponse(page: Page, path: string, actorId: number) {
     }
   };
   await page.route(predicate, handler, { times: 1 });
+  await page.evaluate(
+    ({ path, token }) => {
+      (window as any).__adtrUserAssetAbortIsolation.arm(path, token);
+    },
+    { path, token },
+  );
   return {
     fetched: () =>
       bounded(fetched, 20_000, "No genuine user asset response captured"),
@@ -516,8 +527,33 @@ async function holdAssetResponse(page: Page, path: string, actorId: number) {
             await expect
               .poll(() => outcome, { timeout: 15_000 })
               .not.toBe("pending");
+            if (outcome === "delivered") {
+              const browserResponse = await held.response();
+              if (!browserResponse)
+                throw new Error("Held delivery has no browser response");
+              // Require the actual bounded app read, not just fulfilled headers.
+              expect(await directoryV2ResponseJSON(browserResponse)).toEqual(
+                genuineBody,
+              );
+              const witness = await page.evaluate(
+                (token) =>
+                  (window as any).__adtrUserAssetAbortIsolation.witness(token),
+                token,
+              );
+              expect(witness).toMatchObject({
+                path,
+                requestURL: held.url(),
+                aborted: false,
+              });
+              expect(witness.suppressed).toBeGreaterThan(0);
+            }
             return outcome;
           } finally {
+            await page.evaluate(
+              (token) =>
+                (window as any).__adtrUserAssetAbortIsolation.disarm(token),
+              token,
+            );
             page.off("requestfinished", ended);
             page.off("requestfailed", failed);
             await page.unroute(predicate, handler);
@@ -528,23 +564,7 @@ async function holdAssetResponse(page: Page, path: string, actorId: number) {
   };
 }
 async function ignoreAssetAbort(page: Page) {
-  await page.addInitScript(() => {
-    const original = window.fetch;
-    window.fetch = function (input, init) {
-      const url = new URL(
-        input instanceof Request ? input.url : String(input),
-        location.href,
-      );
-      if (
-        url.origin === location.origin &&
-        ["/api/user-assets/v2", "/api/user-assets/v2/detail"].includes(
-          url.pathname,
-        )
-      )
-        return original.call(this, input, { ...init, signal: undefined });
-      return original.call(this, input, init);
-    };
-  });
+  await page.addInitScript(installUserAssetAbortIsolation);
 }
 
 process.env.PLAYWRIGHT_NO_COPY_PROMPT = "1";
