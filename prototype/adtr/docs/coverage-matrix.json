@@ -24,6 +24,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/connections；业务数据只在当前授权域范围内可见。"
       ]
     },
@@ -40,6 +41,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/connections；业务数据只在当前授权域范围内可见。"
       ]
     },
@@ -56,6 +58,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/connections；业务数据只在当前授权域范围内可见。"
       ]
     },
@@ -72,6 +75,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/connections；业务数据只在当前授权域范围内可见。"
       ]
     },
@@ -88,6 +92,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/connections；业务数据只在当前授权域范围内可见。",
         "需要外部执行的步骤只运行本地任务/状态模型，不能据此验证真实系统效果。"
       ]
@@ -105,6 +110,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/connections/sources；业务数据只在当前授权域范围内可见。"
       ]
     },
@@ -121,6 +127,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/connections/sources；业务数据只在当前授权域范围内可见。"
       ]
     },
@@ -137,6 +144,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/connections/accounts；业务数据只在当前授权域范围内可见。"
       ]
     },
@@ -153,6 +161,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/connections/accounts；业务数据只在当前授权域范围内可见。",
         "表单必填项有效才能保存；关闭或Escape取消草稿，不改原记录。"
       ]
@@ -170,6 +179,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/connections/accounts；业务数据只在当前授权域范围内可见。",
         "表单必填项有效才能保存；关闭或Escape取消草稿，不改原记录。"
       ]
@@ -187,6 +197,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/connections/accounts；业务数据只在当前授权域范围内可见。"
       ]
     },
@@ -203,6 +214,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/connections/deployment；业务数据只在当前授权域范围内可见。",
         "需要外部执行的步骤只运行本地任务/状态模型，不能据此验证真实系统效果。"
       ]
@@ -220,6 +232,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/connections/deployment；业务数据只在当前授权域范围内可见。",
         "需要外部执行的步骤只运行本地任务/状态模型，不能据此验证真实系统效果。"
       ]
@@ -237,6 +250,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/connections/deployment；业务数据只在当前授权域范围内可见。",
         "需要外部执行的步骤只运行本地任务/状态模型，不能据此验证真实系统效果。"
       ]
@@ -254,6 +268,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/connections/deployment；业务数据只在当前授权域范围内可见。",
         "需要外部执行的步骤只运行本地任务/状态模型，不能据此验证真实系统效果。"
       ]
@@ -271,6 +286,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/connections/collectors；业务数据只在当前授权域范围内可见。"
       ]
     },
@@ -287,6 +303,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/connections/deployment；业务数据只在当前授权域范围内可见。"
       ]
     },
@@ -303,6 +320,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/connections/collectors；业务数据只在当前授权域范围内可见。",
         "表单必填项有效才能保存；关闭或Escape取消草稿，不改原记录。"
       ]
@@ -320,6 +338,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/connections/collectors；业务数据只在当前授权域范围内可见。",
         "表单必填项有效才能保存；关闭或Escape取消草稿，不改原记录。"
       ]
@@ -337,6 +356,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/connections/collectors；业务数据只在当前授权域范围内可见。"
       ]
     },
@@ -353,6 +373,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/connections/collectors；业务数据只在当前授权域范围内可见。",
         "单行操作绑定该采集器；批量操作必须先勾选data-biz-select，空选择拒绝，不隐式全选。",
         "需要外部执行的步骤只运行本地任务/状态模型，不能据此验证真实系统效果。"
@@ -371,6 +392,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/connections/collectors；业务数据只在当前授权域范围内可见。"
       ]
     },
@@ -387,6 +409,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/connections/collection；业务数据只在当前授权域范围内可见。"
       ]
     },
@@ -403,6 +426,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/connections/collection；业务数据只在当前授权域范围内可见。"
       ]
     },
@@ -419,6 +443,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/connections/collection；业务数据只在当前授权域范围内可见。"
       ]
     },
@@ -435,6 +460,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/connections/collection；业务数据只在当前授权域范围内可见。"
       ]
     },
@@ -451,6 +477,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/connections/collectors；业务数据只在当前授权域范围内可见。"
       ]
     },
@@ -467,6 +494,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/connections/protection；业务数据只在当前授权域范围内可见。",
         "需要外部执行的步骤只运行本地任务/状态模型，不能据此验证真实系统效果。"
       ]
@@ -484,6 +512,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/connections/protection；业务数据只在当前授权域范围内可见。",
         "表单必填项有效才能保存；关闭或Escape取消草稿，不改原记录。"
       ]
@@ -501,6 +530,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/connections/sync；业务数据只在当前授权域范围内可见。",
         "需要外部执行的步骤只运行本地任务/状态模型，不能据此验证真实系统效果。"
       ]
@@ -518,6 +548,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/connections/remote；业务数据只在当前授权域范围内可见。",
         "需要外部执行的步骤只运行本地任务/状态模型，不能据此验证真实系统效果。"
       ]
@@ -535,6 +566,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/connections/remote；业务数据只在当前授权域范围内可见。"
       ]
     },
@@ -551,6 +583,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/connections/sync；业务数据只在当前授权域范围内可见。",
         "表单必填项有效才能保存；关闭或Escape取消草稿，不改原记录。"
       ]
@@ -990,6 +1023,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/detection；业务数据只在当前授权域范围内可见。",
         "需要外部执行的步骤只运行本地任务/状态模型，不能据此验证真实系统效果。"
       ]
@@ -1007,6 +1041,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/detection/baseline；业务数据只在当前授权域范围内可见。",
         "需要外部执行的步骤只运行本地任务/状态模型，不能据此验证真实系统效果。"
       ]
@@ -1024,6 +1059,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/detection/templates；业务数据只在当前授权域范围内可见。"
       ]
     },
@@ -1040,6 +1076,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/detection/baseline；业务数据只在当前授权域范围内可见。",
         "需要外部执行的步骤只运行本地任务/状态模型，不能据此验证真实系统效果。"
       ]
@@ -1057,6 +1094,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/detection/baseline；业务数据只在当前授权域范围内可见。"
       ]
     },
@@ -1073,6 +1111,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/detection/baseline；业务数据只在当前授权域范围内可见。"
       ]
     },
@@ -1089,6 +1128,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/detection/vulnerabilities；业务数据只在当前授权域范围内可见。",
         "需要外部执行的步骤只运行本地任务/状态模型，不能据此验证真实系统效果。"
       ]
@@ -1106,6 +1146,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/detection/vulnerabilities；业务数据只在当前授权域范围内可见。"
       ]
     },
@@ -1122,6 +1163,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/detection/passwords；业务数据只在当前授权域范围内可见。",
         "需要外部执行的步骤只运行本地任务/状态模型，不能据此验证真实系统效果。"
       ]
@@ -1139,6 +1181,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/detection/passwords；业务数据只在当前授权域范围内可见。"
       ]
     },
@@ -1155,6 +1198,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/detection/passwords；业务数据只在当前授权域范围内可见。"
       ]
     },
@@ -1171,6 +1215,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/detection/passwords；业务数据只在当前授权域范围内可见。",
         "需要外部执行的步骤只运行本地任务/状态模型，不能据此验证真实系统效果。"
       ]
@@ -1188,6 +1233,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/detection/passwords；业务数据只在当前授权域范围内可见。",
         "需要外部执行的步骤只运行本地任务/状态模型，不能据此验证真实系统效果。"
       ]
@@ -1205,6 +1251,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/detection/passwords；业务数据只在当前授权域范围内可见。",
         "需要外部执行的步骤只运行本地任务/状态模型，不能据此验证真实系统效果。"
       ]
@@ -1222,6 +1269,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/detection/templates；业务数据只在当前授权域范围内可见。"
       ]
     },
@@ -1238,6 +1286,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/detection/templates；业务数据只在当前授权域范围内可见。",
         "表单必填项有效才能保存；关闭或Escape取消草稿，不改原记录。"
       ]
@@ -1255,6 +1304,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/detection/templates；业务数据只在当前授权域范围内可见。",
         "表单必填项有效才能保存；关闭或Escape取消草稿，不改原记录。"
       ]
@@ -1272,6 +1322,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/detection/templates；业务数据只在当前授权域范围内可见。"
       ]
     },
@@ -1288,6 +1339,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/detection/templates；业务数据只在当前授权域范围内可见。"
       ]
     },
@@ -1372,6 +1424,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/detection/behavior；业务数据只在当前授权域范围内可见。",
         "表单必填项有效才能保存；关闭或Escape取消草稿，不改原记录。"
       ]
@@ -1389,6 +1442,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/detection/behavior；业务数据只在当前授权域范围内可见。"
       ]
     },
@@ -1405,6 +1459,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/detection/behavior；业务数据只在当前授权域范围内可见。"
       ]
     },
@@ -1421,6 +1476,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/detection/rules；业务数据只在当前授权域范围内可见。"
       ]
     },
@@ -1437,6 +1493,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/detection/rules；业务数据只在当前授权域范围内可见。",
         "表单必填项有效才能保存；关闭或Escape取消草稿，不改原记录。"
       ]
@@ -1454,6 +1511,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/detection/rules；业务数据只在当前授权域范围内可见。"
       ]
     },
@@ -1470,6 +1528,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/detection/rules；业务数据只在当前授权域范围内可见。",
         "选择rule2编辑条件；可用正例event_id=4624且触发次数1。保存后运行测试，通过后才可确认发布。"
       ]
@@ -1487,6 +1546,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/detection/rules；业务数据只在当前授权域范围内可见。"
       ]
     },
@@ -1503,6 +1563,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/detection/rules；业务数据只在当前授权域范围内可见。"
       ]
     },
@@ -1519,6 +1580,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/detection/rules；业务数据只在当前授权域范围内可见。",
         "表单必填项有效才能保存；关闭或Escape取消草稿，不改原记录。"
       ]
@@ -1536,6 +1598,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/detection/rules；业务数据只在当前授权域范围内可见。"
       ]
     },
@@ -1552,6 +1615,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/detection/rules；业务数据只在当前授权域范围内可见。"
       ]
     },
@@ -1584,6 +1648,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/detection/learning；业务数据只在当前授权域范围内可见。",
         "表单必填项有效才能保存；关闭或Escape取消草稿，不改原记录。"
       ]
@@ -1601,6 +1666,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/detection/rules；业务数据只在当前授权域范围内可见。",
         "表单必填项有效才能保存；关闭或Escape取消草稿，不改原记录。"
       ]
@@ -1618,6 +1684,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/detection/rules；业务数据只在当前授权域范围内可见。",
         "表单必填项有效才能保存；关闭或Escape取消草稿，不改原记录。"
       ]
@@ -1635,6 +1702,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/detection/rules；业务数据只在当前授权域范围内可见。",
         "表单必填项有效才能保存；关闭或Escape取消草稿，不改原记录。"
       ]
@@ -1652,6 +1720,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/detection/rules；业务数据只在当前授权域范围内可见。",
         "表单必填项有效才能保存；关闭或Escape取消草稿，不改原记录。"
       ]
@@ -1669,6 +1738,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/detection/rules；业务数据只在当前授权域范围内可见。",
         "选择rule2编辑条件；可用正例event_id=4624且触发次数1。保存后运行测试，通过后才可确认发布。"
       ]
@@ -1686,6 +1756,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/detection/rules；业务数据只在当前授权域范围内可见。"
       ]
     },
@@ -1702,6 +1773,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/detection/allowlists；业务数据只在当前授权域范围内可见。"
       ]
     },
@@ -1718,6 +1790,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/detection/allowlists；业务数据只在当前授权域范围内可见。",
         "表单必填项有效才能保存；关闭或Escape取消草稿，不改原记录。"
       ]
@@ -1735,6 +1808,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/detection/allowlists；业务数据只在当前授权域范围内可见。",
         "表单必填项有效才能保存；关闭或Escape取消草稿，不改原记录。"
       ]
@@ -1769,6 +1843,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/detection/allowlists；业务数据只在当前授权域范围内可见。"
       ]
     },
@@ -1785,6 +1860,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/detection/allowlists；业务数据只在当前授权域范围内可见。"
       ]
     },
@@ -1801,6 +1877,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/detection/allowlists；业务数据只在当前授权域范围内可见。",
         "表单必填项有效才能保存；关闭或Escape取消草稿，不改原记录。"
       ]
@@ -1818,6 +1895,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/detection/allowlists；业务数据只在当前授权域范围内可见。",
         "表单必填项有效才能保存；关闭或Escape取消草稿，不改原记录。"
       ]
@@ -1828,9 +1906,9 @@
       "name": "威胁事件列表与筛选",
       "route": "#/threats",
       "entrySelector": "a[href=\"#/threats\"]",
-      "actionSelector": "[data-filter=\"q\"]",
+      "actionSelector": "#soc-query",
       "representation": "read-only-fixture",
-      "behavior": "按事件类型、域、域控、攻击目标等条件检索事件。",
+      "behavior": "告警队列支持组合搜索、严重度、状态、负责人、时间窗和排序；当前结果/授权总数分开显示，条件可清除。",
       "verification": "pending-current-revision",
       "productionAccepted": false,
       "preconditions": [
@@ -1851,8 +1929,10 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
-        "进入 #/threats；业务数据只在当前授权域范围内可见。"
-      ]
+        "进入 #/threats；业务数据只在当前授权域范围内可见。",
+        "可由事件研判抽屉的“展开调查”进入持续调查工作区；关系边与证据使用相同记录 ID，资产预览关闭后保留调查上下文。"
+      ],
+      "additionalEntry": "#/threats/investigation/e2"
     },
     {
       "id": "AD-F-113",
@@ -1867,8 +1947,10 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
-        "进入 #/threats；业务数据只在当前授权域范围内可见。"
-      ]
+        "进入 #/threats；业务数据只在当前授权域范围内可见。",
+        "可由事件研判抽屉的“展开调查”进入持续调查工作区；关系边与证据使用相同记录 ID，资产预览关闭后保留调查上下文。"
+      ],
+      "additionalEntry": "#/threats/investigation/e2"
     },
     {
       "id": "AD-F-114",
@@ -1883,8 +1965,10 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
-        "进入 #/threats；业务数据只在当前授权域范围内可见。"
-      ]
+        "进入 #/threats；业务数据只在当前授权域范围内可见。",
+        "可由事件研判抽屉的“展开调查”进入持续调查工作区；关系边与证据使用相同记录 ID，资产预览关闭后保留调查上下文。"
+      ],
+      "additionalEntry": "#/threats/investigation/e2"
     },
     {
       "id": "AD-F-115",
@@ -1894,7 +1978,7 @@
       "entrySelector": "a[href=\"#/threats\"]",
       "actionSelector": "[data-action=\"event-close\"]",
       "representation": "stateful-local",
-      "behavior": "确认事件后将其本地状态设为已关闭；不删除证据或自动阻断。",
+      "behavior": "关闭前必须选择调查分类并填写依据；提交变更状态并保留本地调查活动，取消不写入。",
       "verification": "pending-current-revision",
       "productionAccepted": false,
       "preconditions": [
@@ -1958,9 +2042,9 @@
       "name": "历史攻击趋势",
       "route": "#/overview",
       "entrySelector": "a[href=\"#/overview\"]",
-      "actionSelector": ".chart",
-      "representation": "read-only-fixture",
-      "behavior": "查看相关威胁事件的历史攻击趋势。",
+      "actionSelector": "[data-testid=\"overview-trend\"]",
+      "representation": "bounded-local",
+      "behavior": "按授权域聚合7日固定历史序列，数值/折线/无障碍描述一致；不提供任意历史区间的数据查询。",
       "verification": "pending-current-revision",
       "productionAccepted": false,
       "preconditions": [
@@ -2077,7 +2161,7 @@
       "entrySelector": "a[href=\"#/threats\"]",
       "actionSelector": "[data-action=\"event-response\"]",
       "representation": "external-execution-mock",
-      "behavior": "冻结事件、资产ID、域与版本后进入响应确认；任务/历史保留精确对象和按对象类型选择的动作。",
+      "behavior": "可从原研判抽屉或调查工作区发起受控响应，冻结event/asset/GUID/域/动作；调查内返回原事件并关联任务结果。同对象同动作未决请求在入口和提交均阻止新意图。",
       "verification": "pending-current-revision",
       "productionAccepted": false,
       "preconditions": [
@@ -2085,7 +2169,8 @@
         "进入 #/threats；业务数据只在当前授权域范围内可见。",
         "先打开事件 e2：点击 [data-action=\"event-detail\"][data-id=\"e2\"]，再操作抽屉内动作。",
         "需要外部执行的步骤只运行本地任务/状态模型，不能据此验证真实系统效果。"
-      ]
+      ],
+      "additionalEntry": "#/threats/investigation/e2"
     },
     {
       "id": "AD-F-127",
@@ -2341,7 +2426,7 @@
       "entrySelector": "a[href=\"#/overview\"]",
       "actionSelector": "[data-testid=\"overview-health\"]",
       "representation": "read-only-fixture",
-      "behavior": "显示当前资产与域接入概况；无读取权不显示对象。",
+      "behavior": "工作台展示可见资产/域数量、缺失最后观测的资产数及已授权接入历史诊断/陈旧情况；不是实时采集在线证明。",
       "verification": "pending-current-revision",
       "productionAccepted": false,
       "preconditions": [
@@ -2436,8 +2521,8 @@
       "route": "#/overview",
       "entrySelector": "a[href=\"#/overview\"]",
       "actionSelector": "[data-testid=\"overview-heat\"]",
-      "representation": "read-only-fixture",
-      "behavior": "按当前范围展示七日攻击累计和高危累计及文字可读热度单元。",
+      "representation": "bounded-local",
+      "behavior": "工作台重点身份显示当前关联告警数、高危数和风险评分，按风险排序前4项；不是完整攻击热度算法或全量分布。",
       "verification": "pending-current-revision",
       "productionAccepted": false,
       "preconditions": [
@@ -2527,6 +2612,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/admin/audit；业务数据只在当前授权域范围内可见。"
       ]
     },
@@ -2543,6 +2629,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/admin/audit；业务数据只在当前授权域范围内可见。"
       ]
     },
@@ -2559,6 +2646,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/admin/audit；业务数据只在当前授权域范围内可见。"
       ]
     },
@@ -2575,6 +2663,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/admin/audit；业务数据只在当前授权域范围内可见。"
       ]
     },
@@ -2756,6 +2845,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/admin/accounts；业务数据只在当前授权域范围内可见。"
       ]
     },
@@ -2772,6 +2862,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/admin/accounts；业务数据只在当前授权域范围内可见。"
       ]
     },
@@ -2788,6 +2879,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/admin/mfa；业务数据只在当前授权域范围内可见。"
       ]
     },
@@ -2804,6 +2896,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/admin/profile；业务数据只在当前授权域范围内可见。",
         "表单必填项有效才能保存；关闭或Escape取消草稿，不改原记录。"
       ]
@@ -2821,6 +2914,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/admin/users；业务数据只在当前授权域范围内可见。"
       ]
     },
@@ -2837,6 +2931,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/admin/users；业务数据只在当前授权域范围内可见。",
         "表单必填项有效才能保存；关闭或Escape取消草稿，不改原记录。"
       ]
@@ -2854,6 +2949,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/admin/users；业务数据只在当前授权域范围内可见。"
       ]
     },
@@ -2870,6 +2966,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/admin/roles；业务数据只在当前授权域范围内可见。"
       ]
     },
@@ -2886,6 +2983,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/admin/roles；业务数据只在当前授权域范围内可见。",
         "先完成“验证操作身份”步骤（#admin-proof-check）；随后重新确认明确对象/范围。"
       ]
@@ -2903,6 +3001,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/admin/users；业务数据只在当前授权域范围内可见。",
         "先完成“验证操作身份”步骤（#admin-proof-check）；随后重新确认明确对象/范围。"
       ]
@@ -2920,6 +3019,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/admin/roles；业务数据只在当前授权域范围内可见。",
         "先完成“验证操作身份”步骤（#admin-proof-check）；随后重新确认明确对象/范围。"
       ]
@@ -2937,6 +3037,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/admin/roles；业务数据只在当前授权域范围内可见。",
         "先完成“验证操作身份”步骤（#admin-proof-check）；随后重新确认明确对象/范围。"
       ]
@@ -2954,6 +3055,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/admin/resources；业务数据只在当前授权域范围内可见。"
       ]
     },
@@ -2970,6 +3072,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/admin/resources；业务数据只在当前授权域范围内可见。"
       ]
     },
@@ -2986,6 +3089,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/admin/resources；业务数据只在当前授权域范围内可见。",
         "先完成“验证操作身份”步骤（#admin-proof-check）；随后重新确认明确对象/范围。"
       ]
@@ -3003,6 +3107,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/admin/resources；业务数据只在当前授权域范围内可见。",
         "先完成“验证操作身份”步骤（#admin-proof-check）；随后重新确认明确对象/范围。"
       ]
@@ -3020,6 +3125,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/admin/resources；业务数据只在当前授权域范围内可见。",
         "先完成“验证操作身份”步骤（#admin-proof-check）；随后重新确认明确对象/范围。"
       ]
@@ -3037,6 +3143,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/admin/integrations；业务数据只在当前授权域范围内可见。"
       ]
     },
@@ -3053,6 +3160,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/admin/license；业务数据只在当前授权域范围内可见。"
       ]
     },
@@ -3069,6 +3177,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/admin/license；业务数据只在当前授权域范围内可见。",
         "先完成“验证操作身份”步骤（#admin-proof-check）；随后重新确认明确对象/范围。"
       ]
@@ -3086,6 +3195,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/admin/license；业务数据只在当前授权域范围内可见。"
       ]
     },
@@ -3102,6 +3212,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/admin/license；业务数据只在当前授权域范围内可见。"
       ]
     },
@@ -3234,6 +3345,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/admin/system；业务数据只在当前授权域范围内可见。"
       ]
     },
@@ -3250,6 +3362,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/admin/settings；业务数据只在当前授权域范围内可见。",
         "表单必填项有效才能保存；关闭或Escape取消草稿，不改原记录。"
       ]
@@ -3267,6 +3380,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/admin/settings；业务数据只在当前授权域范围内可见。",
         "表单必填项有效才能保存；关闭或Escape取消草稿，不改原记录。"
       ]
@@ -3284,6 +3398,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/admin/system；业务数据只在当前授权域范围内可见。",
         "先完成“验证操作身份”步骤（#admin-proof-check）；随后重新确认明确对象/范围。"
       ]
@@ -3301,6 +3416,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/admin/system；业务数据只在当前授权域范围内可见。"
       ]
     },
@@ -3317,6 +3433,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/admin/system；业务数据只在当前授权域范围内可见。"
       ]
     },
@@ -3333,6 +3450,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/admin/services；业务数据只在当前授权域范围内可见。",
         "先完成“验证操作身份”步骤（#admin-proof-check）；随后重新确认明确对象/范围。",
         "需要外部执行的步骤只运行本地任务/状态模型，不能据此验证真实系统效果。"
@@ -3351,6 +3469,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/admin/services；业务数据只在当前授权域范围内可见。",
         "先完成“验证操作身份”步骤（#admin-proof-check）；随后重新确认明确对象/范围。",
         "需要外部执行的步骤只运行本地任务/状态模型，不能据此验证真实系统效果。"
@@ -3369,6 +3488,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/admin/diagnostics；业务数据只在当前授权域范围内可见。",
         "需要外部执行的步骤只运行本地任务/状态模型，不能据此验证真实系统效果。"
       ]
@@ -3386,6 +3506,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/admin/diagnostics；业务数据只在当前授权域范围内可见。",
         "先对日志类型执行diagnostic_run，按时间/级别形成产物；artifactReady之后才有可下载内容。"
       ]
@@ -3403,6 +3524,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/admin/system；业务数据只在当前授权域范围内可见。"
       ]
     },
@@ -3419,6 +3541,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/admin/services；业务数据只在当前授权域范围内可见。"
       ]
     },
@@ -3435,6 +3558,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/admin/settings；业务数据只在当前授权域范围内可见。",
         "表单必填项有效才能保存；关闭或Escape取消草稿，不改原记录。"
       ]
@@ -3452,6 +3576,7 @@
       "productionAccepted": false,
       "preconditions": [
         "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
         "进入 #/admin/install；业务数据只在当前授权域范围内可见。",
         "对installation-new执行installation_precheck的四步流程，检查通过后另点installation_start并核对#biz-confirm-check。40GB失败样本不能开始。",
         "需要外部执行的步骤只运行本地任务/状态模型，不能据此验证真实系统效果。"
