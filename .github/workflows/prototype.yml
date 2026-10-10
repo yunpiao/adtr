@@ -1,0 +1,47 @@
+name: prototype-review
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'prototype/adtr/**'
+      - '.github/workflows/prototype.yml'
+permissions: {}
+concurrency:
+  group: prototype-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  browser:
+    name: prototype-browser
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24.19.0'
+      - name: Install repository-pinned browser tooling only
+        run: npm ci --prefix web --cache "$RUNNER_TEMP/adtr-prototype-npm"
+      - name: Install pinned Chromium
+        working-directory: web
+        run: npx playwright install --with-deps chromium
+      - name: Check prototype JavaScript
+        run: |
+          node --check prototype/adtr/app.js
+          node --check prototype/adtr/coverage.js
+          node prototype/adtr/test-static.cjs
+      - name: Verify isolated prototype interactions
+        env:
+          GITHUB_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: node prototype/adtr/test-browser.cjs
+      - name: Preserve synthetic screenshots and test evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: adtr-prototype-review-${{ github.event.pull_request.head.sha }}
+          path: prototype/adtr/test-results/
+          if-no-files-found: warn
+          retention-days: 14

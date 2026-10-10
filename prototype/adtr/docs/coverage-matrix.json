@@ -1,0 +1,3586 @@
+{
+  "schemaVersion": 1,
+  "requirements": 209,
+  "featureGroups": 57,
+  "productionAccepted": 0,
+  "purpose": "工程追溯，不在产品界面显示；页面/合成行为不等于真实外部执行或产品验收",
+  "levels": {
+    "read-only-fixture": "可浏览的领域数据、详情、图形或查询结果样本",
+    "stateful-local": "本地有状态增删改、确认或任务交互",
+    "external-execution-mock": "外部效果以本地任务/步骤模拟，绝无真实执行",
+    "bounded-local": "有限范围本地交互，差异明确列于behavior"
+  },
+  "features": [
+    {
+      "id": "AD-F-001",
+      "group": "F01",
+      "name": "域连接列表与详情",
+      "route": "#/connections",
+      "entrySelector": "a[href=\"#/connections\"]",
+      "actionSelector": ".domain-card",
+      "representation": "read-only-fixture",
+      "behavior": "域卡片展示传输、账户引用、用途、观测和版本",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/connections；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-002",
+      "group": "F01",
+      "name": "新增域连接",
+      "route": "#/connections",
+      "entrySelector": "a[href=\"#/connections\"]",
+      "actionSelector": "[data-action=\"add-domain\"]",
+      "representation": "stateful-local",
+      "behavior": "保存example.test域配置元数据；不会自动赋予域访问权或登记凭据。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/connections；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-003",
+      "group": "F01",
+      "name": "编辑域连接",
+      "route": "#/connections",
+      "entrySelector": "a[href=\"#/connections\"]",
+      "actionSelector": "[data-action=\"edit-domain\"]",
+      "representation": "stateful-local",
+      "behavior": "修改所选域的传输/账户引用并增加本地配置版本；不能关闭证书验证。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/connections；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-004",
+      "group": "F01",
+      "name": "删除域连接",
+      "route": "#/connections",
+      "entrySelector": "a[href=\"#/connections\"]",
+      "actionSelector": "[data-action=\"delete-domain\"]",
+      "representation": "stateful-local",
+      "behavior": "确认后归档连接配置，可在连接页恢复；目录观测与审计不删除。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/connections；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-005",
+      "group": "F01",
+      "name": "域连接测试",
+      "route": "#/connections",
+      "entrySelector": "a[href=\"#/connections\"]",
+      "actionSelector": "[data-action=\"diagnose\"]",
+      "representation": "external-execution-mock",
+      "behavior": "对所选域创建单次诊断任务，展示取消/失败/待核对状态；没有真实网络探测。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/connections；业务数据只在当前授权域范围内可见。",
+        "需要外部执行的步骤只运行本地任务/状态模型，不能据此验证真实系统效果。"
+      ]
+    },
+    {
+      "id": "AD-F-006",
+      "group": "F02",
+      "name": "域与数据源选择",
+      "route": "#/connections/sources",
+      "entrySelector": "a[href=\"#/connections/sources\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"connections/sources\"][data-verb=\"select\"]",
+      "representation": "stateful-local",
+      "behavior": "更改当前域的首选数据源标记；不重写已有任务输入或发起连接。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/connections/sources；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-007",
+      "group": "F02",
+      "name": "域控查看与选择",
+      "route": "#/connections/sources",
+      "entrySelector": "a[href=\"#/connections/sources\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"connections/sources\"][data-verb=\"select\"]",
+      "representation": "stateful-local",
+      "behavior": "更改当前域的首选数据源标记；不重写已有任务输入或发起连接。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/connections/sources；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-008",
+      "group": "F03",
+      "name": "管理操作账户列表",
+      "route": "#/connections/accounts",
+      "entrySelector": "a[href=\"#/connections/accounts\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"connections/accounts\"][data-verb=\"inspect\"]",
+      "representation": "read-only-fixture",
+      "behavior": "浏览所选对象的领域字段、状态和关联信息；记录来自当前授权范围内的合成样本。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/connections/accounts；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-009",
+      "group": "F03",
+      "name": "新增管理操作账户",
+      "route": "#/connections/accounts",
+      "entrySelector": "a[href=\"#/connections/accounts\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"connections/accounts\"][data-verb=\"create\"]",
+      "representation": "stateful-local",
+      "behavior": "通过领域表单新增浏览器内存记录；必填检查通过后列表可找回，取消不保存。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/connections/accounts；业务数据只在当前授权域范围内可见。",
+        "表单必填项有效才能保存；关闭或Escape取消草稿，不改原记录。"
+      ]
+    },
+    {
+      "id": "AD-F-010",
+      "group": "F03",
+      "name": "编辑管理操作账户",
+      "route": "#/connections/accounts",
+      "entrySelector": "a[href=\"#/connections/accounts\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"connections/accounts\"][data-verb=\"edit\"]",
+      "representation": "stateful-local",
+      "behavior": "编辑所选记录的领域配置并保存本地版本；不修改真实系统。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/connections/accounts；业务数据只在当前授权域范围内可见。",
+        "表单必填项有效才能保存；关闭或Escape取消草稿，不改原记录。"
+      ]
+    },
+    {
+      "id": "AD-F-011",
+      "group": "F03",
+      "name": "删除管理操作账户",
+      "route": "#/connections/accounts",
+      "entrySelector": "a[href=\"#/connections/accounts\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"connections/accounts\"][data-verb=\"delete\"]",
+      "representation": "stateful-local",
+      "behavior": "确认目标后可恢复归档所选记录；不永久删除数据或清除审计。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/connections/accounts；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-012",
+      "group": "F04",
+      "name": "一键初始化域接入",
+      "route": "#/connections/deployment",
+      "entrySelector": "a[href=\"#/connections/deployment\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"connections/deployment\"][data-verb=\"initialize\"]",
+      "representation": "external-execution-mock",
+      "behavior": "对已确认部署方案创建本地初始化任务；不连接域控或应用任何系统策略。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/connections/deployment；业务数据只在当前授权域范围内可见。",
+        "需要外部执行的步骤只运行本地任务/状态模型，不能据此验证真实系统效果。"
+      ]
+    },
+    {
+      "id": "AD-F-013",
+      "group": "F04",
+      "name": "域审计与组策略部署",
+      "route": "#/connections/deployment",
+      "entrySelector": "a[href=\"#/connections/deployment\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"connections/deployment\"][data-verb=\"deploy-policy\"]",
+      "representation": "external-execution-mock",
+      "behavior": "对所选方案模拟审计策略部署并记录任务结果；不应用真实GPO。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/connections/deployment；业务数据只在当前授权域范围内可见。",
+        "需要外部执行的步骤只运行本地任务/状态模型，不能据此验证真实系统效果。"
+      ]
+    },
+    {
+      "id": "AD-F-014",
+      "group": "F04",
+      "name": "对象审计配置部署",
+      "route": "#/connections/deployment",
+      "entrySelector": "a[href=\"#/connections/deployment\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"connections/deployment\"][data-verb=\"deploy-object\"]",
+      "representation": "external-execution-mock",
+      "behavior": "对所选方案模拟对象审计部署并记录任务结果；不写入真实目录对象。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/connections/deployment；业务数据只在当前授权域范围内可见。",
+        "需要外部执行的步骤只运行本地任务/状态模型，不能据此验证真实系统效果。"
+      ]
+    },
+    {
+      "id": "AD-F-015",
+      "group": "F05",
+      "name": "域控采集器自动安装",
+      "route": "#/connections/deployment",
+      "entrySelector": "a[href=\"#/connections/deployment\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"connections/deployment\"][data-verb=\"install\"]",
+      "representation": "external-execution-mock",
+      "behavior": "使用目标、范围确认和步骤器模拟采集器安装结果；不生成或执行真实安装器。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/connections/deployment；业务数据只在当前授权域范围内可见。",
+        "需要外部执行的步骤只运行本地任务/状态模型，不能据此验证真实系统效果。"
+      ]
+    },
+    {
+      "id": "AD-F-016",
+      "group": "F06",
+      "name": "采集器列表与详情",
+      "route": "#/connections/collectors",
+      "entrySelector": "a[href=\"#/connections/collectors\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"connections/collectors\"][data-verb=\"inspect\"]",
+      "representation": "read-only-fixture",
+      "behavior": "浏览所选对象的领域字段、状态和关联信息；记录来自当前授权范围内的合成样本。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/connections/collectors；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-017",
+      "group": "F05",
+      "name": "下载采集器安装包",
+      "route": "#/connections/deployment",
+      "entrySelector": "a[href=\"#/connections/deployment\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"connections/deployment\"][data-verb=\"download\"]",
+      "representation": "bounded-local",
+      "behavior": "下载合成安装清单，不是真实采集器安装包；不可用于Windows安装。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/connections/deployment；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-018",
+      "group": "F06",
+      "name": "采集器注册",
+      "route": "#/connections/collectors",
+      "entrySelector": "a[href=\"#/connections/collectors\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"connections/collectors\"][data-verb=\"create\"]",
+      "representation": "stateful-local",
+      "behavior": "通过领域表单新增浏览器内存记录；必填检查通过后列表可找回，取消不保存。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/connections/collectors；业务数据只在当前授权域范围内可见。",
+        "表单必填项有效才能保存；关闭或Escape取消草稿，不改原记录。"
+      ]
+    },
+    {
+      "id": "AD-F-019",
+      "group": "F06",
+      "name": "编辑采集器配置",
+      "route": "#/connections/collectors",
+      "entrySelector": "a[href=\"#/connections/collectors\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"connections/collectors\"][data-verb=\"edit\"]",
+      "representation": "stateful-local",
+      "behavior": "编辑所选记录的领域配置并保存本地版本；不修改真实系统。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/connections/collectors；业务数据只在当前授权域范围内可见。",
+        "表单必填项有效才能保存；关闭或Escape取消草稿，不改原记录。"
+      ]
+    },
+    {
+      "id": "AD-F-020",
+      "group": "F06",
+      "name": "删除采集器",
+      "route": "#/connections/collectors",
+      "entrySelector": "a[href=\"#/connections/collectors\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"connections/collectors\"][data-verb=\"delete\"]",
+      "representation": "stateful-local",
+      "behavior": "确认目标后可恢复归档所选记录；不永久删除数据或清除审计。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/connections/collectors；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-021",
+      "group": "F06",
+      "name": "采集器单个与批量升级",
+      "route": "#/connections/collectors",
+      "entrySelector": "a[href=\"#/connections/collectors\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"connections/collectors\"][data-verb=\"upgrade\"]",
+      "representation": "external-execution-mock",
+      "behavior": "按明确选中的采集器分别创建任务；离线样本失败，成功样本更新版本；不安装任何程序。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/connections/collectors；业务数据只在当前授权域范围内可见。",
+        "单行操作绑定该采集器；批量操作必须先勾选data-biz-select，空选择拒绝，不隐式全选。",
+        "需要外部执行的步骤只运行本地任务/状态模型，不能据此验证真实系统效果。"
+      ]
+    },
+    {
+      "id": "AD-F-022",
+      "group": "F06",
+      "name": "忽略与恢复运行异常提醒",
+      "route": "#/connections/collectors",
+      "entrySelector": "a[href=\"#/connections/collectors\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"connections/collectors\"][data-verb=\"alert\"]",
+      "representation": "stateful-local",
+      "behavior": "切换所选对象的提醒配置，原健康观测保持不变；不发送通知。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/connections/collectors；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-023",
+      "group": "F07",
+      "name": "域控安全日志采集",
+      "route": "#/connections/collection",
+      "entrySelector": "a[href=\"#/connections/collection\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"connections/collection\"][data-verb=\"inspect\"]",
+      "representation": "read-only-fixture",
+      "behavior": "日志和网络流量以独立记录展示协议、速率、延迟、开关和观测时间；不采集真实事件或数据包。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/connections/collection；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-024",
+      "group": "F08",
+      "name": "AD 网络流量采集",
+      "route": "#/connections/collection",
+      "entrySelector": "a[href=\"#/connections/collection\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"connections/collection\"][data-verb=\"inspect\"]",
+      "representation": "read-only-fixture",
+      "behavior": "日志和网络流量以独立记录展示协议、速率、延迟、开关和观测时间；不采集真实事件或数据包。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/connections/collection；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-025",
+      "group": "F07",
+      "name": "日志与流量采集开关",
+      "route": "#/connections/collection",
+      "entrySelector": "a[href=\"#/connections/collection\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"connections/collection\"][data-verb=\"toggle\"]",
+      "representation": "stateful-local",
+      "behavior": "更改所选配置的启停状态并保留本地记录；不控制远端进程。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/connections/collection；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-026",
+      "group": "F07",
+      "name": "采集运行详情查看",
+      "route": "#/connections/collection",
+      "entrySelector": "a[href=\"#/connections/collection\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"connections/collection\"][data-verb=\"inspect\"]",
+      "representation": "read-only-fixture",
+      "behavior": "浏览所选对象的领域字段、状态和关联信息；记录来自当前授权范围内的合成样本。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/connections/collection；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-027",
+      "group": "F06",
+      "name": "采集器心跳与资源状态",
+      "route": "#/connections/collectors",
+      "entrySelector": "a[href=\"#/connections/collectors\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"connections/collectors\"][data-verb=\"inspect\"]",
+      "representation": "read-only-fixture",
+      "behavior": "浏览所选对象的领域字段、状态和关联信息；记录来自当前授权范围内的合成样本。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/connections/collectors；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-028",
+      "group": "F09",
+      "name": "采集进程管理与异常恢复",
+      "route": "#/connections/protection",
+      "entrySelector": "a[href=\"#/connections/protection\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"connections/protection\"][data-verb=\"restore\"]",
+      "representation": "external-execution-mock",
+      "behavior": "确认后恢复归档记录或创建对象恢复任务；响应恢复保留原执行与恢复结果，不执行真实解封。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/connections/protection；业务数据只在当前授权域范围内可见。",
+        "需要外部执行的步骤只运行本地任务/状态模型，不能据此验证真实系统效果。"
+      ]
+    },
+    {
+      "id": "AD-F-029",
+      "group": "F09",
+      "name": "资源超限采集保护",
+      "route": "#/connections/protection",
+      "entrySelector": "a[href=\"#/connections/protection\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"connections/protection\"][data-verb=\"edit\"]",
+      "representation": "stateful-local",
+      "behavior": "编辑所选记录的领域配置并保存本地版本；不修改真实系统。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/connections/protection；业务数据只在当前授权域范围内可见。",
+        "表单必填项有效才能保存；关闭或Escape取消草稿，不改原记录。"
+      ]
+    },
+    {
+      "id": "AD-F-030",
+      "group": "F11",
+      "name": "域控变化与采集配置同步",
+      "route": "#/connections/sync",
+      "entrySelector": "a[href=\"#/connections/sync\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"connections/sync\"][data-verb=\"sync\"]",
+      "representation": "external-execution-mock",
+      "behavior": "创建绑定具体记录的本地任务，成功后更新批次/游标/结果，失败和取消保留各自状态；无真实同步。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/connections/sync；业务数据只在当前授权域范围内可见。",
+        "需要外部执行的步骤只运行本地任务/状态模型，不能据此验证真实系统效果。"
+      ]
+    },
+    {
+      "id": "AD-F-031",
+      "group": "F10",
+      "name": "远程操作执行与结果查看",
+      "route": "#/connections/remote",
+      "entrySelector": "a[href=\"#/connections/remote\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"connections/remote\"][data-verb=\"execute\"]",
+      "representation": "external-execution-mock",
+      "behavior": "确认所列受控操作后创建绑定目标的任务；不接受任意命令、不远程执行。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/connections/remote；业务数据只在当前授权域范围内可见。",
+        "需要外部执行的步骤只运行本地任务/状态模型，不能据此验证真实系统效果。"
+      ]
+    },
+    {
+      "id": "AD-F-032",
+      "group": "F10",
+      "name": "远程管理通道控制",
+      "route": "#/connections/remote",
+      "entrySelector": "a[href=\"#/connections/remote\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"connections/remote\"][data-verb=\"toggle\"]",
+      "representation": "stateful-local",
+      "behavior": "更改所选配置的启停状态并保留本地记录；不控制远端进程。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/connections/remote；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-033",
+      "group": "F11",
+      "name": "代理网络连接支持",
+      "route": "#/connections/sync",
+      "entrySelector": "a[href=\"#/connections/sync\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"connections/sync\"][data-verb=\"edit\"]",
+      "representation": "stateful-local",
+      "behavior": "编辑所选记录的领域配置并保存本地版本；不修改真实系统。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/connections/sync；业务数据只在当前授权域范围内可见。",
+        "表单必填项有效才能保存；关闭或Escape取消草稿，不改原记录。"
+      ]
+    },
+    {
+      "id": "AD-F-034",
+      "group": "F12",
+      "name": "AD 资产全量同步",
+      "route": "#/assets/sync",
+      "entrySelector": "a[href=\"#/assets/sync\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"assets/sync\"][data-verb=\"sync\"]",
+      "representation": "external-execution-mock",
+      "behavior": "创建绑定具体记录的本地任务，成功后更新批次/游标/结果，失败和取消保留各自状态；无真实同步。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "进入 #/assets/sync；业务数据只在当前授权域范围内可见。",
+        "需要外部执行的步骤只运行本地任务/状态模型，不能据此验证真实系统效果。"
+      ]
+    },
+    {
+      "id": "AD-F-035",
+      "group": "F12",
+      "name": "AD 资产增量同步",
+      "route": "#/assets/sync",
+      "entrySelector": "a[href=\"#/assets/sync\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"assets/sync\"][data-verb=\"sync\"]",
+      "representation": "external-execution-mock",
+      "behavior": "创建绑定具体记录的本地任务，成功后更新批次/游标/结果，失败和取消保留各自状态；无真实同步。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "进入 #/assets/sync；业务数据只在当前授权域范围内可见。",
+        "需要外部执行的步骤只运行本地任务/状态模型，不能据此验证真实系统效果。"
+      ]
+    },
+    {
+      "id": "AD-F-036",
+      "group": "F13",
+      "name": "目录权限全量同步",
+      "route": "#/assets/permissions",
+      "entrySelector": "a[href=\"#/assets/permissions\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"assets/permissions\"][data-verb=\"sync\"]",
+      "representation": "external-execution-mock",
+      "behavior": "创建绑定具体记录的本地任务，成功后更新批次/游标/结果，失败和取消保留各自状态；无真实同步。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "进入 #/assets/permissions；业务数据只在当前授权域范围内可见。",
+        "需要外部执行的步骤只运行本地任务/状态模型，不能据此验证真实系统效果。"
+      ]
+    },
+    {
+      "id": "AD-F-037",
+      "group": "F13",
+      "name": "目录权限变更同步",
+      "route": "#/assets/permissions",
+      "entrySelector": "a[href=\"#/assets/permissions\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"assets/permissions\"][data-verb=\"sync\"]",
+      "representation": "external-execution-mock",
+      "behavior": "创建绑定具体记录的本地任务，成功后更新批次/游标/结果，失败和取消保留各自状态；无真实同步。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "进入 #/assets/permissions；业务数据只在当前授权域范围内可见。",
+        "需要外部执行的步骤只运行本地任务/状态模型，不能据此验证真实系统效果。"
+      ]
+    },
+    {
+      "id": "AD-F-038",
+      "group": "F14",
+      "name": "用户资产列表与筛选",
+      "route": "#/assets",
+      "entrySelector": "a[href=\"#/assets\"]",
+      "actionSelector": "[data-filter=\"q\"]",
+      "representation": "read-only-fixture",
+      "behavior": "查看与筛选 AD 用户资产。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "进入 #/assets；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-039",
+      "group": "F14",
+      "name": "用户资产详情",
+      "route": "#/assets",
+      "entrySelector": "a[href=\"#/assets\"]",
+      "actionSelector": "[data-action=\"asset-detail\"]",
+      "representation": "read-only-fixture",
+      "behavior": "打开当前授权对象详情，展示支持的身份字段、所属关系与关联证据；未观测字段保持未知。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "进入 #/assets；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-040",
+      "group": "F14",
+      "name": "计算机资产列表",
+      "route": "#/assets",
+      "entrySelector": "a[href=\"#/assets\"]",
+      "actionSelector": "[data-filter=\"q\"]",
+      "representation": "read-only-fixture",
+      "behavior": "查看 AD 计算机资产及地址关联信息。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "进入 #/assets；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-041",
+      "group": "F12",
+      "name": "设备名称与地址同步",
+      "route": "#/assets/sync",
+      "entrySelector": "a[href=\"#/assets/sync\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"assets/sync\"][data-verb=\"sync\"]",
+      "representation": "external-execution-mock",
+      "behavior": "创建绑定具体记录的本地任务，成功后更新批次/游标/结果，失败和取消保留各自状态；无真实同步。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "进入 #/assets/sync；业务数据只在当前授权域范围内可见。",
+        "需要外部执行的步骤只运行本地任务/状态模型，不能据此验证真实系统效果。"
+      ]
+    },
+    {
+      "id": "AD-F-042",
+      "group": "F14",
+      "name": "组资产列表",
+      "route": "#/assets",
+      "entrySelector": "a[href=\"#/assets\"]",
+      "actionSelector": "[data-filter=\"q\"]",
+      "representation": "read-only-fixture",
+      "behavior": "查看 AD 组资产。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "进入 #/assets；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-043",
+      "group": "F14",
+      "name": "所属组与成员查看",
+      "route": "#/assets",
+      "entrySelector": "a[href=\"#/assets\"]",
+      "actionSelector": "[data-action=\"asset-detail\"]",
+      "representation": "read-only-fixture",
+      "behavior": "打开当前授权对象详情，展示支持的身份字段、所属关系与关联证据；未观测字段保持未知。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "进入 #/assets；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-044",
+      "group": "F13",
+      "name": "组成员与授权关系分析",
+      "route": "#/assets/permissions",
+      "entrySelector": "a[href=\"#/assets/permissions\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"assets/permissions\"][data-verb=\"inspect\"]",
+      "representation": "read-only-fixture",
+      "behavior": "浏览所选对象的领域字段、状态和关联信息；记录来自当前授权范围内的合成样本。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "进入 #/assets/permissions；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-045",
+      "group": "F15",
+      "name": "敏感资产识别与标记",
+      "route": "#/assets/sensitive",
+      "entrySelector": "a[href=\"#/assets/sensitive\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"assets/sensitive\"][data-verb=\"create\"]",
+      "representation": "stateful-local",
+      "behavior": "通过领域表单新增浏览器内存记录；必填检查通过后列表可找回，取消不保存。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "进入 #/assets/sensitive；业务数据只在当前授权域范围内可见。",
+        "表单必填项有效才能保存；关闭或Escape取消草稿，不改原记录。"
+      ]
+    },
+    {
+      "id": "AD-F-046",
+      "group": "F15",
+      "name": "敏感资产标签查看",
+      "route": "#/assets/sensitive",
+      "entrySelector": "a[href=\"#/assets/sensitive\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"assets/sensitive\"][data-verb=\"inspect\"]",
+      "representation": "read-only-fixture",
+      "behavior": "浏览所选对象的领域字段、状态和关联信息；记录来自当前授权范围内的合成样本。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "进入 #/assets/sensitive；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-047",
+      "group": "F15",
+      "name": "敏感资产变化告警",
+      "route": "#/assets/sensitive",
+      "entrySelector": "a[href=\"#/assets/sensitive\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"assets/sensitive\"][data-verb=\"alert\"]",
+      "representation": "bounded-local",
+      "behavior": "可以维护敏感资产变化提醒开关；不会自动生成新的变化告警事件，事件触发仍是未实现的后端范围。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "进入 #/assets/sensitive；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-048",
+      "group": "F14",
+      "name": "域信任关系查看",
+      "route": "#/assets/trust",
+      "entrySelector": "a[href=\"#/assets/trust\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"assets/trust\"][data-verb=\"inspect\"]",
+      "representation": "read-only-fixture",
+      "behavior": "浏览所选对象的领域字段、状态和关联信息；记录来自当前授权范围内的合成样本。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "进入 #/assets/trust；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-049",
+      "group": "F14",
+      "name": "关联身份与设备查看",
+      "route": "#/assets",
+      "entrySelector": "a[href=\"#/assets\"]",
+      "actionSelector": "[data-action=\"asset-detail\"]",
+      "representation": "read-only-fixture",
+      "behavior": "打开当前授权对象详情，展示支持的身份字段、所属关系与关联证据；未观测字段保持未知。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "进入 #/assets；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-050",
+      "group": "F16",
+      "name": "登录与服务访问关系分析",
+      "route": "#/assets/relations",
+      "entrySelector": "a[href=\"#/assets/relations\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"assets/relations\"][data-verb=\"inspect\"]",
+      "representation": "read-only-fixture",
+      "behavior": "浏览所选对象的领域字段、状态和关联信息；记录来自当前授权范围内的合成样本。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "进入 #/assets/relations；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-051",
+      "group": "F16",
+      "name": "资产行为查看",
+      "route": "#/assets/relations",
+      "entrySelector": "a[href=\"#/assets/relations\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"assets/relations\"][data-verb=\"inspect\"]",
+      "representation": "read-only-fixture",
+      "behavior": "浏览所选对象的领域字段、状态和关联信息；记录来自当前授权范围内的合成样本。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "进入 #/assets/relations；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-052",
+      "group": "F14",
+      "name": "资产安全概览与分类统计",
+      "route": "#/assets",
+      "entrySelector": "a[href=\"#/assets\"]",
+      "actionSelector": "[data-filter=\"q\"]",
+      "representation": "read-only-fixture",
+      "behavior": "展示用户、组和计算机资产的数量及安全概况。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "进入 #/assets；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-053",
+      "group": "F14",
+      "name": "资产列表导出",
+      "route": "#/assets",
+      "entrySelector": "a[href=\"#/assets\"]",
+      "actionSelector": "[data-action=\"export-assets\"]",
+      "representation": "stateful-local",
+      "behavior": "冻结当前域可见资产字段快照并创建导出任务；创建、确认、恢复和下载均检查资产导出权。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "进入 #/assets；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-054",
+      "group": "F13",
+      "name": "目录对象与权限变更记录",
+      "route": "#/assets/permissions",
+      "entrySelector": "a[href=\"#/assets/permissions\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"assets/permissions\"][data-verb=\"inspect\"]",
+      "representation": "read-only-fixture",
+      "behavior": "浏览所选对象的领域字段、状态和关联信息；记录来自当前授权范围内的合成样本。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "进入 #/assets/permissions；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-055",
+      "group": "F17",
+      "name": "风险事件分布",
+      "route": "#/assets/risk",
+      "entrySelector": "a[href=\"#/assets/risk\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"assets/risk\"][data-verb=\"inspect\"]",
+      "representation": "bounded-local",
+      "behavior": "按身份展示关联事件数量；目前只有计数，不提供按事件类别或时间细分的完整分布分析。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "进入 #/assets/risk；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-056",
+      "group": "F17",
+      "name": "风险分数趋势",
+      "route": "#/assets/risk",
+      "entrySelector": "a[href=\"#/assets/risk\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"assets/risk\"][data-verb=\"inspect\"]",
+      "representation": "bounded-local",
+      "behavior": "比较当前评分与上次评分，并显示两点变化；不是完整历史评分趋势。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "进入 #/assets/risk；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-057",
+      "group": "F17",
+      "name": "风险分数记录",
+      "route": "#/assets/risk",
+      "entrySelector": "a[href=\"#/assets/risk\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"assets/risk\"][data-verb=\"inspect\"]",
+      "representation": "read-only-fixture",
+      "behavior": "浏览所选对象的领域字段、状态和关联信息；记录来自当前授权范围内的合成样本。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "进入 #/assets/risk；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-058",
+      "group": "F17",
+      "name": "风险分数重置",
+      "route": "#/assets/risk",
+      "entrySelector": "a[href=\"#/assets/risk\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"assets/risk\"][data-verb=\"reset\"]",
+      "representation": "stateful-local",
+      "behavior": "确认原因后更新当前本地状态并保留历史；不是生产数据重置。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "进入 #/assets/risk；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-059",
+      "group": "F17",
+      "name": "检测结果更新风险分数",
+      "route": "#/assets/risk",
+      "entrySelector": "a[href=\"#/assets/risk\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"assets/risk\"][data-verb=\"evaluate\"]",
+      "representation": "bounded-local",
+      "behavior": "重新评估从既有合成资产评分写入来源与历史；没有检测算法自动计算真实风险分数。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "进入 #/assets/risk；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-060",
+      "group": "F18",
+      "name": "发起主动检测",
+      "route": "#/detection",
+      "entrySelector": "a[href=\"#/detection\"]",
+      "actionSelector": "[data-action=\"new-detection\"]",
+      "representation": "external-execution-mock",
+      "behavior": "选择固定检测模板及版本，冻结目标集合后创建本地任务；部分失败保留逐对象结果。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/detection；业务数据只在当前授权域范围内可见。",
+        "需要外部执行的步骤只运行本地任务/状态模型，不能据此验证真实系统效果。"
+      ]
+    },
+    {
+      "id": "AD-F-061",
+      "group": "F18",
+      "name": "单项复查",
+      "route": "#/detection/baseline",
+      "entrySelector": "a[href=\"#/detection/baseline\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"detection/baseline\"][data-verb=\"recheck\"]",
+      "representation": "external-execution-mock",
+      "behavior": "为单个检查项创建新任务与结果版本；旧记录保留，不证明修复已在真实环境生效。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/detection/baseline；业务数据只在当前授权域范围内可见。",
+        "需要外部执行的步骤只运行本地任务/状态模型，不能据此验证真实系统效果。"
+      ]
+    },
+    {
+      "id": "AD-F-062",
+      "group": "F18",
+      "name": "检测配置与上次结果查看",
+      "route": "#/detection/templates",
+      "entrySelector": "a[href=\"#/detection/templates\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"detection/templates\"][data-verb=\"inspect\"]",
+      "representation": "read-only-fixture",
+      "behavior": "浏览所选对象的领域字段、状态和关联信息；记录来自当前授权范围内的合成样本。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/detection/templates；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-063",
+      "group": "F19",
+      "name": "AD 安全基线检测",
+      "route": "#/detection/baseline",
+      "entrySelector": "a[href=\"#/detection/baseline\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"detection/baseline\"][data-verb=\"detect\"]",
+      "representation": "external-execution-mock",
+      "behavior": "创建目标范围内的合成检测任务，保留模板或检查项与结果状态；不运行真实检测引擎。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/detection/baseline；业务数据只在当前授权域范围内可见。",
+        "需要外部执行的步骤只运行本地任务/状态模型，不能据此验证真实系统效果。"
+      ]
+    },
+    {
+      "id": "AD-F-064",
+      "group": "F19",
+      "name": "基线结果列表与详情",
+      "route": "#/detection/baseline",
+      "entrySelector": "a[href=\"#/detection/baseline\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"detection/baseline\"][data-verb=\"inspect\"]",
+      "representation": "read-only-fixture",
+      "behavior": "浏览所选对象的领域字段、状态和关联信息；记录来自当前授权范围内的合成样本。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/detection/baseline；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-065",
+      "group": "F19",
+      "name": "基线结果导出",
+      "route": "#/detection/baseline",
+      "entrySelector": "a[href=\"#/detection/baseline\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"detection/baseline\"][data-verb=\"download\"]",
+      "representation": "stateful-local",
+      "behavior": "在当前权限和可见范围内下载本地合成文件；格式和字段按对应业务页面限定。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/detection/baseline；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-066",
+      "group": "F20",
+      "name": "AD 漏洞检测",
+      "route": "#/detection/vulnerabilities",
+      "entrySelector": "a[href=\"#/detection/vulnerabilities\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"detection/vulnerabilities\"][data-verb=\"detect\"]",
+      "representation": "external-execution-mock",
+      "behavior": "创建目标范围内的合成检测任务，保留模板或检查项与结果状态；不运行真实检测引擎。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/detection/vulnerabilities；业务数据只在当前授权域范围内可见。",
+        "需要外部执行的步骤只运行本地任务/状态模型，不能据此验证真实系统效果。"
+      ]
+    },
+    {
+      "id": "AD-F-067",
+      "group": "F20",
+      "name": "漏洞结果查看与导出",
+      "route": "#/detection/vulnerabilities",
+      "entrySelector": "a[href=\"#/detection/vulnerabilities\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"detection/vulnerabilities\"][data-verb=\"inspect\"]",
+      "representation": "read-only-fixture",
+      "behavior": "浏览所选对象的领域字段、状态和关联信息；记录来自当前授权范围内的合成样本。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/detection/vulnerabilities；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-068",
+      "group": "F22",
+      "name": "域用户弱口令检测",
+      "route": "#/detection/passwords",
+      "entrySelector": "a[href=\"#/detection/passwords\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"detection/passwords\"][data-verb=\"detect\"]",
+      "representation": "external-execution-mock",
+      "behavior": "创建目标范围内的合成检测任务，保留模板或检查项与结果状态；不运行真实检测引擎。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/detection/passwords；业务数据只在当前授权域范围内可见。",
+        "需要外部执行的步骤只运行本地任务/状态模型，不能据此验证真实系统效果。"
+      ]
+    },
+    {
+      "id": "AD-F-069",
+      "group": "F22",
+      "name": "弱口令结果查看与导出",
+      "route": "#/detection/passwords",
+      "entrySelector": "a[href=\"#/detection/passwords\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"detection/passwords\"][data-verb=\"download\"]",
+      "representation": "stateful-local",
+      "behavior": "在当前权限和可见范围内下载本地合成文件；格式和字段按对应业务页面限定。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/detection/passwords；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-070",
+      "group": "F22",
+      "name": "弱口令模板导出",
+      "route": "#/detection/passwords",
+      "entrySelector": "a[href=\"#/detection/passwords\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"detection/passwords\"][data-verb=\"template\"]",
+      "representation": "bounded-local",
+      "behavior": "下载无秘密的CSV检查模板",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/detection/passwords；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-071",
+      "group": "F22",
+      "name": "弱口令检测数据采集",
+      "route": "#/detection/passwords",
+      "entrySelector": "a[href=\"#/detection/passwords\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"detection/passwords\"][data-verb=\"collect\"]",
+      "representation": "external-execution-mock",
+      "behavior": "创建合成采集任务，完成后更新数据就绪时间；不读取真实安全日志、网络或凭据数据。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/detection/passwords；业务数据只在当前授权域范围内可见。",
+        "需要外部执行的步骤只运行本地任务/状态模型，不能据此验证真实系统效果。"
+      ]
+    },
+    {
+      "id": "AD-F-072",
+      "group": "F23",
+      "name": "用户密码泄露检测",
+      "route": "#/detection/passwords",
+      "entrySelector": "a[href=\"#/detection/passwords\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"detection/passwords\"][data-verb=\"detect\"]",
+      "representation": "external-execution-mock",
+      "behavior": "创建目标范围内的合成检测任务，保留模板或检查项与结果状态；不运行真实检测引擎。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/detection/passwords；业务数据只在当前授权域范围内可见。",
+        "需要外部执行的步骤只运行本地任务/状态模型，不能据此验证真实系统效果。"
+      ]
+    },
+    {
+      "id": "AD-F-073",
+      "group": "F23",
+      "name": "用户邮箱泄露检查",
+      "route": "#/detection/passwords",
+      "entrySelector": "a[href=\"#/detection/passwords\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"detection/passwords\"][data-verb=\"detect\"]",
+      "representation": "external-execution-mock",
+      "behavior": "创建目标范围内的合成检测任务，保留模板或检查项与结果状态；不运行真实检测引擎。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/detection/passwords；业务数据只在当前授权域范围内可见。",
+        "需要外部执行的步骤只运行本地任务/状态模型，不能据此验证真实系统效果。"
+      ]
+    },
+    {
+      "id": "AD-F-074",
+      "group": "F27",
+      "name": "检测模板列表与详情",
+      "route": "#/detection/templates",
+      "entrySelector": "a[href=\"#/detection/templates\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"detection/templates\"][data-verb=\"inspect\"]",
+      "representation": "read-only-fixture",
+      "behavior": "浏览所选对象的领域字段、状态和关联信息；记录来自当前授权范围内的合成样本。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/detection/templates；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-075",
+      "group": "F27",
+      "name": "新增检测模板",
+      "route": "#/detection/templates",
+      "entrySelector": "a[href=\"#/detection/templates\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"detection/templates\"][data-verb=\"create\"]",
+      "representation": "stateful-local",
+      "behavior": "通过领域表单新增浏览器内存记录；必填检查通过后列表可找回，取消不保存。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/detection/templates；业务数据只在当前授权域范围内可见。",
+        "表单必填项有效才能保存；关闭或Escape取消草稿，不改原记录。"
+      ]
+    },
+    {
+      "id": "AD-F-076",
+      "group": "F27",
+      "name": "编辑检测模板",
+      "route": "#/detection/templates",
+      "entrySelector": "a[href=\"#/detection/templates\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"detection/templates\"][data-verb=\"edit\"]",
+      "representation": "stateful-local",
+      "behavior": "编辑所选记录的领域配置并保存本地版本；不修改真实系统。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/detection/templates；业务数据只在当前授权域范围内可见。",
+        "表单必填项有效才能保存；关闭或Escape取消草稿，不改原记录。"
+      ]
+    },
+    {
+      "id": "AD-F-077",
+      "group": "F27",
+      "name": "删除检测模板",
+      "route": "#/detection/templates",
+      "entrySelector": "a[href=\"#/detection/templates\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"detection/templates\"][data-verb=\"delete\"]",
+      "representation": "stateful-local",
+      "behavior": "确认目标后可恢复归档所选记录；不永久删除数据或清除审计。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/detection/templates；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-078",
+      "group": "F18",
+      "name": "耗时检测能力查看",
+      "route": "#/detection/templates",
+      "entrySelector": "a[href=\"#/detection/templates\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"detection/templates\"][data-verb=\"inspect\"]",
+      "representation": "read-only-fixture",
+      "behavior": "浏览所选对象的领域字段、状态和关联信息；记录来自当前授权范围内的合成样本。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/detection/templates；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-079",
+      "group": "F27",
+      "name": "定时检测配置列表",
+      "route": "#/work/schedules",
+      "entrySelector": "a[href=\"#/work/schedules\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"work/schedules\"][data-verb=\"inspect\"]",
+      "representation": "read-only-fixture",
+      "behavior": "浏览所选对象的领域字段、状态和关联信息；记录来自当前授权范围内的合成样本。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "进入 #/work/schedules；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-080",
+      "group": "F27",
+      "name": "启用与编辑定时检测",
+      "route": "#/work/schedules",
+      "entrySelector": "a[href=\"#/work/schedules\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"work/schedules\"][data-verb=\"clone\"]",
+      "representation": "bounded-local",
+      "behavior": "检测周期配置可启停；变更执行定义会复制新ID并默认暂停，不在原计划原地修改。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "进入 #/work/schedules；业务数据只在当前授权域范围内可见。",
+        "表单必填项有效才能保存；关闭或Escape取消草稿，不改原记录。"
+      ]
+    },
+    {
+      "id": "AD-F-081",
+      "group": "F18",
+      "name": "检测任务列表与详情",
+      "route": "#/work",
+      "entrySelector": "a[href=\"#/work\"]",
+      "actionSelector": "[data-action=\"task-detail\"]",
+      "representation": "stateful-local",
+      "behavior": "查看已创建任务的进度、尝试次数、输入目标、终态及历史；后台执行完全由本地计时模型模拟。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "进入 #/work；业务数据只在当前授权域范围内可见。",
+        "先从目录资产“导出资产”或检测工作台创建任务并确认；详情入口在任务行中。"
+      ]
+    },
+    {
+      "id": "AD-F-082",
+      "group": "F18",
+      "name": "删除检测任务记录",
+      "route": "#/work",
+      "entrySelector": "a[href=\"#/work\"]",
+      "actionSelector": "[data-action=\"archive-task\"]",
+      "representation": "bounded-local",
+      "behavior": "归档/恢复终态检测记录，不删除执行证据或审计。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "进入 #/work；业务数据只在当前授权域范围内可见。",
+        "先从目录资产“导出资产”或检测工作台创建任务并确认；详情入口在任务行中。",
+        "必须是检测任务且已进入已完成、失败、已取消或部分失败终态。"
+      ]
+    },
+    {
+      "id": "AD-F-083",
+      "group": "F21",
+      "name": "AD 行为与威胁检测",
+      "route": "#/detection/behavior",
+      "entrySelector": "a[href=\"#/detection/behavior\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"detection/behavior\"][data-verb=\"create\"]",
+      "representation": "bounded-local",
+      "behavior": "通过领域表单新增浏览器内存记录；必填检查通过后列表可找回，取消不保存。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/detection/behavior；业务数据只在当前授权域范围内可见。",
+        "表单必填项有效才能保存；关闭或Escape取消草稿，不改原记录。"
+      ]
+    },
+    {
+      "id": "AD-F-084",
+      "group": "F21",
+      "name": "登录会话与身份关联",
+      "route": "#/detection/behavior",
+      "entrySelector": "a[href=\"#/detection/behavior\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"detection/behavior\"][data-verb=\"inspect\"]",
+      "representation": "read-only-fixture",
+      "behavior": "浏览所选对象的领域字段、状态和关联信息；记录来自当前授权范围内的合成样本。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/detection/behavior；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-085",
+      "group": "F21",
+      "name": "跨事件关联与时间窗口检测",
+      "route": "#/detection/behavior",
+      "entrySelector": "a[href=\"#/detection/behavior\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"detection/behavior\"][data-verb=\"inspect\"]",
+      "representation": "read-only-fixture",
+      "behavior": "浏览所选对象的领域字段、状态和关联信息；记录来自当前授权范围内的合成样本。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/detection/behavior；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-086",
+      "group": "F24",
+      "name": "规则列表、筛选与详情",
+      "route": "#/detection/rules",
+      "entrySelector": "a[href=\"#/detection/rules\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"detection/rules\"][data-verb=\"inspect\"]",
+      "representation": "read-only-fixture",
+      "behavior": "浏览所选对象的领域字段、状态和关联信息；记录来自当前授权范围内的合成样本。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/detection/rules；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-087",
+      "group": "F24",
+      "name": "规则新增、编辑与删除",
+      "route": "#/detection/rules",
+      "entrySelector": "a[href=\"#/detection/rules\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"detection/rules\"][data-verb=\"create\"]",
+      "representation": "stateful-local",
+      "behavior": "通过领域表单新增浏览器内存记录；必填检查通过后列表可找回，取消不保存。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/detection/rules；业务数据只在当前授权域范围内可见。",
+        "表单必填项有效才能保存；关闭或Escape取消草稿，不改原记录。"
+      ]
+    },
+    {
+      "id": "AD-F-088",
+      "group": "F24",
+      "name": "规则测试",
+      "route": "#/detection/rules",
+      "entrySelector": "a[href=\"#/detection/rules\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"detection/rules\"][data-verb=\"test\"]",
+      "representation": "bounded-local",
+      "behavior": "检查本地配置或样本并展示对应结果；未执行真实网络或生产算法。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/detection/rules；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-089",
+      "group": "F24",
+      "name": "规则激活",
+      "route": "#/detection/rules",
+      "entrySelector": "a[href=\"#/detection/rules\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"detection/rules\"][data-verb=\"activate\"]",
+      "representation": "stateful-local",
+      "behavior": "核对前置状态并确认后激活本地版本；外部系统没有变更。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/detection/rules；业务数据只在当前授权域范围内可见。",
+        "选择rule2编辑条件；可用正例event_id=4624且触发次数1。保存后运行测试，通过后才可确认发布。"
+      ]
+    },
+    {
+      "id": "AD-F-090",
+      "group": "F24",
+      "name": "规则导出",
+      "route": "#/detection/rules",
+      "entrySelector": "a[href=\"#/detection/rules\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"detection/rules\"][data-verb=\"download\"]",
+      "representation": "stateful-local",
+      "behavior": "在当前权限和可见范围内下载本地合成文件；格式和字段按对应业务页面限定。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/detection/rules；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-091",
+      "group": "F24",
+      "name": "告警与行为规则列表和详情",
+      "route": "#/detection/rules",
+      "entrySelector": "a[href=\"#/detection/rules\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"detection/rules\"][data-verb=\"inspect\"]",
+      "representation": "read-only-fixture",
+      "behavior": "浏览所选对象的领域字段、状态和关联信息；记录来自当前授权范围内的合成样本。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/detection/rules；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-092",
+      "group": "F24",
+      "name": "告警与行为检测配置编辑",
+      "route": "#/detection/rules",
+      "entrySelector": "a[href=\"#/detection/rules\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"detection/rules\"][data-verb=\"edit\"]",
+      "representation": "stateful-local",
+      "behavior": "编辑所选记录的领域配置并保存本地版本；不修改真实系统。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/detection/rules；业务数据只在当前授权域范围内可见。",
+        "表单必填项有效才能保存；关闭或Escape取消草稿，不改原记录。"
+      ]
+    },
+    {
+      "id": "AD-F-093",
+      "group": "F24",
+      "name": "规则启用与停用",
+      "route": "#/detection/rules",
+      "entrySelector": "a[href=\"#/detection/rules\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"detection/rules\"][data-verb=\"toggle\"]",
+      "representation": "stateful-local",
+      "behavior": "更改所选配置的启停状态并保留本地记录；不控制远端进程。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/detection/rules；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-094",
+      "group": "F24",
+      "name": "删除检测配置",
+      "route": "#/detection/rules",
+      "entrySelector": "a[href=\"#/detection/rules\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"detection/rules\"][data-verb=\"delete\"]",
+      "representation": "stateful-local",
+      "behavior": "确认目标后可恢复归档所选记录；不永久删除数据或清除审计。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/detection/rules；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-095",
+      "group": "F30",
+      "name": "攻击路径规则信息查看",
+      "route": "#/threats/paths",
+      "entrySelector": "a[href=\"#/threats/paths\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"threats/paths\"][data-verb=\"inspect\"]",
+      "representation": "read-only-fixture",
+      "behavior": "浏览所选对象的领域字段、状态和关联信息；记录来自当前授权范围内的合成样本。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "进入 #/threats/paths；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-096",
+      "group": "F25",
+      "name": "学习型检测配置管理",
+      "route": "#/detection/learning",
+      "entrySelector": "a[href=\"#/detection/learning\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"detection/learning\"][data-verb=\"edit\"]",
+      "representation": "bounded-local",
+      "behavior": "编辑所选记录的领域配置并保存本地版本；不修改真实系统。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/detection/learning；业务数据只在当前授权域范围内可见。",
+        "表单必填项有效才能保存；关闭或Escape取消草稿，不改原记录。"
+      ]
+    },
+    {
+      "id": "AD-F-097",
+      "group": "F26",
+      "name": "在界面新建规则",
+      "route": "#/detection/rules",
+      "entrySelector": "a[href=\"#/detection/rules\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"detection/rules\"][data-verb=\"create\"]",
+      "representation": "stateful-local",
+      "behavior": "通过领域表单新增浏览器内存记录；必填检查通过后列表可找回，取消不保存。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/detection/rules；业务数据只在当前授权域范围内可见。",
+        "表单必填项有效才能保存；关闭或Escape取消草稿，不改原记录。"
+      ]
+    },
+    {
+      "id": "AD-F-098",
+      "group": "F26",
+      "name": "在界面编辑规则",
+      "route": "#/detection/rules",
+      "entrySelector": "a[href=\"#/detection/rules\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"detection/rules\"][data-verb=\"edit\"]",
+      "representation": "stateful-local",
+      "behavior": "编辑所选记录的领域配置并保存本地版本；不修改真实系统。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/detection/rules；业务数据只在当前授权域范围内可见。",
+        "表单必填项有效才能保存；关闭或Escape取消草稿，不改原记录。"
+      ]
+    },
+    {
+      "id": "AD-F-099",
+      "group": "F26",
+      "name": "规则条件配置",
+      "route": "#/detection/rules",
+      "entrySelector": "a[href=\"#/detection/rules\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"detection/rules\"][data-verb=\"edit\"]",
+      "representation": "stateful-local",
+      "behavior": "编辑所选记录的领域配置并保存本地版本；不修改真实系统。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/detection/rules；业务数据只在当前授权域范围内可见。",
+        "表单必填项有效才能保存；关闭或Escape取消草稿，不改原记录。"
+      ]
+    },
+    {
+      "id": "AD-F-100",
+      "group": "F26",
+      "name": "根据界面配置生成规则",
+      "route": "#/detection/rules",
+      "entrySelector": "a[href=\"#/detection/rules\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"detection/rules\"][data-verb=\"edit\"]",
+      "representation": "stateful-local",
+      "behavior": "编辑所选记录的领域配置并保存本地版本；不修改真实系统。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/detection/rules；业务数据只在当前授权域范围内可见。",
+        "表单必填项有效才能保存；关闭或Escape取消草稿，不改原记录。"
+      ]
+    },
+    {
+      "id": "AD-F-101",
+      "group": "F26",
+      "name": "规则保存与生效管理",
+      "route": "#/detection/rules",
+      "entrySelector": "a[href=\"#/detection/rules\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"detection/rules\"][data-verb=\"activate\"]",
+      "representation": "stateful-local",
+      "behavior": "核对前置状态并确认后激活本地版本；外部系统没有变更。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/detection/rules；业务数据只在当前授权域范围内可见。",
+        "选择rule2编辑条件；可用正例event_id=4624且触发次数1。保存后运行测试，通过后才可确认发布。"
+      ]
+    },
+    {
+      "id": "AD-F-102",
+      "group": "F26",
+      "name": "规则配置检查与测试",
+      "route": "#/detection/rules",
+      "entrySelector": "a[href=\"#/detection/rules\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"detection/rules\"][data-verb=\"test\"]",
+      "representation": "bounded-local",
+      "behavior": "检查本地配置或样本并展示对应结果；未执行真实网络或生产算法。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/detection/rules；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-103",
+      "group": "F28",
+      "name": "规则白名单列表与详情",
+      "route": "#/detection/allowlists",
+      "entrySelector": "a[href=\"#/detection/allowlists\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"detection/allowlists\"][data-verb=\"inspect\"]",
+      "representation": "read-only-fixture",
+      "behavior": "浏览所选对象的领域字段、状态和关联信息；记录来自当前授权范围内的合成样本。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/detection/allowlists；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-104",
+      "group": "F28",
+      "name": "新增规则白名单",
+      "route": "#/detection/allowlists",
+      "entrySelector": "a[href=\"#/detection/allowlists\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"detection/allowlists\"][data-verb=\"create\"]",
+      "representation": "stateful-local",
+      "behavior": "通过领域表单新增浏览器内存记录；必填检查通过后列表可找回，取消不保存。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/detection/allowlists；业务数据只在当前授权域范围内可见。",
+        "表单必填项有效才能保存；关闭或Escape取消草稿，不改原记录。"
+      ]
+    },
+    {
+      "id": "AD-F-105",
+      "group": "F28",
+      "name": "编辑与删除规则白名单",
+      "route": "#/detection/allowlists",
+      "entrySelector": "a[href=\"#/detection/allowlists\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"detection/allowlists\"][data-verb=\"edit\"]",
+      "representation": "stateful-local",
+      "behavior": "编辑所选记录的领域配置并保存本地版本；不修改真实系统。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/detection/allowlists；业务数据只在当前授权域范围内可见。",
+        "表单必填项有效才能保存；关闭或Escape取消草稿，不改原记录。"
+      ]
+    },
+    {
+      "id": "AD-F-106",
+      "group": "F28",
+      "name": "从事件创建白名单",
+      "route": "#/threats",
+      "entrySelector": "a[href=\"#/threats\"]",
+      "actionSelector": "[data-action=\"event-whitelist\"]",
+      "representation": "stateful-local",
+      "behavior": "从所选事件预填规则级白名单名称、匹配身份、规则和域，保存前仍可取消。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "进入 #/threats；业务数据只在当前授权域范围内可见。",
+        "先打开事件 e2：点击 [data-action=\"event-detail\"][data-id=\"e2\"]，再操作抽屉内动作。"
+      ]
+    },
+    {
+      "id": "AD-F-107",
+      "group": "F28",
+      "name": "白名单导入与导出",
+      "route": "#/detection/allowlists",
+      "entrySelector": "a[href=\"#/detection/allowlists\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"detection/allowlists\"][data-verb=\"import\"]",
+      "representation": "bounded-local",
+      "behavior": "导入预置的单条白名单示例为待审核记录；不会解析任意上传文件。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/detection/allowlists；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-108",
+      "group": "F28",
+      "name": "全局白名单列表与筛选",
+      "route": "#/detection/allowlists",
+      "entrySelector": "a[href=\"#/detection/allowlists\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"detection/allowlists\"][data-verb=\"inspect\"]",
+      "representation": "read-only-fixture",
+      "behavior": "浏览所选对象的领域字段、状态和关联信息；记录来自当前授权范围内的合成样本。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/detection/allowlists；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-109",
+      "group": "F28",
+      "name": "新增全局白名单",
+      "route": "#/detection/allowlists",
+      "entrySelector": "a[href=\"#/detection/allowlists\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"detection/allowlists\"][data-verb=\"create\"]",
+      "representation": "stateful-local",
+      "behavior": "通过领域表单新增浏览器内存记录；必填检查通过后列表可找回，取消不保存。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/detection/allowlists；业务数据只在当前授权域范围内可见。",
+        "表单必填项有效才能保存；关闭或Escape取消草稿，不改原记录。"
+      ]
+    },
+    {
+      "id": "AD-F-110",
+      "group": "F28",
+      "name": "编辑与删除全局白名单",
+      "route": "#/detection/allowlists",
+      "entrySelector": "a[href=\"#/detection/allowlists\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"detection/allowlists\"][data-verb=\"edit\"]",
+      "representation": "stateful-local",
+      "behavior": "编辑所选记录的领域配置并保存本地版本；不修改真实系统。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/detection/allowlists；业务数据只在当前授权域范围内可见。",
+        "表单必填项有效才能保存；关闭或Escape取消草稿，不改原记录。"
+      ]
+    },
+    {
+      "id": "AD-F-111",
+      "group": "F29",
+      "name": "威胁事件列表与筛选",
+      "route": "#/threats",
+      "entrySelector": "a[href=\"#/threats\"]",
+      "actionSelector": "#soc-query",
+      "representation": "read-only-fixture",
+      "behavior": "告警队列支持组合搜索、严重度、状态、负责人、时间窗和排序；当前结果/授权总数分开显示，条件可清除。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "进入 #/threats；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-112",
+      "group": "F29",
+      "name": "威胁事件详情与状态",
+      "route": "#/threats",
+      "entrySelector": "a[href=\"#/threats\"]",
+      "actionSelector": "[data-action=\"event-detail\"]",
+      "representation": "read-only-fixture",
+      "behavior": "打开当前授权事件详情，展示规则版本、观测字段、关联目标和调查证据。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "进入 #/threats；业务数据只在当前授权域范围内可见。",
+        "可由事件研判抽屉的“展开调查”进入持续调查工作区；关系边与证据使用相同记录 ID，资产预览关闭后保留调查上下文。"
+      ],
+      "additionalEntry": "#/threats/investigation/e2"
+    },
+    {
+      "id": "AD-F-113",
+      "group": "F29",
+      "name": "事件证据查看",
+      "route": "#/threats",
+      "entrySelector": "a[href=\"#/threats\"]",
+      "actionSelector": "[data-action=\"event-detail\"]",
+      "representation": "read-only-fixture",
+      "behavior": "打开当前授权事件详情，展示规则版本、观测字段、关联目标和调查证据。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "进入 #/threats；业务数据只在当前授权域范围内可见。",
+        "可由事件研判抽屉的“展开调查”进入持续调查工作区；关系边与证据使用相同记录 ID，资产预览关闭后保留调查上下文。"
+      ],
+      "additionalEntry": "#/threats/investigation/e2"
+    },
+    {
+      "id": "AD-F-114",
+      "group": "F29",
+      "name": "原始日志与检测原因查看",
+      "route": "#/threats",
+      "entrySelector": "a[href=\"#/threats\"]",
+      "actionSelector": "[data-action=\"event-detail\"]",
+      "representation": "read-only-fixture",
+      "behavior": "打开当前授权事件详情，展示规则版本、观测字段、关联目标和调查证据。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "进入 #/threats；业务数据只在当前授权域范围内可见。",
+        "可由事件研判抽屉的“展开调查”进入持续调查工作区；关系边与证据使用相同记录 ID，资产预览关闭后保留调查上下文。"
+      ],
+      "additionalEntry": "#/threats/investigation/e2"
+    },
+    {
+      "id": "AD-F-115",
+      "group": "F29",
+      "name": "关闭威胁事件",
+      "route": "#/threats",
+      "entrySelector": "a[href=\"#/threats\"]",
+      "actionSelector": "[data-action=\"event-close\"]",
+      "representation": "stateful-local",
+      "behavior": "关闭前必须选择调查分类并填写依据；提交变更状态并保留本地调查活动，取消不写入。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "进入 #/threats；业务数据只在当前授权域范围内可见。",
+        "先打开事件 e2：点击 [data-action=\"event-detail\"][data-id=\"e2\"]，再操作抽屉内动作。"
+      ]
+    },
+    {
+      "id": "AD-F-116",
+      "group": "F29",
+      "name": "威胁事件标记",
+      "route": "#/threats",
+      "entrySelector": "a[href=\"#/threats\"]",
+      "actionSelector": "[data-action=\"event-investigate\"]",
+      "representation": "stateful-local",
+      "behavior": "把所选事件设为调查中并追加本地审计，不执行响应。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "进入 #/threats；业务数据只在当前授权域范围内可见。",
+        "先打开事件 e2：点击 [data-action=\"event-detail\"][data-id=\"e2\"]，再操作抽屉内动作。"
+      ]
+    },
+    {
+      "id": "AD-F-117",
+      "group": "F30",
+      "name": "攻击路径查看",
+      "route": "#/threats/paths",
+      "entrySelector": "a[href=\"#/threats/paths\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"threats/paths\"][data-verb=\"inspect\"]",
+      "representation": "read-only-fixture",
+      "behavior": "浏览所选对象的领域字段、状态和关联信息；记录来自当前授权范围内的合成样本。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "进入 #/threats/paths；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-118",
+      "group": "F30",
+      "name": "攻击路径导出",
+      "route": "#/threats/paths",
+      "entrySelector": "a[href=\"#/threats/paths\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"threats/paths\"][data-verb=\"download\"]",
+      "representation": "bounded-local",
+      "behavior": "在当前权限和可见范围内下载本地合成文件；格式和字段按对应业务页面限定。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "进入 #/threats/paths；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-119",
+      "group": "F29",
+      "name": "历史攻击趋势",
+      "route": "#/overview",
+      "entrySelector": "a[href=\"#/overview\"]",
+      "actionSelector": "[data-testid=\"overview-trend\"]",
+      "representation": "bounded-local",
+      "behavior": "按授权域聚合7日固定历史序列，数值/折线/无障碍描述一致；不提供任意历史区间的数据查询。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "进入 #/overview；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-120",
+      "group": "F29",
+      "name": "事件与证据导出",
+      "route": "#/threats",
+      "entrySelector": "a[href=\"#/threats\"]",
+      "actionSelector": "[data-action=\"export-events\"]",
+      "representation": "stateful-local",
+      "behavior": "冻结事件字段快照并创建导出任务；每阶段核验调查读取和报告导出权限。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "进入 #/threats；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-121",
+      "group": "F31",
+      "name": "阻断策略列表与详情",
+      "route": "#/response/policies",
+      "entrySelector": "a[href=\"#/response/policies\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"response/policies\"][data-verb=\"inspect\"]",
+      "representation": "read-only-fixture",
+      "behavior": "浏览所选对象的领域字段、状态和关联信息；记录来自当前授权范围内的合成样本。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "进入 #/response/policies；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-122",
+      "group": "F31",
+      "name": "新增阻断策略",
+      "route": "#/response/policies",
+      "entrySelector": "a[href=\"#/response/policies\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"response/policies\"][data-verb=\"create\"]",
+      "representation": "stateful-local",
+      "behavior": "通过领域表单新增浏览器内存记录；必填检查通过后列表可找回，取消不保存。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "进入 #/response/policies；业务数据只在当前授权域范围内可见。",
+        "表单必填项有效才能保存；关闭或Escape取消草稿，不改原记录。"
+      ]
+    },
+    {
+      "id": "AD-F-123",
+      "group": "F31",
+      "name": "立即执行阻断",
+      "route": "#/response/policies",
+      "entrySelector": "a[href=\"#/response/policies\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"response/policies\"][data-verb=\"respond\"]",
+      "representation": "external-execution-mock",
+      "behavior": "把启用策略的ID、版本、动作和资产ID绑定到响应工作台，重新确认后才创建任务；停用或变化策略拒绝。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "进入 #/response/policies；业务数据只在当前授权域范围内可见。",
+        "所选策略必须启用、资产ID与动作类型一致且不命中阻断白名单；响应工作台还需核对影响和身份。",
+        "需要外部执行的步骤只运行本地任务/状态模型，不能据此验证真实系统效果。"
+      ]
+    },
+    {
+      "id": "AD-F-124",
+      "group": "F31",
+      "name": "删除阻断策略",
+      "route": "#/response/policies",
+      "entrySelector": "a[href=\"#/response/policies\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"response/policies\"][data-verb=\"delete\"]",
+      "representation": "stateful-local",
+      "behavior": "确认目标后可恢复归档所选记录；不永久删除数据或清除审计。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "进入 #/response/policies；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-125",
+      "group": "F31",
+      "name": "恢复用户或设备状态",
+      "route": "#/response/history",
+      "entrySelector": "a[href=\"#/response/history\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"response/history\"][data-verb=\"restore\"]",
+      "representation": "external-execution-mock",
+      "behavior": "确认后恢复归档记录或创建对象恢复任务；响应恢复保留原执行与恢复结果，不执行真实解封。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "进入 #/response/history；业务数据只在当前授权域范围内可见。",
+        "原响应结果须已确认；未知结果先核对。恢复新任务在任务中心与原执行历史关联。",
+        "需要外部执行的步骤只运行本地任务/状态模型，不能据此验证真实系统效果。"
+      ]
+    },
+    {
+      "id": "AD-F-126",
+      "group": "F31",
+      "name": "告警关联阻断执行",
+      "route": "#/threats",
+      "entrySelector": "a[href=\"#/threats\"]",
+      "actionSelector": "[data-action=\"event-response\"]",
+      "representation": "external-execution-mock",
+      "behavior": "可从原研判抽屉或调查工作区发起受控响应，冻结event/asset/GUID/域/动作；调查内返回原事件并关联任务结果。同对象同动作未决请求在入口和提交均阻止新意图。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "进入 #/threats；业务数据只在当前授权域范围内可见。",
+        "先打开事件 e2：点击 [data-action=\"event-detail\"][data-id=\"e2\"]，再操作抽屉内动作。",
+        "需要外部执行的步骤只运行本地任务/状态模型，不能据此验证真实系统效果。"
+      ],
+      "additionalEntry": "#/threats/investigation/e2"
+    },
+    {
+      "id": "AD-F-127",
+      "group": "F32",
+      "name": "阻断白名单列表与详情",
+      "route": "#/response/allowlist",
+      "entrySelector": "a[href=\"#/response/allowlist\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"response/allowlist\"][data-verb=\"inspect\"]",
+      "representation": "read-only-fixture",
+      "behavior": "浏览所选对象的领域字段、状态和关联信息；记录来自当前授权范围内的合成样本。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "进入 #/response/allowlist；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-128",
+      "group": "F32",
+      "name": "新增阻断白名单",
+      "route": "#/response/allowlist",
+      "entrySelector": "a[href=\"#/response/allowlist\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"response/allowlist\"][data-verb=\"create\"]",
+      "representation": "stateful-local",
+      "behavior": "通过领域表单新增浏览器内存记录；必填检查通过后列表可找回，取消不保存。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "进入 #/response/allowlist；业务数据只在当前授权域范围内可见。",
+        "表单必填项有效才能保存；关闭或Escape取消草稿，不改原记录。"
+      ]
+    },
+    {
+      "id": "AD-F-129",
+      "group": "F32",
+      "name": "编辑与删除阻断白名单",
+      "route": "#/response/allowlist",
+      "entrySelector": "a[href=\"#/response/allowlist\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"response/allowlist\"][data-verb=\"edit\"]",
+      "representation": "stateful-local",
+      "behavior": "编辑所选记录的领域配置并保存本地版本；不修改真实系统。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "进入 #/response/allowlist；业务数据只在当前授权域范围内可见。",
+        "表单必填项有效才能保存；关闭或Escape取消草稿，不改原记录。"
+      ]
+    },
+    {
+      "id": "AD-F-130",
+      "group": "F33",
+      "name": "行为事件列表与筛选",
+      "route": "#/threats/behavior",
+      "entrySelector": "a[href=\"#/threats/behavior\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"threats/behavior\"][data-verb=\"inspect\"]",
+      "representation": "read-only-fixture",
+      "behavior": "浏览所选对象的领域字段、状态和关联信息；记录来自当前授权范围内的合成样本。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "进入 #/threats/behavior；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-131",
+      "group": "F33",
+      "name": "行为事件详情",
+      "route": "#/threats/behavior",
+      "entrySelector": "a[href=\"#/threats/behavior\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"threats/behavior\"][data-verb=\"inspect\"]",
+      "representation": "read-only-fixture",
+      "behavior": "浏览所选对象的领域字段、状态和关联信息；记录来自当前授权范围内的合成样本。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "进入 #/threats/behavior；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-132",
+      "group": "F33",
+      "name": "设备认证活动查看",
+      "route": "#/threats/behavior",
+      "entrySelector": "a[href=\"#/threats/behavior\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"threats/behavior\"][data-verb=\"inspect\"]",
+      "representation": "read-only-fixture",
+      "behavior": "浏览所选对象的领域字段、状态和关联信息；记录来自当前授权范围内的合成样本。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "进入 #/threats/behavior；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-133",
+      "group": "F33",
+      "name": "行为事件导出",
+      "route": "#/threats/behavior",
+      "entrySelector": "a[href=\"#/threats/behavior\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"threats/behavior\"][data-verb=\"download\"]",
+      "representation": "stateful-local",
+      "behavior": "在当前权限和可见范围内下载本地合成文件；格式和字段按对应业务页面限定。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "进入 #/threats/behavior；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-134",
+      "group": "F34",
+      "name": "查询模板列表",
+      "route": "#/threats/search",
+      "entrySelector": "a[href=\"#/threats/search\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"threats/search\"][data-verb=\"inspect\"]",
+      "representation": "read-only-fixture",
+      "behavior": "浏览所选对象的领域字段、状态和关联信息；记录来自当前授权范围内的合成样本。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "进入 #/threats/search；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-135",
+      "group": "F34",
+      "name": "新增与删除查询模板",
+      "route": "#/threats/search",
+      "entrySelector": "a[href=\"#/threats/search\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"threats/search\"][data-verb=\"create\"]",
+      "representation": "stateful-local",
+      "behavior": "通过领域表单新增浏览器内存记录；必填检查通过后列表可找回，取消不保存。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "进入 #/threats/search；业务数据只在当前授权域范围内可见。",
+        "表单必填项有效才能保存；关闭或Escape取消草稿，不改原记录。"
+      ]
+    },
+    {
+      "id": "AD-F-136",
+      "group": "F34",
+      "name": "行为数据保留期限查看",
+      "route": "#/threats/search",
+      "entrySelector": "a[href=\"#/threats/search\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"threats/search\"][data-verb=\"inspect\"]",
+      "representation": "read-only-fixture",
+      "behavior": "查询模板详情显示该域的样本保留天数，不会实际到期清理存储。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "进入 #/threats/search；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-137",
+      "group": "F34",
+      "name": "高级数据检索",
+      "route": "#/threats/search",
+      "entrySelector": "a[href=\"#/threats/search\"]",
+      "actionSelector": "[data-action=\"biz-search\"]",
+      "representation": "bounded-local",
+      "behavior": "查询值和24小时/7天/30天窗口实际过滤本地样本；完整查询语言和独立保留期限强制执行尚不具备。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "进入 #/threats/search；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-138",
+      "group": "F35",
+      "name": "蜜罐与特权账户列表",
+      "route": "#/threats/honeypots",
+      "entrySelector": "a[href=\"#/threats/honeypots\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"threats/honeypots\"][data-verb=\"inspect\"]",
+      "representation": "read-only-fixture",
+      "behavior": "浏览所选对象的领域字段、状态和关联信息；记录来自当前授权范围内的合成样本。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "进入 #/threats/honeypots；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-139",
+      "group": "F35",
+      "name": "添加与删除蜜罐或特权配置",
+      "route": "#/threats/honeypots",
+      "entrySelector": "a[href=\"#/threats/honeypots\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"threats/honeypots\"][data-verb=\"create\"]",
+      "representation": "stateful-local",
+      "behavior": "通过领域表单新增浏览器内存记录；必填检查通过后列表可找回，取消不保存。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "进入 #/threats/honeypots；业务数据只在当前授权域范围内可见。",
+        "表单必填项有效才能保存；关闭或Escape取消草稿，不改原记录。"
+      ]
+    },
+    {
+      "id": "AD-F-140",
+      "group": "F35",
+      "name": "账户可用性检查",
+      "route": "#/threats/honeypots",
+      "entrySelector": "a[href=\"#/threats/honeypots\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"threats/honeypots\"][data-verb=\"test\"]",
+      "representation": "external-execution-mock",
+      "behavior": "检查本地配置或样本并展示对应结果；未执行真实网络或生产算法。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "进入 #/threats/honeypots；业务数据只在当前授权域范围内可见。",
+        "需要外部执行的步骤只运行本地任务/状态模型，不能据此验证真实系统效果。"
+      ]
+    },
+    {
+      "id": "AD-F-141",
+      "group": "F35",
+      "name": "蜜罐账户属性设置",
+      "route": "#/threats/honeypots",
+      "entrySelector": "a[href=\"#/threats/honeypots\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"threats/honeypots\"][data-verb=\"edit\"]",
+      "representation": "stateful-local",
+      "behavior": "编辑所选记录的领域配置并保存本地版本；不修改真实系统。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "进入 #/threats/honeypots；业务数据只在当前授权域范围内可见。",
+        "表单必填项有效才能保存；关闭或Escape取消草稿，不改原记录。"
+      ]
+    },
+    {
+      "id": "AD-F-142",
+      "group": "F36",
+      "name": "资产与接入健康概览",
+      "route": "#/overview",
+      "entrySelector": "a[href=\"#/overview\"]",
+      "actionSelector": "[data-testid=\"overview-health\"]",
+      "representation": "read-only-fixture",
+      "behavior": "工作台展示可见资产/域数量、缺失最后观测的资产数及已授权接入历史诊断/陈旧情况；不是实时采集在线证明。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "进入 #/overview；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-143",
+      "group": "F36",
+      "name": "威胁风险趋势",
+      "route": "#/overview",
+      "entrySelector": "a[href=\"#/overview\"]",
+      "actionSelector": "[data-testid=\"overview-trend\"]",
+      "representation": "read-only-fixture",
+      "behavior": "同一域范围的合成七日汇总同时驱动摘要、折线和无障碍说明。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "进入 #/overview；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-144",
+      "group": "F36",
+      "name": "待处理威胁概览",
+      "route": "#/overview",
+      "entrySelector": "a[href=\"#/overview\"]",
+      "actionSelector": "[data-testid=\"overview-pending\"]",
+      "representation": "read-only-fixture",
+      "behavior": "显示当前范围待调查事件，进入事件详情保留对象上下文。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "进入 #/overview；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-145",
+      "group": "F36",
+      "name": "事件处理速率展示",
+      "route": "#/overview",
+      "entrySelector": "a[href=\"#/overview\"]",
+      "actionSelector": "[data-testid=\"overview-processing\"]",
+      "representation": "read-only-fixture",
+      "behavior": "按当前24小时内已关闭事件计算每小时处理数量，同时显示关闭数。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "进入 #/overview；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-146",
+      "group": "F36",
+      "name": "最近检测结果概览",
+      "route": "#/overview",
+      "entrySelector": "a[href=\"#/overview\"]",
+      "actionSelector": "[data-testid=\"overview-latest-detection\"]",
+      "representation": "read-only-fixture",
+      "behavior": "显示本次检测任务或初始基线样本的结果、目标域与时间。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "进入 #/overview；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-147",
+      "group": "F36",
+      "name": "攻击目标与阻断统计",
+      "route": "#/overview",
+      "entrySelector": "a[href=\"#/overview\"]",
+      "actionSelector": "[data-testid=\"overview-targets\"]",
+      "representation": "read-only-fixture",
+      "behavior": "统计当前范围关联目标及已完成/待核对响应任务。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "进入 #/overview；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-148",
+      "group": "F36",
+      "name": "攻击次数与高危事件热度",
+      "route": "#/overview",
+      "entrySelector": "a[href=\"#/overview\"]",
+      "actionSelector": "[data-testid=\"overview-heat\"]",
+      "representation": "bounded-local",
+      "behavior": "工作台重点身份显示当前关联告警数、高危数和风险评分，按风险排序前4项；不是完整攻击热度算法或全量分布。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "进入 #/overview；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-149",
+      "group": "F37",
+      "name": "安全评估与加固报告",
+      "route": "#/reports/templates",
+      "entrySelector": "a[href=\"#/reports/templates\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"reports/templates\"][data-verb=\"generate\"]",
+      "representation": "bounded-local",
+      "behavior": "生成按安全评估/加固/事件/巡检类型区分的冻结报告实例并支持HTML预览下载；模板章节字段可保存，但尚未控制每个章节的启停和顺序。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "进入 #/reports/templates；业务数据只在当前授权域范围内可见。",
+        "选择模板rpttpl2或其他授权模板，核对影响后生成；新实例在#/reports/library，可读预览并下载HTML。"
+      ]
+    },
+    {
+      "id": "AD-F-150",
+      "group": "F37",
+      "name": "事件与巡检报告",
+      "route": "#/reports/templates",
+      "entrySelector": "a[href=\"#/reports/templates\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"reports/templates\"][data-verb=\"generate\"]",
+      "representation": "bounded-local",
+      "behavior": "生成按安全评估/加固/事件/巡检类型区分的冻结报告实例并支持HTML预览下载；模板章节字段可保存，但尚未控制每个章节的启停和顺序。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "进入 #/reports/templates；业务数据只在当前授权域范围内可见。",
+        "选择模板rpttpl2或其他授权模板，核对影响后生成；新实例在#/reports/library，可读预览并下载HTML。"
+      ]
+    },
+    {
+      "id": "AD-F-151",
+      "group": "F38",
+      "name": "导出任务列表与进度",
+      "route": "#/reports",
+      "entrySelector": "a[href=\"#/reports\"]",
+      "actionSelector": "[data-action=\"task-detail\"]",
+      "representation": "stateful-local",
+      "behavior": "查看已创建任务的进度、尝试次数、输入目标、终态及历史；后台执行完全由本地计时模型模拟。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "进入 #/reports；业务数据只在当前授权域范围内可见。",
+        "先从目录资产“导出资产”或检测工作台创建任务并确认；详情入口在任务行中。"
+      ]
+    },
+    {
+      "id": "AD-F-152",
+      "group": "F38",
+      "name": "导出文件下载",
+      "route": "#/reports",
+      "entrySelector": "a[href=\"#/reports\"]",
+      "actionSelector": "[data-action=\"download-task\"]",
+      "representation": "stateful-local",
+      "behavior": "读取已完成导出任务的冻结快照下载CSV；角色、域、授权版本、具体导出权和撤销状态均重新核验。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "进入 #/reports；业务数据只在当前授权域范围内可见。",
+        "先从目录资产“导出资产”或检测工作台创建任务并确认；详情入口在任务行中。",
+        "等待导出任务“已完成”，保持同角色/域/授权版本；下载权限未撤销。"
+      ]
+    },
+    {
+      "id": "AD-F-153",
+      "group": "F39",
+      "name": "平台操作记录",
+      "route": "#/admin/audit",
+      "entrySelector": "a[href=\"#/admin/audit\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"admin/audit\"][data-verb=\"inspect\"]",
+      "representation": "read-only-fixture",
+      "behavior": "浏览所选对象的领域字段、状态和关联信息；记录来自当前授权范围内的合成样本。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/admin/audit；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-154",
+      "group": "F39",
+      "name": "操作审计列表与筛选",
+      "route": "#/admin/audit",
+      "entrySelector": "a[href=\"#/admin/audit\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"admin/audit\"][data-verb=\"inspect\"]",
+      "representation": "read-only-fixture",
+      "behavior": "浏览所选对象的领域字段、状态和关联信息；记录来自当前授权范围内的合成样本。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/admin/audit；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-155",
+      "group": "F39",
+      "name": "操作审计导出",
+      "route": "#/admin/audit",
+      "entrySelector": "a[href=\"#/admin/audit\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"admin/audit\"][data-intent=\"audit_export\"]",
+      "representation": "stateful-local",
+      "behavior": "按当前审计筛选/选择下载本地平台记录；不包含AD业务私有对象。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/admin/audit；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-156",
+      "group": "F39",
+      "name": "操作审计记录删除",
+      "route": "#/admin/audit",
+      "entrySelector": "a[href=\"#/admin/audit\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"admin/audit\"][data-intent=\"audit_archive\"]",
+      "representation": "bounded-local",
+      "behavior": "确认后切换审计记录可见/归档状态，可筛选和还原；没有物理删除。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/admin/audit；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-157",
+      "group": "F40",
+      "name": "消息列表与时间线",
+      "route": "#/work",
+      "entrySelector": "a[href=\"#/work\"]",
+      "actionSelector": "[data-action=\"messages\"]",
+      "representation": "stateful-local",
+      "behavior": "查看范围内消息、未读数和时间线；可以标记已读并定位事件，未读仅按当前可见集合计算。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "进入 #/work；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-158",
+      "group": "F40",
+      "name": "消息已读管理与定位",
+      "route": "#/work",
+      "entrySelector": "a[href=\"#/work\"]",
+      "actionSelector": "[data-action=\"messages\"]",
+      "representation": "stateful-local",
+      "behavior": "查看范围内消息、未读数和时间线；可以标记已读并定位事件，未读仅按当前可见集合计算。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "进入 #/work；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-159",
+      "group": "F40",
+      "name": "消息数量统计",
+      "route": "#/work",
+      "entrySelector": "a[href=\"#/work\"]",
+      "actionSelector": "[data-action=\"messages\"]",
+      "representation": "stateful-local",
+      "behavior": "查看范围内消息、未读数和时间线；可以标记已读并定位事件，未读仅按当前可见集合计算。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "进入 #/work；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-160",
+      "group": "F41",
+      "name": "通知配置列表与详情",
+      "route": "#/work/notifications",
+      "entrySelector": "a[href=\"#/work/notifications\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"work/notifications\"][data-verb=\"inspect\"]",
+      "representation": "read-only-fixture",
+      "behavior": "浏览所选对象的领域字段、状态和关联信息；记录来自当前授权范围内的合成样本。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "进入 #/work/notifications；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-161",
+      "group": "F41",
+      "name": "新增、编辑与删除通知配置",
+      "route": "#/work/notifications",
+      "entrySelector": "a[href=\"#/work/notifications\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"work/notifications\"][data-verb=\"edit\"]",
+      "representation": "stateful-local",
+      "behavior": "编辑所选记录的领域配置并保存本地版本；不修改真实系统。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "进入 #/work/notifications；业务数据只在当前授权域范围内可见。",
+        "表单必填项有效才能保存；关闭或Escape取消草稿，不改原记录。"
+      ]
+    },
+    {
+      "id": "AD-F-162",
+      "group": "F41",
+      "name": "通知规则与检测模板关联",
+      "route": "#/work/notifications",
+      "entrySelector": "a[href=\"#/work/notifications\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"work/notifications\"][data-verb=\"edit\"]",
+      "representation": "stateful-local",
+      "behavior": "编辑所选记录的领域配置并保存本地版本；不修改真实系统。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "进入 #/work/notifications；业务数据只在当前授权域范围内可见。",
+        "表单必填项有效才能保存；关闭或Escape取消草稿，不改原记录。"
+      ]
+    },
+    {
+      "id": "AD-F-163",
+      "group": "F41",
+      "name": "通知发送与测试",
+      "route": "#/work/notifications",
+      "entrySelector": "a[href=\"#/work/notifications\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"work/notifications\"][data-verb=\"test\"]",
+      "representation": "external-execution-mock",
+      "behavior": "检查本地配置或样本并展示对应结果；未执行真实网络或生产算法。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "进入 #/work/notifications；业务数据只在当前授权域范围内可见。",
+        "需要外部执行的步骤只运行本地任务/状态模型，不能据此验证真实系统效果。"
+      ]
+    },
+    {
+      "id": "AD-F-164",
+      "group": "F41",
+      "name": "延迟与定时通知",
+      "route": "#/work/notifications",
+      "entrySelector": "a[href=\"#/work/notifications\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"work/notifications\"][data-verb=\"edit\"]",
+      "representation": "bounded-local",
+      "behavior": "可保存延迟/每日通知配置，发送测试记录为已排程；不存在实际发送队列或定时邮件/短信。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "进入 #/work/notifications；业务数据只在当前授权域范围内可见。",
+        "表单必填项有效才能保存；关闭或Escape取消草稿，不改原记录。"
+      ]
+    },
+    {
+      "id": "AD-F-165",
+      "group": "F41",
+      "name": "通知接收人列表与详情",
+      "route": "#/work/recipients",
+      "entrySelector": "a[href=\"#/work/recipients\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"work/recipients\"][data-verb=\"inspect\"]",
+      "representation": "read-only-fixture",
+      "behavior": "浏览所选对象的领域字段、状态和关联信息；记录来自当前授权范围内的合成样本。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "进入 #/work/recipients；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-166",
+      "group": "F41",
+      "name": "新增、编辑与删除接收人",
+      "route": "#/work/recipients",
+      "entrySelector": "a[href=\"#/work/recipients\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"work/recipients\"][data-verb=\"create\"]",
+      "representation": "stateful-local",
+      "behavior": "通过领域表单新增浏览器内存记录；必填检查通过后列表可找回，取消不保存。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "进入 #/work/recipients；业务数据只在当前授权域范围内可见。",
+        "表单必填项有效才能保存；关闭或Escape取消草稿，不改原记录。"
+      ]
+    },
+    {
+      "id": "AD-F-167",
+      "group": "F43",
+      "name": "登录与退出",
+      "route": "#/admin/accounts",
+      "entrySelector": "a[href=\"#/admin/accounts\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"admin/accounts\"][data-intent=\"session_toggle\"]",
+      "representation": "bounded-local",
+      "behavior": "既有合成账号使用确认、安全更新和身份验证步骤登录；退出锁定工作空间，返回历史不会解锁。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/admin/accounts；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-168",
+      "group": "F43",
+      "name": "首次登录与密码过期处理",
+      "route": "#/admin/accounts",
+      "entrySelector": "a[href=\"#/admin/accounts\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"admin/accounts\"][data-intent=\"password_change\"]",
+      "representation": "bounded-local",
+      "behavior": "确认现有合成账号安全更新并使旧会话失效；没有密码输入或真实密码修改。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/admin/accounts；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-169",
+      "group": "F44",
+      "name": "多因素认证管理",
+      "route": "#/admin/mfa",
+      "entrySelector": "a[href=\"#/admin/mfa\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"admin/mfa\"][data-intent=\"mfa_toggle\"]",
+      "representation": "bounded-local",
+      "behavior": "为既有合成账号完成绑定/验证/恢复确认步骤，或确认停用；没有真实秘密、二维码、OTP或恢复码。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/admin/mfa；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-170",
+      "group": "F42",
+      "name": "个人资料与头像",
+      "route": "#/admin/profile",
+      "entrySelector": "a[href=\"#/admin/profile\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"admin/profile\"][data-intent=\"edit_profile\"]",
+      "representation": "stateful-local",
+      "behavior": "按当前账号编辑个人资料/预设头像/偏好分组，保存后可找回；账号之间数据隔离。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/admin/profile；业务数据只在当前授权域范围内可见。",
+        "表单必填项有效才能保存；关闭或Escape取消草稿，不改原记录。"
+      ]
+    },
+    {
+      "id": "AD-F-171",
+      "group": "F45",
+      "name": "用户列表",
+      "route": "#/admin/users",
+      "entrySelector": "a[href=\"#/admin/users\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"admin/users\"][data-verb=\"inspect\"]",
+      "representation": "read-only-fixture",
+      "behavior": "浏览所选对象的领域字段、状态和关联信息；记录来自当前授权范围内的合成样本。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/admin/users；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-172",
+      "group": "F45",
+      "name": "新增、编辑与删除用户",
+      "route": "#/admin/users",
+      "entrySelector": "a[href=\"#/admin/users\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"admin/users\"][data-verb=\"create\"]",
+      "representation": "stateful-local",
+      "behavior": "通过领域表单新增浏览器内存记录；必填检查通过后列表可找回，取消不保存。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/admin/users；业务数据只在当前授权域范围内可见。",
+        "表单必填项有效才能保存；关闭或Escape取消草稿，不改原记录。"
+      ]
+    },
+    {
+      "id": "AD-F-173",
+      "group": "F43",
+      "name": "密码修改与重置",
+      "route": "#/admin/users",
+      "entrySelector": "a[href=\"#/admin/users\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"admin/users\"][data-intent=\"admin_password_reset\"]",
+      "representation": "bounded-local",
+      "behavior": "核验目标与操作权限后把目标账号改为首次登录需更新，并撤销本地会话；不产生密码。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/admin/users；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-174",
+      "group": "F45",
+      "name": "角色列表与详情",
+      "route": "#/admin/roles",
+      "entrySelector": "a[href=\"#/admin/roles\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"admin/roles\"][data-verb=\"inspect\"]",
+      "representation": "read-only-fixture",
+      "behavior": "浏览所选对象的领域字段、状态和关联信息；记录来自当前授权范围内的合成样本。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/admin/roles；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-175",
+      "group": "F45",
+      "name": "角色保存与删除",
+      "route": "#/admin/roles",
+      "entrySelector": "a[href=\"#/admin/roles\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"admin/roles\"][data-intent=\"edit_permissions\"]",
+      "representation": "stateful-local",
+      "behavior": "编辑角色布尔权限矩阵，写入依赖读取；确认后影响角色后续视图/操作，不得修改当前身份自身授权。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/admin/roles；业务数据只在当前授权域范围内可见。",
+        "先完成“验证操作身份”步骤（#admin-proof-check）；随后重新确认明确对象/范围。"
+      ]
+    },
+    {
+      "id": "AD-F-176",
+      "group": "F45",
+      "name": "用户角色单个与批量分配",
+      "route": "#/admin/users",
+      "entrySelector": "a[href=\"#/admin/users\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"admin/users\"][data-intent=\"assign_roles\"]",
+      "representation": "stateful-local",
+      "behavior": "单个或明确勾选多个用户后选择角色并确认，结束受影响本地会话；自改角色及最后管理员保护生效。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/admin/users；业务数据只在当前授权域范围内可见。",
+        "先完成“验证操作身份”步骤（#admin-proof-check）；随后重新确认明确对象/范围。"
+      ]
+    },
+    {
+      "id": "AD-F-177",
+      "group": "F46",
+      "name": "权限配置管理",
+      "route": "#/admin/roles",
+      "entrySelector": "a[href=\"#/admin/roles\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"admin/roles\"][data-intent=\"edit_permissions\"]",
+      "representation": "bounded-local",
+      "behavior": "编辑角色布尔权限矩阵，写入依赖读取；确认后影响角色后续视图/操作，不得修改当前身份自身授权。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/admin/roles；业务数据只在当前授权域范围内可见。",
+        "先完成“验证操作身份”步骤（#admin-proof-check）；随后重新确认明确对象/范围。"
+      ]
+    },
+    {
+      "id": "AD-F-178",
+      "group": "F46",
+      "name": "菜单、页面及操作权限控制",
+      "route": "#/admin/roles",
+      "entrySelector": "a[href=\"#/admin/roles\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"admin/roles\"][data-intent=\"edit_permissions\"]",
+      "representation": "bounded-local",
+      "behavior": "编辑角色布尔权限矩阵，写入依赖读取；确认后影响角色后续视图/操作，不得修改当前身份自身授权。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/admin/roles；业务数据只在当前授权域范围内可见。",
+        "先完成“验证操作身份”步骤（#admin-proof-check）；随后重新确认明确对象/范围。"
+      ]
+    },
+    {
+      "id": "AD-F-179",
+      "group": "F47",
+      "name": "AD 数据资源访问控制",
+      "route": "#/admin/resources",
+      "entrySelector": "a[href=\"#/admin/resources\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"admin/resources\"][data-verb=\"inspect\"]",
+      "representation": "bounded-local",
+      "behavior": "浏览所选对象的领域字段、状态和关联信息；记录来自当前授权范围内的合成样本。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/admin/resources；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-180",
+      "group": "F47",
+      "name": "资源组列表与详情",
+      "route": "#/admin/resources",
+      "entrySelector": "a[href=\"#/admin/resources\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"admin/resources\"][data-verb=\"inspect\"]",
+      "representation": "bounded-local",
+      "behavior": "浏览所选对象的领域字段、状态和关联信息；记录来自当前授权范围内的合成样本。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/admin/resources；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-181",
+      "group": "F47",
+      "name": "新增、编辑与删除资源组",
+      "route": "#/admin/resources",
+      "entrySelector": "a[href=\"#/admin/resources\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"admin/resources\"][data-intent=\"edit_resource\"]",
+      "representation": "stateful-local",
+      "behavior": "维护合成资源组域集合；功能权限与域范围分别核验，不得修改当前操作者正在使用的授权。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/admin/resources；业务数据只在当前授权域范围内可见。",
+        "先完成“验证操作身份”步骤（#admin-proof-check）；随后重新确认明确对象/范围。"
+      ]
+    },
+    {
+      "id": "AD-F-182",
+      "group": "F47",
+      "name": "角色与资源组关联",
+      "route": "#/admin/resources",
+      "entrySelector": "a[href=\"#/admin/resources\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"admin/resources\"][data-intent=\"associate_roles\"]",
+      "representation": "stateful-local",
+      "behavior": "把所选资源组关联到已存在角色并更新后续域集合；不会自动赋予其他功能权限。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/admin/resources；业务数据只在当前授权域范围内可见。",
+        "先完成“验证操作身份”步骤（#admin-proof-check）；随后重新确认明确对象/范围。"
+      ]
+    },
+    {
+      "id": "AD-F-183",
+      "group": "F47",
+      "name": "租户配置",
+      "route": "#/admin/resources",
+      "entrySelector": "a[href=\"#/admin/resources\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"admin/resources\"][data-intent=\"tenant_settings\"]",
+      "representation": "stateful-local",
+      "behavior": "独立保存租户名称、时区和会话时限，不创建新的资源组。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/admin/resources；业务数据只在当前授权域范围内可见。",
+        "先完成“验证操作身份”步骤（#admin-proof-check）；随后重新确认明确对象/范围。"
+      ]
+    },
+    {
+      "id": "AD-F-184",
+      "group": "F51",
+      "name": "第三方访问授权",
+      "route": "#/admin/integrations",
+      "entrySelector": "a[href=\"#/admin/integrations\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"admin/integrations\"][data-intent=\"authorization_preview\"]",
+      "representation": "bounded-local",
+      "behavior": "展示所选应用的范围、引用和授权步骤；没有外部跳转、真实授权交换或token生成。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/admin/integrations；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-185",
+      "group": "F53",
+      "name": "许可信息与有效期查看",
+      "route": "#/admin/license",
+      "entrySelector": "a[href=\"#/admin/license\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"admin/license\"][data-verb=\"inspect\"]",
+      "representation": "read-only-fixture",
+      "behavior": "浏览所选对象的领域字段、状态和关联信息；记录来自当前授权范围内的合成样本。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/admin/license；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-186",
+      "group": "F53",
+      "name": "许可更新与激活",
+      "route": "#/admin/license",
+      "entrySelector": "a[href=\"#/admin/license\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"admin/license\"][data-intent=\"license_activate\"]",
+      "representation": "bounded-local",
+      "behavior": "重新核验候选许可并确认后切换本地激活记录；设备不匹配、过期或超量拒绝。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/admin/license；业务数据只在当前授权域范围内可见。",
+        "先完成“验证操作身份”步骤（#admin-proof-check）；随后重新确认明确对象/范围。"
+      ]
+    },
+    {
+      "id": "AD-F-187",
+      "group": "F53",
+      "name": "授权预览",
+      "route": "#/admin/license",
+      "entrySelector": "a[href=\"#/admin/license\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"admin/license\"][data-intent=\"license_preview\"]",
+      "representation": "read-only-fixture",
+      "behavior": "只读展示设备、有效期、额度与模块，不改变当前激活状态。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/admin/license；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-188",
+      "group": "F53",
+      "name": "设备绑定与授权校验",
+      "route": "#/admin/license",
+      "entrySelector": "a[href=\"#/admin/license\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"admin/license\"][data-intent=\"license_validate\"]",
+      "representation": "bounded-local",
+      "behavior": "比较预置许可与设备/日期/用量条件，保存通过或具体失败原因；没有签名验证服务。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/admin/license；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-189",
+      "group": "F48",
+      "name": "后台任务状态查看",
+      "route": "#/work",
+      "entrySelector": "a[href=\"#/work\"]",
+      "actionSelector": "[data-action=\"task-detail\"]",
+      "representation": "stateful-local",
+      "behavior": "查看已创建任务的进度、尝试次数、输入目标、终态及历史；后台执行完全由本地计时模型模拟。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "进入 #/work；业务数据只在当前授权域范围内可见。",
+        "先从目录资产“导出资产”或检测工作台创建任务并确认；详情入口在任务行中。"
+      ]
+    },
+    {
+      "id": "AD-F-190",
+      "group": "F49",
+      "name": "周期任务调度",
+      "route": "#/work/schedules",
+      "entrySelector": "a[href=\"#/work/schedules\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"work/schedules\"][data-verb=\"create\"]",
+      "representation": "bounded-local",
+      "behavior": "通过领域表单新增浏览器内存记录；必填检查通过后列表可找回，取消不保存。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "进入 #/work/schedules；业务数据只在当前授权域范围内可见。",
+        "表单必填项有效才能保存；关闭或Escape取消草稿，不改原记录。"
+      ]
+    },
+    {
+      "id": "AD-F-191",
+      "group": "F48",
+      "name": "跨域任务并行与失败隔离",
+      "route": "#/work",
+      "entrySelector": "a[href=\"#/work\"]",
+      "actionSelector": "[data-action=\"task-detail\"]",
+      "representation": "stateful-local",
+      "behavior": "查看已创建任务的进度、尝试次数、输入目标、终态及历史；后台执行完全由本地计时模型模拟。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "进入 #/work；业务数据只在当前授权域范围内可见。",
+        "先从目录资产“导出资产”或检测工作台创建任务并确认；详情入口在任务行中。"
+      ]
+    },
+    {
+      "id": "AD-F-192",
+      "group": "F48",
+      "name": "重复任务控制",
+      "route": "#/work",
+      "entrySelector": "a[href=\"#/work\"]",
+      "actionSelector": "[data-action=\"task-detail\"]",
+      "representation": "stateful-local",
+      "behavior": "查看已创建任务的进度、尝试次数、输入目标、终态及历史；后台执行完全由本地计时模型模拟。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "进入 #/work；业务数据只在当前授权域范围内可见。",
+        "先从目录资产“导出资产”或检测工作台创建任务并确认；详情入口在任务行中。"
+      ]
+    },
+    {
+      "id": "AD-F-193",
+      "group": "F49",
+      "name": "过期任务状态与消息清理",
+      "route": "#/work/schedules",
+      "entrySelector": "a[href=\"#/work/schedules\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"work/schedules\"][data-verb=\"cleanup\"]",
+      "representation": "bounded-local",
+      "behavior": "归档当前范围的终态任务与已读消息；运行中/待核对任务不归档，不物理清理磁盘。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "进入 #/work/schedules；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-194",
+      "group": "F50",
+      "name": "域连接与采集器异常通知",
+      "route": "#/work/health",
+      "entrySelector": "a[href=\"#/work/health\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"work/health\"][data-verb=\"inspect\"]",
+      "representation": "read-only-fixture",
+      "behavior": "浏览所选对象的领域字段、状态和关联信息；记录来自当前授权范围内的合成样本。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "进入 #/work/health；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-195",
+      "group": "F50",
+      "name": "检测与同步运行健康查看",
+      "route": "#/work/health",
+      "entrySelector": "a[href=\"#/work/health\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"work/health\"][data-verb=\"inspect\"]",
+      "representation": "read-only-fixture",
+      "behavior": "浏览所选对象的领域字段、状态和关联信息；记录来自当前授权范围内的合成样本。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "进入 #/work/health；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-196",
+      "group": "F52",
+      "name": "系统信息查看",
+      "route": "#/admin/system",
+      "entrySelector": "a[href=\"#/admin/system\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"admin/system\"][data-verb=\"inspect\"]",
+      "representation": "read-only-fixture",
+      "behavior": "浏览所选对象的领域字段、状态和关联信息；记录来自当前授权范围内的合成样本。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/admin/system；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-197",
+      "group": "F54",
+      "name": "系统标识设置",
+      "route": "#/admin/settings",
+      "entrySelector": "a[href=\"#/admin/settings\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"admin/settings\"][data-intent=\"edit_settings\"]",
+      "representation": "bounded-local",
+      "behavior": "按设置分组维护标识、时间与管理项；仅更新浏览器状态，不更改操作系统时间或服务。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/admin/settings；业务数据只在当前授权域范围内可见。",
+        "表单必填项有效才能保存；关闭或Escape取消草稿，不改原记录。"
+      ]
+    },
+    {
+      "id": "AD-F-198",
+      "group": "F54",
+      "name": "系统时间与同步设置",
+      "route": "#/admin/settings",
+      "entrySelector": "a[href=\"#/admin/settings\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"admin/settings\"][data-intent=\"edit_settings\"]",
+      "representation": "bounded-local",
+      "behavior": "按设置分组维护标识、时间与管理项；仅更新浏览器状态，不更改操作系统时间或服务。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/admin/settings；业务数据只在当前授权域范围内可见。",
+        "表单必填项有效才能保存；关闭或Escape取消草稿，不改原记录。"
+      ]
+    },
+    {
+      "id": "AD-F-199",
+      "group": "F52",
+      "name": "存储管理",
+      "route": "#/admin/system",
+      "entrySelector": "a[href=\"#/admin/system\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"admin/system\"][data-intent=\"storage_settings\"]",
+      "representation": "bounded-local",
+      "behavior": "保存容量提醒阈值和保留天数；不分配存储或执行清理。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/admin/system；业务数据只在当前授权域范围内可见。",
+        "先完成“验证操作身份”步骤（#admin-proof-check）；随后重新确认明确对象/范围。"
+      ]
+    },
+    {
+      "id": "AD-F-200",
+      "group": "F52",
+      "name": "系统资源监控",
+      "route": "#/admin/system",
+      "entrySelector": "a[href=\"#/admin/system\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"admin/system\"][data-verb=\"inspect\"]",
+      "representation": "read-only-fixture",
+      "behavior": "浏览所选对象的领域字段、状态和关联信息；记录来自当前授权范围内的合成样本。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/admin/system；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-201",
+      "group": "F52",
+      "name": "服务与运行状态查看",
+      "route": "#/admin/system",
+      "entrySelector": "a[href=\"#/admin/system\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"admin/system\"][data-verb=\"inspect\"]",
+      "representation": "read-only-fixture",
+      "behavior": "浏览所选对象的领域字段、状态和关联信息；记录来自当前授权范围内的合成样本。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/admin/system；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-202",
+      "group": "F55",
+      "name": "服务启动、停止与重启",
+      "route": "#/admin/services",
+      "entrySelector": "a[href=\"#/admin/services\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"admin/services\"][data-intent=\"service_restart\"]",
+      "representation": "external-execution-mock",
+      "behavior": "需要运维会话和近期验证，确认目标及影响后推进停止/启动/检查步骤；无真实服务控制。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/admin/services；业务数据只在当前授权域范围内可见。",
+        "先完成“验证操作身份”步骤（#admin-proof-check）；随后重新确认明确对象/范围。",
+        "需要外部执行的步骤只运行本地任务/状态模型，不能据此验证真实系统效果。"
+      ]
+    },
+    {
+      "id": "AD-F-203",
+      "group": "F55",
+      "name": "平台重启与恢复状态查看",
+      "route": "#/admin/services",
+      "entrySelector": "a[href=\"#/admin/services\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"admin/services\"][data-intent=\"service_restart\"]",
+      "representation": "external-execution-mock",
+      "behavior": "需要运维会话和近期验证，确认目标及影响后推进停止/启动/检查步骤；无真实服务控制。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/admin/services；业务数据只在当前授权域范围内可见。",
+        "先完成“验证操作身份”步骤（#admin-proof-check）；随后重新确认明确对象/范围。",
+        "需要外部执行的步骤只运行本地任务/状态模型，不能据此验证真实系统效果。"
+      ]
+    },
+    {
+      "id": "AD-F-204",
+      "group": "F56",
+      "name": "网络诊断",
+      "route": "#/admin/diagnostics",
+      "entrySelector": "a[href=\"#/admin/diagnostics\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"admin/diagnostics\"][data-intent=\"diagnostic_run\"]",
+      "representation": "external-execution-mock",
+      "behavior": "对登记目标模拟DNS/TCP/TLS检查或按时间/级别过滤本地日志并打包；不探测任意网络。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/admin/diagnostics；业务数据只在当前授权域范围内可见。",
+        "需要外部执行的步骤只运行本地任务/状态模型，不能据此验证真实系统效果。"
+      ]
+    },
+    {
+      "id": "AD-F-205",
+      "group": "F56",
+      "name": "平台日志查询、打包与下载",
+      "route": "#/admin/diagnostics",
+      "entrySelector": "a[href=\"#/admin/diagnostics\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"admin/diagnostics\"][data-intent=\"diagnostic_download\"]",
+      "representation": "bounded-local",
+      "behavior": "仅在所选日志产物就绪并重新授权后下载冻结日志快照；没有真实系统日志读取。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/admin/diagnostics；业务数据只在当前授权域范围内可见。",
+        "先对日志类型执行diagnostic_run，按时间/级别形成产物；artifactReady之后才有可下载内容。"
+      ]
+    },
+    {
+      "id": "AD-F-206",
+      "group": "F52",
+      "name": "平台与依赖健康查看",
+      "route": "#/admin/system",
+      "entrySelector": "a[href=\"#/admin/system\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"admin/system\"][data-verb=\"inspect\"]",
+      "representation": "read-only-fixture",
+      "behavior": "浏览所选对象的领域字段、状态和关联信息；记录来自当前授权范围内的合成样本。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/admin/system；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-207",
+      "group": "F55",
+      "name": "运维登录与退出",
+      "route": "#/admin/services",
+      "entrySelector": "a[href=\"#/admin/services\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"admin/services\"][data-intent=\"operations_login\"]",
+      "representation": "bounded-local",
+      "behavior": "用当前合成身份建立受限运维会话，可退出并取消待确认操作；不扩大原有角色权限。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/admin/services；业务数据只在当前授权域范围内可见。"
+      ]
+    },
+    {
+      "id": "AD-F-208",
+      "group": "F54",
+      "name": "平台管理项配置",
+      "route": "#/admin/settings",
+      "entrySelector": "a[href=\"#/admin/settings\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"admin/settings\"][data-intent=\"edit_settings\"]",
+      "representation": "bounded-local",
+      "behavior": "按设置分组维护标识、时间与管理项；仅更新浏览器状态，不更改操作系统时间或服务。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/admin/settings；业务数据只在当前授权域范围内可见。",
+        "表单必填项有效才能保存；关闭或Escape取消草稿，不改原记录。"
+      ]
+    },
+    {
+      "id": "AD-F-209",
+      "group": "F57",
+      "name": "AD 平台安装与部署",
+      "route": "#/admin/install",
+      "entrySelector": "a[href=\"#/admin/install\"]",
+      "actionSelector": "[data-action=\"biz-action\"][data-page=\"admin/install\"][data-intent=\"installation_start\"]",
+      "representation": "external-execution-mock",
+      "behavior": "必须先完成所选配置的有效预检，再单独确认影响，逐步推进平台安装状态；容量不足样本失败，无真实安装。",
+      "verification": "pending-current-revision",
+      "productionAccepted": false,
+      "preconditions": [
+        "使用“演示环境”选择安全负责人、正常场景；初始权限来自同一角色/资源模型。",
+        "侧栏先展开“配置与管理”，再选择对应一级导航及其二级业务页。",
+        "进入 #/admin/install；业务数据只在当前授权域范围内可见。",
+        "对installation-new执行installation_precheck的四步流程，检查通过后另点installation_start并核对#biz-confirm-check。40GB失败样本不能开始。",
+        "需要外部执行的步骤只运行本地任务/状态模型，不能据此验证真实系统效果。"
+      ]
+    }
+  ]
+}

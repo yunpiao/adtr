@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="ADTR 高保真交互原型，全部为合成数据，无真实系统连接。">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; font-src 'none'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>ADTR · 安全运营控制台</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="business-pages.js" defer></script>
+  <script src="admin-pages.js" defer></script>
+  <script src="workbench.js" defer></script>
+  <script src="admin-engine.js" defer></script>
+  <script src="soc-workspace.js" defer></script>
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">跳到主内容</a>
+  <div id="app"></div>
+  <dialog id="dialog" aria-labelledby="dialog-title"></dialog>
+  <div id="toast" role="status" aria-live="polite"></div>
+</body>
+</html>
