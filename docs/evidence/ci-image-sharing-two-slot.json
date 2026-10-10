@@ -1,0 +1,58 @@
+{
+  "run_url": "https://github.com/yunpiao/adtr/actions/runs/38074594460",
+  "head_sha": "aa6dab827986fae646f9e359579acffe38615ed2",
+  "run_attempt": 1,
+  "complete_all_35_success": true,
+  "jobs_listed": 35,
+  "jobs_passed": 35,
+  "failures": [],
+  "browser_jobs": 24,
+  "browser_completed": 24,
+  "browser_test_seconds": {
+    "count": 24,
+    "min": 20.0,
+    "median": 303.5,
+    "max": 653.0,
+    "sum": 7072.0
+  },
+  "download_step_seconds": {
+    "count": 31,
+    "min": 1.0,
+    "median": 4.0,
+    "max": 19.0,
+    "sum": 142.0
+  },
+  "verify_load_step_seconds": {
+    "count": 31,
+    "min": 4.0,
+    "median": 7.0,
+    "max": 13.0,
+    "sum": 239.0
+  },
+  "timing_note": "Step timestamps have 1-second resolution. These are observations, not a controlled causal speedup benchmark.",
+  "wall_seconds": 4591.0,
+  "browser_runner_seconds": 8772.0,
+  "browser_matrix_wall_seconds": 4558.0,
+  "merge_checkout_sha": "d78760b810b3fcdda6a1955ca7309b4d867ad458",
+  "browser_max_parallel": 2,
+  "image_source": "public.ecr.aws/docker/library/postgres:17.6-alpine@sha256:ef257d85f76e48da1c64832459b59fcaba1a4dac97bf5d7450c77753542eee94",
+  "full_run_archive_bytes": 116657483,
+  "full_run_archive_sha256": "ec5a83f8049d3ee5fb6d7209fcef1db04d07ca8fb6bd691b0fd694496fe4f872",
+  "full_run_producer_pull_attempts": 1,
+  "full_run_prepare_seconds": 17.336,
+  "npm_cache_restored_bytes": 26777873,
+  "previous_observed_npm_cache_bytes": 1074,
+  "expected_artifacts_present": 10,
+  "comparison": "76m31s is slightly slower than recent green 74\u201376m runs. Image sharing and cache correctness are verified; this is not an end-to-end speedup claim.",
+  "probe_url": "https://github.com/yunpiao/adtr/actions/runs/38074448398",
+  "probe_wall_seconds": 38,
+  "independent_archive_audit": {
+    "index_bytes": 10293,
+    "manifest_bytes": 2865,
+    "config_bytes": 8488,
+    "ordered_layer_count": 10,
+    "layer_tar_bytes": 281036800,
+    "content_addressed_blob_count": 22,
+    "result": "All pinned digests and ordered config rootfs.diff_ids match; streamed without local image execution or extraction."
+  }
+}

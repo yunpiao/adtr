@@ -60,6 +60,7 @@ class CIEventContract(unittest.TestCase):
         self.assertNotIn('name: Require native no-store stream completion', baseline)
         self.assertIn('ADTR_E2E_NATIVE_STREAM_MODE: native-finish', fixed)
         self.assertIn('ADTR_E2E_NATIVE_STREAM_MODE: native-finish', assets_fixed)
+        self.assertIn('max-parallel: 4', browser)
         self.assertNotIn('ADTR_E2E_CHROMIUM_PATH', browser)
         self.assertIn('USER_ASSETS_FIXED_RESULT: ${{ needs.user-assets-fixed.result }}', text)
         self.assertIn('&& test "$USER_ASSETS_FIXED_RESULT" = success', text)

@@ -5,7 +5,8 @@ Engineering issue: [#96](https://github.com/yunpiao/adtr/issues/96).
 ## Conclusion and measured baseline
 
 The candidate removes repeated PostgreSQL registry pulls from 31 isolated
-acceptance jobs and aligns npm's cache path. Browser concurrency remains **2**.
+acceptance jobs and aligns npm's cache path. Browser concurrency is now a
+bounded **4-slot canary**; auth/fixed matrices remain at **2**.
 All original 34 jobs remain; `prepare-postgres` adds a required 35th job.
 Every original test, assertion, timeout, permission and workflow event is retained.
 
@@ -14,8 +15,17 @@ and explicitly labelled scheduling simulations are in
 [ci-acceleration-baseline.json](evidence/ci-acceleration-baseline.json).
 About 83% of browser runner time was real acceptance work, so cache changes alone
 cannot remove most waiting. A four-slot simulation predicts roughly 37–38 minutes
-for the existing browser workload; four-slot execution has **not** been measured
-or enabled. Archive transfer overhead and final CI duration require remote proof.
+for the existing browser workload. The four-slot setting is now enabled in this
+candidate; its runtime and reliability still require a new exact-head full run.
+
+The preceding unchanged two-slot head `aa6dab827986fae646f9e359579acffe38615ed2`
+passed [all 35 jobs on attempt 1](https://github.com/yunpiao/adtr/actions/runs/38074594460)
+in **76m31s**. That is slightly slower than the recent baseline, so this stage
+proved stable delivery rather than an end-to-end speedup. All 31 consumers
+loaded the verified artifact; download steps were 1–19s (median 4s), and
+verification/load was 4–13s (median 7s). The later npm cache restored 26,777,873
+bytes into the intended directory instead of the old 1,074-byte cache. Full
+measurements are preserved in [the two-slot evidence](evidence/ci-image-sharing-two-slot.json).
 
 ## Trust chain and failure semantics
 
@@ -72,10 +82,18 @@ attempt, rather than rebuilding a name from the newer consumer run attempt.
 - `--pull=never` / Compose `pull_policy: never` are necessary for artifact
   consumers. Missing/corrupt images fail rather than silently hitting ECR.
   Removing these settings would undermine the no-fallback guarantee.
-- Browser/auth/fixed matrices keep `max-parallel: 2`, `fail-fast: false`;
-  Playwright keeps `workers: 1`, `retries: 0`. A future parallelism increase needs
-  measured transfer stability and a separate decision. Removing max-parallel
-  would allow an unbounded scheduling burst and is outside this change.
+- Browser `max-parallel: 4` allows four independent isolated suites to run
+  together and targets the two-slot queue, after the complete shared-image run
+  passed. Auth/fixed matrices keep `max-parallel: 2`; every matrix keeps
+  `fail-fast: false`, and Playwright keeps `workers: 1`, `retries: 0`. The bound is
+  required to limit peak resources; removing it permits a scheduling burst.
+  Setting it back to two preserves every test but restores the earlier queue.
+  The potential peak is 11 standard hosted jobs during overlap (4 browser +
+  2 auth + 2 fixed + 1 contracts + 2 native diagnostics), versus 9 with two browser
+  slots. The prepare/native startup peak is three, and verify runs afterward.
+  Each consumer uses its own runner/database; no added ECR pulls are required.
+  Real resource/transfer failures require investigating or reverting concurrency,
+  not weakening checks. Account-wide runner availability is not assumed.
 - The shared image is stored for one day. Consumers incur archive download,
   SHA256, load and runtime validation costs; exact bytes/times are recorded by
   the probe. This is a same-run immutable artifact, not a cross-run cache.
@@ -95,8 +113,12 @@ attempt, rather than rebuilding a name from the newer consumer run attempt.
    checks, and post-merge main CI. A passing image probe is not a full CI pass.
 
 No Docker executable is available in the current cloud development workspace.
-Until the remote probe and full pipeline run, Docker roundtrip success, cache
-restoration performance and CI speedup remain unverified. Product acceptance
+The [two-job remote probe](https://github.com/yunpiao/adtr/actions/runs/38074448398)
+and subsequent 35-job run verified the real transfer, database execution,
+all prior acceptance gates and useful npm cache restoration. Independent byte
+review additionally matched the fixed index, manifest, config, all ten ordered
+layer tar hashes and all 22 content-addressed saved blobs. Four-slot stability,
+actual speedup and post-merge main validation remain open. Product acceptance
 remains 0/209; this change does not deploy anything.
 
 References: [artifact validation](https://docs.github.com/en/actions/tutorials/store-and-share-data#validating-artifacts),
