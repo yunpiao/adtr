@@ -1,0 +1,79 @@
+name: image-transfer-probe
+# Explicit diagnostic branch pushes only; engineering-ci's full gates are unchanged.
+on:
+  push:
+    branches: ['ci/image-transfer-probe/**']
+permissions: {}
+env:
+  ADTR_EVENT_HEAD_SHA: ${{ github.sha }}
+  ADTR_EVENT_BASE_SHA: ${{ github.event.before }}
+concurrency:
+  group: image-probe-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  prepare-postgres:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    outputs:
+      artifact_id: ${{ steps.upload.outputs.artifact-id }}
+      archive_sha256: ${{ steps.prepare.outputs.archive_sha256 }}
+      producer_attempt: ${{ steps.prepare.outputs.producer_attempt }}
+      checkout_sha: ${{ steps.prepare.outputs.checkout_sha }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Prepare the exact PostgreSQL image once
+        id: prepare
+        run: python3 scripts/ci_postgres_image.py produce --directory "$RUNNER_TEMP/adtr-postgres"
+      - name: Share the verified public image within this run
+        id: upload
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: postgres-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/adtr-postgres/*
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 1
+
+  image-roundtrip:
+    needs: [prepare-postgres]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Require explicit immutable producer outputs
+        env:
+          ARTIFACT_ID: ${{ needs.prepare-postgres.outputs.artifact_id }}
+          ARCHIVE_SHA: ${{ needs.prepare-postgres.outputs.archive_sha256 }}
+          PRODUCER_ATTEMPT: ${{ needs.prepare-postgres.outputs.producer_attempt }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$ARCHIVE_SHA" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$PRODUCER_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
+      - name: Download this run's immutable PostgreSQL image artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          artifact-ids: ${{ needs.prepare-postgres.outputs.artifact_id }}
+          merge-multiple: true
+          path: ${{ runner.temp }}/adtr-postgres
+      - name: Prove transfer hard failures and real no-pull PostgreSQL readiness
+        env:
+          ADTR_CI_POSTGRES_ARCHIVE_SHA: ${{ needs.prepare-postgres.outputs.archive_sha256 }}
+          ADTR_CI_POSTGRES_PRODUCER_ATTEMPT: ${{ needs.prepare-postgres.outputs.producer_attempt }}
+        run: python3 scripts/probe_ci_postgres_image.py --directory "$RUNNER_TEMP/adtr-postgres" --output "$RUNNER_TEMP/adtr-image-probe.json"
+      - name: Retain exact-head image transfer proof
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: image-transfer-proof-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/adtr-image-probe.json
+          if-no-files-found: error
+          retention-days: 7

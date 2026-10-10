@@ -9,6 +9,9 @@ import urllib.request
 import uuid
 
 
+from ci_postgres_image import postgres_compose_files
+
+
 SERVICES = [("api", "8080"), ("worker", "8081")]
 
 
@@ -35,10 +38,10 @@ def wait_ready(compose, probe, expected_ids, attempts=120, pause=time.sleep):
     raise AssertionError("services did not recover readiness in the expected containers")
 
 
-def main():
+def run_lifecycle(compose_files=()):
     project = "adtr-smoke-" + uuid.uuid4().hex[:12]
     env = dict(os.environ, ADTR_DEV_PASSWORD=secrets.token_hex(24), ADTR_API_PORT="0", ADTR_WORKER_PORT="0")
-    base = ["docker", "compose", "-p", project]
+    base = ["docker", "compose", *compose_files, "-p", project]
 
     def compose(*args, capture=False):
         return subprocess.run(base + list(args), env=env, check=True, text=True, capture_output=capture)
@@ -95,6 +98,11 @@ def main():
     finally:
         # This randomly named project belongs solely to this test.
         compose("down", "--volumes", "--remove-orphans")
+
+
+def main():
+    with postgres_compose_files() as compose_files:
+        run_lifecycle(compose_files)
 
 
 if __name__ == "__main__":

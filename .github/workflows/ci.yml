@@ -6,11 +6,44 @@ on:
   push:
     branches: [main]
 permissions: {}
+# setup-node, npm ci and npm audit must restore/use the same content cache.
+env:
+  npm_config_cache: /tmp/adtr-npm-cache
+  ADTR_EVENT_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha || github.sha }}
+  ADTR_EVENT_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 jobs:
+  prepare-postgres:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    outputs:
+      artifact_id: ${{ steps.upload.outputs.artifact-id }}
+      archive_sha256: ${{ steps.prepare.outputs.archive_sha256 }}
+      producer_attempt: ${{ steps.prepare.outputs.producer_attempt }}
+      checkout_sha: ${{ steps.prepare.outputs.checkout_sha }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Prepare the exact PostgreSQL image once
+        id: prepare
+        run: python3 scripts/ci_postgres_image.py produce --directory "$RUNNER_TEMP/adtr-postgres"
+      - name: Share the verified public image within this run
+        id: upload
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: postgres-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/adtr-postgres/*
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 1
+
   contracts:
+    needs: [prepare-postgres]
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
@@ -19,6 +52,28 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           persist-credentials: false
+      - name: Require explicit immutable producer outputs
+        env:
+          ARTIFACT_ID: ${{ needs.prepare-postgres.outputs.artifact_id }}
+          ARCHIVE_SHA: ${{ needs.prepare-postgres.outputs.archive_sha256 }}
+          PRODUCER_ATTEMPT: ${{ needs.prepare-postgres.outputs.producer_attempt }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$ARCHIVE_SHA" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$PRODUCER_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
+      - name: Download this run's immutable PostgreSQL image artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          artifact-ids: ${{ needs.prepare-postgres.outputs.artifact_id }}
+          merge-multiple: true
+          path: ${{ runner.temp }}/adtr-postgres
+      - name: Verify image provenance and load without a registry fallback
+        env:
+          ADTR_CI_POSTGRES_ARCHIVE_SHA: ${{ needs.prepare-postgres.outputs.archive_sha256 }}
+          ADTR_CI_POSTGRES_PRODUCER_ATTEMPT: ${{ needs.prepare-postgres.outputs.producer_attempt }}
+        run: python3 scripts/ci_postgres_image.py consume --directory "$RUNNER_TEMP/adtr-postgres"
       - uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
         with:
           go-version: '1.27.1'
@@ -33,11 +88,20 @@ jobs:
       - name: Lint, race tests, type checking and build
         run: make check
       - name: Real PostgreSQL migration and schema contracts
+        env:
+          ADTR_CI_POSTGRES_BUNDLE: ${{ runner.temp }}/adtr-postgres
+          ADTR_CI_POSTGRES_ARCHIVE_SHA: ${{ needs.prepare-postgres.outputs.archive_sha256 }}
+          ADTR_CI_POSTGRES_PRODUCER_ATTEMPT: ${{ needs.prepare-postgres.outputs.producer_attempt }}
         run: python3 scripts/test_integration.py --suite non-auth
       - name: API and Worker lifecycle
+        env:
+          ADTR_CI_POSTGRES_BUNDLE: ${{ runner.temp }}/adtr-postgres
+          ADTR_CI_POSTGRES_ARCHIVE_SHA: ${{ needs.prepare-postgres.outputs.archive_sha256 }}
+          ADTR_CI_POSTGRES_PRODUCER_ATTEMPT: ${{ needs.prepare-postgres.outputs.producer_attempt }}
         run: python3 scripts/test_lifecycle.py
 
   auth-integration:
+    needs: [prepare-postgres]
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
@@ -51,6 +115,28 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           persist-credentials: false
+      - name: Require explicit immutable producer outputs
+        env:
+          ARTIFACT_ID: ${{ needs.prepare-postgres.outputs.artifact_id }}
+          ARCHIVE_SHA: ${{ needs.prepare-postgres.outputs.archive_sha256 }}
+          PRODUCER_ATTEMPT: ${{ needs.prepare-postgres.outputs.producer_attempt }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$ARCHIVE_SHA" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$PRODUCER_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
+      - name: Download this run's immutable PostgreSQL image artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          artifact-ids: ${{ needs.prepare-postgres.outputs.artifact_id }}
+          merge-multiple: true
+          path: ${{ runner.temp }}/adtr-postgres
+      - name: Verify image provenance and load without a registry fallback
+        env:
+          ADTR_CI_POSTGRES_ARCHIVE_SHA: ${{ needs.prepare-postgres.outputs.archive_sha256 }}
+          ADTR_CI_POSTGRES_PRODUCER_ATTEMPT: ${{ needs.prepare-postgres.outputs.producer_attempt }}
+        run: python3 scripts/ci_postgres_image.py consume --directory "$RUNNER_TEMP/adtr-postgres"
       - uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
         with:
           go-version: '1.27.1'
@@ -58,9 +144,14 @@ jobs:
       - name: Verify dependency checksums
         run: go mod verify
       - name: Real PostgreSQL authentication and HTTP contracts
+        env:
+          ADTR_CI_POSTGRES_BUNDLE: ${{ runner.temp }}/adtr-postgres
+          ADTR_CI_POSTGRES_ARCHIVE_SHA: ${{ needs.prepare-postgres.outputs.archive_sha256 }}
+          ADTR_CI_POSTGRES_PRODUCER_ATTEMPT: ${{ needs.prepare-postgres.outputs.producer_attempt }}
         run: python3 scripts/test_integration.py --suite auth --shard ${{ matrix.shard }}
 
   browser:
+    needs: [prepare-postgres]
     env:
       ADTR_E2E_NATIVE_STREAM_MODE: ${{ (matrix.name == 'user-assets-v2' || matrix.name == 'user-assets-v2-readers') && 'stable-body' || 'native-finish' }}
     runs-on: ubuntu-24.04
@@ -124,6 +215,28 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           persist-credentials: false
+      - name: Require explicit immutable producer outputs
+        env:
+          ARTIFACT_ID: ${{ needs.prepare-postgres.outputs.artifact_id }}
+          ARCHIVE_SHA: ${{ needs.prepare-postgres.outputs.archive_sha256 }}
+          PRODUCER_ATTEMPT: ${{ needs.prepare-postgres.outputs.producer_attempt }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$ARCHIVE_SHA" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$PRODUCER_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
+      - name: Download this run's immutable PostgreSQL image artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          artifact-ids: ${{ needs.prepare-postgres.outputs.artifact_id }}
+          merge-multiple: true
+          path: ${{ runner.temp }}/adtr-postgres
+      - name: Verify image provenance and load without a registry fallback
+        env:
+          ADTR_CI_POSTGRES_ARCHIVE_SHA: ${{ needs.prepare-postgres.outputs.archive_sha256 }}
+          ADTR_CI_POSTGRES_PRODUCER_ATTEMPT: ${{ needs.prepare-postgres.outputs.producer_attempt }}
+        run: python3 scripts/ci_postgres_image.py consume --directory "$RUNNER_TEMP/adtr-postgres"
       - uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
         with:
           go-version: '1.27.1'
@@ -138,6 +251,10 @@ jobs:
       - name: Install real browser
         run: cd web && npx playwright install --with-deps chromium
       - name: Run isolated real browser API database acceptance
+        env:
+          ADTR_CI_POSTGRES_BUNDLE: ${{ runner.temp }}/adtr-postgres
+          ADTR_CI_POSTGRES_ARCHIVE_SHA: ${{ needs.prepare-postgres.outputs.archive_sha256 }}
+          ADTR_CI_POSTGRES_PRODUCER_ATTEMPT: ${{ needs.prepare-postgres.outputs.producer_attempt }}
         run: ${{ matrix.command }}
       - name: Retain synthetic profile visual evidence
         if: ${{ success() && matrix.name == 'profile' }}
@@ -265,6 +382,7 @@ jobs:
           retention-days: 7
 
   user-assets-fixed:
+    needs: [prepare-postgres]
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
@@ -280,6 +398,28 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           persist-credentials: false
+      - name: Require explicit immutable producer outputs
+        env:
+          ARTIFACT_ID: ${{ needs.prepare-postgres.outputs.artifact_id }}
+          ARCHIVE_SHA: ${{ needs.prepare-postgres.outputs.archive_sha256 }}
+          PRODUCER_ATTEMPT: ${{ needs.prepare-postgres.outputs.producer_attempt }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$ARCHIVE_SHA" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$PRODUCER_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
+      - name: Download this run's immutable PostgreSQL image artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          artifact-ids: ${{ needs.prepare-postgres.outputs.artifact_id }}
+          merge-multiple: true
+          path: ${{ runner.temp }}/adtr-postgres
+      - name: Verify image provenance and load without a registry fallback
+        env:
+          ADTR_CI_POSTGRES_ARCHIVE_SHA: ${{ needs.prepare-postgres.outputs.archive_sha256 }}
+          ADTR_CI_POSTGRES_PRODUCER_ATTEMPT: ${{ needs.prepare-postgres.outputs.producer_attempt }}
+        run: python3 scripts/ci_postgres_image.py consume --directory "$RUNNER_TEMP/adtr-postgres"
       - uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
         with:
           go-version: '1.27.1'
@@ -317,6 +457,10 @@ jobs:
           } > "$fixture/provenance.txt"
           cat "$fixture/provenance.txt"
       - name: Require complete real user asset suite on fixed engine
+        env:
+          ADTR_CI_POSTGRES_BUNDLE: ${{ runner.temp }}/adtr-postgres
+          ADTR_CI_POSTGRES_ARCHIVE_SHA: ${{ needs.prepare-postgres.outputs.archive_sha256 }}
+          ADTR_CI_POSTGRES_PRODUCER_ATTEMPT: ${{ needs.prepare-postgres.outputs.producer_attempt }}
         run: python3 scripts/test_auth_e2e.py --suite "${{ matrix.suite }}"
       - name: Retain fixed-engine real user asset evidence
         if: ${{ always() }}
@@ -331,16 +475,17 @@ jobs:
 
   verify:
     if: ${{ always() }}
-    needs: [contracts, auth-integration, browser, native-no-store, native-no-store-fixed, user-assets-fixed]
+    needs: [prepare-postgres, contracts, auth-integration, browser, native-no-store, native-no-store-fixed, user-assets-fixed]
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - name: Require every contract and browser suite
         env:
+          POSTGRES_RESULT: ${{ needs.prepare-postgres.result }}
           CONTRACT_RESULT: ${{ needs.contracts.result }}
           AUTH_INTEGRATION_RESULT: ${{ needs.auth-integration.result }}
           BROWSER_RESULT: ${{ needs.browser.result }}
           NATIVE_STREAM_RESULT: ${{ needs.native-no-store.result }}
           NATIVE_STREAM_FIXED_RESULT: ${{ needs.native-no-store-fixed.result }}
           USER_ASSETS_FIXED_RESULT: ${{ needs.user-assets-fixed.result }}
-        run: test "$CONTRACT_RESULT" = success && test "$AUTH_INTEGRATION_RESULT" = success && test "$BROWSER_RESULT" = success && test "$NATIVE_STREAM_RESULT" = success && test "$NATIVE_STREAM_FIXED_RESULT" = success && test "$USER_ASSETS_FIXED_RESULT" = success
+        run: test "$POSTGRES_RESULT" = success && test "$CONTRACT_RESULT" = success && test "$AUTH_INTEGRATION_RESULT" = success && test "$BROWSER_RESULT" = success && test "$NATIVE_STREAM_RESULT" = success && test "$NATIVE_STREAM_FIXED_RESULT" = success && test "$USER_ASSETS_FIXED_RESULT" = success

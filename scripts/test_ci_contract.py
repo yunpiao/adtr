@@ -23,7 +23,7 @@ class CIEventContract(unittest.TestCase):
         self.assertIn('scripts/test_integration.py --suite non-auth', text)
         self.assertIn('scripts/test_integration.py --suite auth --shard ${{ matrix.shard }}', text)
         self.assertIn('shard: [1, 2, 3, 4]', text)
-        self.assertIn('needs: [contracts, auth-integration, browser, native-no-store, native-no-store-fixed, user-assets-fixed]', text)
+        self.assertIn('needs: [prepare-postgres, contracts, auth-integration, browser, native-no-store, native-no-store-fixed, user-assets-fixed]', text)
         self.assertIn('if: ${{ always() }}', text)
         self.assertIn('fail-fast: false', text)
         self.assertIn('max-parallel: 2', text)

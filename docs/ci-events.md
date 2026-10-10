@@ -54,3 +54,14 @@ inside a 540-second harness budget, preserving the 20-minute job limit.
 F01 adds a domains browser suite against an isolated synthetic LDAP container on fixed 389/636 ports. The same bounded browser matrix and final verify gate apply. Its ephemeral CA and credentials are test-owned; this is protocol integration evidence, not Windows/AD acceptance.
 
 F03 adds the operations browser suite with a storage-only domain key and probes disabled. It exercises real API/PostgreSQL credential-registration lifecycle and committed-response-loss recovery, not LDAP or remote account administration. The browser timeout and concurrency gate remain bounded.
+
+## Same-run image preparation
+
+The original 34 jobs remain; required `prepare-postgres` makes 35. The 31
+PostgreSQL consumers load the same-run immutable artifact after strict source,
+digest, checkout and archive checks, then use the verified image ID without
+pulling. `verify` additionally requires preparation success. Matrix concurrency
+remains two. A separate two-job workflow runs only on explicit
+`ci/image-transfer-probe/**` branch pushes; it does not replace any full-CI gate.
+Trust boundaries, parameters, evidence limits and measurement sequence are in
+[ci-image-sharing.md](ci-image-sharing.md).

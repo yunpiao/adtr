@@ -10,6 +10,7 @@ import tempfile
 import time
 import uuid
 
+from ci_postgres_image import postgres_image_args
 from test_integration import IMAGE
 
 
@@ -70,7 +71,7 @@ class LDAPFixture:
                         "-e", "ADTR_LDAP_FIXTURE_USERNAME", "-e", "ADTR_LDAP_FIXTURE_PASSWORD"]
         if self.control_path is not None:
             command.extend(["-v", f"{self.control_path}:/control:rw"])
-        command.extend([IMAGE,
+        command.extend([*postgres_image_args(IMAGE),
                         "-cert", "/fixture/server.crt", "-key", "/fixture/server.key",
                         "-starttls-listen", "0.0.0.0:389", "-ldaps-listen", "0.0.0.0:636"])
         if self.control_path is not None:

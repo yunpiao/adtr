@@ -14,6 +14,7 @@ import urllib.error
 import urllib.request
 import uuid
 
+from ci_postgres_image import postgres_image_args
 from test_integration import IMAGE
 from ldap_e2e_fixture import LDAPFixture
 from account_barrier_e2e_fixture import AccountBarrierFixture
@@ -71,7 +72,7 @@ def main():
             subprocess.run(["docker", "run", "--detach", "--rm", "--name", name,
                             "--label", f"{OWNER_LABEL}={owner}",
                             "-e", "POSTGRES_PASSWORD", "-e", "POSTGRES_DB=adtr_e2e",
-                            "-p", "127.0.0.1::5432", IMAGE], env=env, check=True, capture_output=True, timeout=60)
+                            "-p", "127.0.0.1::5432", *postgres_image_args(IMAGE)], env=env, check=True, capture_output=True, timeout=60)
         except subprocess.CalledProcessError as error:
             report_container_startup_failure(error, password)
             raise
