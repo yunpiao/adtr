@@ -1,3 +1,4 @@
+import { revealNavigation } from "./test-navigation";
 import {
   act,
   fireEvent,
@@ -362,6 +363,7 @@ describe("personal profile workspace", () => {
   it("has a separate authenticated tab, preserves Account heading, and permits viewers without management grants", async () => {
     render(<App />);
     await screen.findByRole("heading", { name: "账户概览" });
+    await revealNavigation("个人资料");
     click("个人资料");
     await screen.findByText("合成用户");
     expect(screen.getByRole("heading", { name: "个人资料" })).toBeVisible();
@@ -558,15 +560,19 @@ describe("personal profile workspace", () => {
     imagePresent = true;
     render(<App />);
     await screen.findByRole("heading", { name: "账户概览" });
+    await revealNavigation("个人资料");
     click("个人资料");
     await screen.findByText("合成用户");
     await select();
+    await revealNavigation("账户概览");
     click("账户概览");
     await screen.findByRole("heading", { name: "账户概览" });
     expect(screen.queryByRole("img")).toBeNull();
+    await revealNavigation("个人资料");
     click("个人资料");
     await screen.findByText("合成用户");
     expect(screen.getByRole("button", { name: "替换头像" })).toBeDisabled();
+    await revealNavigation("退出登录");
     click("退出登录");
     await screen.findByRole("heading", { name: "登录账户" });
     expect(screen.queryByRole("img")).toBeNull();

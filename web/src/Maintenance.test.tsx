@@ -1,3 +1,4 @@
+import { revealNavigation } from "./test-navigation";
 import {
   act,
   fireEvent,
@@ -565,6 +566,7 @@ describe("reversible archive UI", () => {
     );
     render(<App />);
     await screen.findByRole("heading", { name: "账户概览" });
+    await revealNavigation("后台任务");
     click("后台任务");
     await screen.findByRole("table", { name: "任务列表" });
     click("继续核对维护操作");
@@ -579,6 +581,7 @@ describe("reversible archive UI", () => {
     expect(screen.queryByLabelText("操作者当前密码")).not.toBeInTheDocument();
     override = (url) =>
       url === "/api/auth/logout" ? response({ result: "SUCCESS" }) : undefined;
+    await revealNavigation("退出登录");
     click("退出登录");
     await screen.findByRole("heading", { name: "登录账户" });
     expect(

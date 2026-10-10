@@ -1,3 +1,4 @@
+import { revealNavigation } from "./test-navigation";
 import {
   fireEvent,
   render,
@@ -54,6 +55,7 @@ async function fill(label: string, value: string) {
   await userEvent.type(screen.getByLabelText(label), value);
 }
 async function click(name: string) {
+  await revealNavigation(name);
   await userEvent.click(screen.getByRole("button", { name }));
 }
 describe("validation", () => {

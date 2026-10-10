@@ -1,3 +1,4 @@
+import { navigateTo } from "./navigation";
 import { test, expect, type BrowserContext, type Page } from "@playwright/test";
 import { createHmac } from "node:crypto";
 
@@ -63,7 +64,7 @@ async function changeInitialPassword(
 }
 
 async function enrollMfa(page: Page, password: string): Promise<Authenticator> {
-  await page.getByRole("button", { name: "多因素认证", exact: true }).click();
+  await navigateTo(page, "多因素认证");
   await page.getByLabel("当前密码", { exact: true }).fill(password);
   await page.getByRole("button", { name: "开始设置", exact: true }).click();
   const secret = await page
@@ -130,7 +131,7 @@ async function relogin(
   ).toBeVisible();
 }
 async function openResources(page: Page) {
-  await page.getByRole("button", { name: "资源与租户", exact: true }).click();
+  await navigateTo(page, "资源与租户");
   await expect(
     page.getByRole("heading", { name: "当前数据权限", exact: true }),
   ).toBeVisible();
@@ -164,7 +165,7 @@ test("real domain enrollment, explicit grant, TLS diagnostics, rotation and loca
     dc = "dc.synthetic.invalid",
     group = "E2EDomainConnection";
   const openDomains = async () => {
-    await page.getByRole("button", { name: "域连接", exact: true }).click();
+    await navigateTo(page, "域连接");
     await expect(
       page.getByRole("heading", { name: "域连接", exact: true }),
     ).toBeVisible();

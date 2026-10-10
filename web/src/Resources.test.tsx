@@ -1,3 +1,4 @@
+import { revealNavigation } from "./test-navigation";
 import {
   act,
   fireEvent,
@@ -135,8 +136,10 @@ beforeEach(() => {
   });
   vi.stubGlobal("fetch", fetcher);
 });
-const click = async (name: string) =>
-  userEvent.click(await screen.findByRole("button", { name }));
+const click = async (name: string) => {
+  await revealNavigation(name);
+  return userEvent.click(await screen.findByRole("button", { name }));
+};
 const fill = (label: string, value: string) =>
   fireEvent.change(screen.getByLabelText(label, { exact: true }), {
     target: { value },
@@ -710,6 +713,7 @@ describe("tenant configuration and navigation", () => {
   });
   it("clears draft fields on Back and rechecks account on navigation away", async () => {
     render(<App />);
+    await screen.findByRole("navigation", { name: "账户设置" });
     await click("资源与租户");
     await click("资源组");
     await click("新增资源组");

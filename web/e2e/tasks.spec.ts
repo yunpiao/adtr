@@ -1,3 +1,4 @@
+import { navigateTo } from "./navigation";
 import { test, expect, type BrowserContext, type Page } from "@playwright/test";
 import { createHmac } from "node:crypto";
 
@@ -67,7 +68,7 @@ async function changeInitialPassword(
 }
 
 async function enrollMfa(page: Page, password: string): Promise<Authenticator> {
-  await page.getByRole("button", { name: "多因素认证", exact: true }).click();
+  await navigateTo(page, "多因素认证");
   await page.getByLabel("当前密码", { exact: true }).fill(password);
   await page.getByRole("button", { name: "开始设置", exact: true }).click();
   const secret = await page
@@ -122,7 +123,7 @@ test("real browser → API → Worker → PostgreSQL task result, idempotency an
   await login(page, username, password);
   await changeInitialPassword(page, password, changed);
   const mfa = await enrollMfa(page, changed);
-  await page.getByRole("button", { name: "后台任务", exact: true }).click();
+  await navigateTo(page, "后台任务");
   await expect(page.getByRole("table", { name: "任务列表" })).toBeVisible();
   await expect(
     page.getByText(/平台健康成功不代表\s*AD 业务验收通过。/),
@@ -261,7 +262,7 @@ test("real browser → API → Worker → PostgreSQL task result, idempotency an
   // Create a persisted task-read-only role through the same expanded UI editor.
   // These are real synthetic credentials and MFA, so denial cannot be explained
   // by an absent enrollment, invalid proof, or a forged browser permission flag.
-  await page.getByRole("button", { name: "访问管理", exact: true }).click();
+  await navigateTo(page, "访问管理");
   await page.getByRole("button", { name: "角色管理", exact: true }).click();
   await page.getByRole("button", { name: "新增角色", exact: true }).click();
   await page
@@ -324,7 +325,7 @@ test("real browser → API → Worker → PostgreSQL task result, idempotency an
     await login(reader, readerName, readerInitial);
     await changeInitialPassword(reader, readerInitial, readerChanged);
     const readerMfa = await enrollMfa(reader, readerChanged);
-    await reader.getByRole("button", { name: "后台任务", exact: true }).click();
+    await navigateTo(reader, "后台任务");
     await expect(reader.getByRole("table", { name: "任务列表" })).toBeVisible();
     await expect(
       reader.getByRole("rowheader").filter({ hasText: id }),
@@ -377,7 +378,7 @@ test("real browser → API → Worker → PostgreSQL task result, idempotency an
     expect(
       (await readJSON(context, "/api/tasks?pageIdx=1&pageSize=20")).page.total,
     ).toBe(1);
-    await reader.getByRole("button", { name: "退出登录", exact: true }).click();
+    await navigateTo(reader, "退出登录");
     await expect(
       reader.getByRole("heading", { name: "登录账户", exact: true }),
     ).toBeVisible();

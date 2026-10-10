@@ -1,3 +1,4 @@
+import { revealNavigation } from "./test-navigation";
 import {
   act,
   fireEvent,
@@ -247,6 +248,7 @@ describe("task workspace", () => {
   it("uses the task nav and clears the page after navigation and browser Back", async () => {
     render(<App />);
     await screen.findByRole("heading", { name: "账户概览" });
+    await revealNavigation("后台任务");
     click("后台任务");
     await screen.findByRole("table", { name: "任务列表" });
     expect(screen.getByText(/域连接检测请使用域连接页面/)).toBeVisible();
@@ -256,6 +258,7 @@ describe("task workspace", () => {
           .body as string,
       ).paths,
     ).toEqual(taskOperations);
+    await revealNavigation("账户概览");
     click("账户概览");
     await screen.findByRole("heading", { name: "账户概览" });
     act(() => window.dispatchEvent(new PopStateEvent("popstate")));

@@ -1,3 +1,4 @@
+import { revealNavigation } from "./test-navigation";
 import {
   act,
   fireEvent,
@@ -649,6 +650,7 @@ describe("domain workspace security flows", () => {
   it("Back removes domain secrets and ignores stale detail responses", async () => {
     render(<App />);
     await screen.findByRole("heading", { name: "账户概览" });
+    await revealNavigation("域连接");
     click("域连接");
     await screen.findByRole("table", { name: "获授权的域连接" });
     click("新增域连接");

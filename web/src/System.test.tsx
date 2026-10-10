@@ -1,3 +1,4 @@
+import { revealNavigation } from "./test-navigation";
 import {
   act,
   fireEvent,
@@ -799,6 +800,7 @@ describe("system health interface", () => {
   it("navigation and Back/Forward clear pending proof and discard late responses", async () => {
     render(<App />);
     await screen.findByRole("heading", { name: "账户概览" });
+    await revealNavigation("系统健康");
     click("系统健康");
     await screen.findByRole("table", { name: "已登记节点" });
     click("存储管理");

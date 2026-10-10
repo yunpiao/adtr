@@ -1,3 +1,4 @@
+import { navigateTo } from "./navigation";
 import {
   test,
   expect,
@@ -116,7 +117,7 @@ async function login(page: Page, username: string, password: string) {
 }
 
 async function enrollMfa(page: Page, password: string): Promise<Authenticator> {
-  await page.getByRole("button", { name: "多因素认证", exact: true }).click();
+  await navigateTo(page, "多因素认证");
   await fillSecret(page.getByLabel("当前密码", { exact: true }), password);
   await page.getByRole("button", { name: "开始设置", exact: true }).click();
   const secret = await page
@@ -223,7 +224,7 @@ async function observationAction(page: Page, action: () => Promise<unknown>) {
 }
 
 async function openDirectory(page: Page) {
-  await page.getByRole("button", { name: "目录资产", exact: true }).click();
+  await navigateTo(page, "目录资产");
   await expect(
     page.getByRole("heading", { name: "目录资产", exact: true }),
   ).toBeVisible();
@@ -391,7 +392,7 @@ test("real empty directory observation and cancellation during paged I/O", async
   expect(tenant.maxAdCount).toBe(2);
   expect(tenant.expireTime).toBeGreaterThan(Math.floor(Date.now() / 1000));
 
-  await page.getByRole("button", { name: "域连接", exact: true }).click();
+  await navigateTo(page, "域连接");
   await page.getByRole("button", { name: "新增域连接", exact: true }).click();
   await page.getByLabel("域 DNS 名称", { exact: true }).fill(domain);
   await page
@@ -420,7 +421,7 @@ test("real empty directory observation and cancellation during paged I/O", async
   expect(deniedScope.status()).toBe(404);
   expect(await deniedScope.json()).toEqual({ error: "not_found" });
 
-  await page.getByRole("button", { name: "资源与租户", exact: true }).click();
+  await navigateTo(page, "资源与租户");
   await page.getByRole("button", { name: "资源组", exact: true }).click();
   await page.getByRole("button", { name: "新增资源组", exact: true }).click();
   await page.getByLabel("资源组名称", { exact: true }).fill(groupName);
@@ -455,7 +456,7 @@ test("real empty directory observation and cancellation during paged I/O", async
   // the bootstrap session; create the producer only after that UI re-login.
   // Producer: password/MFA (3), account/connection grant/binding/directory
   // grant (4), first sync/second sync/cancel (3) = 10. No limit or clock bypass.
-  await page.getByRole("button", { name: "访问管理", exact: true }).click();
+  await navigateTo(page, "访问管理");
   await page.getByRole("button", { name: "用户管理", exact: true }).click();
   await page.getByRole("button", { name: "新增用户", exact: true }).click();
   await page.getByLabel("用户名", { exact: true }).fill(producerUsername);
@@ -477,7 +478,7 @@ test("real empty directory observation and cancellation during paged I/O", async
   });
   expect(producer.value.ID).toBeGreaterThan(0);
   expect(producer.value.ID).not.toBe(actorId);
-  await page.getByRole("button", { name: "退出登录", exact: true }).click();
+  await navigateTo(page, "退出登录");
   await login(page, producerUsername, producerInitial);
   await expect(
     page.getByRole("heading", { name: "修改密码", exact: true }),
@@ -505,7 +506,7 @@ test("real empty directory observation and cancellation during paged I/O", async
   actorId = (await readJSON(context, "/api/auth/me")).ID as number;
   expect(actorId).toBe(producer.value.ID);
 
-  await page.getByRole("button", { name: "管理操作账户", exact: true }).click();
+  await navigateTo(page, "管理操作账户");
   await page.getByRole("button", { name: "新增操作账户", exact: true }).click();
   await page
     .getByRole("button", { name: `选择 ${domain}`, exact: true })
@@ -540,7 +541,7 @@ test("real empty directory observation and cancellation during paged I/O", async
   });
   safe(connectionGrant.value);
 
-  await page.getByRole("button", { name: "域连接", exact: true }).click();
+  await navigateTo(page, "域连接");
   const backToDomains = page.getByRole("button", {
     name: "返回域连接列表",
     exact: true,
@@ -594,7 +595,7 @@ test("real empty directory observation and cancellation during paged I/O", async
       hasText: "尚无当前配置的成功目录观察。此状态不表示目录为空。",
     }),
   ).toBeVisible();
-  await page.getByRole("button", { name: "管理操作账户", exact: true }).click();
+  await navigateTo(page, "管理操作账户");
   const backToAccounts = page.getByRole("button", {
     name: "返回操作账户列表",
     exact: true,
@@ -636,7 +637,7 @@ test("real empty directory observation and cancellation during paged I/O", async
     grantRevision: connectionGrant.value.grantRevision,
   });
 
-  await page.getByRole("button", { name: "目录读取授权", exact: true }).click();
+  await navigateTo(page, "目录读取授权");
   await expect(
     page.getByRole("table", {
       name: "具有已保存目录读取授权的账户",
@@ -1074,7 +1075,7 @@ test("real empty directory observation and cancellation during paged I/O", async
   expect(
     consoles.filter((message) => /Uncaught|unhandled/i.test(message)),
   ).toEqual([]);
-  await page.getByRole("button", { name: "退出登录", exact: true }).click();
+  await navigateTo(page, "退出登录");
   await expect(
     page.getByRole("heading", { name: "登录账户", exact: true }),
   ).toBeVisible();

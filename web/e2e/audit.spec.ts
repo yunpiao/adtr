@@ -1,3 +1,4 @@
+import { navigateTo } from "./navigation";
 import {
   test as base,
   expect,
@@ -97,7 +98,7 @@ async function changeInitialPassword(
 }
 
 async function enrollMfa(page: Page, password: string): Promise<Authenticator> {
-  await page.getByRole("button", { name: "多因素认证", exact: true }).click();
+  await navigateTo(page, "多因素认证");
   await fillSecret(page.getByLabel("当前密码", { exact: true }), password);
   await page.getByRole("button", { name: "开始设置", exact: true }).click();
   const secret = await page
@@ -477,7 +478,7 @@ async function assertExportCompleted(
 }
 
 async function reopenExportHistory(page: Page, actorID: number) {
-  await page.getByRole("button", { name: "账户概览", exact: true }).click();
+  await navigateTo(page, "账户概览");
   await expect(
     page.getByRole("heading", { name: "账户概览", exact: true }),
   ).toBeVisible();
@@ -489,7 +490,7 @@ async function reopenExportHistory(page: Page, actorID: number) {
         new URL(candidate.url()).pathname === "/api/audit/exports/history" &&
         candidate.request().method() === "GET",
     ),
-    page.getByRole("button", { name: "操作审计", exact: true }).click(),
+    navigateTo(page, "操作审计"),
   ]);
   expect(response.status()).toBe(200);
   expectExportReadHeaders(response.headers(), actorID);
@@ -540,7 +541,7 @@ test("real browser audit history, visibility, XLSX worker export and persisted r
   });
 
   await test.step("server-captured history, missing metadata, filters and input boundaries", async () => {
-    await page.getByRole("button", { name: "操作审计", exact: true }).click();
+    await navigateTo(page, "操作审计");
     const table = page.getByRole("table", {
       name: "操作审计记录",
       exact: true,
@@ -719,7 +720,7 @@ test("real browser audit history, visibility, XLSX worker export and persisted r
   const managerName = "synthetic.audit.manager";
   const managerInitial = "Initial Audit Manager 123";
   const managerChanged = "Changed Audit Manager 456";
-  await page.getByRole("button", { name: "访问管理", exact: true }).click();
+  await navigateTo(page, "访问管理");
   await page.getByRole("button", { name: "用户管理", exact: true }).click();
   await page.getByRole("button", { name: "新增用户", exact: true }).click();
   await page.getByLabel("用户名", { exact: true }).fill(managerName);
@@ -752,7 +753,7 @@ test("real browser audit history, visibility, XLSX worker export and persisted r
     Origin: new URL(managerPage.url()).origin,
     "X-CSRF-Token": managerMe.csrfToken,
   };
-  await page.getByRole("button", { name: "操作审计", exact: true }).click();
+  await navigateTo(page, "操作审计");
 
   await test.step("hide and restore preserve the source and protect their own history", async () => {
     const page = managerPage,
@@ -760,7 +761,7 @@ test("real browser audit history, visibility, XLSX worker export and persisted r
     const changed = managerChanged,
       mfa = managerMfa,
       headers = managerHeaders;
-    await page.getByRole("button", { name: "操作审计", exact: true }).click();
+    await navigateTo(page, "操作审计");
     await page
       .getByLabel("审计事件筛选", { exact: true })
       .selectOption(["login"]);
@@ -1336,7 +1337,7 @@ test("real browser audit history, visibility, XLSX worker export and persisted r
       context = managerContext;
     const changed = managerChanged,
       mfa = managerMfa;
-    await page.getByRole("button", { name: "访问管理", exact: true }).click();
+    await navigateTo(page, "访问管理");
     await page.getByRole("button", { name: "角色管理", exact: true }).click();
     await page.getByRole("button", { name: "新增角色", exact: true }).click();
     await page
@@ -1418,9 +1419,7 @@ test("real browser audit history, visibility, XLSX worker export and persisted r
       await login(reader, readerName, readerInitial);
       await changeInitialPassword(reader, readerInitial, readerChanged);
       const readerMfa = await enrollMfa(reader, readerChanged);
-      await reader
-        .getByRole("button", { name: "操作审计", exact: true })
-        .click();
+      await navigateTo(reader, "操作审计");
       await expect(
         reader.getByRole("table", { name: "操作审计记录", exact: true }),
       ).toBeVisible();
@@ -1552,9 +1551,7 @@ test("real browser audit history, visibility, XLSX worker export and persisted r
         await expect(
           reader.getByText(`audit-${id}.xlsx`, { exact: true }),
         ).toHaveCount(0);
-      await reader
-        .getByRole("button", { name: "退出登录", exact: true })
-        .click();
+      await navigateTo(reader, "退出登录");
       await expect(
         reader.getByRole("heading", { name: "登录账户", exact: true }),
       ).toBeVisible();

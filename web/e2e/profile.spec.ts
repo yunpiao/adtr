@@ -1,3 +1,4 @@
+import { navigateTo } from "./navigation";
 import {
   test,
   expect,
@@ -109,7 +110,7 @@ async function changeInitialPassword(
 }
 
 async function openProfile(page: Page) {
-  await page.getByRole("button", { name: "个人资料", exact: true }).click();
+  await navigateTo(page, "个人资料");
   await expect(
     page.getByRole("heading", { name: "个人资料", exact: true }),
   ).toBeVisible();
@@ -574,7 +575,7 @@ test("real browser → API → PostgreSQL private self profile and avatar lifecy
 
   let viewerID: number;
   await test.step("create a genuine viewer fixture with no management grants", async () => {
-    await page.getByRole("button", { name: "多因素认证", exact: true }).click();
+    await navigateTo(page, "多因素认证");
     await page.getByLabel("当前密码", { exact: true }).fill(changed);
     await page.getByRole("button", { name: "开始设置", exact: true }).click();
     const secret = await page
@@ -627,7 +628,7 @@ test("real browser → API → PostgreSQL private self profile and avatar lifecy
     await expectPixels(page, [0, 0, 255]);
     await page.getByLabel("选择头像", { exact: true }).setInputFiles(yellow);
     const staleCookies = await context.cookies();
-    await page.getByRole("button", { name: "退出登录", exact: true }).click();
+    await navigateTo(page, "退出登录");
     await expect(
       page.getByRole("heading", { name: "登录账户", exact: true }),
     ).toBeVisible();
@@ -722,7 +723,7 @@ test("real browser → API → PostgreSQL private self profile and avatar lifecy
     );
     expect(await readJSON(context, "/api/access/menu")).toEqual({ menu: [] });
     expect(browserUploads).toBe(4);
-    await page.getByRole("button", { name: "退出登录", exact: true }).click();
+    await navigateTo(page, "退出登录");
     await expect(
       page.getByRole("heading", { name: "登录账户", exact: true }),
     ).toBeVisible();

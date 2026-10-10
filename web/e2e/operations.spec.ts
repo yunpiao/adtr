@@ -1,3 +1,4 @@
+import { navigateTo } from "./navigation";
 import {
   test,
   expect,
@@ -73,7 +74,7 @@ async function login(page: Page, username: string, password: string) {
 }
 
 async function enrollMfa(page: Page, password: string): Promise<Authenticator> {
-  await page.getByRole("button", { name: "多因素认证", exact: true }).click();
+  await navigateTo(page, "多因素认证");
   await fillSecret(page.getByLabel("当前密码", { exact: true }), password);
   await page.getByRole("button", { name: "开始设置", exact: true }).click();
   const secret = await page
@@ -130,7 +131,7 @@ async function submit(page: Page, path: string, button: string, status = 200) {
 }
 
 async function openOperations(page: Page) {
-  await page.getByRole("button", { name: "管理操作账户", exact: true }).click();
+  await navigateTo(page, "管理操作账户");
   await expect(
     page.getByRole("heading", { name: "管理操作账户", exact: true }),
   ).toBeVisible();
@@ -146,7 +147,7 @@ async function openAccount(page: Page, label: string) {
 }
 
 async function openDomains(page: Page) {
-  await page.getByRole("button", { name: "域连接", exact: true }).click();
+  await navigateTo(page, "域连接");
   await expect(
     page.getByRole("heading", { name: "域连接", exact: true }),
   ).toBeVisible();
@@ -307,7 +308,7 @@ test("local operation-account CRUD, lost-response recovery, stale editor and dom
       await context.request.get(`/api/domains/detail?domainId=${domainId}`)
     ).status(),
   ).toBe(404);
-  await page.getByRole("button", { name: "资源与租户", exact: true }).click();
+  await navigateTo(page, "资源与租户");
   await page.getByRole("button", { name: "资源组", exact: true }).click();
   await page.getByRole("button", { name: "新增资源组", exact: true }).click();
   await page.getByLabel("资源组名称", { exact: true }).fill(group);
@@ -343,7 +344,7 @@ test("local operation-account CRUD, lost-response recovery, stale editor and dom
   // edit/replacement (4), blocked domain delete/account delete/domain delete (3)
   // = 10. Session rotation, logout and the stale editor tab do not reset it.
   const bootstrapActorId = (await readJSON(context, "/api/auth/me")).ID;
-  await page.getByRole("button", { name: "访问管理", exact: true }).click();
+  await navigateTo(page, "访问管理");
   await page.getByRole("button", { name: "用户管理", exact: true }).click();
   await page.getByRole("button", { name: "新增用户", exact: true }).click();
   await page.getByLabel("用户名", { exact: true }).fill(operatorUsername);
@@ -365,7 +366,7 @@ test("local operation-account CRUD, lost-response recovery, stale editor and dom
   });
   expect(operator.value.ID).toBeGreaterThan(0);
   expect(operator.value.ID).not.toBe(bootstrapActorId);
-  await page.getByRole("button", { name: "退出登录", exact: true }).click();
+  await navigateTo(page, "退出登录");
   await login(page, operatorUsername, operatorInitial);
   await expect(
     page.getByRole("heading", { name: "修改密码", exact: true }),

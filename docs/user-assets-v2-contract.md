@@ -139,7 +139,7 @@ null semantics, actor header and streaming 8 MiB/UTF-8 bounds. Generation and
 abort protections reject delayed responses after source/query/navigation/session
 changes, including ignored abort and repeated same-parameter refreshes.
 
-Inline details fetch the pinned endpoint. Close/Escape, source/filter/page/
+The SOC right-hand detail drawer fetches the pinned endpoint. It remains inside the authenticated main subtree so session revalidation conceals it. Background controls are inert while open; Tab is contained, Close/Escape invalidate the read, and visible connected row focus is restored. The resolved source chooser and full provenance are collapsible; neither changes the API identity or authorization contract. See [SOC UI scope](soc-production-ui.md). Close/Escape, source/filter/page/
 refresh changes and unmount invalidate detail; Close returns focus when its
 originating row still exists. App Back/Forward and cross-tab session invalidation
 cannot resurrect a private panel. React text nodes and `directoryV2DisplayText`

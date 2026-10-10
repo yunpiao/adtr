@@ -1,3 +1,4 @@
+import { navigateTo } from "./navigation";
 import { test, expect, type BrowserContext, type Page } from "@playwright/test";
 import { createHmac } from "node:crypto";
 import { readFileSync, statfsSync } from "node:fs";
@@ -74,7 +75,7 @@ async function changeInitialPassword(
 }
 
 async function enrollMfa(page: Page, password: string): Promise<Authenticator> {
-  await page.getByRole("button", { name: "多因素认证", exact: true }).click();
+  await navigateTo(page, "多因素认证");
   await page.getByLabel("当前密码", { exact: true }).fill(password);
   await page.getByRole("button", { name: "开始设置", exact: true }).click();
   const secret = await page
@@ -142,7 +143,7 @@ test("real browser → Linux sampler → PostgreSQL history/settings and actual 
   await login(page, username, password);
   await changeInitialPassword(page, password, changed);
   const mfa = await enrollMfa(page, changed);
-  await page.getByRole("button", { name: "系统健康", exact: true }).click();
+  await navigateTo(page, "系统健康");
   await expect(page.getByRole("table", { name: "已登记节点" })).toBeVisible();
   const nodes = await readJSON(context, "/api/system/nodes");
   expect(nodes.nodeList).toHaveLength(1);
@@ -336,7 +337,7 @@ test("real browser → Linux sampler → PostgreSQL history/settings and actual 
   await expect(rootStorage.getByText("版本 1", { exact: true })).toBeVisible();
   await expect(savedThreshold).toBeVisible();
   await page.reload();
-  await page.getByRole("button", { name: "系统健康", exact: true }).click();
+  await navigateTo(page, "系统健康");
   await page.getByRole("button", { name: "存储管理", exact: true }).click();
   await expect(rootStorage.getByText("版本 1", { exact: true })).toBeVisible();
   await expect(savedThreshold).toBeVisible();
@@ -429,7 +430,7 @@ test("real browser → Linux sampler → PostgreSQL history/settings and actual 
 
   // Persist system-only read authority through the actual role editor and use
   // a second browser with valid MFA to prove server denial of settings writes.
-  await page.getByRole("button", { name: "访问管理", exact: true }).click();
+  await navigateTo(page, "访问管理");
   await page.getByRole("button", { name: "角色管理", exact: true }).click();
   await page.getByRole("button", { name: "新增角色", exact: true }).click();
   await page
@@ -496,7 +497,7 @@ test("real browser → Linux sampler → PostgreSQL history/settings and actual 
     await login(reader, readerName, readerInitial);
     await changeInitialPassword(reader, readerInitial, readerChanged);
     const readerMfa = await enrollMfa(reader, readerChanged);
-    await reader.getByRole("button", { name: "系统健康", exact: true }).click();
+    await navigateTo(reader, "系统健康");
     await reader.getByRole("button", { name: "存储管理", exact: true }).click();
     await expect(
       reader.getByRole("table", { name: "实际文件系统存储" }),
@@ -551,7 +552,7 @@ test("real browser → Linux sampler → PostgreSQL history/settings and actual 
         )
       ).storage[0],
     ).toMatchObject({ alarmPercent: 90, revision: 1 });
-    await reader.getByRole("button", { name: "退出登录", exact: true }).click();
+    await navigateTo(reader, "退出登录");
     await expect(
       reader.getByRole("heading", { name: "登录账户", exact: true }),
     ).toBeVisible();
@@ -564,7 +565,7 @@ test("real browser → Linux sampler → PostgreSQL history/settings and actual 
   // Only the exact synthetic child supplied by the owning harness is stopped.
   // The product has no worker-stop endpoint, and no fake stale row is injected.
   process.kill(workerPID, "SIGTERM");
-  await page.getByRole("button", { name: "系统健康", exact: true }).click();
+  await navigateTo(page, "系统健康");
   await page.getByRole("button", { name: "平台依赖健康", exact: true }).click();
   const expectedStoppedCycles = healthy.worker.cycles.map(
     ({ workerId, cycle }) => ({
