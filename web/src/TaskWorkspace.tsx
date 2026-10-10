@@ -1,5 +1,5 @@
 import { isDomainConnectionTask } from "./task-api";
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ApiError, type Profile } from "./api";
 import {
   accessRequest,
@@ -33,6 +33,21 @@ import {
   type MaintenanceView,
 } from "./TaskMaintenance";
 import { maintenanceIntent } from "./maintenance-intent";
+import {
+  defaultTaskQuery,
+  validTaskListQuery,
+  readTaskNavigation,
+  writeTaskNavigation,
+  type TaskListQuery,
+  type TaskListReturn,
+  type TaskNavigationView,
+} from "./task-view-state";
+import {
+  TaskTimeline,
+  TaskStateExplanation,
+  taskKindLabel,
+} from "./TaskPresentation";
+import "./soc-tasks.css";
 
 const isDirectoryTask = (name: unknown) =>
   name === "domain.directory_read" || name === "domain.directory_read.v2";
@@ -193,21 +208,28 @@ export {
   clearIntent as clearTaskIntent,
 };
 
-type View =
-  | { type: "list" }
-  | { type: "submit" }
-  | { type: "detail"; id: string; archived?: boolean }
-  | MaintenanceView;
-export default function TaskWorkspace({
-  profile,
-  sessionChanged,
-}: {
-  profile: Profile;
-  sessionChanged: () => void;
-}) {
-  const [view, setView] = useState<View>({ type: "list" }),
-    [notice, setNotice] = useState(""),
-    [revision, setRevision] = useState(0);
+type View = TaskNavigationView;
+type WorkspaceProps = { profile: Profile; sessionChanged: () => void };
+export default function TaskWorkspace(props: WorkspaceProps) {
+  return (
+    <Workspace
+      key={`${props.profile.ID}:${props.profile.username}:${props.profile.csrfToken}`}
+      {...props}
+    />
+  );
+}
+function Workspace({ profile, sessionChanged }: WorkspaceProps) {
+  const [navigation, setNavigation] = useState(() =>
+    readTaskNavigation(profile),
+  );
+  const { view, query, listReturn } = navigation;
+  const [notice, setNotice] = useState("");
+  const [revision, setRevision] = useState(0);
+  // App revalidates the session and remounts on history navigation. Only safe,
+  // actor-bound query/selection state is restored; every response is fetched anew.
+  useEffect(() => {
+    writeTaskNavigation(profile, navigation, "replace");
+  }, [profile, navigation]);
   const gate = useTaskRead(
     profile.csrfToken,
     async (signal) => {
@@ -261,24 +283,70 @@ export default function TaskWorkspace({
         )),
   };
   const open = (next: View, message = "") => {
-    setView(next);
+    setNavigation(
+      writeTaskNavigation(profile, { ...navigation, view: next }, "push"),
+    );
     setNotice(message);
     setRevision((n) => n + 1);
-    window.history.pushState(
-      {},
-      "",
-      `#tasks/${next.type}${next.type === "detail" || next.type === "schedule-detail" ? `/${encodeURIComponent(next.id)}` : ""}`,
+  };
+  const changeQuery = (next: TaskListQuery) => {
+    if (!validTaskListQuery(next)) {
+      setNotice(
+        "筛选条件无效：域 ID 仅支持字母、数字、点、下划线或短横线，最长 128 字符；任务种类最多 64 个 UTF-8 字节。请修改后重新筛选。",
+      );
+      return;
+    }
+    setNotice("");
+    setNavigation(
+      writeTaskNavigation(
+        profile,
+        {
+          view: { type: "list" },
+          query: next,
+          listReturn: { focusTaskId: "", scrollY: 0 },
+        },
+        "replace",
+      ),
     );
+  };
+  const openTask = (task: Task) => {
+    const saved = {
+      ...navigation,
+      listReturn: {
+        focusTaskId: task.taskUUID,
+        scrollY: Math.min(10000000, Math.max(0, Math.round(window.scrollY))),
+      },
+    };
+    writeTaskNavigation(profile, saved, "replace");
+    setNavigation(
+      writeTaskNavigation(
+        profile,
+        {
+          ...saved,
+          view: { type: "detail", id: task.taskUUID, archived: task.archived },
+        },
+        "push",
+      ),
+    );
+    setNotice("");
+    setRevision((n) => n + 1);
   };
   const intent = getIntent(profile);
   const maintenance = maintenanceIntent(profile);
   return (
-    <div className="task-workspace">
-      <h2>后台任务</h2>
-      <p className="warning">
-        平台健康检查（infrastructure.health）可在此提交；审计导出请使用操作审计页面，域连接检测请使用域连接页面。平台健康成功不代表
-        AD 业务验收通过。
-      </p>
+    <section className="task-workspace" aria-labelledby="task-workspace-title">
+      <div className="task-page-heading">
+        <p className="task-eyebrow">EXECUTION &amp; HISTORY</p>
+        <h2 id="task-workspace-title">后台任务</h2>
+        <p>查看真实执行进度，追溯持久化结果与状态变化。</p>
+      </div>
+      <details className="task-scope-help">
+        <summary>任务范围与结果说明</summary>
+        <p>
+          平台健康检查（infrastructure.health）可在此提交；审计导出请使用操作审计页面，域连接检测请使用域连接页面。平台健康成功不代表
+          AD 业务验收通过。
+        </p>
+      </details>
       <ErrorNotice error={gate.error} />
       {gate.busy && <p role="status">正在确认任务权限…</p>}
       {gate.error && (
@@ -291,10 +359,15 @@ export default function TaskWorkspace({
       )}
       {gate.data?.readable && context.can("GET /api/tasks") && (
         <>
-          <nav className="actions compact" aria-label="任务视图">
+          <nav className="actions compact task-view-tabs" aria-label="任务视图">
             <button
               className="secondary"
               onClick={() => open({ type: "list" })}
+              aria-current={
+                ["list", "detail", "submit"].includes(view.type)
+                  ? "page"
+                  : undefined
+              }
             >
               执行任务
             </button>
@@ -302,6 +375,9 @@ export default function TaskWorkspace({
               <button
                 className="secondary"
                 onClick={() => open({ type: "schedules" })}
+                aria-current={
+                  view.type.startsWith("schedule") ? "page" : undefined
+                }
               >
                 周期计划
               </button>
@@ -310,6 +386,7 @@ export default function TaskWorkspace({
               <button
                 className="secondary"
                 onClick={() => open({ type: "archive" })}
+                aria-current={view.type === "archive" ? "page" : undefined}
               >
                 任务归档
               </button>
@@ -352,14 +429,32 @@ export default function TaskWorkspace({
               </button>
             </div>
           )}
-          {view.type === "list" && (
-            <TasksList
-              key={revision}
-              context={context}
-              open={open}
-              blocked={!!intent?.attempted}
-            />
-          )}
+          {view.type === "list" &&
+            query.visibility &&
+            !context.canArchiveView && (
+              <div role="status" className="warning">
+                当前账户没有已保存可见性筛选的读取权限。
+                <button
+                  className="secondary"
+                  onClick={() => changeQuery(defaultTaskQuery())}
+                >
+                  返回默认可见任务
+                </button>
+              </div>
+            )}
+          {view.type === "list" &&
+            (!query.visibility || context.canArchiveView) && (
+              <TasksList
+                key={revision}
+                context={context}
+                open={open}
+                blocked={!!intent?.attempted}
+                query={query}
+                changeQuery={changeQuery}
+                openTask={openTask}
+                listReturn={listReturn}
+              />
+            )}
           {view.type === "submit" && (
             <SubmitTask context={context} done={open} />
           )}
@@ -371,139 +466,201 @@ export default function TaskWorkspace({
               open={open}
             />
           )}
-          {view.type === "detail" && (
-            <TaskDetails
-              key={view.id}
-              context={context}
-              id={view.id}
-              archived={view.archived}
-              done={open}
-            />
-          )}
+          {view.type === "detail" &&
+            (!context.can("GET /api/tasks/detail") ||
+              (view.archived && !context.canArchiveView)) && (
+              <p role="status">
+                当前账户没有此任务详情的读取权限，请返回执行任务列表。
+              </p>
+            )}
+          {view.type === "detail" &&
+            context.can("GET /api/tasks/detail") &&
+            (!view.archived || context.canArchiveView) && (
+              <TaskDetails
+                key={`${view.id}:${view.archived ?? false}`}
+                context={context}
+                id={view.id}
+                archived={view.archived}
+                done={open}
+              />
+            )}
         </>
       )}
-    </div>
+    </section>
   );
 }
 function TasksList({
   context,
   open,
   blocked,
+  query,
+  changeQuery,
+  openTask,
+  listReturn,
 }: {
   context: TaskContext;
   open: (view: View, notice?: string) => void;
   blocked: boolean;
+  query: TaskListQuery;
+  changeQuery: (query: TaskListQuery) => void;
+  openTask: (task: Task) => void;
+  listReturn: TaskListReturn;
 }) {
-  const [query, setQuery] = useState({
-    pageIdx: 1,
-    pageSize: 20,
-    domainId: "",
-    state: "",
-    taskName: "",
-    visibility: "",
-  });
-  const text = queryString(query);
+  const panel = useRef<HTMLDetailsElement>(null);
+  const list = useRef<HTMLDivElement>(null);
+  const restored = useRef(false);
+  const text = queryString({ ...query });
   const read = useTaskRead(
     text,
     (signal) => taskAPI.list(text, signal),
     context.sessionChanged,
     (data) => data.tasks.some((task) => !terminal(task.state)),
   );
+  useLayoutEffect(() => {
+    if (!read.data || restored.current) return;
+    restored.current = true;
+    if (listReturn.focusTaskId) {
+      const target = list.current?.querySelector<HTMLButtonElement>(
+        `button[data-task-id="${listReturn.focusTaskId}"]`,
+      );
+      target?.focus({ preventScroll: true });
+      window.scrollTo?.(0, listReturn.scrollY);
+    }
+  }, [read.data, listReturn]);
+  const applied = [
+    query.taskName && `种类：${query.taskName}`,
+    query.domainId && `范围：${query.domainId}`,
+    query.state && `状态：${stateLabels[query.state]}`,
+    query.visibility &&
+      `可见性：${query.visibility === "archived" ? "已归档" : "所有可见性"}`,
+  ].filter(Boolean);
   return (
-    <>
-      <div className="actions compact">
-        {context.can("POST /api/tasks/submit") &&
-          context.can("GET /api/tasks/kinds") && (
-            <button disabled={blocked} onClick={() => open({ type: "submit" })}>
-              提交健康检查
-            </button>
-          )}
-        <button className="secondary" onClick={read.refresh}>
-          刷新任务列表
-        </button>
-      </div>
-      <form
-        className="filters"
-        onSubmit={(event) => {
-          const v = readValues(event);
-          setQuery({
-            pageIdx: 1,
-            pageSize: Number(v.pageSize),
-            domainId: v.domainId,
-            state: v.state,
-            taskName: v.taskName,
-            visibility: v.visibility ?? "",
-          });
-        }}
-      >
-        <div className="form-grid">
-          <Field label="任务种类筛选">
-            <input
-              name="taskName"
-              defaultValue={query.taskName}
-              maxLength={64}
-            />
-          </Field>
-          <Field label="域 ID 筛选" help="平台健康检查的域 ID 为 platform">
-            <input
-              name="domainId"
-              defaultValue={query.domainId}
-              maxLength={128}
-            />
-          </Field>
-          <Field label="任务状态筛选">
-            <select name="state" defaultValue="">
-              <option value="">所有状态</option>
-              {taskStates.map((state) => (
-                <option key={state} value={state}>
-                  {stateLabels[state]}
-                </option>
-              ))}
-            </select>
-          </Field>
-          {context.canArchiveView && (
-            <Field label="任务可见性筛选">
-              <select name="visibility" defaultValue="">
-                <option value="">默认可见任务</option>
-                <option value="archived">已归档任务</option>
-                <option value="all">所有可见性</option>
-              </select>
-            </Field>
-          )}
-          <Field label="每页任务数">
-            <select name="pageSize" defaultValue={20}>
-              {[10, 20, 50, 100].map((size) => (
-                <option key={size}>{size}</option>
-              ))}
-            </select>
-          </Field>
+    <div className="task-queue-panel" ref={list}>
+      <div className="task-queue-heading">
+        <div>
+          <h3>执行队列</h3>
+          <p>仅显示当前授权范围内、符合筛选的任务</p>
         </div>
         <div className="actions compact">
-          <button>筛选任务</button>
-          <button
-            type="reset"
-            className="secondary"
-            onClick={() =>
-              setQuery({
-                pageIdx: 1,
-                pageSize: 20,
-                domainId: "",
-                state: "",
-                taskName: "",
-                visibility: "",
-              })
-            }
-          >
-            清除任务筛选
+          {context.can("POST /api/tasks/submit") &&
+            context.can("GET /api/tasks/kinds") && (
+              <button
+                disabled={blocked}
+                onClick={() => open({ type: "submit" })}
+              >
+                提交健康检查
+              </button>
+            )}
+          <button className="secondary" onClick={read.refresh}>
+            刷新任务列表
           </button>
         </div>
-      </form>
+      </div>
+      <details ref={panel} className="task-filter-panel">
+        <summary>
+          筛选条件{" "}
+          <span>
+            {applied.length ? `${applied.length} 项已应用` : "所有任务"}
+          </span>
+        </summary>
+        <form
+          key={text}
+          className="filters"
+          aria-label="任务筛选条件"
+          onSubmit={(event) => {
+            const v = readValues(event);
+            const next = {
+              pageIdx: 1,
+              pageSize: Number(v.pageSize),
+              domainId: v.domainId,
+              state: v.state as TaskListQuery["state"],
+              taskName: v.taskName,
+              visibility: (v.visibility ?? "") as TaskListQuery["visibility"],
+            };
+            changeQuery(next);
+            if (validTaskListQuery(next) && panel.current) {
+              panel.current.open = false;
+              panel.current.querySelector("summary")?.focus();
+            }
+          }}
+        >
+          <div className="form-grid">
+            <Field label="任务种类筛选">
+              <input
+                name="taskName"
+                defaultValue={query.taskName}
+                maxLength={64}
+              />
+            </Field>
+            <Field label="域 ID 筛选" help="平台健康检查的域 ID 为 platform">
+              <input
+                name="domainId"
+                defaultValue={query.domainId}
+                maxLength={128}
+              />
+            </Field>
+            <Field label="任务状态筛选">
+              <select name="state" defaultValue={query.state}>
+                <option value="">所有状态</option>
+                {taskStates.map((state) => (
+                  <option key={state} value={state}>
+                    {stateLabels[state]}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            {context.canArchiveView && (
+              <Field label="任务可见性筛选">
+                <select name="visibility" defaultValue={query.visibility}>
+                  <option value="">默认可见任务</option>
+                  <option value="archived">已归档任务</option>
+                  <option value="all">所有可见性</option>
+                </select>
+              </Field>
+            )}
+            <Field label="每页任务数">
+              <select name="pageSize" defaultValue={query.pageSize}>
+                {[10, 20, 50, 100].map((size) => (
+                  <option key={size}>{size}</option>
+                ))}
+              </select>
+            </Field>
+          </div>
+          <div className="actions compact">
+            <button>筛选任务</button>
+            <button
+              type="button"
+              className="secondary"
+              onClick={(event) => {
+                event.currentTarget.form?.reset();
+                changeQuery(defaultTaskQuery());
+                panel.current?.querySelector("summary")?.focus();
+              }}
+            >
+              清除任务筛选
+            </button>
+          </div>
+        </form>
+      </details>
+      {!!applied.length && (
+        <div className="task-applied-filters" aria-label="已应用任务筛选">
+          {applied.map((label) => (
+            <span key={String(label)}>{label}</span>
+          ))}
+          <button
+            className="secondary"
+            onClick={() => changeQuery(defaultTaskQuery())}
+          >
+            重置已应用条件
+          </button>
+        </div>
+      )}
       <ErrorNotice error={read.error} />
       {read.busy && <p role="status">正在读取任务…</p>}
       {read.data && (
         <>
-          <div className="table-scroll">
-            <table>
+          <div className="table-scroll task-queue-scroll">
+            <table className="task-queue" role="table">
               <caption>任务列表</caption>
               <thead>
                 <tr>
@@ -517,35 +674,37 @@ function TasksList({
               </thead>
               <tbody>
                 {read.data.tasks.map((task) => (
-                  <tr key={task.taskUUID}>
-                    <th scope="row">
-                      {task.taskName}
+                  <tr key={task.taskUUID} role="row">
+                    <th scope="row" role="rowheader">
+                      <strong>{taskKindLabel(task.taskName)}</strong>
+                      <small className="block">{task.taskName}</small>
                       <small className="block">{task.taskUUID}</small>
                     </th>
-                    <td>{task.domainId}</td>
-                    <td>
+                    <td data-label="范围">{task.domainId}</td>
+                    <td data-label="状态">
                       <TaskStatus task={task} />
                       {task.archived && (
                         <strong className="block">已归档</strong>
                       )}
                     </td>
-                    <td>
-                      {task.progress}% · {task.attempt}/{task.maxAttempts}
+                    <td data-label="进度 / 尝试">
+                      <span className="task-progress-number">
+                        {task.progress}%
+                      </span>
+                      <small className="block">
+                        {task.attempt}/{task.maxAttempts} 次尝试
+                      </small>
                     </td>
-                    <td>{task.createdAt}</td>
+                    <td data-label="创建时间（UTC）">{task.createdAt}</td>
                     <td>
                       {context.can("GET /api/tasks/detail") && (
                         <button
-                          className="secondary"
-                          onClick={() =>
-                            open({
-                              type: "detail",
-                              id: task.taskUUID,
-                              archived: task.archived,
-                            })
-                          }
+                          className="secondary task-detail-link"
+                          aria-label={`详情 ${task.taskUUID}`}
+                          data-task-id={task.taskUUID}
+                          onClick={() => openTask(task)}
                         >
-                          详情 {task.taskUUID}
+                          查看详情 <span aria-hidden="true">→</span>
                         </button>
                       )}
                     </td>
@@ -559,11 +718,11 @@ function TasksList({
             page={read.data.page}
             exhausted={read.data.exhausted}
             busy={read.busy}
-            change={(pageIdx) => setQuery({ ...query, pageIdx })}
+            change={(pageIdx) => changeQuery({ ...query, pageIdx })}
           />
         </>
       )}
-    </>
+    </div>
   );
 }
 export function TaskStatus({ task }: { task: Task }) {
@@ -758,6 +917,11 @@ function TaskDetails({
   archived?: boolean;
   done: (view: View, notice?: string) => void;
 }) {
+  const heading = useRef<HTMLHeadingElement>(null);
+  useLayoutEffect(() => {
+    heading.current?.focus({ preventScroll: true });
+    window.scrollTo?.(0, 0);
+  }, []);
   const read = useTaskRead(
     `${id}:${archived}`,
     (signal) => taskAPI.detail(id, signal, archived ? "all" : "active"),
@@ -788,22 +952,46 @@ function TaskDetails({
   const blocked =
     !!old?.attempted && !(old.action === "recover" && old.taskUUID === id);
   return (
-    <>
-      <h3>任务详情</h3>
-      <div className="actions compact">
-        <button className="secondary" onClick={() => done({ type: "list" })}>
-          返回任务列表
-        </button>
-        <button className="secondary" onClick={read.refresh}>
-          刷新任务详情
-        </button>
+    <section className="task-detail-page" aria-label="任务执行详情">
+      <div className="task-detail-toolbar">
+        <h3 tabIndex={-1} ref={heading}>
+          任务详情
+        </h3>
+        <div className="actions compact">
+          <button className="secondary" onClick={() => done({ type: "list" })}>
+            返回任务列表
+          </button>
+          <button className="secondary" onClick={read.refresh}>
+            刷新任务详情
+          </button>
+        </div>
       </div>
       <ErrorNotice error={read.error} />
       {read.busy && <p role="status">正在读取任务详情…</p>}
       {task && (
         <>
-          <div role="status" aria-live="polite">
-            <TaskStatus task={task} />
+          <div className="task-detail-identity">
+            <div>
+              <p className="task-eyebrow">持久化执行记录</p>
+              <h4>{taskKindLabel(task.taskName)}</h4>
+              <p>
+                {task.taskName} · {task.domainId}
+              </p>
+              <span className="task-mono" data-testid="task-detail-identity">
+                {task.taskUUID}
+              </span>
+              {task.parentTaskUUID && (
+                <p className="task-parent-identity">
+                  父任务 <span>{task.parentTaskUUID}</span>
+                </p>
+              )}
+            </div>
+            <div role="status" aria-live="polite">
+              <TaskStatus task={task} />
+            </div>
+          </div>
+          <div className="task-state-summary">
+            <TaskStateExplanation task={task} />
             {!terminal(task.state) && (
               <p>正在自动核对服务器状态；页面轮询不会增加业务尝试次数。</p>
             )}
@@ -824,33 +1012,6 @@ function TaskDetails({
               结果包含部分失败；不能整体自动重放。当前健康检查界面不支持选择失败对象重新提交。
             </p>
           )}
-          <dl>
-            {[
-              ["任务 ID", task.taskUUID],
-              ["任务种类", task.taskName],
-              ["域 / 范围", task.domainId],
-              ["输入版本", task.payloadVersion],
-              ["业务尝试次数", `${task.attempt}/${task.maxAttempts}（含首次）`],
-              ["结果版本", task.resultVersion],
-              ["父任务 ID", task.parentTaskUUID || "无"],
-              ["创建时间（UTC）", task.createdAt],
-              ["更新时间（UTC）", task.updatedAt],
-              [
-                "终态时间（UTC）",
-                task.terminalAt ??
-                  (terminal(task.state) ? "终态时间未知" : "尚未结束"),
-              ],
-              ["可见性", task.archived ? "已归档" : "默认可见"],
-              ["可见性版本", task.visibilityVersion],
-              ["下一次尝试（UTC）", task.nextAttemptAt ?? "无"],
-              ["错误代码", task.error || "无"],
-            ].map(([label, value]) => (
-              <div key={label}>
-                <dt>{label}</dt>
-                <dd>{value}</dd>
-              </div>
-            ))}
-          </dl>
           <label className="task-progress">
             持久化进度：{task.progress}%
             <progress
@@ -962,44 +1123,41 @@ function TaskDetails({
                 reconcile={read.refresh}
               />
             )}
-          <div className="table-scroll">
-            <table>
-              <caption>持久化任务事件</caption>
-              <thead>
-                <tr>
-                  <th>事件</th>
-                  <th>状态</th>
-                  <th>尝试 / 结果版本</th>
-                  <th>时间（UTC）</th>
-                </tr>
-              </thead>
-              <tbody>
-                {read.data!.events.map((event) => (
-                  <tr key={event.id}>
-                    <td>
-                      {event.action}
-                      {event.action === "completed-with-cancel-race" && (
-                        <strong className="block">
-                          取消与完成发生竞争，终态反映实际结果
-                        </strong>
-                      )}
-                    </td>
-                    <td>
-                      {stateLabels[event.state]} · {event.state}
-                    </td>
-                    <td>
-                      {event.attempt} / {event.resultVersion}
-                    </td>
-                    <td>{event.createdAt}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          {!read.data!.events.length && <p>服务器尚未返回事件。</p>}
+          <TaskTimeline events={read.data!.events} />
+          <details className="task-metadata-panel">
+            <summary>任务元数据与版本</summary>
+            <dl className="task-metadata">
+              {[
+                ["任务种类", task.taskName],
+                ["域 / 范围", task.domainId],
+                ["输入版本", task.payloadVersion],
+                [
+                  "业务尝试次数",
+                  `${task.attempt}/${task.maxAttempts}（含首次）`,
+                ],
+                ["结果版本", task.resultVersion],
+                ["创建时间（UTC）", task.createdAt],
+                ["更新时间（UTC）", task.updatedAt],
+                [
+                  "终态时间（UTC）",
+                  task.terminalAt ??
+                    (terminal(task.state) ? "终态时间未知" : "尚未结束"),
+                ],
+                ["可见性", task.archived ? "已归档" : "默认可见"],
+                ["可见性版本", task.visibilityVersion],
+                ["下一次尝试（UTC）", task.nextAttemptAt ?? "无"],
+                ["错误代码", task.error || "无"],
+              ].map(([label, value]) => (
+                <div key={label}>
+                  <dt>{label}</dt>
+                  <dd>{value}</dd>
+                </div>
+              ))}
+            </dl>
+          </details>
         </>
       )}
-    </>
+    </section>
   );
 }
 function TaskAction({
