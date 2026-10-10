@@ -29,3 +29,7 @@ progress{display:block;width:105px;height:5px;border:0;border-radius:5px;margin-
 .avatar-orange{background:#f5e7d8;color:#ab8257}
 .heatmap{display:grid;gap:9px}.heat-row{display:grid;grid-template-columns:90px repeat(7,minmax(16px,1fr));gap:4px;align-items:center}.heat-row>span:first-child{font-size:9px;color:#8294ad;overflow-wrap:anywhere}.heat-cell{min-width:0;height:22px;display:grid;place-items:center;border-radius:3px;font-size:8px;color:#6685b1;background:#edf2f9}.heat-1{background:#dfEafa}.heat-2{background:#acc8f0;color:#416fae}.heat-3{background:#658fcd;color:white}.heat-0{color:#aab7c8}
 @media(max-width:1000px){.heat-row{grid-template-columns:88px repeat(7,minmax(16px,1fr))}}@media(max-width:760px){.heat-row{grid-template-columns:84px repeat(7,minmax(16px,1fr));gap:4px}}
+
+/* Keep long dialogs readable from the title while their content scrolls. */
+dialog[open]{display:flex;flex-direction:column}.dialog-head,.dialog-footer{flex:0 0 auto}.dialog-body{min-height:0;overflow:auto;overscroll-behavior:contain}.heat-row>span:first-child small{display:block;font-size:8px;color:#9aa8ba;margin-top:2px}
+@media(max-width:760px){.business-table .row-actions{min-width:240px;max-width:260px}}
