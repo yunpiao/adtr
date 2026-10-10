@@ -34,6 +34,7 @@
 | --- | --- | --- | --- |
 | 早期任务契约首部写“尚无持久化调度实现”和“尚无已冻结业务种类”，当前已有任务/计划及多种执行器 | [task-contract](../task-contract.md)、[tasks-contract](../tasks-contract.md)、[计划](../schedules-contract.md)、[程序入口](../../cmd/adtr/main.go) | 总体方案把早期设计与当前切片分开，引用当前具体契约；不修改原文 | G02 对主契约做整合，防止误读为仍无实现 |
 | ADR 前端版本“引入时固定”，当前已经有版本和生产 React 页面 | [architecture](../architecture.md)、[web/package.json](../../web/package.json)、[App](../../web/src/App.tsx) | 标明现有版本；原型仍独立 | 后续 ADR 状态说明与实际版本入口对齐 |
+| ADR 的九类 Windows 测试概括与 G05 原始 OS 矩阵分类不同 | [ADR](../architecture.md)、[G05 OS-001–OS-072](https://github.com/yunpiao/adtr/issues/65) | 本方案保留 G05 原始九类，压力/身份等作为补充，不替换业务场景 | G02/G05 整合术语并保留原场景 ID |
 | 各契约保存历史“未实现”描述或旧精确 head 证据，不能只凭单句推断当前全局能力 | [交付台账](../delivery.md)、[README](../../README.md)、[catalog](../../requirements/catalog.json) | 使用固定基线、明确证据层次；逐项追溯保留状态和剩余项 | 由对应模块整合，不能批量把历史测试改成当前验收 |
 | 有 v2 字段读取链路，但完整资产 UI、关系、导出和源兼容尚开放 | [v2 整合状态](../directory-v2-integration-status.md) | 方案及原型不把 v2 数据表格当作 F14 已完成 | F12/F14 按子项继续交付 |
 
