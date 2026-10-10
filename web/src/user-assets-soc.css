@@ -1,0 +1,494 @@
+.user-assets-workspace {
+  --asset-line: #dbe4f0;
+  --asset-muted: #586e87;
+  color: #1b3450;
+  font-size: 14px;
+  min-width: 0;
+}
+.user-assets-workspace .asset-eyebrow {
+  color: #59769a;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  margin: 0 0 6px;
+}
+.asset-page-heading h2 {
+  font-size: 26px;
+  margin: 0 0 8px;
+}
+.asset-page-heading > p:last-child {
+  color: var(--asset-muted);
+  margin: 0;
+}
+.asset-data-help {
+  margin: 8px 0 12px;
+  font-size: 12px;
+  color: var(--asset-muted);
+}
+.asset-data-help summary {
+  cursor: pointer;
+  width: fit-content;
+}
+.asset-data-help p {
+  max-width: 760px;
+  margin: 8px 0;
+}
+.asset-source-card,
+.asset-queue {
+  border: 1px solid var(--asset-line);
+  border-radius: 8px;
+  background: #fff;
+  min-width: 0;
+}
+.asset-source-card {
+  margin-bottom: 8px;
+}
+.asset-source-heading {
+  padding: 14px 18px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.asset-source-heading > div {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  min-width: 0;
+}
+.asset-source-heading strong {
+  overflow-wrap: anywhere;
+}
+.asset-source-heading .asset-eyebrow {
+  margin: 0;
+  white-space: nowrap;
+}
+#asset-source-picker {
+  padding: 0 18px 18px;
+  border-top: 1px solid var(--asset-line);
+}
+#asset-source-picker h3 {
+  font-size: 14px;
+}
+.asset-source-revisions {
+  margin: 0 0 16px;
+  color: var(--asset-muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.asset-queue {
+  padding-bottom: 14px;
+}
+.asset-queue-heading {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 16px 18px 12px;
+}
+.asset-queue-heading h3 {
+  margin: 0;
+  font-size: 16px;
+}
+.asset-count {
+  color: #436d9e;
+  border: 1px solid var(--asset-line);
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-size: 12px;
+}
+.user-assets-workspace .asset-search-toolbar {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 0 18px 12px;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+}
+.user-assets-workspace .asset-search-toolbar > .field {
+  margin: 0;
+  gap: 6px;
+}
+.user-assets-workspace .asset-search-toolbar > .field:first-child {
+  flex: 1 1 280px;
+}
+.user-assets-workspace .asset-search-toolbar > .field:nth-child(2) {
+  flex: 0 0 82px;
+}
+.asset-search-toolbar .field small {
+  font-size: 12px;
+}
+.user-assets-workspace button,
+.user-assets-workspace input,
+.user-assets-workspace select {
+  font-size: 14px;
+}
+.user-assets-workspace button {
+  min-height: 36px;
+  padding: 7px 12px;
+  border-radius: 5px;
+}
+.user-assets-workspace input,
+.user-assets-workspace select {
+  min-height: 36px;
+  padding: 7px 10px;
+}
+.asset-applied-search {
+  margin: 0 18px 10px;
+  color: var(--asset-muted);
+  font-size: 12px;
+}
+.asset-queue > button {
+  margin: 0 0 12px 18px;
+}
+.asset-queue > p[role],
+.asset-queue > .alert {
+  margin: 12px 18px;
+}
+.asset-observation-bar {
+  background: #f8faff;
+  border-top: 1px solid var(--asset-line);
+  border-bottom: 1px solid var(--asset-line);
+  padding: 10px 18px;
+  color: var(--asset-muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.asset-provenance {
+  margin-top: 5px;
+}
+.asset-provenance summary {
+  cursor: pointer;
+}
+.asset-provenance > dl {
+  background: white;
+  padding: 14px;
+  border: 1px solid var(--asset-line);
+  border-radius: 5px;
+}
+.user-assets-workspace .asset-table-scroll {
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+}
+.asset-table {
+  width: 100%;
+  min-width: 740px;
+  table-layout: fixed;
+}
+.asset-table caption {
+  text-align: left;
+  padding: 12px 18px;
+  font-weight: 650;
+  font-size: 12px;
+  color: var(--asset-muted);
+}
+.asset-table th {
+  background: #f7f9fd;
+  font-size: 12px;
+  font-weight: 550;
+  color: #546e90;
+}
+.asset-table th,
+.asset-table td {
+  padding: 12px 14px;
+  border-bottom: 1px solid #e4ebf4;
+  vertical-align: top;
+}
+.asset-table th:nth-child(1) {
+  width: 15%;
+}
+.asset-table th:nth-child(2) {
+  width: 19%;
+}
+.asset-table th:nth-child(3) {
+  width: 21%;
+}
+.asset-table th:nth-child(4) {
+  width: 18%;
+}
+.asset-table th:nth-child(5) {
+  width: 17%;
+}
+.asset-table th:nth-child(6) {
+  width: 10%;
+}
+.asset-table tbody tr:hover {
+  background: #f5f9ff;
+}
+.asset-table .asset-name {
+  font-weight: 650;
+  color: #285f99;
+}
+.asset-table .asset-identifier {
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+}
+.asset-table .asset-detail-button {
+  background: transparent;
+  color: #245ba4;
+  padding: 4px;
+  min-height: 28px;
+}
+.asset-table .asset-detail-button:hover:not(:disabled) {
+  background: #eaf2ff;
+}
+.asset-page-count {
+  margin: 12px 18px;
+  color: var(--asset-muted);
+  font-size: 12px;
+}
+.asset-pagination {
+  margin: 0 18px;
+  gap: 8px;
+}
+.asset-drawer-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+}
+.asset-drawer-scrim {
+  position: absolute;
+  inset: 0;
+  background: #10263e40;
+  backdrop-filter: blur(2px);
+}
+.asset-drawer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: min(520px, 100%);
+  height: 100dvh;
+  background: #fff;
+  box-shadow: -12px 0 40px #152c4720;
+}
+.asset-detail-content {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  outline: none;
+}
+.asset-detail-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 24px 26px;
+  border-bottom: 1px solid var(--asset-line);
+  flex: 0 0 auto;
+}
+.asset-detail-header > div {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.asset-detail-header h3 {
+  font-size: 22px;
+  color: #173149;
+  margin: 4px 0 6px;
+}
+.asset-detail-header small {
+  color: var(--asset-muted);
+  font-size: 12px;
+}
+.asset-detail-header button {
+  flex-shrink: 0;
+}
+.asset-detail-body {
+  flex: 1 1 auto;
+  overflow: auto;
+  padding: 20px 26px;
+  overscroll-behavior: contain;
+}
+.asset-fact-note {
+  color: var(--asset-muted);
+  font-size: 12px;
+  margin: 0 0 22px;
+  line-height: 1.6;
+}
+.asset-detail-body h4 {
+  border-bottom: 1px solid var(--asset-line);
+  padding-bottom: 10px;
+  margin: 20px 0 14px;
+  font-size: 14px;
+}
+.asset-detail-body .facts {
+  display: grid;
+  grid-template-columns: minmax(120px, 0.8fr) minmax(0, 1.5fr);
+  gap: 12px 16px;
+  margin: 0 0 24px;
+}
+.asset-detail-body .facts dt {
+  font-size: 12px;
+  color: var(--asset-muted);
+  font-weight: 500;
+}
+.asset-detail-body .facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-size: 14px;
+}
+.asset-detail-body .facts ul {
+  margin: 0;
+  padding-left: 18px;
+}
+.asset-detail-footer {
+  padding: 16px 26px;
+  border-top: 1px solid var(--asset-line);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex: 0 0 auto;
+}
+.asset-detail-footer span {
+  color: var(--asset-muted);
+  font-size: 12px;
+}
+@media (max-width: 760px) {
+  .asset-page-heading h2 {
+    font-size: 23px;
+  }
+  .asset-source-heading {
+    padding: 12px 14px;
+  }
+  .asset-source-heading > div {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+  }
+  .asset-source-heading button {
+    flex-shrink: 0;
+  }
+  #asset-source-picker {
+    padding: 0 12px 12px;
+  }
+  .user-assets-workspace .asset-search-toolbar > .field:first-child {
+    flex-basis: 100%;
+  }
+  .asset-table {
+    min-width: 0;
+    display: block;
+  }
+  .asset-table caption {
+    display: block;
+  }
+  .asset-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+  .asset-table tbody {
+    display: block;
+  }
+  .asset-table tr {
+    display: block;
+    margin: 0 12px 12px;
+    border: 1px solid var(--asset-line);
+    border-radius: 6px;
+    padding: 8px 12px;
+  }
+  .asset-table td {
+    display: grid;
+    grid-template-columns: 44px minmax(0, 1fr);
+    gap: 10px;
+    border: 0;
+    padding: 5px 0;
+    font-size: 13px;
+  }
+  .asset-table td::before {
+    content: attr(data-label);
+    font-size: 12px;
+    font-weight: 400;
+    color: var(--asset-muted);
+  }
+  .asset-table .asset-detail-button {
+    justify-self: start;
+  }
+  .asset-detail-header {
+    padding: 18px;
+  }
+  .asset-detail-body {
+    padding: 14px 18px;
+  }
+  .asset-detail-body .facts {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+  .asset-detail-body .facts dd {
+    margin-bottom: 13px;
+  }
+  .asset-detail-footer {
+    padding: 12px 18px;
+  }
+}
+
+/* Long factual names remain inspectable without displacing the fixed Close control. */
+.asset-detail-header .asset-detail-identity {
+  max-height: min(180px, 25dvh);
+  overflow: auto;
+}
+.asset-detail-body {
+  min-height: 0;
+}
+
+/* Compact field rules intentionally outrank the legacy generic form styles. */
+.user-assets-workspace .asset-search-toolbar > .field:first-child > span {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.user-assets-workspace .asset-search-toolbar input,
+.user-assets-workspace .asset-search-toolbar select {
+  min-height: 36px;
+  height: 36px;
+  padding: 7px 10px;
+}
+.user-assets-workspace .asset-search-toolbar .asset-page-size > span {
+  font-size: 12px;
+  white-space: nowrap;
+}
+.asset-queue-heading .asset-refresh {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+.user-assets-workspace button:not(.secondary):not(.asset-detail-button) {
+  background: #2463e8;
+}
+.user-assets-workspace
+  button:not(.secondary):not(.asset-detail-button):hover:not(:disabled) {
+  background: #1c50c4;
+}
+@media (max-width: 760px) {
+  .asset-page-heading > p:last-child {
+    font-size: 13px;
+  }
+  .asset-source-heading {
+    padding: 10px 14px;
+  }
+  .asset-source-revisions {
+    margin-bottom: 10px;
+  }
+  .asset-queue-heading {
+    padding: 12px 14px;
+    gap: 8px;
+  }
+  .asset-queue-heading h3 {
+    font-size: 14px;
+  }
+  .user-assets-workspace .asset-search-toolbar {
+    padding: 0 14px 10px;
+    gap: 8px;
+  }
+  .user-assets-workspace .asset-search-toolbar > .field:first-child {
+    flex-basis: 100%;
+  }
+  .asset-applied-search {
+    margin: 0 14px 10px;
+  }
+}

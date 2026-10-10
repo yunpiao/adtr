@@ -1,3 +1,4 @@
+import { revealNavigation } from "./test-navigation";
 import {
   act,
   fireEvent,
@@ -402,6 +403,7 @@ describe("operation account permissions and lifecycle", () => {
             ),
           })
         : undefined;
+    await revealNavigation("管理操作账户");
     click("管理操作账户");
     await screen.findByText("服务器未授予操作账户读取权限。");
     expect(calls(base)).toHaveLength(0);

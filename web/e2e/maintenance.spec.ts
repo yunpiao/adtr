@@ -1,3 +1,4 @@
+import { navigateTo } from "./navigation";
 import {
   test as base,
   expect,
@@ -95,7 +96,7 @@ async function changeInitialPassword(
 }
 
 async function enrollMfa(page: Page, password: string): Promise<Authenticator> {
-  await page.getByRole("button", { name: "多因素认证", exact: true }).click();
+  await navigateTo(page, "多因素认证");
   await fillSecret(page.getByLabel("当前密码", { exact: true }), password);
   await page.getByRole("button", { name: "开始设置", exact: true }).click();
   const secret = await page
@@ -178,9 +179,7 @@ test("real scheduled health occurrence and reversible visibility through browser
   const producerName = "synthetic.maintenance.producer";
   const producerInitial = "Initial Maintenance Producer 123";
   const changed = "Changed Maintenance Producer 456";
-  await bootstrapPage
-    .getByRole("button", { name: "访问管理", exact: true })
-    .click();
+  await navigateTo(bootstrapPage, "访问管理");
   await bootstrapPage
     .getByRole("button", { name: "用户管理", exact: true })
     .click();
@@ -227,7 +226,7 @@ test("real scheduled health occurrence and reversible visibility through browser
     return r.json();
   };
   const fillProof = () => fillActorProof(page, changed, mfa);
-  await page.getByRole("button", { name: "后台任务", exact: true }).click();
+  await navigateTo(page, "后台任务");
   await page.getByRole("button", { name: "周期计划", exact: true }).click();
   await expect(page.getByRole("table", { name: "周期计划列表" })).toBeVisible();
   expect(
@@ -481,9 +480,7 @@ test("real scheduled health occurrence and reversible visibility through browser
     (await readJSON(context, "/api/tasks/schedules?pageIdx=1&pageSize=20")).page
       .total,
   ).toBe(1);
-  await bootstrapPage
-    .getByRole("button", { name: "访问管理", exact: true })
-    .click();
+  await navigateTo(bootstrapPage, "访问管理");
   await bootstrapPage
     .getByRole("button", { name: "角色管理", exact: true })
     .click();
@@ -543,7 +540,7 @@ test("real scheduled health occurrence and reversible visibility through browser
     await login(reader, readerName, readerInitial);
     await changeInitialPassword(reader, readerInitial, readerChanged);
     const readerMfa = await enrollMfa(reader, readerChanged);
-    await reader.getByRole("button", { name: "后台任务", exact: true }).click();
+    await navigateTo(reader, "后台任务");
     await expect(reader.getByLabel("任务可见性筛选")).toHaveCount(0);
     await reader.getByRole("button", { name: "周期计划", exact: true }).click();
     await expect(
@@ -584,7 +581,7 @@ test("real scheduled health occurrence and reversible visibility through browser
         await readerContext.request.get("/api/tasks?visibility=archived")
       ).status(),
     ).toBe(403);
-    await reader.getByRole("button", { name: "退出登录", exact: true }).click();
+    await navigateTo(reader, "退出登录");
     await expect(
       reader.getByRole("heading", { name: "登录账户", exact: true }),
     ).toBeVisible();

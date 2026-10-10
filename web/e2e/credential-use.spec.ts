@@ -1,3 +1,4 @@
+import { navigateTo } from "./navigation";
 import { test, expect, type BrowserContext, type Page } from "@playwright/test";
 import { createHmac } from "node:crypto";
 import { credentialUseRead } from "./credential-use-read";
@@ -48,7 +49,7 @@ async function login(page: Page, username: string, password: string) {
 }
 
 async function enrollMfa(page: Page, password: string): Promise<Authenticator> {
-  await page.getByRole("button", { name: "多因素认证", exact: true }).click();
+  await navigateTo(page, "多因素认证");
   await page.getByLabel("当前密码", { exact: true }).fill(password);
   await page.getByRole("button", { name: "开始设置", exact: true }).click();
   const secret = await page
@@ -196,7 +197,7 @@ test("default admin deny, explicit role grant, receipt recovery, expired-tenant 
   ).toEqual([]);
   expect((await readJSON(context, "/api/operation-accounts")).List).toEqual([]);
 
-  await page.getByRole("button", { name: "域连接", exact: true }).click();
+  await navigateTo(page, "域连接");
   await page.getByRole("button", { name: "新增域连接", exact: true }).click();
   await page.getByLabel("域 DNS 名称", { exact: true }).fill(domain);
   await page
@@ -220,7 +221,7 @@ test("default admin deny, explicit role grant, receipt recovery, expired-tenant 
   expect(
     (await readJSON(context, "/api/operation-accounts/domains")).domains,
   ).toEqual([]);
-  await page.getByRole("button", { name: "资源与租户", exact: true }).click();
+  await navigateTo(page, "资源与租户");
   await page.getByRole("button", { name: "资源组", exact: true }).click();
   await page.getByRole("button", { name: "新增资源组", exact: true }).click();
   await page.getByLabel("资源组名称", { exact: true }).fill(group);
@@ -247,7 +248,7 @@ test("default admin deny, explicit role grant, receipt recovery, expired-tenant 
     page.getByRole("heading", { name: "账户概览", exact: true }),
   ).toBeVisible();
   const actorId = (await readJSON(context, "/api/auth/me")).ID;
-  await page.getByRole("button", { name: "管理操作账户", exact: true }).click();
+  await navigateTo(page, "管理操作账户");
   await page.getByRole("button", { name: "新增操作账户", exact: true }).click();
   await page
     .getByRole("button", { name: `选择 ${domain}`, exact: true })
@@ -416,7 +417,7 @@ test("default admin deny, explicit role grant, receipt recovery, expired-tenant 
   // unroute() alone does not await handlers and can handle their route twice.
   await page.unrouteAll({ behavior: "wait" });
   await page.reload();
-  await page.getByRole("button", { name: "凭据授权清理", exact: true }).click();
+  await navigateTo(page, "凭据授权清理");
   await expect(
     page.getByRole("heading", { name: "凭据授权回执", exact: true }),
   ).toBeVisible();
@@ -439,7 +440,7 @@ test("default admin deny, explicit role grant, receipt recovery, expired-tenant 
 
   // Expire through the actual scoped, proof-bearing administrative path. This
   // invalidates the session; reauthentication still permits reducing authority.
-  await page.getByRole("button", { name: "资源与租户", exact: true }).click();
+  await navigateTo(page, "资源与租户");
   await page.getByRole("button", { name: "租户配置", exact: true }).click();
   await page.getByRole("button", { name: "编辑租户配置", exact: true }).click();
   await page.getByLabel("失效时间（UTC Unix 秒）", { exact: true }).fill("0");
@@ -465,7 +466,7 @@ test("default admin deny, explicit role grant, receipt recovery, expired-tenant 
   expect(cleanup.List.map((a: { accountId: string }) => a.accountId)).toEqual([
     accountId,
   ]);
-  await page.getByRole("button", { name: "凭据授权清理", exact: true }).click();
+  await navigateTo(page, "凭据授权清理");
   await page
     .getByRole("button", { name: `清理 ${label}`, exact: true })
     .click();

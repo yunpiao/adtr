@@ -1,3 +1,4 @@
+import { navigateTo } from "./navigation";
 import { test, expect } from "@playwright/test";
 import { createHmac } from "node:crypto";
 function totp(secret: string, now = Date.now()): string {
@@ -86,7 +87,7 @@ test("real browser → API → PostgreSQL password and MFA lifecycle", async ({
     },
   });
   expect(stale.status()).toBe(401);
-  await page.getByRole("button", { name: "多因素认证", exact: true }).click();
+  await navigateTo(page, "多因素认证");
   await page.getByLabel("当前密码", { exact: true }).fill(changed);
   await page.getByRole("button", { name: "开始设置", exact: true }).click();
   const secret = await page
@@ -103,7 +104,7 @@ test("real browser → API → PostgreSQL password and MFA lifecycle", async ({
   const mfa = await context.request.get("/api/auth/mfa");
   expect(mfa.status()).toBe(200);
   expect(await mfa.json()).toEqual({ hasMfa: true });
-  await page.getByRole("button", { name: "退出登录", exact: true }).click();
+  await navigateTo(page, "退出登录");
   await expect(
     page.getByRole("heading", { name: "登录账户", exact: true }),
   ).toBeVisible();
@@ -135,7 +136,7 @@ test("real browser → API → PostgreSQL password and MFA lifecycle", async ({
   await expect(
     page.getByRole("heading", { name: "账户概览", exact: true }),
   ).toBeVisible();
-  await page.getByRole("button", { name: "多因素认证", exact: true }).click();
+  await navigateTo(page, "多因素认证");
   await page.getByLabel("当前密码", { exact: true }).fill(changed);
   // The MFA login consumed its counter too. Disabling must prove possession
   // with the next unused real authenticator code, never a replayed code.
@@ -153,7 +154,7 @@ test("real browser → API → PostgreSQL password and MFA lifecycle", async ({
   expect(
     (await (await context.request.get("/api/auth/me")).json()).hasMfa,
   ).toBe(false);
-  await page.getByRole("button", { name: "退出登录", exact: true }).click();
+  await navigateTo(page, "退出登录");
   await expect(
     page.getByRole("heading", { name: "登录账户", exact: true }),
   ).toBeVisible();

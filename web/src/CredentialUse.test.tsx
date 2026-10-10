@@ -1,3 +1,4 @@
+import { revealNavigation } from "./test-navigation";
 // Synthetic DOM/transport tests. Real browser/API/database evidence lives in
 // e2e/credential-use.spec.ts; these fixtures do not replace it.
 import {
@@ -610,6 +611,8 @@ describe("credential governance views", () => {
           })
         : undefined;
     render(<App />);
+    await screen.findByRole("navigation", { name: "账户设置" });
+    await revealNavigation("凭据授权清理");
     await screen.findByRole("button", { name: "凭据授权清理" });
     click("凭据授权清理");
     await screen.findByRole("table", { name: "具有已保存使用授权的账户" });
@@ -645,6 +648,7 @@ describe("credential governance views", () => {
     expect(JSON.stringify(saved)).not.toMatch(
       /Synthetic actor password|123456|actorPassword|totpCode/,
     );
+    await revealNavigation("凭据授权清理");
     click("凭据授权清理");
     await screen.findByRole("heading", { name: "凭据授权回执" });
     expect(calls("mutation")).toHaveLength(1);
@@ -807,6 +811,8 @@ describe("credential governance views", () => {
   });
   it("makes admin cleanup reachable in the application shell", async () => {
     render(<App />);
+    await screen.findByRole("navigation", { name: "账户设置" });
+    await revealNavigation("凭据授权清理");
     await screen.findByRole("button", { name: "凭据授权清理" });
     click("凭据授权清理");
     await screen.findByRole("table", { name: "具有已保存使用授权的账户" });

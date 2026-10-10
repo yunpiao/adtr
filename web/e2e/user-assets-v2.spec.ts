@@ -1,3 +1,4 @@
+import { navigateTo } from "./navigation";
 import {
   test,
   expect,
@@ -143,7 +144,7 @@ async function login(page: Page, username: string, password: string) {
 }
 
 async function enrollMfa(page: Page, password: string): Promise<Authenticator> {
-  await page.getByRole("button", { name: "多因素认证", exact: true }).click();
+  await navigateTo(page, "多因素认证");
   await fillSecret(page.getByLabel("当前密码", { exact: true }), password);
   await page.getByRole("button", { name: "开始设置", exact: true }).click();
   const secret = await page
@@ -260,7 +261,7 @@ async function observationAction(page: Page, action: () => Promise<unknown>) {
 }
 
 async function openDirectory(page: Page) {
-  await page.getByRole("button", { name: "补充目录资产", exact: true }).click();
+  await navigateTo(page, "补充目录资产");
   await expect(
     page.getByRole("heading", { name: "补充目录资产", exact: true }),
   ).toBeVisible();
@@ -314,7 +315,7 @@ async function signedIn(page: Page, username: string) {
 }
 
 async function logout(page: Page) {
-  await page.getByRole("button", { name: "退出登录", exact: true }).click();
+  await navigateTo(page, "退出登录");
   await expect(
     page.getByRole("heading", { name: "登录账户", exact: true }),
   ).toBeVisible();
@@ -390,7 +391,7 @@ async function assetAction(
   };
 }
 async function openAssets(page: Page) {
-  await page.getByRole("button", { name: "用户资产", exact: true }).click();
+  await navigateTo(page, "用户资产");
   await expect(
     page.getByRole("heading", { name: "用户资产", exact: true }),
   ).toBeVisible();
@@ -498,7 +499,7 @@ test("UserAssetsV2 real worker TLS LDAP PostgreSQL search and pinned detail", as
   expect(tenant.maxAdCount).toBe(2);
   expect(tenant.expireTime).toBeGreaterThan(Math.floor(Date.now() / 1000));
 
-  await page.getByRole("button", { name: "域连接", exact: true }).click();
+  await navigateTo(page, "域连接");
   await page.getByRole("button", { name: "新增域连接", exact: true }).click();
   await page.getByLabel("域 DNS 名称", { exact: true }).fill(domain);
   await page
@@ -527,7 +528,7 @@ test("UserAssetsV2 real worker TLS LDAP PostgreSQL search and pinned detail", as
   expect(deniedScope.status()).toBe(404);
   expect(await deniedScope.json()).toEqual({ error: "not_found" });
 
-  await page.getByRole("button", { name: "资源与租户", exact: true }).click();
+  await navigateTo(page, "资源与租户");
   await page.getByRole("button", { name: "资源组", exact: true }).click();
   await page.getByRole("button", { name: "新增资源组", exact: true }).click();
   await page.getByLabel("资源组名称", { exact: true }).fill(groupName);
@@ -562,7 +563,7 @@ test("UserAssetsV2 real worker TLS LDAP PostgreSQL search and pinned detail", as
   // the bootstrap session; create the producer only after that UI re-login.
   // Producer: password/MFA (3), account/connection grant/binding/directory
   // grant (4), first sync/second sync (2) = 9. No limit or clock bypass.
-  await page.getByRole("button", { name: "访问管理", exact: true }).click();
+  await navigateTo(page, "访问管理");
   await page.getByRole("button", { name: "用户管理", exact: true }).click();
   await page.getByRole("button", { name: "新增用户", exact: true }).click();
   await page.getByLabel("用户名", { exact: true }).fill(producerUsername);
@@ -584,7 +585,7 @@ test("UserAssetsV2 real worker TLS LDAP PostgreSQL search and pinned detail", as
   });
   expect(producer.value.ID).toBeGreaterThan(0);
   expect(producer.value.ID).not.toBe(actorId);
-  await page.getByRole("button", { name: "退出登录", exact: true }).click();
+  await navigateTo(page, "退出登录");
   await login(page, producerUsername, producerInitial);
   await expect(
     page.getByRole("heading", { name: "修改密码", exact: true }),
@@ -611,7 +612,7 @@ test("UserAssetsV2 real worker TLS LDAP PostgreSQL search and pinned detail", as
   actorId = (await readJSON(context, "/api/auth/me")).ID as number;
   expect(actorId).toBe(producer.value.ID);
 
-  await page.getByRole("button", { name: "管理操作账户", exact: true }).click();
+  await navigateTo(page, "管理操作账户");
   await page.getByRole("button", { name: "新增操作账户", exact: true }).click();
   await page
     .getByRole("button", { name: `选择 ${domain}`, exact: true })
@@ -646,7 +647,7 @@ test("UserAssetsV2 real worker TLS LDAP PostgreSQL search and pinned detail", as
   });
   safe(connectionGrant.value);
 
-  await page.getByRole("button", { name: "域连接", exact: true }).click();
+  await navigateTo(page, "域连接");
   const backToDomains = page.getByRole("button", {
     name: "返回域连接列表",
     exact: true,
@@ -688,7 +689,7 @@ test("UserAssetsV2 real worker TLS LDAP PostgreSQL search and pinned detail", as
     consumerEnabled: true,
   });
 
-  await page.getByRole("button", { name: "管理操作账户", exact: true }).click();
+  await navigateTo(page, "管理操作账户");
   const backToAccounts = page.getByRole("button", {
     name: "返回操作账户列表",
     exact: true,
@@ -814,13 +815,302 @@ test("UserAssetsV2 real worker TLS LDAP PostgreSQL search and pinned detail", as
       pages: 2,
     },
   });
-  const table = page.getByRole("table", { name: "用户资产列表", exact: true });
+  const table = page.getByRole("table", {
+    name: "用户资产列表",
+    exact: true,
+    includeHidden: true,
+  });
   await expect(table.locator("tbody tr")).toHaveCount(10);
   await expect(table).not.toContainText("group-");
   await expect(table).not.toContainText("computer-");
   await expect(
     page.getByRole("button", { name: "提交目录同步", exact: true }),
   ).toHaveCount(0);
+  await test.step("SOC desktop and mobile use real disclosures, routes and asset data", async () => {
+    const soc = await context.newPage();
+    try {
+      await soc.setViewportSize({ width: 1440, height: 900 });
+      await soc.goto("/#user-assets-v2");
+      await signedIn(soc, producerUsername);
+      for (const name of ["用户资产", "后台任务", "操作审计"])
+        await expect(
+          soc.getByRole("button", { name, exact: true }),
+        ).toBeVisible();
+      for (const [group, label] of [
+        ["management", "平台管理"],
+        ["collection", "采集与接入"],
+        ["identity", "账户与身份"],
+      ]) {
+        const details = soc.locator(
+          `details[data-navigation-group="${group}"]`,
+        );
+        await expect(details.locator("summary")).toContainText(label);
+        await expect(details).not.toHaveAttribute("open", "");
+      }
+      await expect(
+        soc.getByRole("button", { name: "访问管理", exact: true }),
+      ).toHaveCount(0);
+      const desktop = await openAssets(soc);
+      expect(desktop.value).toEqual(first.value);
+      const socTable = soc.getByRole("table", {
+        name: "用户资产列表",
+        exact: true,
+      });
+      await expect(socTable.locator("tbody tr")).toHaveCount(10);
+      // Measure the unscrolled first screen; the first complete user row must
+      // fit at the approved desktop viewport without scrolling it into view.
+      expect(await soc.evaluate(() => scrollY)).toBe(0);
+      const firstRowBounds = await socTable
+        .locator("tbody tr")
+        .first()
+        .boundingBox();
+      expect(firstRowBounds).not.toBeNull();
+      expect(firstRowBounds!.y).toBeGreaterThanOrEqual(0);
+      expect(firstRowBounds!.y + firstRowBounds!.height).toBeLessThanOrEqual(
+        900,
+      );
+      await expect(
+        soc.getByRole("button", { name: "更换数据源", exact: true }),
+      ).toBeVisible();
+      await expect(soc.locator("#asset-source-picker")).toBeHidden();
+      expect(
+        await soc.evaluate(
+          () => document.documentElement.scrollWidth <= innerWidth,
+        ),
+      ).toBe(true);
+      await soc.screenshot({
+        path: testInfo.outputPath(
+          "user-assets-v2-soc-desktop-user-assets-list.png",
+        ),
+        fullPage: true,
+      });
+      await soc.screenshot({
+        path: testInfo.outputPath(
+          "user-assets-v2-soc-desktop-user-assets-first-screen.png",
+        ),
+        fullPage: false,
+      });
+
+      const desktopDetail = await assetAction(
+        soc,
+        () =>
+          soc
+            .getByRole("button", { name: "查看用户 user-01", exact: true })
+            .click(),
+        true,
+      );
+      expect(desktopDetail.value.object).toEqual(expected[0]);
+      const desktopDrawer = soc.getByRole("dialog", {
+        name: "用户详情抽屉",
+        exact: true,
+      });
+      await expect(desktopDrawer).toHaveAttribute("aria-modal", "true");
+      const desktopBounds = await desktopDrawer.boundingBox();
+      expect(desktopBounds).toEqual({ x: 920, y: 0, width: 520, height: 900 });
+      await soc.screenshot({
+        path: testInfo.outputPath(
+          "user-assets-v2-soc-desktop-user-asset-detail.png",
+        ),
+        fullPage: false,
+      });
+      await soc
+        .getByRole("button", { name: "返回用户列表", exact: true })
+        .click();
+      await expect(desktopDrawer).toHaveCount(0);
+      await expect(
+        soc.getByRole("button", { name: "查看用户 user-01", exact: true }),
+      ).toBeFocused();
+
+      // Visit an actual destination in each secondary group. Native history
+      // still revalidates the session and keeps the matching group reachable.
+      for (const name of [
+        "后台任务",
+        "操作审计",
+        "访问管理",
+        "域连接",
+        "账户概览",
+      ]) {
+        await navigateTo(soc, name);
+        await expect(
+          soc.getByRole("heading", { name, exact: true }),
+        ).toBeVisible();
+        await expect(
+          soc.getByRole("button", { name, exact: true }),
+        ).toHaveAttribute("aria-current", "page");
+      }
+      await soc.goBack();
+      await expect(
+        soc.getByRole("heading", { name: "域连接", exact: true }),
+      ).toBeVisible();
+      await soc.goForward();
+      await expect(
+        soc.getByRole("heading", { name: "账户概览", exact: true }),
+      ).toBeVisible();
+
+      await soc.setViewportSize({ width: 390, height: 844 });
+      const toggle = soc.getByRole("button", { name: "打开导航", exact: true });
+      await expect(toggle).toBeVisible();
+      await expect(soc.locator("#soc-navigation-panel")).toBeHidden();
+      await toggle.click();
+      const navigation = soc.getByRole("dialog", {
+        name: "工作区导航",
+        exact: true,
+      });
+      await expect(navigation).toBeVisible();
+      await expect(
+        navigation.getByRole("button", { name: "用户资产", exact: true }),
+      ).toBeVisible();
+      const management = soc.locator(
+        'details[data-navigation-group="management"]',
+      );
+      await expect(management).toHaveAttribute("open", "");
+      await management.locator("summary").click();
+      await expect(management).not.toHaveAttribute("open", "");
+      await soc.screenshot({
+        path: testInfo.outputPath(
+          "user-assets-v2-soc-mobile-navigation-open.png",
+        ),
+        fullPage: false,
+      });
+      await soc.keyboard.press("Escape");
+      await expect(navigation).toHaveCount(0);
+      await expect(toggle).toBeFocused();
+      await navigateTo(soc, "系统健康");
+      await expect(
+        soc.getByRole("heading", { name: "系统健康", exact: true }),
+      ).toBeVisible();
+      await expect(soc.locator("#soc-navigation-panel")).toBeHidden();
+      await expect(management).toHaveAttribute("open", "");
+      const mobile = await openAssets(soc);
+      expect(mobile.value).toEqual(first.value);
+      await expect(soc.locator("#soc-navigation-panel")).toBeHidden();
+      await expect(socTable.locator("tbody tr")).toHaveCount(10);
+      // A complete first SAM value must be readable on the untouched mobile
+      // first screen, not just the first card's border below the toolbar.
+      expect(await soc.evaluate(() => scrollY)).toBe(0);
+      const firstMobileSAM = socTable
+        .locator("tbody tr")
+        .first()
+        .locator('td[data-label="SAM"]');
+      await expect(firstMobileSAM).toHaveText("user-01");
+      await expect(firstMobileSAM).toBeVisible();
+      const firstMobileSAMBounds = await firstMobileSAM.boundingBox();
+      expect(firstMobileSAMBounds).not.toBeNull();
+      expect(firstMobileSAMBounds!.y).toBeGreaterThanOrEqual(0);
+      expect(
+        firstMobileSAMBounds!.y + firstMobileSAMBounds!.height,
+      ).toBeLessThanOrEqual(844);
+      expect(
+        await soc.evaluate(
+          () => document.documentElement.scrollWidth <= innerWidth,
+        ),
+      ).toBe(true);
+      await soc.screenshot({
+        path: testInfo.outputPath(
+          "user-assets-v2-soc-mobile-user-assets-list.png",
+        ),
+        fullPage: true,
+      });
+      await soc.screenshot({
+        path: testInfo.outputPath(
+          "user-assets-v2-soc-mobile-user-assets-first-screen.png",
+        ),
+        fullPage: false,
+      });
+
+      const mobileDetail = await assetAction(
+        soc,
+        () =>
+          soc
+            .getByRole("button", { name: "查看用户 user-01", exact: true })
+            .click(),
+        true,
+      );
+      expect(mobileDetail.value.object).toEqual(expected[0]);
+      const drawer = soc.getByRole("dialog", {
+        name: "用户详情抽屉",
+        exact: true,
+      });
+      await expect(drawer).toHaveAttribute("aria-modal", "true");
+      const bounds = await drawer.boundingBox();
+      expect(bounds).not.toBeNull();
+      expect(bounds!.x).toBeGreaterThanOrEqual(0);
+      expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(390);
+      expect(bounds!.height).toBe(844);
+      // Playwright 1.56's role selector still matches inert descendants.
+      // Prove the browser's actual focus barrier, rather than DOM absence.
+      const searchForm = soc.locator("form.asset-search-toolbar");
+      await expect(searchForm).toHaveAttribute("inert", "");
+      await expect(searchForm).toHaveJSProperty("inert", true);
+      const backgroundSearch = searchForm.getByRole("button", {
+        name: "搜索用户",
+        exact: true,
+      });
+      const identity = soc.getByRole("region", {
+        name: "用户身份",
+        exact: true,
+      });
+      await identity.focus();
+      await expect(identity).toBeFocused();
+      await backgroundSearch.evaluate((button) =>
+        (button as HTMLButtonElement).focus(),
+      );
+      await expect(identity).toBeFocused();
+      expect(
+        await drawer.evaluate((element) =>
+          element.contains(document.activeElement),
+        ),
+      ).toBe(true);
+      expect(
+        await soc.evaluate(
+          () => document.documentElement.scrollWidth <= innerWidth,
+        ),
+      ).toBe(true);
+      await soc.screenshot({
+        path: testInfo.outputPath(
+          "user-assets-v2-soc-mobile-user-asset-detail.png",
+        ),
+        fullPage: false,
+      });
+      const close = soc.getByRole("button", {
+        name: "关闭用户详情",
+        exact: true,
+      });
+      await identity.focus();
+      await soc.keyboard.press("Shift+Tab");
+      await expect(
+        soc.getByRole("button", { name: "返回用户列表", exact: true }),
+      ).toBeFocused();
+      await soc.keyboard.press("Tab");
+      await expect(identity).toBeFocused();
+      await soc.keyboard.press("Tab");
+      await expect(close).toBeFocused();
+      await soc.keyboard.press("Escape");
+      await expect(drawer).toHaveCount(0);
+      await expect(
+        soc.getByRole("button", { name: "查看用户 user-01", exact: true }),
+      ).toBeFocused();
+      await soc
+        .getByRole("button", { name: "更换数据源", exact: true })
+        .click();
+      await expect(soc.locator("#asset-source-picker")).toBeVisible();
+      await expect(
+        soc.getByRole("radio", {
+          name: "选择数据源 synthetic.invalid",
+          exact: true,
+        }),
+      ).toBeVisible();
+      await soc
+        .getByRole("button", { name: "收起数据源选择", exact: true })
+        .click();
+      await expect(soc.locator("#asset-source-picker")).toBeHidden();
+      await expect(socTable.locator("tbody tr")).toHaveCount(10);
+    } finally {
+      await soc.close();
+      await page.bringToFront();
+      await signedIn(page, producerUsername);
+    }
+  });
   const privateTaskCount = (
     await readJSON(context, "/api/tasks?pageIdx=1&pageSize=20")
   ).page.total;
@@ -1142,6 +1432,7 @@ test("UserAssetsV2 real worker TLS LDAP PostgreSQL search and pinned detail", as
     true,
   );
   expect(pinnedDetail.value.observationId).toBe(taskUUID);
+  await page.getByRole("button", { name: "关闭用户详情", exact: true }).click();
   const refreshed = await assetAction(page, () =>
     page.getByRole("button", { name: "刷新用户资产观测", exact: true }).click(),
   );
@@ -1162,7 +1453,8 @@ test("UserAssetsV2 real worker TLS LDAP PostgreSQL search and pinned detail", as
         .click(),
     true,
   );
-  await page.getByRole("button", { name: "账户概览", exact: true }).click();
+  await page.getByRole("button", { name: "关闭用户详情", exact: true }).click();
+  await navigateTo(page, "账户概览");
   await page.goBack();
   await expect(
     page.getByRole("heading", { name: "用户资产", exact: true }),
@@ -1172,7 +1464,7 @@ test("UserAssetsV2 real worker TLS LDAP PostgreSQL search and pinned detail", as
   await expect(
     page.getByRole("heading", { name: "账户概览", exact: true }),
   ).toBeVisible();
-  await test.step("a genuine detail404 after production source deletion clears the still-open private view", async () => {
+  await test.step("a genuine detail404 after production source deletion clears the selected private source", async () => {
     const current = await openAssets(page);
     expect(current.value.observationId).toBe(newerId);
     await assetAction(
@@ -1208,9 +1500,7 @@ test("UserAssetsV2 real worker TLS LDAP PostgreSQL search and pinned detail", as
       );
       // Existing bootstrap's eighth, ninth and tenth sensitive actions. Use
       // production dependency/credential guards, never SQL state or guard edits.
-      await adminPage
-        .getByRole("button", { name: "域连接", exact: true })
-        .click();
+      await navigateTo(adminPage, "域连接");
       await adminPage
         .getByRole("button", { name: `查看 ${domain}`, exact: true })
         .click();
@@ -1231,9 +1521,7 @@ test("UserAssetsV2 real worker TLS LDAP PostgreSQL search and pinned detail", as
         operation: "detach",
         credentialSource: "unconfigured",
       });
-      await adminPage
-        .getByRole("button", { name: "管理操作账户", exact: true })
-        .click();
+      await navigateTo(adminPage, "管理操作账户");
       await adminPage
         .getByRole("button", { name: `查看 ${accountLabel}`, exact: true })
         .click();
@@ -1255,9 +1543,7 @@ test("UserAssetsV2 real worker TLS LDAP PostgreSQL search and pinned detail", as
         accountId,
         deleted: true,
       });
-      await adminPage
-        .getByRole("button", { name: "域连接", exact: true })
-        .click();
+      await navigateTo(adminPage, "域连接");
       const back = adminPage.getByRole("button", {
         name: "返回域连接列表",
         exact: true,
@@ -1287,6 +1573,9 @@ test("UserAssetsV2 real worker TLS LDAP PostgreSQL search and pinned detail", as
       expect((await readJSON(context, "/api/auth/me")).ID).toBe(actorId);
       await expect(table.locator("tbody tr")).toHaveCount(10);
       await expect(panel).toContainText(guid(1));
+      await page
+        .getByRole("button", { name: "关闭用户详情", exact: true })
+        .click();
       const unavailable = await assetAction(
         page,
         () =>

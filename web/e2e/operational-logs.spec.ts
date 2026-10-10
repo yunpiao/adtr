@@ -1,3 +1,4 @@
+import { navigateTo } from "./navigation";
 import { test, expect, type BrowserContext, type Page } from "@playwright/test";
 import { createHmac, randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
@@ -69,7 +70,7 @@ async function changePassword(page: Page, old: string, next: string) {
   ).toBeVisible();
 }
 async function enroll(page: Page, password: string): Promise<Authenticator> {
-  await page.getByRole("button", { name: "多因素认证", exact: true }).click();
+  await navigateTo(page, "多因素认证");
   await page.getByLabel("当前密码", { exact: true }).fill(password);
   await page.getByRole("button", { name: "开始设置", exact: true }).click();
   const secret = await page
@@ -193,9 +194,7 @@ test("real API/worker journal → lost-submit recovery → protected ZIP and own
     Origin: new URL(page.url()).origin,
     "X-CSRF-Token": me.csrfToken,
   };
-  await page
-    .getByRole("button", { name: "运行日志与诊断包", exact: true })
-    .click();
+  await navigateTo(page, "运行日志与诊断包");
   await expect(page.getByRole("table", { name: "运行事件记录" })).toBeVisible();
   await expect(page.getByText(/部署后新增的 api \/ worker/)).toBeVisible();
   let produced: { List: { event: Event; log: string }[]; selection: Selection };
@@ -543,9 +542,7 @@ test("real API/worker journal → lost-submit recovery → protected ZIP and own
     await reader.goto("/");
     await login(reader, readerName, readerInitial);
     await changePassword(reader, readerInitial, readerChanged);
-    await reader
-      .getByRole("button", { name: "运行日志与诊断包", exact: true })
-      .click();
+    await navigateTo(reader, "运行日志与诊断包");
     await expect(
       reader.getByText(/当前账户没有此运行日志操作权限/),
     ).toBeVisible();
@@ -564,9 +561,7 @@ test("real API/worker journal → lost-submit recovery → protected ZIP and own
     await expect(
       reader.getByRole("heading", { name: "账户概览", exact: true }),
     ).toBeVisible();
-    await reader
-      .getByRole("button", { name: "运行日志与诊断包", exact: true })
-      .click();
+    await navigateTo(reader, "运行日志与诊断包");
     await expect(
       reader.getByRole("table", { name: "运行事件记录" }),
     ).toBeVisible();

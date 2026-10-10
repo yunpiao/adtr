@@ -1,3 +1,4 @@
+import { navigateTo } from "./navigation";
 import {
   test,
   expect,
@@ -149,7 +150,7 @@ async function login(page: Page, username: string, password: string) {
 }
 
 async function enrollMfa(page: Page, password: string): Promise<Authenticator> {
-  await page.getByRole("button", { name: "多因素认证", exact: true }).click();
+  await navigateTo(page, "多因素认证");
   await fillSecret(page.getByLabel("当前密码", { exact: true }), password);
   await page.getByRole("button", { name: "开始设置", exact: true }).click();
   const secret = await page
@@ -266,7 +267,7 @@ async function observationAction(page: Page, action: () => Promise<unknown>) {
 }
 
 async function openDirectory(page: Page) {
-  await page.getByRole("button", { name: "补充目录资产", exact: true }).click();
+  await navigateTo(page, "补充目录资产");
   await expect(
     page.getByRole("heading", { name: "补充目录资产", exact: true }),
   ).toBeVisible();
@@ -320,7 +321,7 @@ async function signedIn(page: Page, username: string) {
 }
 
 async function logout(page: Page) {
-  await page.getByRole("button", { name: "退出登录", exact: true }).click();
+  await navigateTo(page, "退出登录");
   await expect(
     page.getByRole("heading", { name: "登录账户", exact: true }),
   ).toBeVisible();
@@ -371,9 +372,9 @@ async function readerView(
     "确认撤销角色使用权",
     `清理 ${accountLabel}`,
   ])
-    await expect(page.getByRole("button", { name, exact: true })).toHaveCount(
-      0,
-    );
+    await expect(
+      page.getByRole("button", { name, exact: true, includeHidden: true }),
+    ).toHaveCount(0);
   await expect(
     page.getByRole("table", {
       name: "具有已保存目录读取授权的账户",
@@ -752,7 +753,7 @@ test("real empty dictionary-v2 reader and same-context account-switch isolation"
   const tenant = await readJSON(context, "/api/resources/tenant");
   expect(tenant.maxAdCount).toBe(2);
   expect(tenant.expireTime).toBeGreaterThan(Math.floor(Date.now() / 1000));
-  await page.getByRole("button", { name: "域连接", exact: true }).click();
+  await navigateTo(page, "域连接");
   await page.getByRole("button", { name: "新增域连接", exact: true }).click();
   await page.getByLabel("域 DNS 名称", { exact: true }).fill(domain);
   await page
@@ -781,7 +782,7 @@ test("real empty dictionary-v2 reader and same-context account-switch isolation"
   expect(deniedScope.status()).toBe(404);
   expect(await deniedScope.json()).toEqual({ error: "not_found" });
 
-  await page.getByRole("button", { name: "资源与租户", exact: true }).click();
+  await navigateTo(page, "资源与租户");
   await page.getByRole("button", { name: "资源组", exact: true }).click();
   await page.getByRole("button", { name: "新增资源组", exact: true }).click();
   await page.getByLabel("资源组名称", { exact: true }).fill(groupName);
@@ -806,7 +807,7 @@ test("real empty dictionary-v2 reader and same-context account-switch isolation"
   let actorId = (await readJSON(context, "/api/auth/me")).ID as number;
 
   await test.step("create exactly two reader permissions and assign the producer's existing domain scope", async () => {
-    await page.getByRole("button", { name: "访问管理", exact: true }).click();
+    await navigateTo(page, "访问管理");
     await page.getByRole("button", { name: "角色管理", exact: true }).click();
     await page.getByRole("button", { name: "新增角色", exact: true }).click();
     await page.getByLabel("角色名称", { exact: true }).fill(roleName);
@@ -846,7 +847,7 @@ test("real empty dictionary-v2 reader and same-context account-switch isolation"
         permissions.find((permission) => permission.mark === mark)?.auth,
       ).toEqual({ readable: false, writeable: false });
 
-    await page.getByRole("button", { name: "资源与租户", exact: true }).click();
+    await navigateTo(page, "资源与租户");
     await page.getByRole("button", { name: "资源组", exact: true }).click();
     await page
       .getByRole("button", { name: `查看 ${groupName}`, exact: true })
@@ -870,7 +871,7 @@ test("real empty dictionary-v2 reader and same-context account-switch isolation"
     });
     await loginMfa(page, username, password, auth);
 
-    await page.getByRole("button", { name: "访问管理", exact: true }).click();
+    await navigateTo(page, "访问管理");
     await page.getByRole("button", { name: "用户管理", exact: true }).click();
     await page.getByRole("button", { name: "新增用户", exact: true }).click();
     await page.getByLabel("用户名", { exact: true }).fill(readerUsername);
@@ -931,7 +932,7 @@ test("real empty dictionary-v2 reader and same-context account-switch isolation"
   actorId = (await readJSON(context, "/api/auth/me")).ID as number;
   expect(actorId).toBe(producer.value.ID);
 
-  await page.getByRole("button", { name: "管理操作账户", exact: true }).click();
+  await navigateTo(page, "管理操作账户");
   await page.getByRole("button", { name: "新增操作账户", exact: true }).click();
   await page
     .getByRole("button", { name: `选择 ${domain}`, exact: true })
@@ -966,7 +967,7 @@ test("real empty dictionary-v2 reader and same-context account-switch isolation"
   });
   safe(connectionGrant.value);
 
-  await page.getByRole("button", { name: "域连接", exact: true }).click();
+  await navigateTo(page, "域连接");
   const backToDomains = page.getByRole("button", {
     name: "返回域连接列表",
     exact: true,
@@ -1008,7 +1009,7 @@ test("real empty dictionary-v2 reader and same-context account-switch isolation"
     consumerEnabled: true,
   });
 
-  await page.getByRole("button", { name: "管理操作账户", exact: true }).click();
+  await navigateTo(page, "管理操作账户");
   const backToAccounts = page.getByRole("button", {
     name: "返回操作账户列表",
     exact: true,
@@ -1317,9 +1318,7 @@ test("real empty dictionary-v2 reader and same-context account-switch isolation"
       await signedIn(switching, username);
       for (const old of oldTabs) {
         await old.bringToFront();
-        await old
-          .getByRole("button", { name: "补充目录凭据授权", exact: true })
-          .click();
+        await navigateTo(old, "补充目录凭据授权");
         await expect(
           old.getByRole("table", {
             name: "具有已保存目录读取授权的账户",
@@ -1447,7 +1446,11 @@ test("real empty dictionary-v2 reader and same-context account-switch isolation"
           0,
         );
         await expect(
-          old.getByRole("button", { name: "补充目录凭据授权", exact: true }),
+          old.getByRole("button", {
+            name: "补充目录凭据授权",
+            exact: true,
+            includeHidden: true,
+          }),
         ).toHaveCount(0);
       }
       // Release only now: both old views and shared-cookie /me have proved
@@ -1577,9 +1580,7 @@ test("real empty dictionary-v2 reader and same-context account-switch isolation"
       await adminPage.goto("/");
       await loginMfa(adminPage, producerUsername, producerPassword, auth);
       await signedIn(adminPage, producerUsername);
-      await adminPage
-        .getByRole("button", { name: "补充目录凭据授权", exact: true })
-        .click();
+      await navigateTo(adminPage, "补充目录凭据授权");
       await adminPage
         .getByRole("button", { name: `清理 ${accountLabel}`, exact: true })
         .click();
@@ -1622,9 +1623,7 @@ test("real empty dictionary-v2 reader and same-context account-switch isolation"
       expect(afterRevoke.value).toEqual(observation);
       await readerView(page, readerUsername, accountLabel, taskUUID);
 
-      await adminPage
-        .getByRole("button", { name: "资源与租户", exact: true })
-        .click();
+      await navigateTo(adminPage, "资源与租户");
       await adminPage
         .getByRole("button", { name: "资源组", exact: true })
         .click();
@@ -1671,9 +1670,7 @@ test("real empty dictionary-v2 reader and same-context account-switch isolation"
         expect(denied.status()).toBe(404);
         expect(await denied.json()).toEqual({ error: "not_found" });
       }
-      await page
-        .getByRole("button", { name: "补充目录资产", exact: true })
-        .click();
+      await navigateTo(page, "补充目录资产");
       await expect(
         page.getByRole("heading", { name: "补充目录资产", exact: true }),
       ).toBeVisible();

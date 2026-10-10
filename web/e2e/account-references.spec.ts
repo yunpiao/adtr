@@ -1,3 +1,4 @@
+import { navigateTo } from "./navigation";
 import {
   test,
   expect,
@@ -60,7 +61,7 @@ async function login(page: Page, username: string, password: string) {
 }
 
 async function enrollMfa(page: Page, password: string): Promise<Authenticator> {
-  await page.getByRole("button", { name: "多因素认证", exact: true }).click();
+  await navigateTo(page, "多因素认证");
   await fillSecret(page.getByLabel("当前密码", { exact: true }), password);
   await page.getByRole("button", { name: "开始设置", exact: true }).click();
   const secret = await page
@@ -221,7 +222,7 @@ test("unconfigured bootstrap, explicit own-role reference, real LDAP consumption
   ).toEqual([]);
   expect((await readJSON(context, "/api/operation-accounts")).List).toEqual([]);
 
-  await page.getByRole("button", { name: "域连接", exact: true }).click();
+  await navigateTo(page, "域连接");
   await page.getByRole("button", { name: "新增域连接", exact: true }).click();
   await page.getByLabel("域 DNS 名称", { exact: true }).fill(domain);
   await page
@@ -249,7 +250,7 @@ test("unconfigured bootstrap, explicit own-role reference, real LDAP consumption
   expect(
     (await readJSON(context, "/api/operation-accounts/domains")).domains,
   ).toEqual([]);
-  await page.getByRole("button", { name: "资源与租户", exact: true }).click();
+  await navigateTo(page, "资源与租户");
   await page.getByRole("button", { name: "资源组", exact: true }).click();
   await page.getByRole("button", { name: "新增资源组", exact: true }).click();
   await page.getByLabel("资源组名称", { exact: true }).fill(group);
@@ -276,7 +277,7 @@ test("unconfigured bootstrap, explicit own-role reference, real LDAP consumption
     page.getByRole("heading", { name: "账户概览", exact: true }),
   ).toBeVisible();
   let actorId = (await readJSON(context, "/api/auth/me")).ID as number;
-  await page.getByRole("button", { name: "管理操作账户", exact: true }).click();
+  await navigateTo(page, "管理操作账户");
   await page.getByRole("button", { name: "新增操作账户", exact: true }).click();
   await page
     .getByRole("button", { name: `选择 ${domain}`, exact: true })
@@ -362,7 +363,7 @@ test("unconfigured bootstrap, explicit own-role reference, real LDAP consumption
   // after the one-member grant review to retain its current/future-member check.
   // Logout does not reset a bucket; the real second user has its own budget.
   const bootstrapActorId = actorId;
-  await page.getByRole("button", { name: "访问管理", exact: true }).click();
+  await navigateTo(page, "访问管理");
   await page.getByRole("button", { name: "用户管理", exact: true }).click();
   await page.getByRole("button", { name: "新增用户", exact: true }).click();
   await page.getByLabel("用户名", { exact: true }).fill(consumerUsername);
@@ -384,7 +385,7 @@ test("unconfigured bootstrap, explicit own-role reference, real LDAP consumption
   });
   expect(consumer.value.ID).toBeGreaterThan(0);
   expect(consumer.value.ID).not.toBe(bootstrapActorId);
-  await page.getByRole("button", { name: "退出登录", exact: true }).click();
+  await navigateTo(page, "退出登录");
   await login(page, consumerUsername, consumerInitial);
   await expect(
     page.getByRole("heading", { name: "修改密码", exact: true }),
@@ -422,7 +423,7 @@ test("unconfigured bootstrap, explicit own-role reference, real LDAP consumption
     memberCount: 2,
   });
   const openSource = async () => {
-    await page.getByRole("button", { name: "域连接", exact: true }).click();
+    await navigateTo(page, "域连接");
     const back = page.getByRole("button", {
       name: "返回域连接列表",
       exact: true,
@@ -745,7 +746,7 @@ test("unconfigured bootstrap, explicit own-role reference, real LDAP consumption
   expect(taskView.task.cursor).toEqual({});
   expect(JSON.stringify(taskView)).not.toContain(accountId);
   safe(taskView);
-  await page.getByRole("button", { name: "管理操作账户", exact: true }).click();
+  await navigateTo(page, "管理操作账户");
   await page
     .getByRole("button", { name: `查看 ${label}`, exact: true })
     .click();

@@ -1,3 +1,4 @@
+import { revealNavigation } from "./test-navigation";
 // Synthetic DOM/transport unit fixtures only. These tests do not replace a real
 // browser -> authenticated API -> PostgreSQL -> worker -> XLSX acceptance run.
 import {
@@ -834,6 +835,7 @@ describe("audit workspace DOM unit behavior", () => {
         : undefined;
     render(<App />);
     await screen.findByRole("heading", { name: "账户概览" });
+    await revealNavigation("操作审计");
     click("操作审计");
     await screen.findByRole("table", { name: "操作审计记录" });
     fill("导出任务 ID", taskUUID);

@@ -40,26 +40,14 @@ import {
   type SessionInvalidation,
 } from "./session-invalidation";
 
-type Page =
-  | "account"
-  | "profile"
-  | "password"
-  | "mfa"
-  | "reset"
-  | "access"
-  | "resources"
-  | "tasks"
-  | "audit"
-  | "system"
-  | "operational-logs"
-  | "domains"
-  | "operation-accounts"
-  | "credential-use"
-  | "directory"
-  | "directory-credential-use"
-  | "directory-v2"
-  | "user-assets-v2"
-  | "directory-credential-use-v2";
+import SocNavigation, {
+  SOC_WORKSPACE_LABELS,
+  socWorkspaceSection,
+  type SocPage as Page,
+} from "./SocNavigation";
+import "./soc-shell.css";
+import { WorkspaceModalContext } from "./workspace-modal";
+
 type Run = <T>(
   path: string,
   body: unknown | undefined,
@@ -174,6 +162,12 @@ export default function App() {
     [page, setPage] = useState<Page>(pageFromHash),
     [revision, setRevision] = useState(0);
   const [checkingSession, setCheckingSession] = useState(false);
+  const [mobileNavigationOpen, setMobileNavigationOpen] = useState(false);
+  const [workspaceModalOpen, setWorkspaceModalOpen] = useState(false);
+  const updateWorkspaceModal = useCallback((open: boolean) => {
+    setWorkspaceModalOpen(open);
+    if (open) setMobileNavigationOpen(false);
+  }, []);
   const sessionNotifications = useRef<SessionInvalidation | null>(null);
   const controller = useRef<AbortController | null>(null),
     sequence = useRef(0),
@@ -187,6 +181,7 @@ export default function App() {
     setBusy(false);
   }, []);
   const refresh = useCallback(() => {
+    setMobileNavigationOpen(false);
     invalidate();
     setCheckingSession(false);
     const id = sequence.current;
@@ -216,6 +211,7 @@ export default function App() {
   }, [invalidate]);
   useEffect(() => {
     const resetPrivateView = () => {
+      setMobileNavigationOpen(false);
       setProfile(null);
       setRevision((n) => n + 1);
       setNotice("");
@@ -228,6 +224,7 @@ export default function App() {
     sessionNotifications.current = notifications;
     const verify = () => {
       if (document.visibilityState !== "visible") return;
+      setMobileNavigationOpen(false);
       invalidate();
       const id = sequence.current;
       const current = new AbortController();
@@ -344,6 +341,7 @@ export default function App() {
       });
   };
   const navigate = (next: Page) => {
+    setMobileNavigationOpen(false);
     const pending = locked.current || checkingSession || loading;
     invalidate();
     setPage(next);
@@ -381,369 +379,338 @@ export default function App() {
   const forced = !!profile && (profile.needChangePwd || profile.isExpired);
   const active = forced ? "password" : page;
   return (
-    <div className="shell">
-      <header>
-        <a
-          className="brand"
-          href="#account"
-          onClick={(e) => {
-            e.preventDefault();
-            navigate("account");
-          }}
-        >
-          <span className="brand-mark">A</span>ADTR
-          <span className="brand-sub">身份安全平台</span>
-        </a>
-        <span className="environment">账户与访问</span>
-      </header>
-      {checkingSession && <p role="status">正在核验当前会话…</p>}
-      <main hidden={checkingSession} inert={checkingSession}>
-        <div className="intro">
-          <p className="eyebrow">IDENTITY SECURITY</p>
-          <h1>{profile ? "账户安全" : "安全登录"}</h1>
-          <p>
-            {profile
-              ? "管理登录凭据与多因素认证，保护平台访问。"
-              : "使用平台账户继续。您的登录状态由安全会话管理。"}
-          </p>
-        </div>
-        {loading ? (
-          <section className="card" role="status">
-            正在确认登录状态…
-          </section>
-        ) : (
-          <>
-            {error && error !== "mfa_required" && (
-              <div role="alert" className="alert">
-                {error}
-                <button
-                  type="button"
-                  className="text-button"
-                  disabled={busy}
-                  onClick={() => refresh()}
-                >
-                  刷新账户状态
-                </button>
-              </div>
-            )}
-            {notice && (
-              <div role="status" className="success">
-                {notice}
-              </div>
-            )}
-            {!profile ? (
-              <section className="card login">
-                <Login
-                  key={revision}
-                  run={run}
-                  busy={busy}
-                  mfa={error === "mfa_required"}
-                  onSuccess={(data) => updated(data, "登录成功")}
-                  cancel={() => {
-                    invalidate();
-                    setRevision((n) => n + 1);
-                    setError("");
-                    refresh();
-                  }}
-                  invalid={setError}
-                />
-              </section>
-            ) : (
-              <div className="workspace">
-                <aside>
-                  <p className="signed-in">
-                    已登录为<strong>{profile.username}</strong>
-                  </p>
-                  <nav aria-label="账户设置">
-                    {(
-                      [
-                        "account",
-                        "profile",
-                        "password",
-                        "mfa",
-                        "reset",
-                        "access",
-                        "resources",
-                        "tasks",
-                        "audit",
-                        "system",
-                        "operational-logs",
-                        "domains",
-                        "operation-accounts",
-                        "credential-use",
-                        "directory",
-                        "directory-credential-use",
-                        "directory-v2",
-                        "user-assets-v2",
-                        "directory-credential-use-v2",
-                      ] as Page[]
-                    )
-                      .filter(
-                        (p) =>
-                          (p !== "reset" &&
-                            p !== "credential-use" &&
-                            p !== "directory-credential-use" &&
-                            p !== "directory-credential-use-v2") ||
-                          profile.role === "platform_admin",
-                      )
-                      .map((p) => (
-                        <button
-                          key={p}
-                          disabled={(forced && p !== "password") || busy}
-                          className={active === p ? "selected" : ""}
-                          aria-current={active === p ? "page" : undefined}
-                          onClick={() => navigate(p)}
-                        >
-                          {
-                            {
-                              account: "账户概览",
-                              profile: "个人资料",
-                              password: "修改密码",
-                              mfa: "多因素认证",
-                              reset: "重置用户密码",
-                              access: "访问管理",
-                              resources: "资源与租户",
-                              tasks: "后台任务",
-                              audit: "操作审计",
-                              system: "系统健康",
-                              "operational-logs": "运行日志与诊断包",
-                              domains: "域连接",
-                              "operation-accounts": "管理操作账户",
-                              "credential-use": "凭据授权清理",
-                              directory: "目录资产",
-                              "directory-credential-use": "目录读取授权",
-                              "directory-v2": "补充目录资产",
-                              "user-assets-v2": "用户资产",
-                              "directory-credential-use-v2": "补充目录凭据授权",
-                            }[p]
-                          }
-                        </button>
-                      ))}
-                  </nav>
-                  <button
-                    className="secondary logout"
-                    disabled={busy}
-                    onClick={() =>
-                      run<{ result: string }>("/logout", {}, (data) => {
-                        if (data.result !== "SUCCESS") {
-                          setError(messages.invalid_response);
-                          return;
-                        }
-                        sessionNotifications.current?.publish();
-                        forgetTaskSession();
-                        forgetMaintenanceSession();
-                        forgetAuditSession();
-                        forgetBundleSession();
-                        forgetDomainSession();
-                        setProfile(null);
-                        setPage("account");
-                        setRevision((n) => n + 1);
-                        setNotice("已安全退出");
-                      })
-                    }
-                  >
-                    退出登录
-                  </button>
-                </aside>
-                <section
-                  className="card"
-                  key={`${active}-${revision}`}
-                  aria-busy={busy}
-                >
-                  {forced && (
-                    <div className="warning" role="status">
-                      {profile.isExpired
-                        ? "密码已过期"
-                        : "首次登录或管理员重置后，需要修改密码"}
-                      。完成修改后才能继续使用平台。
-                    </div>
-                  )}
-                  {active === "access" && (
-                    <AccessWorkspace
-                      profile={profile}
-                      sessionChanged={() => {
-                        setPage("account");
-                        refresh();
-                      }}
-                    />
-                  )}
-                  {active === "resources" && (
-                    <ResourcesWorkspace
-                      profile={profile}
-                      sessionChanged={() => {
-                        setPage("account");
-                        refresh();
-                      }}
-                    />
-                  )}
-                  {active === "tasks" && (
-                    <TaskWorkspace
-                      profile={profile}
-                      sessionChanged={() => {
-                        setPage("account");
-                        refresh();
-                      }}
-                    />
-                  )}
-                  {active === "audit" && (
-                    <AuditWorkspace
-                      profile={profile}
-                      sessionChanged={() => {
-                        setPage("account");
-                        refresh();
-                      }}
-                    />
-                  )}
-                  {active === "domains" && (
-                    <DomainsWorkspace
-                      profile={profile}
-                      sessionChanged={() => {
-                        setPage("account");
-                        refresh();
-                      }}
-                    />
-                  )}
-                  {active === "operation-accounts" && (
-                    <OperationAccountsWorkspace
-                      profile={profile}
-                      sessionChanged={() => {
-                        setPage("account");
-                        refresh();
-                      }}
-                    />
-                  )}
-                  {active === "credential-use" && (
-                    <CredentialUseWorkspace
-                      profile={profile}
-                      sessionChanged={() => {
-                        setPage("account");
-                        refresh();
-                      }}
-                    />
-                  )}
-                  {active === "directory" && (
-                    <DirectoryWorkspace
-                      profile={profile}
-                      sessionChanged={() => {
-                        setPage("account");
-                        refresh();
-                      }}
-                    />
-                  )}
-                  {active === "user-assets-v2" && (
-                    <UserAssetsV2Workspace
-                      profile={profile}
-                      sessionChanged={() => {
-                        setPage("account");
-                        refresh();
-                      }}
-                    />
-                  )}
-                  {active === "directory-v2" && (
-                    <DirectoryV2Workspace
-                      profile={profile}
-                      sessionChanged={() => {
-                        setPage("account");
-                        refresh();
-                      }}
-                    />
-                  )}
-                  {active === "directory-credential-use-v2" &&
-                    profile.role === "platform_admin" && (
-                      <DirectoryV2CredentialUseWorkspace
-                        profile={profile}
-                        sessionChanged={() => {
-                          setPage("account");
-                          refresh();
-                        }}
-                      />
-                    )}
-                  {active === "directory-credential-use" &&
-                    profile.role === "platform_admin" && (
-                      <DirectoryCredentialUseWorkspace
-                        profile={profile}
-                        sessionChanged={() => {
-                          setPage("account");
-                          refresh();
-                        }}
-                      />
-                    )}
-                  {active === "operational-logs" && (
-                    <OperationalLogsWorkspace
-                      profile={profile}
-                      sessionChanged={() => {
-                        setPage("account");
-                        refresh();
-                      }}
-                    />
-                  )}
-                  {active === "system" && (
-                    <SystemWorkspace
-                      profile={profile}
-                      sessionChanged={() => {
-                        setPage("account");
-                        refresh();
-                      }}
-                    />
-                  )}
-                  {active === "account" && <Account profile={profile} />}{" "}
-                  {active === "profile" && (
-                    <ProfileWorkspace
-                      profile={profile}
-                      sessionChanged={() => {
-                        setPage("account");
-                        refresh();
-                      }}
-                    />
-                  )}
-                  {active === "password" && (
-                    <Password
-                      busy={busy}
-                      run={run}
-                      invalid={setError}
-                      cancel={forced ? undefined : () => navigate("account")}
-                      updated={(data) =>
-                        updated(data, "密码已更新，当前会话已轮换")
-                      }
-                    />
-                  )}{" "}
-                  {active === "mfa" && (
-                    <Mfa
-                      profile={profile}
-                      busy={busy}
-                      run={run}
-                      invalid={setError}
-                      cancel={() => navigate("account")}
-                      updated={(data) =>
-                        updated(
-                          data,
-                          data.hasMfa ? "多因素认证已启用" : "多因素认证已停用",
-                        )
-                      }
-                    />
-                  )}{" "}
-                  {active === "reset" && profile.role === "platform_admin" && (
-                    <Reset
-                      busy={busy}
-                      run={run}
-                      invalid={setError}
-                      cancel={() => navigate("account")}
-                      done={() => {
-                        setRevision((n) => n + 1);
-                        setNotice(
-                          "用户密码已重置。该用户下次登录必须修改密码。",
-                        );
-                      }}
-                    />
-                  )}
-                </section>
-              </div>
-            )}
-          </>
+    <WorkspaceModalContext.Provider value={updateWorkspaceModal}>
+      <div className={`shell soc-shell${profile ? " soc-authenticated" : ""}`}>
+        {profile && (
+          <SocNavigation
+            profile={profile}
+            active={active}
+            forced={forced}
+            busy={busy}
+            gated={loading || checkingSession}
+            blocked={workspaceModalOpen}
+            mobileOpen={mobileNavigationOpen}
+            onMobileOpenChange={setMobileNavigationOpen}
+            onNavigate={navigate}
+            onLogout={() =>
+              run<{ result: string }>("/logout", {}, (data) => {
+                if (data.result !== "SUCCESS") {
+                  setError(messages.invalid_response);
+                  return;
+                }
+                sessionNotifications.current?.publish();
+                forgetTaskSession();
+                forgetMaintenanceSession();
+                forgetAuditSession();
+                forgetBundleSession();
+                forgetDomainSession();
+                setProfile(null);
+                setPage("account");
+                setRevision((n) => n + 1);
+                setNotice("已安全退出");
+              })
+            }
+          />
         )}
-        <footer>ADTR · 仅展示服务器确认的账户状态</footer>
-      </main>
-    </div>
+        <header
+          className="soc-topbar"
+          data-workspace-modal-owned
+          inert={mobileNavigationOpen || workspaceModalOpen}
+        >
+          <a
+            className="brand soc-home-link"
+            href="#account"
+            aria-label="ADTR 身份安全平台"
+            onClick={(e) => {
+              e.preventDefault();
+              navigate("account");
+            }}
+          >
+            ADTR
+          </a>
+          <div className="soc-workspace-breadcrumb" aria-label="当前工作区">
+            <span>
+              {profile ? socWorkspaceSection(active) : "身份安全平台"}
+            </span>
+            <span aria-hidden="true">/</span>
+            <strong>
+              {checkingSession
+                ? "会话核验"
+                : loading
+                  ? "确认登录状态"
+                  : profile
+                    ? SOC_WORKSPACE_LABELS[active]
+                    : "安全登录"}
+            </strong>
+          </div>
+          <span className="soc-topbar-caption">身份安全工作空间</span>
+        </header>
+        {checkingSession && (
+          <p role="status" className="soc-session-status">
+            正在核验当前会话…
+          </p>
+        )}
+        <main
+          className="soc-main"
+          hidden={checkingSession}
+          inert={checkingSession || mobileNavigationOpen}
+        >
+          {!profile && (
+            <div className="intro">
+              <p className="eyebrow">IDENTITY SECURITY</p>
+              <h1>安全登录</h1>
+              <p>使用平台账户继续。您的登录状态由安全会话管理。</p>
+            </div>
+          )}
+          {loading ? (
+            <section className="card" role="status">
+              正在确认登录状态…
+            </section>
+          ) : (
+            <>
+              {error && error !== "mfa_required" && (
+                <div role="alert" className="alert">
+                  {error}
+                  <button
+                    type="button"
+                    className="text-button"
+                    disabled={busy}
+                    onClick={() => refresh()}
+                  >
+                    刷新账户状态
+                  </button>
+                </div>
+              )}
+              {notice && (
+                <div role="status" className="success">
+                  {notice}
+                </div>
+              )}
+              {!profile ? (
+                <section className="card login">
+                  <Login
+                    key={revision}
+                    run={run}
+                    busy={busy}
+                    mfa={error === "mfa_required"}
+                    onSuccess={(data) => updated(data, "登录成功")}
+                    cancel={() => {
+                      invalidate();
+                      setRevision((n) => n + 1);
+                      setError("");
+                      refresh();
+                    }}
+                    invalid={setError}
+                  />
+                </section>
+              ) : (
+                <div className="workspace">
+                  <section
+                    className="card"
+                    key={`${active}-${revision}`}
+                    aria-busy={busy}
+                  >
+                    {forced && (
+                      <div className="warning" role="status">
+                        {profile.isExpired
+                          ? "密码已过期"
+                          : "首次登录或管理员重置后，需要修改密码"}
+                        。完成修改后才能继续使用平台。
+                      </div>
+                    )}
+                    {active === "access" && (
+                      <AccessWorkspace
+                        profile={profile}
+                        sessionChanged={() => {
+                          setPage("account");
+                          refresh();
+                        }}
+                      />
+                    )}
+                    {active === "resources" && (
+                      <ResourcesWorkspace
+                        profile={profile}
+                        sessionChanged={() => {
+                          setPage("account");
+                          refresh();
+                        }}
+                      />
+                    )}
+                    {active === "tasks" && (
+                      <TaskWorkspace
+                        profile={profile}
+                        sessionChanged={() => {
+                          setPage("account");
+                          refresh();
+                        }}
+                      />
+                    )}
+                    {active === "audit" && (
+                      <AuditWorkspace
+                        profile={profile}
+                        sessionChanged={() => {
+                          setPage("account");
+                          refresh();
+                        }}
+                      />
+                    )}
+                    {active === "domains" && (
+                      <DomainsWorkspace
+                        profile={profile}
+                        sessionChanged={() => {
+                          setPage("account");
+                          refresh();
+                        }}
+                      />
+                    )}
+                    {active === "operation-accounts" && (
+                      <OperationAccountsWorkspace
+                        profile={profile}
+                        sessionChanged={() => {
+                          setPage("account");
+                          refresh();
+                        }}
+                      />
+                    )}
+                    {active === "credential-use" && (
+                      <CredentialUseWorkspace
+                        profile={profile}
+                        sessionChanged={() => {
+                          setPage("account");
+                          refresh();
+                        }}
+                      />
+                    )}
+                    {active === "directory" && (
+                      <DirectoryWorkspace
+                        profile={profile}
+                        sessionChanged={() => {
+                          setPage("account");
+                          refresh();
+                        }}
+                      />
+                    )}
+                    {active === "user-assets-v2" && (
+                      <UserAssetsV2Workspace
+                        profile={profile}
+                        sessionChanged={() => {
+                          setPage("account");
+                          refresh();
+                        }}
+                      />
+                    )}
+                    {active === "directory-v2" && (
+                      <DirectoryV2Workspace
+                        profile={profile}
+                        sessionChanged={() => {
+                          setPage("account");
+                          refresh();
+                        }}
+                      />
+                    )}
+                    {active === "directory-credential-use-v2" &&
+                      profile.role === "platform_admin" && (
+                        <DirectoryV2CredentialUseWorkspace
+                          profile={profile}
+                          sessionChanged={() => {
+                            setPage("account");
+                            refresh();
+                          }}
+                        />
+                      )}
+                    {active === "directory-credential-use" &&
+                      profile.role === "platform_admin" && (
+                        <DirectoryCredentialUseWorkspace
+                          profile={profile}
+                          sessionChanged={() => {
+                            setPage("account");
+                            refresh();
+                          }}
+                        />
+                      )}
+                    {active === "operational-logs" && (
+                      <OperationalLogsWorkspace
+                        profile={profile}
+                        sessionChanged={() => {
+                          setPage("account");
+                          refresh();
+                        }}
+                      />
+                    )}
+                    {active === "system" && (
+                      <SystemWorkspace
+                        profile={profile}
+                        sessionChanged={() => {
+                          setPage("account");
+                          refresh();
+                        }}
+                      />
+                    )}
+                    {active === "account" && <Account profile={profile} />}{" "}
+                    {active === "profile" && (
+                      <ProfileWorkspace
+                        profile={profile}
+                        sessionChanged={() => {
+                          setPage("account");
+                          refresh();
+                        }}
+                      />
+                    )}
+                    {active === "password" && (
+                      <Password
+                        busy={busy}
+                        run={run}
+                        invalid={setError}
+                        cancel={forced ? undefined : () => navigate("account")}
+                        updated={(data) =>
+                          updated(data, "密码已更新，当前会话已轮换")
+                        }
+                      />
+                    )}{" "}
+                    {active === "mfa" && (
+                      <Mfa
+                        profile={profile}
+                        busy={busy}
+                        run={run}
+                        invalid={setError}
+                        cancel={() => navigate("account")}
+                        updated={(data) =>
+                          updated(
+                            data,
+                            data.hasMfa
+                              ? "多因素认证已启用"
+                              : "多因素认证已停用",
+                          )
+                        }
+                      />
+                    )}{" "}
+                    {active === "reset" &&
+                      profile.role === "platform_admin" && (
+                        <Reset
+                          busy={busy}
+                          run={run}
+                          invalid={setError}
+                          cancel={() => navigate("account")}
+                          done={() => {
+                            setRevision((n) => n + 1);
+                            setNotice(
+                              "用户密码已重置。该用户下次登录必须修改密码。",
+                            );
+                          }}
+                        />
+                      )}
+                  </section>
+                </div>
+              )}
+            </>
+          )}
+          <footer className="soc-footer">
+            <span>ADTR · Identity Security</span>
+            <span>仅展示当前权限范围内的服务器数据</span>
+          </footer>
+        </main>
+      </div>
+    </WorkspaceModalContext.Provider>
   );
 }
 function Login({

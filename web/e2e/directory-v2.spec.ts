@@ -1,3 +1,4 @@
+import { navigateTo } from "./navigation";
 import {
   test,
   expect,
@@ -127,7 +128,7 @@ async function login(page: Page, username: string, password: string) {
 }
 
 async function enrollMfa(page: Page, password: string): Promise<Authenticator> {
-  await page.getByRole("button", { name: "多因素认证", exact: true }).click();
+  await navigateTo(page, "多因素认证");
   await fillSecret(page.getByLabel("当前密码", { exact: true }), password);
   await page.getByRole("button", { name: "开始设置", exact: true }).click();
   const secret = await page
@@ -422,7 +423,7 @@ async function observationAction(page: Page, action: () => Promise<unknown>) {
 }
 
 async function openDirectory(page: Page) {
-  await page.getByRole("button", { name: "补充目录资产", exact: true }).click();
+  await navigateTo(page, "补充目录资产");
   await expect(
     page.getByRole("heading", { name: "补充目录资产", exact: true }),
   ).toBeVisible();
@@ -569,7 +570,7 @@ test("real dictionary-v2 UI → authenticated API → worker → paged synthetic
   expect(tenant.maxAdCount).toBe(2);
   expect(tenant.expireTime).toBeGreaterThan(Math.floor(Date.now() / 1000));
 
-  await page.getByRole("button", { name: "域连接", exact: true }).click();
+  await navigateTo(page, "域连接");
   await page.getByRole("button", { name: "新增域连接", exact: true }).click();
   await page.getByLabel("域 DNS 名称", { exact: true }).fill(domain);
   await page
@@ -598,7 +599,7 @@ test("real dictionary-v2 UI → authenticated API → worker → paged synthetic
   expect(deniedScope.status()).toBe(404);
   expect(await deniedScope.json()).toEqual({ error: "not_found" });
 
-  await page.getByRole("button", { name: "资源与租户", exact: true }).click();
+  await navigateTo(page, "资源与租户");
   await page.getByRole("button", { name: "资源组", exact: true }).click();
   await page.getByRole("button", { name: "新增资源组", exact: true }).click();
   await page.getByLabel("资源组名称", { exact: true }).fill(groupName);
@@ -634,7 +635,7 @@ test("real dictionary-v2 UI → authenticated API → worker → paged synthetic
   // Producer: password/MFA (3), account/connection grant/binding (3), v1 grant
   // (1), denied v2 sync (1), v2 grant (1), committed v2 sync (1) = 10.
   // The forbidden sync still consumes rate budget. Login/logout never resets it.
-  await page.getByRole("button", { name: "访问管理", exact: true }).click();
+  await navigateTo(page, "访问管理");
   await page.getByRole("button", { name: "用户管理", exact: true }).click();
   await page.getByRole("button", { name: "新增用户", exact: true }).click();
   await page.getByLabel("用户名", { exact: true }).fill(producerUsername);
@@ -656,7 +657,7 @@ test("real dictionary-v2 UI → authenticated API → worker → paged synthetic
   });
   expect(producer.value.ID).toBeGreaterThan(0);
   expect(producer.value.ID).not.toBe(actorId);
-  await page.getByRole("button", { name: "退出登录", exact: true }).click();
+  await navigateTo(page, "退出登录");
   await login(page, producerUsername, producerInitial);
   await expect(
     page.getByRole("heading", { name: "修改密码", exact: true }),
@@ -684,7 +685,7 @@ test("real dictionary-v2 UI → authenticated API → worker → paged synthetic
   actorId = (await readJSON(context, "/api/auth/me")).ID as number;
   expect(actorId).toBe(producer.value.ID);
 
-  await page.getByRole("button", { name: "管理操作账户", exact: true }).click();
+  await navigateTo(page, "管理操作账户");
   await page.getByRole("button", { name: "新增操作账户", exact: true }).click();
   await page
     .getByRole("button", { name: `选择 ${domain}`, exact: true })
@@ -719,7 +720,7 @@ test("real dictionary-v2 UI → authenticated API → worker → paged synthetic
   });
   safe(connectionGrant.value);
 
-  await page.getByRole("button", { name: "域连接", exact: true }).click();
+  await navigateTo(page, "域连接");
   const backToDomains = page.getByRole("button", {
     name: "返回域连接列表",
     exact: true,
@@ -754,7 +755,7 @@ test("real dictionary-v2 UI → authenticated API → worker → paged synthetic
   ).connection;
   // An actual, explicitly saved v1 grant must not authorize the v2 profile.
   // Both grants target the same account and role through the production UI.
-  await page.getByRole("button", { name: "管理操作账户", exact: true }).click();
+  await navigateTo(page, "管理操作账户");
   const v1BackToAccounts = page.getByRole("button", {
     name: "返回操作账户列表",
     exact: true,
@@ -824,7 +825,7 @@ test("real dictionary-v2 UI → authenticated API → worker → paged synthetic
     (await readJSON(context, "/api/tasks?pageIdx=1&pageSize=20")).page.total,
   ).toBe(0);
 
-  await page.getByRole("button", { name: "管理操作账户", exact: true }).click();
+  await navigateTo(page, "管理操作账户");
   const backToAccounts = page.getByRole("button", {
     name: "返回操作账户列表",
     exact: true,
@@ -866,9 +867,7 @@ test("real dictionary-v2 UI → authenticated API → worker → paged synthetic
     grantRevision: connectionGrant.value.grantRevision,
   });
 
-  await page
-    .getByRole("button", { name: "补充目录凭据授权", exact: true })
-    .click();
+  await navigateTo(page, "补充目录凭据授权");
   await expect(
     page.getByRole("table", {
       name: "具有已保存目录读取授权的账户",
@@ -1171,9 +1170,7 @@ test("real dictionary-v2 UI → authenticated API → worker → paged synthetic
     await expect(
       editorPage.getByRole("heading", { name: "账户概览", exact: true }),
     ).toBeVisible();
-    await editorPage
-      .getByRole("button", { name: "域连接", exact: true })
-      .click();
+    await navigateTo(editorPage, "域连接");
     await editorPage
       .getByRole("button", { name: `查看 ${domain}`, exact: true })
       .click();
@@ -1246,7 +1243,7 @@ test("real dictionary-v2 UI → authenticated API → worker → paged synthetic
     consoles.filter((message) => /Uncaught|unhandled/i.test(message)),
   ).toEqual([]);
 
-  await page.getByRole("button", { name: "退出登录", exact: true }).click();
+  await navigateTo(page, "退出登录");
   await expect(
     page.getByRole("heading", { name: "登录账户", exact: true }),
   ).toBeVisible();

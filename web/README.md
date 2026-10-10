@@ -213,3 +213,7 @@ TOTP、审计或浏览器到实际 API 的端到端效果；这些须由后端�
 真实提交响应丢失、重载恢复、双编辑器冲突、凭据替换、浏览器状态清理及父域删除依赖。
 它只中断真实请求的返回，不编造响应或绕过 TOTP；480 秒超时等待实际验证码窗口。
 凭据相关 trace、截图、视频关闭。测试发现和本地 DOM 通过不代表真实集成已执行或产品验收。
+
+## SOC navigation and user-assets presentation
+
+Issue #91 adapts the PR89 visual direction to the existing real APIs: grouped desktop/mobile navigation, compact resolved-source summary, user list/cards and fixed-observation detail drawer. All previous authentication, permission and data-source boundaries remain. Scope and current evidence: [SOC production UI](../docs/soc-production-ui.md). Prototype examples are not imported into production.

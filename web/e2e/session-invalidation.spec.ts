@@ -1,3 +1,4 @@
+import { navigateTo } from "./navigation";
 import {
   test,
   expect,
@@ -69,7 +70,7 @@ async function changeInitialPassword(page: Page, old: string, changed: string) {
 }
 
 async function openProfile(page: Page, username: string) {
-  await page.getByRole("button", { name: "个人资料", exact: true }).click();
+  await navigateTo(page, "个人资料");
   await expect(page.getByLabel("选择头像", { exact: true })).toBeEnabled();
   await expect(
     page.locator(".profile-workspace dd").filter({ hasText: username }),
@@ -84,7 +85,7 @@ async function signedIn(page: Page, username: string) {
 }
 
 async function logout(page: Page) {
-  await page.getByRole("button", { name: "退出登录", exact: true }).click();
+  await navigateTo(page, "退出登录");
   await expect(
     page.getByRole("heading", { name: "登录账户", exact: true }),
   ).toBeVisible();
@@ -327,9 +328,7 @@ test("real browser → API → PostgreSQL cross-tab session invalidation and foc
     await actor.goto("/");
     await login(actor, username, initial);
     await changeInitialPassword(actor, initial, changed);
-    await actor
-      .getByRole("button", { name: "多因素认证", exact: true })
-      .click();
+    await navigateTo(actor, "多因素认证");
     await actor.getByLabel("当前密码", { exact: true }).fill(changed);
     await actor.getByRole("button", { name: "开始设置", exact: true }).click();
     const secret = await actor
@@ -381,9 +380,7 @@ test("real browser → API → PostgreSQL cross-tab session invalidation and foc
     await profileTab.goto("/");
     await openProfile(profileTab, admin.username);
     await proofTab.goto("/");
-    await proofTab
-      .getByRole("button", { name: "重置用户密码", exact: true })
-      .click();
+    await navigateTo(proofTab, "重置用户密码");
     await proofTab
       .getByLabel("目标用户名", { exact: true })
       .fill("synthetic.unsubmitted.target");
@@ -467,9 +464,7 @@ test("real browser → API → PostgreSQL cross-tab session invalidation and foc
     const proofTab = await fallbackPage(context);
     const checkProofPosts = watchPosts(proofTab);
     await proofTab.bringToFront();
-    await proofTab
-      .getByRole("button", { name: "修改密码", exact: true })
-      .click();
+    await navigateTo(proofTab, "修改密码");
     await proofTab.getByLabel("当前密码", { exact: true }).fill(proofDraft);
     await proofTab
       .getByLabel("新密码", { exact: true })
@@ -539,9 +534,7 @@ test("real browser → API → PostgreSQL cross-tab session invalidation and foc
       checkProfileNavigation();
       checkProofNavigation();
       await proofTab.bringToFront();
-      await proofTab
-        .getByRole("button", { name: "修改密码", exact: true })
-        .click();
+      await navigateTo(proofTab, "修改密码");
       await expect(
         proofTab.getByLabel("当前密码", { exact: true }),
       ).toHaveValue("");

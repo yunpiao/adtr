@@ -562,6 +562,18 @@ describe("UserAssetsV2 strict parser and transport", () => {
 });
 
 describe("UserAssetsV2 private workspace", () => {
+  it("successful source resolution collapses its chooser and focuses the asset query", async () => {
+    await start();
+    expect(document.getElementById("asset-source-picker")).not.toBeVisible();
+    expect(screen.getByLabelText("用户资产关键词")).toHaveFocus();
+    click("更换数据源");
+    expect(document.getElementById("asset-source-picker")).toBeVisible();
+    expect(screen.getByRole("table", { name: "用户资产列表" })).toBeVisible();
+    click("收起数据源选择");
+    expect(document.getElementById("asset-source-picker")).not.toBeVisible();
+    expect(screen.getByRole("table", { name: "用户资产列表" })).toBeVisible();
+  });
+
   it("is read-only without tasks or producer privileges and fetches GUID detail with both source pins", async () => {
     await start();
     expect(JSON.parse(calls("/api/access/check")[0][1].body).paths).toEqual([
@@ -583,16 +595,16 @@ describe("UserAssetsV2 private workspace", () => {
     await within(panel).findByText("Factual description");
     expect(params("/api/user-assets/v2/detail")).toEqual(detailQuery);
     for (const key of [
-      "objectGUID",
-      "distinguishedName",
-      "kind",
-      "objectClass",
-      "samAccountName",
-      "userAccountControl（原始整数）",
-      "objectSid",
-      "mail",
-      "description",
-      "whenCreated（UTC）",
+      "对象 GUID",
+      "目录路径（DN）",
+      "对象类型",
+      "目录对象类",
+      "账户名（SAM）",
+      "账户控制值（原始整数）",
+      "安全标识（SID）",
+      "电子邮箱",
+      "描述",
+      "创建时间（UTC）",
     ])
       expect(within(panel).getByText(key)).toBeVisible();
     expect(within(panel).getByText("0")).toBeVisible();
@@ -752,6 +764,7 @@ describe("UserAssetsV2 private workspace", () => {
         ? held.promise
         : undefined;
     click("查看用户 observed-1");
+    click("关闭用户详情");
     click("查看用户 observed-2");
     const panel = screen.getByRole("region", { name: "用户详情" });
     await within(panel).findByText(row(2).objectGUID);
@@ -765,6 +778,7 @@ describe("UserAssetsV2 private workspace", () => {
     await start();
     click("查看用户 observed-1");
     await screen.findByText("Factual description");
+    click("关闭用户详情");
     const first = deferred(),
       second = deferred();
     let count = 0;
@@ -782,13 +796,15 @@ describe("UserAssetsV2 private workspace", () => {
     await screen.findByText("observed-2");
     await first.resolve(list(q, [row(1)]));
     expect(screen.queryByText("observed-1")).toBeNull();
-    expect(screen.getByText("observation-new")).toBeVisible();
+    expect(screen.getByText("观测来源 · observation-new")).toBeVisible();
   });
   it("source selection resets private rows, draft and pin before resolution and ignores held old detail", async () => {
     await start();
     const held = deferred();
     override = (url) => (url.includes("/detail?") ? held.promise : undefined);
     click("查看用户 observed-1");
+    click("关闭用户详情");
+    click("更换数据源");
     fireEvent.click(
       screen.getByRole("radio", { name: "选择数据源 other.invalid" }),
     );
@@ -986,6 +1002,42 @@ describe("UserAssetsV2 App navigation and session boundaries", () => {
     expect(screen.queryByText("old-private-description")).toBeNull();
     expect(calls("/api/auth/me").length).toBeGreaterThanOrEqual(3);
   });
+  it.each(["focus", "visibility"])(
+    "same-identity %s resume retains modal ownership and pinned detail",
+    async (channel) => {
+      await openApp();
+      click("查看用户 observed-1");
+      await screen.findByText("Factual description");
+      const before = params("/api/user-assets/v2/detail");
+      const held = deferred();
+      override = (url) => (url === "/api/auth/me" ? held.promise : undefined);
+      await act(async () => {
+        if (channel === "focus") window.dispatchEvent(new Event("focus"));
+        else document.dispatchEvent(new Event("visibilitychange"));
+      });
+      expect(
+        screen.getByRole("dialog", { name: "用户详情抽屉", hidden: true }),
+      ).not.toBeVisible();
+      await held.resolve(profile);
+      await screen.findByRole("dialog", { name: "用户详情抽屉" });
+      expect(document.getElementById("soc-navigation-panel")).toHaveAttribute(
+        "inert",
+      );
+      expect(document.querySelector(".soc-topbar")).toHaveAttribute("inert");
+      expect(params("/api/user-assets/v2/detail")).toEqual(before);
+      expect(screen.getByText("Factual description")).toBeVisible();
+      click("关闭用户详情");
+      expect(
+        document.getElementById("soc-navigation-panel"),
+      ).not.toHaveAttribute("inert");
+      expect(document.querySelector(".soc-topbar")).not.toHaveAttribute(
+        "inert",
+      );
+      expect(
+        screen.getByRole("button", { name: "查看用户 observed-1" }),
+      ).toHaveFocus();
+    },
+  );
   it.each(["storage", "focus", "visibility"])(
     "%s identity revalidation removes assets and rejects old actor responses",
     async (channel) => {

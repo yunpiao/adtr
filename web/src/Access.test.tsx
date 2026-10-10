@@ -1,3 +1,4 @@
+import { revealNavigation } from "./test-navigation";
 import {
   act,
   fireEvent,
@@ -146,8 +147,10 @@ beforeEach(() => {
   });
   vi.stubGlobal("fetch", fetcher);
 });
-const click = async (name: string) =>
-  userEvent.click(screen.getByRole("button", { name }));
+const click = async (name: string) => {
+  await revealNavigation(name);
+  return userEvent.click(screen.getByRole("button", { name }));
+};
 const fill = async (name: string, value: string) => {
   const input = screen.getByLabelText(name, { exact: true });
   await userEvent.clear(input);

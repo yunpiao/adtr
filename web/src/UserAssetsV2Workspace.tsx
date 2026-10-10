@@ -1,14 +1,10 @@
-import {
-  useEffect,
-  useLayoutEffect,
-  useRef,
-  useState,
-  type FormEvent,
-} from "react";
+import { useLayoutEffect, useRef, useState, type FormEvent } from "react";
 import { ApiError, type Profile } from "./api";
 import { accessRequest, type Permission } from "./access-api";
 import { ErrorNotice, Field } from "./access-common";
 import SavedSourcePicker from "./SavedSourcePicker";
+import AssetDetailDrawer from "./AssetDetailDrawer";
+import "./user-assets-soc.css";
 import type { ResolvedSource } from "./domain-selection-api";
 import { directoryV2DisplayText as display } from "./directory-v2-json";
 import type { DirectoryV2Source } from "./directory-v2-api";
@@ -47,8 +43,10 @@ function Workspace({ profile, sessionChanged }: Props) {
   const [pickerGeneration, setPickerGeneration] = useState(0);
   const [lostAccess, setLostAccess] = useState(false);
   const [notice, setNotice] = useState("");
+  const [sourcePickerOpen, setSourcePickerOpen] = useState(true);
   const clearSource = () => {
     setSource(null);
+    setSourcePickerOpen(true);
     setSourceGeneration((value) => value + 1);
   };
   const lost = () => {
@@ -92,12 +90,26 @@ function Workspace({ profile, sessionChanged }: Props) {
     readable("directory_assets") &&
     gate.data?.checks[0] === true;
   return (
-    <section aria-labelledby="user-assets-v2-title">
-      <h2 id="user-assets-v2-title">用户资产</h2>
-      <p>
-        只读展示已完成、已保存的字典 2 用户观测；不发起采集。观测不是 AD
-        时间点快照，未观察到对象不表示删除。未返回表示已请求但未返回，不推断原因。
-      </p>
+    <section
+      className="user-assets-workspace"
+      aria-labelledby="user-assets-v2-title"
+    >
+      <div className="asset-page-heading">
+        <p className="asset-eyebrow">DIRECTORY &amp; IDENTITY</p>
+        <h2 id="user-assets-v2-title">用户资产</h2>
+        <p>检索已保存的目录用户，核对身份字段与观测来源。</p>
+      </div>
+      <details className="asset-data-help">
+        <summary>如何理解这些数据</summary>
+        <p>
+          数据来自已完成并保存的目录观测。观测不是 AD
+          时间点快照，未观察到对象不表示删除。“未返回”表示已请求但未返回，不推断原因。
+        </p>
+        <p id="asset-search-help">
+          按 SAM、SID、mail 或 DN 搜索；最多 50 个 UTF-16
+          单元，保留空白，按字面匹配。
+        </p>
+      </details>
       <ErrorNotice error={gate.error || notice} />
       {gate.busy && <p role="status">正在核对用户资产访问权限…</p>}
       {gate.data && !canRead && (
@@ -106,28 +118,52 @@ function Workspace({ profile, sessionChanged }: Props) {
       {canRead && (
         <>
           {gate.data?.checks[2] && gate.data.checks[3] ? (
-            <div
-              onChangeCapture={() => {
-                if (source) clearSource();
-              }}
-            >
-              <SavedSourcePicker
-                key={pickerGeneration}
-                userID={profile.ID}
-                sessionChanged={lost}
-                onResolved={(value) => {
-                  clearSource();
-                  setSource(value);
-                  setNotice("");
+            <div className="asset-source-card">
+              <div className="asset-source-heading">
+                <div>
+                  <span className="asset-eyebrow">数据源</span>
+                  <strong>
+                    {source ? display(source.selection.domain) : "选择已授权域"}
+                  </strong>
+                </div>
+                {source && (
+                  <button
+                    type="button"
+                    className="secondary"
+                    aria-expanded={sourcePickerOpen}
+                    aria-controls="asset-source-picker"
+                    onClick={() => setSourcePickerOpen(!sourcePickerOpen)}
+                  >
+                    {sourcePickerOpen ? "收起数据源选择" : "更换数据源"}
+                  </button>
+                )}
+              </div>
+              <div
+                id="asset-source-picker"
+                hidden={!sourcePickerOpen}
+                onChangeCapture={() => {
+                  if (source) clearSource();
                 }}
-              />
+              >
+                <SavedSourcePicker
+                  key={pickerGeneration}
+                  userID={profile.ID}
+                  sessionChanged={lost}
+                  onResolved={(value) => {
+                    clearSource();
+                    setSource(value);
+                    setSourcePickerOpen(false);
+                    setNotice("");
+                  }}
+                />
+              </div>
             </div>
           ) : (
             <p role="status">当前账户无权选择已配置域。</p>
           )}
           {source && (
             <>
-              <p>
+              <p className="asset-source-revisions">
                 已选择域：{display(source.selection.domain)} · 配置版本{" "}
                 {source.selection.revision} · 凭据版本{" "}
                 {source.selection.credentialRevision}
@@ -199,13 +235,13 @@ function Facts({ object }: { object: UserAssetV2Object }) {
       className="facts"
       style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}
     >
-      <dt>objectGUID</dt>
+      <dt>对象 GUID</dt>
       <dd>{display(object.objectGUID)}</dd>
-      <dt>distinguishedName</dt>
+      <dt>目录路径（DN）</dt>
       <dd>{display(object.distinguishedName)}</dd>
-      <dt>kind</dt>
+      <dt>对象类型</dt>
       <dd>{display(object.kind)}</dd>
-      <dt>objectClass</dt>
+      <dt>目录对象类</dt>
       <dd>
         <ul>
           {object.objectClass.map((value) => (
@@ -213,15 +249,15 @@ function Facts({ object }: { object: UserAssetV2Object }) {
           ))}
         </ul>
       </dd>
-      <dt>samAccountName</dt>
+      <dt>账户名（SAM）</dt>
       <dd>{nullable(object.samAccountName)}</dd>
-      <dt>userAccountControl（原始整数）</dt>
+      <dt>账户控制值（原始整数）</dt>
       <dd>{nullable(object.userAccountControl)}</dd>
-      <dt>objectSid</dt>
+      <dt>安全标识（SID）</dt>
       <dd>{nullable(object.objectSid)}</dd>
-      <dt>mail</dt>
+      <dt>电子邮箱</dt>
       <dd>{nullable(object.mail)}</dd>
-      <dt>description</dt>
+      <dt>描述</dt>
       <dd>
         {object.description === null ? (
           "未返回"
@@ -231,7 +267,7 @@ function Facts({ object }: { object: UserAssetV2Object }) {
           </ul>
         )}
       </dd>
-      <dt>whenCreated（UTC）</dt>
+      <dt>创建时间（UTC）</dt>
       <dd>{nullable(object.whenCreated)}</dd>
     </dl>
   );
@@ -275,8 +311,8 @@ function Assets({
       undefined,
     ),
     detailTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const origin = useRef<HTMLButtonElement | null>(null),
-    panel = useRef<HTMLElement | null>(null);
+  const origin = useRef<HTMLButtonElement | null>(null);
+  const searchInput = useRef<HTMLInputElement | null>(null);
   const failureRef = useRef(failure);
   failureRef.current = failure;
   const cancelDetail = () => {
@@ -298,7 +334,6 @@ function Assets({
   };
   const close = () => {
     clearDetail();
-    if (origin.current?.isConnected) origin.current.focus();
   };
   // Fatal read failures invalidate BOTH independent channels before handing
   // control to the source/session owner. No aborted transport can restore data.
@@ -413,6 +448,7 @@ function Assets({
   };
   useLayoutEffect(() => {
     loadList(initial);
+    searchInput.current?.focus();
     return () => {
       cancelList();
       cancelDetail();
@@ -420,9 +456,6 @@ function Assets({
     // Source/actor/session changes remount Assets; effects never update its identity.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  useEffect(() => {
-    if (selected) panel.current?.focus();
-  }, [selected]);
   const submit = (event: FormEvent) => {
     event.preventDefault();
     if (stale || (busy && draft === query.search)) return;
@@ -436,13 +469,29 @@ function Assets({
   };
   const dirty = draft !== query.search;
   return (
-    <section aria-label="已选数据源用户资产">
-      <form className="filters" onSubmit={submit}>
-        <Field
-          label="用户资产关键词"
-          help="按 SAM、SID、mail 或 DN 搜索；最多 50 个 UTF-16 单元，保留空白，按字面匹配"
+    <section className="asset-queue" aria-label="已选数据源用户资产">
+      <div className="asset-queue-heading">
+        <h3>用户目录</h3>
+        {list?.available && (
+          <span className="asset-count">{list.page.total} 个匹配用户</span>
+        )}
+        <button
+          type="button"
+          className="secondary asset-refresh"
+          aria-label="刷新用户资产观测"
+          onClick={() => {
+            const { observationId: _pin, ...latest } = queryRef.current;
+            loadList({ ...latest, pageIdx: 1 });
+          }}
         >
+          刷新观测
+        </button>
+      </div>
+      <form className="filters asset-search-toolbar" onSubmit={submit}>
+        <Field label="用户资产关键词">
           <input
+            ref={searchInput}
+            aria-describedby="asset-search-help"
             placeholder="按 SAM、SID、mail 或 DN 搜索"
             value={draft}
             onChange={(event) => {
@@ -452,8 +501,10 @@ function Assets({
             }}
           />
         </Field>
-        <Field label="用户资产每页条数">
+        <label className="field asset-page-size">
+          <span>每页条数</span>
           <select
+            aria-label="用户资产每页条数"
             value={query.pageSize}
             disabled={busy || stale}
             onChange={(event) =>
@@ -470,7 +521,7 @@ function Assets({
               </option>
             ))}
           </select>
-        </Field>
+        </label>
         <button disabled={stale || (busy && !dirty)}>搜索用户</button>
         <button
           type="button"
@@ -484,7 +535,10 @@ function Assets({
           清除用户搜索
         </button>
       </form>
-      <p style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
+      <p
+        className="asset-applied-search"
+        style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}
+      >
         已应用搜索：
         {query.search === "" ? "无文本筛选" : `“${display(query.search)}”`}
       </p>
@@ -492,15 +546,6 @@ function Assets({
         <p role="status">搜索已编辑，尚未应用；请提交搜索后查看详情或翻页。</p>
       )}
       <ErrorNotice error={inputError || error} />
-      <button
-        className="secondary"
-        onClick={() => {
-          const { observationId: _pin, ...latest } = queryRef.current;
-          loadList({ ...latest, pageIdx: 1 });
-        }}
-      >
-        刷新用户资产观测
-      </button>
       {error && !stale && (
         <button
           className="secondary"
@@ -517,15 +562,24 @@ function Assets({
       )}
       {list?.available && (
         <>
-          <Provenance
-            source={list.source!}
-            observationId={list.observationId!}
-          />
+          <div className="asset-observation-bar">
+            <span>观测完成（UTC）：{display(list.source!.completed_at)}</span>
+            <details className="asset-provenance">
+              <summary>观测来源 · {display(list.observationId!)}</summary>
+              <Provenance
+                source={list.source!}
+                observationId={list.observationId!}
+              />
+            </details>
+          </div>
           {list.list.length === 0 ? (
             <p role="status">此观测在当前筛选下没有匹配用户。</p>
           ) : (
-            <div className="table-scroll">
-              <table style={{ overflowWrap: "anywhere" }}>
+            <div className="table-scroll asset-table-scroll">
+              <table
+                className="asset-table"
+                style={{ overflowWrap: "anywhere" }}
+              >
                 <caption>用户资产列表</caption>
                 <thead>
                   <tr>
@@ -540,15 +594,22 @@ function Assets({
                 <tbody>
                   {list.list.map((row) => (
                     <tr key={row.objectGUID}>
-                      <td>{nullable(row.samAccountName)}</td>
-                      <td>{display(row.objectGUID)}</td>
-                      <td>{display(row.distinguishedName)}</td>
-                      <td>{nullable(row.objectSid)}</td>
-                      <td style={{ whiteSpace: "pre-wrap" }}>
+                      <td data-label="SAM" className="asset-name">
+                        {nullable(row.samAccountName)}
+                      </td>
+                      <td data-label="GUID" className="asset-identifier">
+                        {display(row.objectGUID)}
+                      </td>
+                      <td data-label="DN">{display(row.distinguishedName)}</td>
+                      <td data-label="SID" className="asset-identifier">
+                        {nullable(row.objectSid)}
+                      </td>
+                      <td data-label="mail" style={{ whiteSpace: "pre-wrap" }}>
                         {nullable(row.mail)}
                       </td>
-                      <td>
+                      <td data-label="操作">
                         <button
+                          className="asset-detail-button"
                           disabled={!canDetail || dirty || busy}
                           aria-label={`查看用户 ${display(row.samAccountName ?? row.objectGUID)}`}
                           onClick={(event) => {
@@ -574,11 +635,11 @@ function Assets({
               </table>
             </div>
           )}
-          <p>
+          <p className="asset-page-count">
             第 {list.page.pageIdx} 页 · 共 {list.page.totalPage} 页 · 匹配用户{" "}
             {list.page.total} 个
           </p>
-          <div className="actions">
+          <div className="actions asset-pagination">
             <button
               aria-label="用户资产上一页"
               disabled={busy || dirty || list.page.pageIdx <= 1}
@@ -606,40 +667,85 @@ function Assets({
         </>
       )}
       {selected && (
-        <section
-          aria-label="用户详情"
-          ref={panel}
-          tabIndex={-1}
-          onKeyDown={(event) => {
-            if (event.key === "Escape") {
-              event.preventDefault();
-              event.stopPropagation();
-              close();
-            }
+        <AssetDetailDrawer
+          close={close}
+          returnFocus={() => {
+            if (
+              origin.current?.isConnected &&
+              !origin.current.closest("[hidden], [inert]")
+            )
+              origin.current.focus();
           }}
         >
-          <h3>用户详情</h3>
-          <button className="secondary" onClick={close}>
-            关闭用户详情
-          </button>
-          <p>按观测与 GUID 读取；null 显示为未返回，原始整数不推导账户状态。</p>
-          {detailBusy && <p role="status">正在读取用户详情…</p>}
-          <ErrorNotice error={detailError} />
-          {detailError && (
-            <button onClick={() => loadDetail(selected)}>
-              重试用户详情读取
-            </button>
-          )}
-          {detail && (
-            <>
-              <Facts object={detail.object} />
-              <Provenance
-                source={detail.source}
-                observationId={detail.observationId}
-              />
-            </>
-          )}
-        </section>
+          <section
+            className="asset-detail-content"
+            aria-label="用户详情"
+            tabIndex={-1}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") {
+                event.preventDefault();
+                event.stopPropagation();
+                close();
+              }
+            }}
+          >
+            <div className="asset-detail-header">
+              <div
+                className="asset-detail-identity"
+                tabIndex={0}
+                role="region"
+                aria-label="用户身份"
+              >
+                <p className="asset-eyebrow">DIRECTORY OBJECT / 用户</p>
+                <h3>
+                  {detail
+                    ? display(
+                        detail.object.samAccountName ??
+                          detail.object.objectGUID,
+                      )
+                    : "用户详情"}
+                </h3>
+                <small>{display(source.selection.domain)}</small>
+              </div>
+              <button
+                className="secondary"
+                aria-label="关闭用户详情"
+                onClick={close}
+              >
+                关闭
+              </button>
+            </div>
+            <div className="asset-detail-body">
+              <p className="asset-fact-note">
+                固定观测内的原始身份字段。“未返回”与空值、零值分别保留；账户控制值不推导当前账户状态。
+              </p>
+              {detailBusy && <p role="status">正在读取用户详情…</p>}
+              <ErrorNotice error={detailError} />
+              {detailError && (
+                <button onClick={() => loadDetail(selected)}>
+                  重试用户详情读取
+                </button>
+              )}
+              {detail && (
+                <>
+                  <h4>身份字段</h4>
+                  <Facts object={detail.object} />
+                  <h4>观测来源</h4>
+                  <Provenance
+                    source={detail.source}
+                    observationId={detail.observationId}
+                  />
+                </>
+              )}
+            </div>
+            <div className="asset-detail-footer">
+              <span>只读观测</span>
+              <button className="secondary" onClick={close}>
+                返回用户列表
+              </button>
+            </div>
+          </section>
+        </AssetDetailDrawer>
       )}
     </section>
   );

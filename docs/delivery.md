@@ -3,6 +3,14 @@
 总路线图：https://github.com/yunpiao/adtr/issues/1 。全部 209 项均在范围内。
 工程文档、代码、PR、最新 head CI、合并、产品验收分别记录；任一阶段不能代表后续阶段完成。
 
+## SOC 生产用户资产界面（2026-10-10 开发切片）
+
+Refs [#91](https://github.com/yunpiao/adtr/issues/91)、[F14 #30](https://github.com/yunpiao/adtr/issues/30)、AD-F-038/039。按用户确认的 PR89 当前 SOC 原型制作真实生产导航与用户资产列表/详情；用户已自行合入 PR89，开发分支正常整合 main `665fcf7c2ab7373d9e8e9a7a4e289ce8a121a527`。不改原型文件、后端接口、数据授权或默认开关。
+
+未改基线 make check 1017 项前端测试通过；初始候选完整 make check 1042 项前端测试、60 项 Python 契约、Go race/vet/build、类型/构建、依赖审计0通过。独立实际 diff 审查发现并修复同身份会话核验后的模态背景惯性所有权冲突与 StrictMode 焦点重放问题，实际 App 复现和119项针对性测试通过。整合 main665fcf7 后完整 make check 再次通过1043项前端测试及全部上述检查，原型27项静态/VM检查通过。真实 API/Worker/TLS LDAP/PostgreSQL、桌面/390px截图和完整逐提交 CI 待关联 PR 的精确提交运行结果；本地没有 Docker，Chromium 受 OS socket 限制，不把 DOM 测试计为浏览器通过。
+
+[范围与状态契约](soc-production-ui.md)记录设计依据、真实接口、模态/来源/会话边界和测试迁移。原型风险、关系与告警样本不作为真实结果。产品验收仍0/209，F14 #30保持开放，无生产部署。
+
 ## F14 用户资产搜索与固定详情（2026-10-10 开发切片）
 
 Refs [#30](https://github.com/yunpiao/adtr/issues/30)、AD-F-038/039。基于已合并

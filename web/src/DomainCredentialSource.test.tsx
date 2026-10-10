@@ -1,3 +1,4 @@
+import { revealNavigation } from "./test-navigation";
 import {
   act,
   fireEvent,
@@ -224,6 +225,7 @@ describe("source navigation through the app", () => {
       url === "/api/auth/me" ? response(profile) : undefined;
     render(<App />);
     await screen.findByRole("heading", { name: "账户概览" });
+    await revealNavigation("域连接");
     click("域连接");
     await screen.findByRole("button", { name: "查看 synthetic.invalid" });
     click("查看 synthetic.invalid");

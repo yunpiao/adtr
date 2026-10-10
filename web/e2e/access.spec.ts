@@ -1,3 +1,4 @@
+import { navigateTo } from "./navigation";
 import { test, expect, type BrowserContext, type Page } from "@playwright/test";
 import { createHmac } from "node:crypto";
 
@@ -67,7 +68,7 @@ async function changeInitialPassword(
 }
 
 async function enrollMfa(page: Page, password: string): Promise<Authenticator> {
-  await page.getByRole("button", { name: "多因素认证", exact: true }).click();
+  await navigateTo(page, "多因素认证");
   await page.getByLabel("当前密码", { exact: true }).fill(password);
   await page.getByRole("button", { name: "开始设置", exact: true }).click();
   const secret = await page
@@ -137,7 +138,7 @@ test("real browser → API → PostgreSQL users and function permissions", async
   await login(page, username, password);
   await changeInitialPassword(page, password, changed);
   const adminMfa = await enrollMfa(page, changed);
-  await page.getByRole("button", { name: "访问管理", exact: true }).click();
+  await navigateTo(page, "访问管理");
   for (const name of ["用户管理", "角色管理", "功能权限"])
     await expect(page.getByRole("button", { name, exact: true })).toBeVisible();
   const adminMenu = await readJSON(context, "/api/access/menu");
@@ -306,7 +307,7 @@ test("real browser → API → PostgreSQL users and function permissions", async
     true,
   );
   const readerReset = "Reset Reader Password 789";
-  await page.getByRole("button", { name: "重置用户密码", exact: true }).click();
+  await navigateTo(page, "重置用户密码");
   await page.getByLabel("目标用户名", { exact: true }).fill(readerUsername);
   await page.getByLabel("用户新密码", { exact: true }).fill(readerReset);
   await page.getByLabel("确认用户新密码", { exact: true }).fill(readerReset);
@@ -350,9 +351,7 @@ test("real browser → API → PostgreSQL users and function permissions", async
     await expect(
       readerPage.getByRole("heading", { name: "账户概览", exact: true }),
     ).toBeVisible();
-    await readerPage
-      .getByRole("button", { name: "访问管理", exact: true })
-      .click();
+    await navigateTo(readerPage, "访问管理");
     await expect(
       readerPage.getByRole("button", { name: "用户管理", exact: true }),
     ).toBeVisible();
@@ -445,9 +444,7 @@ test("real browser → API → PostgreSQL users and function permissions", async
         () => localStorage.length + sessionStorage.length,
       ),
     ).toBe(0);
-    await readerPage
-      .getByRole("button", { name: "退出登录", exact: true })
-      .click();
+    await navigateTo(readerPage, "退出登录");
     await expect(
       readerPage.getByRole("heading", { name: "登录账户", exact: true }),
     ).toBeVisible();
