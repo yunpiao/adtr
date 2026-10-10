@@ -8,6 +8,7 @@ import {
   type Request,
 } from "@playwright/test";
 import { createHmac } from "node:crypto";
+import { writeFile } from "node:fs/promises";
 import { fixtureGET } from "./fixture-get";
 import { holdAssetResponse as holdGenuineAssetResponse } from "./user-assets-v2-held-response";
 import { installUserAssetAbortIsolation } from "./user-assets-v2-abort-isolation";
@@ -1289,14 +1290,22 @@ test("UserAssetsV2 real scoped reader revocation and native cross-tab held-respo
         path: testInfo.outputPath("user-assets-v2-reader-native-tab.png"),
         fullPage: true,
       });
-      await testInfo.attach("user-assets-v2-native-transport-outcomes", {
-        body: JSON.stringify({
+      const nativeTransportEvidencePath = testInfo.outputPath(
+        "user-assets-v2-native-transport-outcomes.json",
+      );
+      await writeFile(
+        nativeTransportEvidencePath,
+        JSON.stringify({
           outcomes,
           stages,
           nativeLifecycle: await fallback.lifecycle.evaluate((value) =>
             value.read(),
           ),
         }),
+        "utf8",
+      );
+      await testInfo.attach("user-assets-v2-native-transport-outcomes", {
+        path: nativeTransportEvidencePath,
         contentType: "application/json",
       });
     } catch (error) {
@@ -1509,13 +1518,21 @@ test("UserAssetsV2 real scoped reader revocation and native cross-tab held-respo
       expect(heldDetailOutcome).toMatchObject({
         application: "complete-consumed",
       });
-      await testInfo.attach("user-assets-v2-revocation-native-evidence", {
-        body: JSON.stringify({
+      const revocationEvidencePath = testInfo.outputPath(
+        "user-assets-v2-revocation-native-evidence.json",
+      );
+      await writeFile(
+        revocationEvidencePath,
+        JSON.stringify({
           apiListStatus: expired.status(),
           nativeSessionStatus: 401,
           native: await native.evaluate((value) => value.read()),
           heldDetailOutcome,
         }),
+        "utf8",
+      );
+      await testInfo.attach("user-assets-v2-revocation-native-evidence", {
+        path: revocationEvidencePath,
         contentType: "application/json",
       });
       await expect(

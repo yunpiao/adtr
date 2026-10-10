@@ -83,6 +83,25 @@ class CIEventContract(unittest.TestCase):
         self.assertIn('          heldDetailOutcome,', reader)
         self.assertNotIn('heldDetailOutcome: "delivered"', reader)
 
+    def test_native_reader_json_is_durable_and_matches_existing_upload_globs(self):
+        reader = pathlib.Path('web/e2e/user-assets-v2-readers.spec.ts').read_text()
+        workflow = pathlib.Path('.github/workflows/ci.yml').read_text()
+        self.assertIn('import { writeFile } from "node:fs/promises";', reader)
+        for name, variable in [
+            ('user-assets-v2-native-transport-outcomes', 'nativeTransportEvidencePath'),
+            ('user-assets-v2-revocation-native-evidence', 'revocationEvidencePath'),
+        ]:
+            self.assertRegex(reader, rf'const {variable} = testInfo.outputPath\(\s*"{name}\.json",?\s*\);')
+            self.assertRegex(reader, rf'await writeFile\(\s*{variable},\s*JSON.stringify\(\{{')
+            attachment = f'await testInfo.attach("{name}", {{\n        path: {variable},\n        contentType: "application/json",\n      }});'
+            self.assertIn(attachment, reader)
+            self.assertLess(reader.index(f'await writeFile(\n        {variable},'), reader.index(attachment))
+            self.assertTrue(pathlib.PurePosixPath(f'web/test-results/reader/{name}.json').match('web/test-results/**/user-assets-v2-*'))
+        browser = workflow.split('  browser:\n', 1)[1].split('  native-no-store:\n', 1)[0]
+        fixed = workflow.split('  user-assets-fixed:\n', 1)[1].split('  verify:\n', 1)[0]
+        self.assertIn('path: web/test-results/**/user-assets-v2-*\n', browser)
+        self.assertIn('path: |\n            web/test-results/**/user-assets-v2-*\n            ${{ runner.temp }}/adtr-native-fixed/provenance.txt\n', fixed)
+
 
 if __name__ == '__main__':
     unittest.main()

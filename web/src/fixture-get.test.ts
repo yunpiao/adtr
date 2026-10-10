@@ -81,30 +81,166 @@ describe("bounded fixture GET retry", () => {
   });
 
   it.each([
-    new Error(`apiRequestContext.get: connect ECONNREFUSED\n${secret}`),
-    new Error(`apiRequestContext.get: socket hang up\n${secret}`),
-    new Error(`apiRequestContext.get: read EPIPE\n${secret}`),
-    new Error(`apiRequestContext.get: Target closed\n${secret}`),
-    new Error(`apiRequestContext.get: failed\nCookie: ECONNRESET ${secret}`),
-    new Error(`apiRequestContext.get: read ECONNRESET ${secret}`),
-    new Error(`some-other-operation: read ECONNRESET\n${secret}`),
-    { code: "ECONNRESET", message: secret },
-    secret,
-  ])("never retries an unrecognized/non-reset error %#", async (raw) => {
-    const get = vi.fn().mockRejectedValue(raw);
-    const error = await fixtureGET({ get }, path).catch(
-      (value: Error) => value,
-    );
-    expect(error).toBeInstanceOf(Error);
-    expect((error as Error).message).toBe(
-      "User-assets fixture GET failed: transport_error",
-    );
-    expect((error as Error).cause).toBeUndefined();
-    expect(String((error as Error).stack)).not.toContain(secret);
-    expect(get).toHaveBeenCalledTimes(1);
-    expect(console.log).not.toHaveBeenCalled();
-    expect(vi.getTimerCount()).toBe(0);
-  });
+    [
+      new Error(`apiRequestContext.get: connect ECONNREFUSED\n${secret}`),
+      "connection_refused",
+    ],
+    [
+      new Error(
+        `apiRequestContext.get: connect ECONNREFUSED 127.0.0.1:12345\n${secret}`,
+      ),
+      "connection_refused",
+    ],
+    [
+      new Error(
+        `apiRequestContext.get: connect ECONNREFUSED ::1:12345\n${secret}`,
+      ),
+      "connection_refused",
+    ],
+    [
+      new Error(`apiRequestContext.get: socket hang up\n${secret}`),
+      "socket_hang_up",
+    ],
+    [
+      new Error(`apiRequestContext.get: aborted\n${secret}`),
+      "response_aborted",
+    ],
+    [
+      new Error(`apiRequestContext.get: read EPIPE\n${secret}`),
+      "unknown_error",
+    ],
+    [
+      new Error(`apiRequestContext.get: write EPIPE\n${secret}`),
+      "unknown_error",
+    ],
+    [
+      new Error(`apiRequestContext.get: Request context disposed.\n${secret}`),
+      "context_disposed",
+    ],
+    [
+      new Error(
+        `apiRequestContext.get: Target page, context or browser has been closed\n${secret}`,
+      ),
+      "target_closed",
+    ],
+    [
+      new Error(`apiRequestContext.get: Target closed\n${secret}`),
+      "unknown_error",
+    ],
+    [
+      new Error(`apiRequestContext.get: failed\nCookie: ECONNRESET ${secret}`),
+      "unknown_error",
+    ],
+    [
+      new Error(`apiRequestContext.get: read ECONNRESET ${secret}`),
+      "unknown_error",
+    ],
+    [
+      new Error(`some-other-operation: read ECONNRESET\n${secret}`),
+      "unknown_error",
+    ],
+    [
+      new Error(
+        `apiRequestContext.get: failed\napiRequestContext.get: socket hang up\n${secret}`,
+      ),
+      "unknown_error",
+    ],
+    [
+      new Error(`apiRequestContext.get: socket hang up ${secret}`),
+      "unknown_error",
+    ],
+    [new Error(`apiRequestContext.get: aborted ${secret}`), "unknown_error"],
+    [
+      new Error(
+        `apiRequestContext.get: connect ECONNREFUSED 127.0.0.1:12345 ${secret}`,
+      ),
+      "unknown_error",
+    ],
+    [
+      new Error(`apiRequestContext.get: Request context disposed. ${secret}`),
+      "unknown_error",
+    ],
+    [
+      new Error(
+        `apiRequestContext.get: Target page, context or browser has been closed ${secret}`,
+      ),
+      "unknown_error",
+    ],
+    [
+      new Error(`apiRequestContext.get: socket hang up\r\n${secret}`),
+      "unknown_error",
+    ],
+    [
+      new Error(
+        `apiRequestContext.get: ${secret}\nCall log:\n - url: /ECONNRESET\n - cookie: ${secret}`,
+        { cause: secret },
+      ),
+      "unknown_error",
+    ],
+    [
+      new Error(
+        `apiRequestContext.get: connect ECONNREFUSED 127.0.0.1:12345/ECONNRESET\n${secret}`,
+      ),
+      "unknown_error",
+    ],
+    [
+      new Error(`apiRequestContext.get: connect ECONNREFUSED ${secret}:12345`),
+      "unknown_error",
+    ],
+    [
+      new Error(`some-other-operation: socket hang up\n${secret}`),
+      "unknown_error",
+    ],
+    [{ code: "ECONNRESET", message: secret }, "non_error"],
+    [secret, "non_error"],
+  ])(
+    "never retries and emits only a fixed diagnostic %#",
+    async (raw, reason) => {
+      const get = vi.fn().mockRejectedValue(raw);
+      const error = await fixtureGET({ get }, path).catch(
+        (value: Error) => value,
+      );
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toBe(
+        `User-assets fixture GET failed: transport_error; reason=${reason}; attempt=1/2`,
+      );
+      expect((error as Error).cause).toBeUndefined();
+      expect(String((error as Error).stack)).not.toContain(secret);
+      expect(get).toHaveBeenCalledTimes(1);
+      expect(console.log).not.toHaveBeenCalled();
+      expect(vi.getTimerCount()).toBe(0);
+    },
+  );
+
+  it.each([
+    ["socket hang up", "socket_hang_up"],
+    ["unrecognized failure", "unknown_error"],
+  ])(
+    "diagnoses a second-attempt failure without starting another retry %#",
+    async (message, reason) => {
+      const get = vi
+        .fn()
+        .mockRejectedValueOnce(resetError())
+        .mockRejectedValueOnce(
+          new Error(`apiRequestContext.get: ${message}\nCookie: ${secret}`, {
+            cause: secret,
+          }),
+        );
+      const observed = fixtureGET({ get }, path).catch((error: Error) => error);
+      await vi.advanceTimersByTimeAsync(250);
+      const error = (await observed) as Error;
+      expect(error.message).toBe(
+        `User-assets fixture GET failed: transport_error; reason=${reason}; attempt=2/2`,
+      );
+      expect(error.cause).toBeUndefined();
+      expect(String(error.stack)).not.toContain(secret);
+      expect(get).toHaveBeenCalledTimes(2);
+      expect(console.log).toHaveBeenCalledExactlyOnceWith(
+        "User-assets fixture GET retry: ECONNRESET; attempt=2/2",
+      );
+      expect(vi.getTimerCount()).toBe(0);
+    },
+  );
 
   it.each([200, 401, 403, 404, 429, 500, 503])(
     "returns HTTP %i unchanged without retries",
@@ -184,6 +320,25 @@ describe("bounded fixture GET retry", () => {
     expect(get).toHaveBeenCalledTimes(1);
     expect(console.log).not.toHaveBeenCalled();
   });
+
+  it("keeps a late abort after the deadline handled without a retry or raw log", async () => {
+    const get = vi.fn().mockImplementation(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 31_000));
+      throw new Error(`apiRequestContext.get: aborted\nCookie: ${secret}`);
+    });
+    const observed = fixtureGET({ get }, path).catch((error: Error) => error);
+    await vi.advanceTimersByTimeAsync(30_000);
+    const error = (await observed) as Error;
+    expect(error.message).toBe(
+      "User-assets fixture GET failed: deadline_exceeded",
+    );
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(error.cause).toBeUndefined();
+    expect(String(error.stack)).not.toContain(secret);
+    expect(get).toHaveBeenCalledTimes(1);
+    expect(console.log).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
+  });
 });
 
 // No browser, Docker, real account or external endpoint. The reset is an
@@ -192,8 +347,22 @@ describe("bounded fixture GET retry", () => {
 describe("real Playwright APIRequestContext on owned loopback", () => {
   afterEach(() => vi.restoreAllMocks());
 
-  async function fixture(mode: "once" | "always" | "http503" | "none") {
+  async function fixture(
+    mode:
+      | "once"
+      | "always"
+      | "http503"
+      | "none"
+      | "hangup"
+      | "aborted"
+      | "pending",
+  ) {
     let seedSocket: Socket;
+    let received!: () => void;
+    const firstProbe = new Promise<void>((resolve) => {
+      received = resolve;
+    });
+    let abortTimer: ReturnType<typeof setTimeout> | undefined;
     const requests: {
       method: string;
       reused: boolean;
@@ -209,10 +378,22 @@ describe("real Playwright APIRequestContext on owned loopback", () => {
           reused: request.socket === seedSocket,
           cookieMatches: request.headers.cookie === `fixture=${secret}`,
         });
+        received();
         if (mode === "always" || (mode === "once" && requests.length === 1)) {
           request.socket.resetAndDestroy();
           return;
         }
+        if (mode === "hangup") {
+          request.socket.end();
+          return;
+        }
+        if (mode === "aborted") {
+          response.writeHead(200, { "Content-Length": "100" });
+          response.write('{"partial":');
+          abortTimer = setTimeout(() => request.socket.end(), 20);
+          return;
+        }
+        if (mode === "pending") return;
       }
       response.writeHead(
         request.url !== "/seed" && mode === "http503" ? 503 : 200,
@@ -225,6 +406,7 @@ describe("real Playwright APIRequestContext on owned loopback", () => {
       response.end('{"ok":true}');
     });
     server.on("connection", (socket) => socket.on("error", () => {}));
+    server.on("close", () => clearTimeout(abortTimer));
     await new Promise<void>((resolve, reject) => {
       server.once("error", reject);
       server.listen(0, "127.0.0.1", resolve);
@@ -232,7 +414,12 @@ describe("real Playwright APIRequestContext on owned loopback", () => {
     const address = server.address();
     if (!address || typeof address === "string")
       throw new Error("Missing owned loopback listener");
-    return { server, base: `http://127.0.0.1:${address.port}`, requests };
+    return {
+      server,
+      base: `http://127.0.0.1:${address.port}`,
+      requests,
+      firstProbe,
+    };
   }
 
   async function close(server: Server) {
@@ -330,6 +517,106 @@ describe("real Playwright APIRequestContext on owned loopback", () => {
     } finally {
       await context.dispose();
       await close(owned.server);
+    }
+  });
+
+  it.each([
+    ["hangup", "socket_hang_up"],
+    ["aborted", "response_aborted"],
+  ] as const)("diagnoses real %s without retrying", async (mode, reason) => {
+    const owned = await fixture(mode);
+    const context = await playwrightRequest.newContext();
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      await (await context.get(`${owned.base}/seed`)).body();
+      const error = (await fixtureGET(context, `${owned.base}/probe`).catch(
+        (value: Error) => value,
+      )) as Error;
+      expect(error.message).toBe(
+        `User-assets fixture GET failed: transport_error; reason=${reason}; attempt=1/2`,
+      );
+      expect(error.cause).toBeUndefined();
+      expect(String(error.stack)).not.toContain(secret);
+      expect(String(error.stack)).not.toContain(owned.base);
+      expect(owned.requests).toEqual([
+        { method: "GET", reused: true, cookieMatches: true },
+      ]);
+      expect(log).not.toHaveBeenCalled();
+    } finally {
+      await context.dispose();
+      await close(owned.server);
+    }
+  });
+
+  it("diagnoses a context disposed during a real pending GET without retrying", async () => {
+    const owned = await fixture("pending");
+    const context = await playwrightRequest.newContext();
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      await (await context.get(`${owned.base}/seed`)).body();
+      const observed = fixtureGET(context, `${owned.base}/probe`).catch(
+        (value: Error) => value,
+      );
+      await owned.firstProbe;
+      await context.dispose();
+      const error = (await observed) as Error;
+      expect(error.message).toBe(
+        "User-assets fixture GET failed: transport_error; reason=context_disposed; attempt=1/2",
+      );
+      expect(error.cause).toBeUndefined();
+      expect(String(error.stack)).not.toContain(secret);
+      expect(owned.requests).toEqual([
+        { method: "GET", reused: true, cookieMatches: true },
+      ]);
+      expect(log).not.toHaveBeenCalled();
+    } finally {
+      await context.dispose();
+      await close(owned.server);
+    }
+  });
+
+  it("diagnoses an already closed real context without making a request", async () => {
+    const owned = await fixture("none");
+    const context = await playwrightRequest.newContext();
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      await context.dispose();
+      const error = (await fixtureGET(context, `${owned.base}/probe`).catch(
+        (value: Error) => value,
+      )) as Error;
+      expect(error.message).toBe(
+        "User-assets fixture GET failed: transport_error; reason=target_closed; attempt=1/2",
+      );
+      expect(error.cause).toBeUndefined();
+      expect(String(error.stack)).not.toContain(owned.base);
+      expect(owned.requests).toHaveLength(0);
+      expect(log).not.toHaveBeenCalled();
+    } finally {
+      await context.dispose();
+      await close(owned.server);
+    }
+  });
+
+  it("diagnoses a refused owned loopback listener without retrying", async () => {
+    const owned = await fixture("none");
+    await close(owned.server);
+    const context = await playwrightRequest.newContext();
+    const get = vi.spyOn(context, "get");
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      const error = (await fixtureGET(context, `${owned.base}/probe`).catch(
+        (value: Error) => value,
+      )) as Error;
+      expect(error.message).toBe(
+        "User-assets fixture GET failed: transport_error; reason=connection_refused; attempt=1/2",
+      );
+      expect(error.cause).toBeUndefined();
+      expect(String(error.stack)).not.toContain(owned.base);
+      expect(get).toHaveBeenCalledTimes(1);
+      expect(owned.requests).toHaveLength(0);
+      expect(log).not.toHaveBeenCalled();
+    } finally {
+      await context.dispose();
     }
   });
 

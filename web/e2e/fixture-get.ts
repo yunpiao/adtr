@@ -28,6 +28,39 @@ function timedOut(error: unknown): boolean {
   );
 }
 
+function transportDiagnostic(
+  error: unknown,
+):
+  | "socket_hang_up"
+  | "response_aborted"
+  | "context_disposed"
+  | "target_closed"
+  | "connection_refused"
+  | "unknown_error"
+  | "non_error" {
+  // Diagnostic labels never authorize retries. Match only complete first
+  // lines and return constants, never messages, URLs, headers, bodies or cause.
+  if (!(error instanceof Error)) return "non_error";
+  const firstLine = error.message.split("\n", 1)[0];
+  switch (firstLine) {
+    case "apiRequestContext.get: socket hang up":
+      return "socket_hang_up";
+    case "apiRequestContext.get: aborted":
+      return "response_aborted";
+    case "apiRequestContext.get: Request context disposed.":
+      return "context_disposed";
+    case "apiRequestContext.get: Target page, context or browser has been closed":
+      return "target_closed";
+  }
+  if (
+    /^apiRequestContext\.get: connect ECONNREFUSED(?: (?:127\.0\.0\.1|::1):[0-9]{1,5})?$/u.test(
+      firstLine,
+    )
+  )
+    return "connection_refused";
+  return "unknown_error";
+}
+
 export async function fixtureGET(
   request: Pick<APIRequestContext, "get">,
   path: string,
@@ -75,7 +108,9 @@ export async function fixtureGET(
         }
         // Do not attach the original error as cause: Playwright's call log can
         // contain a session Cookie, response body or other synthetic secrets.
-        throw new Error("User-assets fixture GET failed: transport_error");
+        throw new Error(
+          `User-assets fixture GET failed: transport_error; reason=${transportDiagnostic(error)}; attempt=${attempt + 1}/2`,
+        );
       }
     }
     throw new Error("User-assets fixture GET failed: transport_error");

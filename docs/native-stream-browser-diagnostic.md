@@ -162,7 +162,25 @@ IdleTimeout 的边界支持空闲连接关闭竞态这一可能解释，但没�
 本 PR 的只读 fixture GET helper（`web/e2e/fixture-get.ts`）
 仅用于两套资产 suite 的 fixture-side `readJSON` GET，在连接重置时至多重试一次，
 保持原 Cookie jar，
-不重试状态码响应或任何写操作。28 项测试包含 5 项真实 Node 24.19.0 /
+不重试状态码响应或任何写操作。53 项测试包含 10 项真实 Node 24.19.0 /
 Playwright 1.56.1 回环连接实验，证明复用 socket 重置后单次新 socket 重试、
 Cookie 与 503 不重试行为；这些实验不能倒推原 CI 根因。held-response 的
 `route.fetch` 仍禁用重试，原始字节与原生事件证据不经过这个恢复 helper。
+
+提交 `ddb5d1ca7ee4ff5373d06c875336c70a88043ba4` 的
+[固定引擎普通资产 job 114153652806](https://github.com/yunpiao/adtr/actions/runs/38031626256/job/114153652806)
+在 grant 成功后另一次 fixture GET 报出 `transport_error`，没有重试记录；旧诊断未保留
+原始原因，不能据此判定为 ECONNRESET 或空闲连接关闭。新增诊断仅给出固定类别和尝试次数，
+仍只匹配完整首行、剥离原始错误/cause，不扩大重试资格或宣称修复这个历史传输故障。
+真实回环负例另覆盖 socket hangup、部分响应后延迟中止、上下文关闭/释放及连接拒绝，
+这些终态均不重试；恶意首行和调用日志内容不能获取重试资格或泄露进诊断。
+
+## 结构化读取器证据留存
+
+同一 ddb5d1c 提交的两套完整 reader job 均通过，日志中的 held 原始字节/原生完成与
+会话撤销断言成立；但下载归档只保留截图（固定引擎另有 provenance），缺少两个 JSON。
+锁定的 Playwright 1.56.1 将 `testInfo.attach({body})` 留在内存，文件上传 glob 不会收取它。
+因此新增显式 `outputPath`/`writeFile` 后按路径附加同一份实际 JSON，命名为
+`user-assets-v2-native-transport-outcomes.json` 和 `user-assets-v2-revocation-native-evidence.json`。
+内容表达式、断言及旧/固定引擎上传规则不变；新增源契约在旧实现上失败。
+新精确 head 的实际归档仍需下载核验，不能把已通过的旧 reader job 说成已留存这些 JSON。
