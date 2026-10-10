@@ -4,6 +4,7 @@ import {
   installDirectoryV2ResponseObserver,
   observeDirectoryV2Responses,
   directoryV2ResponseJSON,
+  directoryV2RequestDiagnostic,
 } from "../e2e/directory-v2-response-observer";
 import { EventEmitter } from "node:events";
 import type {
@@ -362,6 +363,7 @@ describe("host directory response identity", () => {
     return {
       context,
       page,
+      fetch,
       consume,
       newDocument,
       omitNextRequest: () => {
@@ -379,6 +381,76 @@ describe("host directory response identity", () => {
       },
     };
   }
+
+  it("diagnoses exact repeated-URL request ordinals without mutating or consuming observations", async () => {
+    const { consume, fetch } = await harness();
+    const first = await consume();
+    const second = await consume();
+    const before = [0, 1].map((ordinal) => ({
+      ...observer().peek(identity, ordinal),
+    }));
+    const take = vi.spyOn(observer(), "take");
+    for (const [ordinal, response] of [first, second].entries()) {
+      await expect(
+        directoryV2RequestDiagnostic(response.request()),
+      ).resolves.toEqual({
+        registered: true,
+        sameDocument: true,
+        ordinal,
+        hostCount: 2,
+        browserCount: 2,
+        countsMatch: true,
+        state: "complete",
+        failure: null,
+      });
+    }
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(take).not.toHaveBeenCalled();
+    expect([0, 1].map((ordinal) => observer().peek(identity, ordinal))).toEqual(
+      before,
+    );
+    await expect(directoryV2ResponseJSON(second)).resolves.toEqual({
+      sequence: 2,
+    });
+    await expect(directoryV2ResponseJSON(first)).resolves.toEqual({
+      sequence: 1,
+    });
+  });
+
+  it("diagnoses missing/document-changed identities and censors arbitrary failure text", async () => {
+    const { consume, newDocument } = await harness();
+    const retained = await consume();
+    const entry = observer().peek(identity, 0)!;
+    entry.state = "failed";
+    entry.failure = "non-allowlisted private diagnostic";
+    entry.text = "private response text";
+    const diagnostic = await directoryV2RequestDiagnostic(retained.request());
+    expect(diagnostic).toMatchObject({ state: "failed", failure: "other" });
+    expect(JSON.stringify(diagnostic)).not.toContain("private");
+    expect(entry.text).toBe("private response text");
+    await expect(
+      directoryV2RequestDiagnostic(
+        {} as ReturnType<BrowserResponse["request"]>,
+      ),
+    ).resolves.toMatchObject({
+      registered: false,
+      sameDocument: false,
+      state: "missing",
+    });
+    newDocument();
+    await consume();
+    await expect(
+      directoryV2RequestDiagnostic(retained.request()),
+    ).resolves.toMatchObject({
+      registered: true,
+      sameDocument: false,
+      ordinal: 0,
+      hostCount: null,
+      browserCount: null,
+      countsMatch: false,
+      state: "missing",
+    });
+  });
 
   it("keeps same-document ordinals and caches duplicate reads of the exact Response", async () => {
     const { context, page, consume } = await harness();

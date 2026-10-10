@@ -2266,9 +2266,27 @@
         "UI-0502",
         "UI-0503"
       ],
-      "status": "not_started",
+      "status": "in_progress",
       "product_accepted": false,
-      "evidence": null
+      "evidence": {
+        "local_contract": "docs/user-assets-v2-contract.md",
+        "implementation_base": "26f1463e98d2064182ad3f89e8663af7a0d9ef24",
+        "implemented_scope": "只读已验证dictionary2不可变观测；当前域/凭据版本下的用户SAM/SID/mail/DN字面量搜索、稳定分页与观测/GUID固定详情；保留十个事实字段和null语义",
+        "tests": [
+          "internal/domains/user_assets_v2_test.go",
+          "internal/domains/user_assets_v2_integration_test.go",
+          "internal/auth/user_assets_v2_http_test.go",
+          "internal/auth/user_assets_v2_http_external_integration_test.go",
+          "web/src/UserAssetsV2.test.tsx",
+          "web/e2e/user-assets-v2.spec.ts",
+          "web/e2e/user-assets-v2-readers.spec.ts"
+        ],
+        "remaining": [
+          "精确候选head完整CI、独立实际diff审查及当前main兼容性按PR证据分别记录；不能借用基线测试结果",
+          "其余原始筛选/字段/控件、关系与业务导出尚未实现；无风险/登录/成员数据推断",
+          "真实AD、八版本Windows、源系统1:1兼容、容量及生产验收仍开放；Issue30与产品验收不因本切片完成"
+        ]
+      }
     },
     {
       "id": "AD-F-039",
@@ -2386,9 +2404,27 @@
         "UI-0492",
         "UI-0493"
       ],
-      "status": "not_started",
+      "status": "in_progress",
       "product_accepted": false,
-      "evidence": null
+      "evidence": {
+        "local_contract": "docs/user-assets-v2-contract.md",
+        "implementation_base": "26f1463e98d2064182ad3f89e8663af7a0d9ef24",
+        "implemented_scope": "只读已验证dictionary2不可变观测；当前域/凭据版本下的用户SAM/SID/mail/DN字面量搜索、稳定分页与观测/GUID固定详情；保留十个事实字段和null语义",
+        "tests": [
+          "internal/domains/user_assets_v2_test.go",
+          "internal/domains/user_assets_v2_integration_test.go",
+          "internal/auth/user_assets_v2_http_test.go",
+          "internal/auth/user_assets_v2_http_external_integration_test.go",
+          "web/src/UserAssetsV2.test.tsx",
+          "web/e2e/user-assets-v2.spec.ts",
+          "web/e2e/user-assets-v2-readers.spec.ts"
+        ],
+        "remaining": [
+          "精确候选head完整CI、独立实际diff审查及当前main兼容性按PR证据分别记录；不能借用基线测试结果",
+          "其余原始筛选/字段/控件、关系与业务导出尚未实现；无风险/登录/成员数据推断",
+          "真实AD、八版本Windows、源系统1:1兼容、容量及生产验收仍开放；Issue30与产品验收不因本切片完成"
+        ]
+      }
     },
     {
       "id": "AD-F-040",

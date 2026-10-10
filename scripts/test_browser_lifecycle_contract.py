@@ -11,12 +11,21 @@ class BrowserLifecycleContract(unittest.TestCase):
         with patch.object(test_auth_e2e.sys, "platform", "linux"), \
              patch.dict(os.environ, {}, clear=True), \
              patch.object(test_auth_e2e.shutil, "which", return_value="/usr/bin/xvfb-run"):
-            for suite in ["session-invalidation", "directory-readers", "directory-v2-readers"]:
+            for suite in ["session-invalidation", "directory-readers", "directory-v2-readers", "user-assets-v2-readers"]:
                 with self.subTest(suite=suite):
                     self.assertEqual(test_auth_e2e.browser_command(suite), [
                         "xvfb-run", "-a", "npm", "run", "test:e2e", "--prefix",
                         "web", "--", f"e2e/{suite}.spec.ts", "--headed",
                     ])
+
+    def test_user_assets_suites_are_nonempty_v2_worker_fixtures(self):
+        self.assertEqual(test_auth_e2e.USER_ASSETS_V2_SUITES,
+                         {"user-assets-v2", "user-assets-v2-readers"})
+        for suite in test_auth_e2e.USER_ASSETS_V2_SUITES:
+            self.assertIn(suite, test_auth_e2e.DIRECTORY_V2_SUITES)
+            self.assertIn(suite, test_auth_e2e.DIRECTORY_SUITES)
+            self.assertNotIn(suite, test_auth_e2e.EMPTY_DIRECTORY_SUITES)
+            self.assertNotIn(suite, test_auth_e2e.SLOW_DIRECTORY_SUITES)
 
     def test_existing_display_is_used_without_requiring_xvfb(self):
         with patch.object(test_auth_e2e.sys, "platform", "linux"), \
@@ -54,7 +63,7 @@ class BrowserLifecycleContract(unittest.TestCase):
         with patch.object(test_auth_e2e.sys, "platform", "linux"), \
              patch.dict(os.environ, {}, clear=True), \
              patch.object(test_auth_e2e.shutil, "which") as lookup:
-            for suite in ["auth", "profile", "directory", "directory-controls", "directory-v2", "directory-v2-controls"]:
+            for suite in ["auth", "profile", "directory", "directory-controls", "directory-v2", "directory-v2-controls", "user-assets-v2"]:
                 with self.subTest(suite=suite):
                     self.assertEqual(test_auth_e2e.browser_command(suite), [
                         "npm", "run", "test:e2e", "--prefix", "web", "--",

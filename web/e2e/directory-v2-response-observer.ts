@@ -30,6 +30,8 @@ export function installDirectoryV2ResponseObserver() {
   };
   const records = new Map<string, Record[]>();
   const paths = new Set([
+    "/api/user-assets/v2",
+    "/api/user-assets/v2/detail",
     "/api/directory/v2/observation",
     "/api/directory/v2/receipt",
     "/api/directory/v2/task",
@@ -189,6 +191,9 @@ const documents = new WeakMap<
   { epoch: string; counts: Map<string, number> }
 >();
 const directoryPath = (url: URL) =>
+  ["/api/user-assets/v2", "/api/user-assets/v2/detail"].includes(
+    url.pathname,
+  ) ||
   /^\/api\/directory\/v2\/(?:observation|receipt|task|sync|cancel)$/u.test(
     url.pathname,
   ) ||
@@ -224,6 +229,72 @@ export async function observeDirectoryV2Responses(context: BrowserContext) {
     document.counts.set(id, ordinal + 1);
   });
   await context.addInitScript(installDirectoryV2ResponseObserver);
+}
+
+// Read-only failure diagnostics for an exact browser Request. Never return
+// URLs, identity headers or body text; never read, clone, take or refetch a body.
+// A snapshot is diagnostic only, not a substitute for readObservedBody's checks.
+export async function directoryV2RequestDiagnostic(request: BrowserRequest) {
+  const captured = identities.get(request);
+  if (!captured)
+    return {
+      registered: false,
+      sameDocument: false,
+      ordinal: null,
+      hostCount: null,
+      browserCount: null,
+      countsMatch: false,
+      state: "missing",
+      failure: null,
+    };
+  const page = request.frame().page();
+  const document = documents.get(page);
+  const id = `${request.method()} ${request.url()}`;
+  const hostCount =
+    document?.epoch === captured.epoch ? (document.counts.get(id) ?? 0) : null;
+  const snapshot = await page.evaluate(
+    ({ id, ordinal, epoch }) => {
+      const observer = (window as any).__adtrDirectoryV2ResponseObserver;
+      const sameDocument = observer?.epoch === epoch;
+      const record = sameDocument ? observer.peek(id, ordinal) : undefined;
+      const failures = [
+        "fetch rejected",
+        "cancelled before EOF",
+        "body read rejected",
+        "body limit exceeded",
+        "invalid UTF-8 or JSON",
+        "observer setup failed",
+        "missing body",
+        "unsupported reader mode",
+        "document registration failed",
+      ];
+      return {
+        sameDocument,
+        browserCount: sameDocument ? observer.count(id) : null,
+        state: ["pending", "complete", "failed"].includes(record?.state)
+          ? record.state
+          : "missing",
+        failure:
+          record?.failure === undefined
+            ? null
+            : failures.includes(record.failure)
+              ? record.failure
+              : "other",
+      };
+    },
+    { id, ...captured },
+  );
+  return {
+    registered: true,
+    ordinal: captured.ordinal,
+    hostCount,
+    ...snapshot,
+    sameDocument:
+      snapshot.sameDocument &&
+      document?.epoch === captured.epoch &&
+      documents.get(page)?.epoch === captured.epoch,
+    countsMatch: hostCount !== null && hostCount === snapshot.browserCount,
+  };
 }
 
 // Correlate by the exact method/URL and invocation ordinal in the same document.

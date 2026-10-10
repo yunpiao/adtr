@@ -70,6 +70,10 @@ jobs:
       max-parallel: 2
       matrix:
         include:
+          - name: user-assets-v2
+            command: python3 scripts/test_auth_e2e.py --suite user-assets-v2
+          - name: user-assets-v2-readers
+            command: python3 scripts/test_auth_e2e.py --suite user-assets-v2-readers
           - name: directory-v2
             command: python3 scripts/test_auth_e2e.py --suite directory-v2
           - name: directory-v2-controls
@@ -160,6 +164,14 @@ jobs:
           path: |
             web/test-results/**/production-journal-first-last.json
             web/test-results/**/operational-logs.png
+          if-no-files-found: error
+          retention-days: 7
+      - name: Retain synthetic user asset evidence
+        if: ${{ success() && (matrix.name == 'user-assets-v2' || matrix.name == 'user-assets-v2-readers') }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ${{ matrix.name }}-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: web/test-results/**/user-assets-v2-*
           if-no-files-found: error
           retention-days: 7
   verify:
