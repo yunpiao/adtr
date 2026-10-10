@@ -19,8 +19,9 @@ configuration and any merge queue settings remain repository-owner controls.
 ## Parallel real-browser acceptance
 
 F39 adds an isolated audit/API/Worker/PostgreSQL browser suite. Browser suites run
-in a matrix with at most two concurrent jobs and fail-fast disabled, so every
-suite reports its outcome. Each job retains the 20-minute budget and uses its
+in a matrix with at most four concurrent jobs and fail-fast disabled, so every
+suite reports its outcome. The four-slot bound is a measured-rollout canary;
+authentication and fixed-engine matrices retain their two-slot bounds. Each job retains the 20-minute budget and uses its
 own fresh database. The audit browser subprocess has a 600-second budget for
 its additional real TOTP windows; prior suites retain 420 seconds.
 
@@ -54,3 +55,14 @@ inside a 540-second harness budget, preserving the 20-minute job limit.
 F01 adds a domains browser suite against an isolated synthetic LDAP container on fixed 389/636 ports. The same bounded browser matrix and final verify gate apply. Its ephemeral CA and credentials are test-owned; this is protocol integration evidence, not Windows/AD acceptance.
 
 F03 adds the operations browser suite with a storage-only domain key and probes disabled. It exercises real API/PostgreSQL credential-registration lifecycle and committed-response-loss recovery, not LDAP or remote account administration. The browser timeout and concurrency gate remain bounded.
+
+## Same-run image preparation
+
+The original 34 jobs remain; required `prepare-postgres` makes 35. The 31
+PostgreSQL consumers load the same-run immutable artifact after strict source,
+digest, checkout and archive checks, then use the verified image ID without
+pulling. `verify` additionally requires preparation success. The browser matrix now has a bounded four-slot canary; auth/fixed matrices
+remain at two. A separate two-job workflow runs only on explicit
+`ci/image-transfer-probe/**` branch pushes; it does not replace any full-CI gate.
+Trust boundaries, parameters, evidence limits and measurement sequence are in
+[ci-image-sharing.md](ci-image-sharing.md).

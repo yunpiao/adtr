@@ -1,0 +1,72 @@
+{
+  "captured_at": "2026-10-10T17:50:30Z",
+  "baseline_main": "a8cc62aab884292e2747704968a7f9fe988c719a",
+  "method": "Actual GitHub job timestamps (run creation to final job completion). Simulation schedules observed browser job durations in workflow matrix order into the earliest free slot; it omits inter-job scheduling gaps and future artifact preparation/transfer costs. It is not optimized-run evidence.",
+  "browser_matrix_order": [
+    "user-assets-v2",
+    "user-assets-v2-readers",
+    "directory-v2",
+    "directory-v2-controls",
+    "directory-v2-readers",
+    "directory-readers",
+    "authentication",
+    "expired-password",
+    "access",
+    "resources",
+    "tasks",
+    "audit",
+    "system",
+    "maintenance",
+    "domains",
+    "operations",
+    "profile",
+    "credential-use",
+    "account-references",
+    "operational-logs",
+    "session-invalidation",
+    "account-reference-barrier",
+    "directory",
+    "directory-controls"
+  ],
+  "runs": [
+    {
+      "run_url": "https://github.com/yunpiao/adtr/actions/runs/38060682440",
+      "head_sha": "8a0da79da17fea1807a5af2e11035e3110a07e58",
+      "jobs": 34,
+      "actual_wall_seconds": 4545,
+      "browser_jobs": 24,
+      "browser_runner_seconds": 8675,
+      "simulated_browser_seconds_by_slots": {
+        "2": 4516,
+        "3": 2947,
+        "4": 2262
+      }
+    },
+    {
+      "run_url": "https://github.com/yunpiao/adtr/actions/runs/38053284175",
+      "head_sha": "665fcf7c2ab7373d9e8e9a7a4e289ce8a121a527",
+      "jobs": 34,
+      "actual_wall_seconds": 4462,
+      "browser_jobs": 24,
+      "browser_runner_seconds": 8537,
+      "simulated_browser_seconds_by_slots": {
+        "2": 4431,
+        "3": 2952,
+        "4": 2226
+      }
+    },
+    {
+      "run_url": "https://github.com/yunpiao/adtr/actions/runs/38048701877",
+      "head_sha": "2ec70500881038251ddb1678691d9ecd10aebb90",
+      "jobs": 34,
+      "actual_wall_seconds": 4468,
+      "browser_jobs": 24,
+      "browser_runner_seconds": 8588,
+      "simulated_browser_seconds_by_slots": {
+        "2": 4411,
+        "3": 2964,
+        "4": 2238
+      }
+    }
+  ]
+}

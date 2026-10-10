@@ -1,0 +1,99 @@
+{
+  "run_url": "https://github.com/yunpiao/adtr/actions/runs/38080292537",
+  "head_sha": "fd733de6ab50dc3d3863fa44e6de5ddf92d7546d",
+  "run_attempt": 1,
+  "complete_all_35_success": false,
+  "jobs_listed": 35,
+  "jobs_passed": 33,
+  "failures": [
+    {
+      "name": "contracts",
+      "conclusion": "failure",
+      "url": "https://github.com/yunpiao/adtr/actions/runs/38080292537/job/114295707861"
+    },
+    {
+      "name": "verify",
+      "conclusion": "failure",
+      "url": "https://github.com/yunpiao/adtr/actions/runs/38080292537/job/114303138427"
+    }
+  ],
+  "browser_jobs": 24,
+  "browser_completed": 24,
+  "browser_test_seconds": {
+    "count": 24,
+    "min": 21.0,
+    "median": 300.5,
+    "max": 647.0,
+    "sum": 7050.0
+  },
+  "download_step_seconds": {
+    "count": 31,
+    "min": 1.0,
+    "median": 3.0,
+    "max": 5.0,
+    "sum": 96.0
+  },
+  "verify_load_step_seconds": {
+    "count": 31,
+    "min": 4.0,
+    "median": 7.0,
+    "max": 12.0,
+    "sum": 223.0
+  },
+  "timing_note": "Step timestamps have 1-second resolution. These are observations, not a controlled causal speedup benchmark.",
+  "first_attempt_wall_seconds": 2341,
+  "browser_matrix_wall_seconds": 2308,
+  "browser_runner_seconds": 8736,
+  "browser_max_parallel": 4,
+  "actual_job_interval_peak": 11,
+  "actual_browser_job_interval_peak": 4,
+  "merge_checkout_sha": "ae0b9520e730b0a2f21dc93859afd9e4357b915e",
+  "producer": {
+    "attempt": 1,
+    "artifact_id": 11679857692,
+    "archive_bytes": 116657480,
+    "archive_sha256": "53772ad0fd9f82f3633f17c6715389677529abdbd282cd9694e3767eca1ffab4",
+    "prepare_seconds": 11.01,
+    "pull_attempts": 1,
+    "pull_seconds": 4.146,
+    "registry_metadata_seconds": 1.231,
+    "save_compress_seconds": 5.464
+  },
+  "fanout": {
+    "jobs": 31,
+    "verified_image_id": "sha256:d741b376874687de90374fd34f55c6b2760e8f7bd7e4ae5cd47f50757fc08cf8",
+    "archive_bytes": 116657480,
+    "all_required_verify_load_steps_passed": true,
+    "npm_cache_restored_bytes": 26777873,
+    "expected_artifacts_present": 10
+  },
+  "retry": {
+    "attempt": 2,
+    "scope": [
+      "contracts",
+      "verify"
+    ],
+    "complete_all_35_success": true,
+    "overall_wall_seconds_including_observation_gap": 2912,
+    "contracts_seconds": 462,
+    "same_head": true,
+    "producer_reused_from_attempt": 1,
+    "artifact_id": 11679857692,
+    "consume_seconds": 4.527,
+    "watchdog_subtest_seconds": 0.05
+  },
+  "failure_diagnosis": {
+    "test": "TestCoordinatorFailureAlwaysClosesLock/watchdog",
+    "first_failure": "main_test.go:272 timed out after 3s awaiting LockHeld && FixtureReleased",
+    "observed": "Existing test uses a 40ms held deadline; cleanup clears the transient LockHeld state. Unchanged retry passed; local integration-tagged race repeat passed 100/100.",
+    "inference": "A missed transient-state observation is plausible. The original run lacks final status and scheduler/IO telemetry, so the cause is not established. No evidence attributes it to browser-job concurrency.",
+    "test_or_source_changes": "none"
+  },
+  "comparison": {
+    "two_slot_green_wall_seconds": 4591,
+    "four_slot_eventual_green_wall_seconds": 2912,
+    "observed_saved_seconds_including_retry": 1679,
+    "observed_reduction_percent_including_retry": 36.6,
+    "note": "First attempt 39m01s was not all-green. Eventual green took 48m32s including retry and observation gap; a single pair of runs is not a causal performance guarantee. The following integrated-main candidate needs its own exact-head full CI."
+  }
+}

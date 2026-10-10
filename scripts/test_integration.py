@@ -5,6 +5,7 @@ import subprocess
 import time
 import uuid
 
+from ci_postgres_image import postgres_image_args
 from run_integration import parse_args, run_tests
 
 IMAGE = "public.ecr.aws/docker/library/postgres:17.6-alpine@sha256:ef257d85f76e48da1c64832459b59fcaba1a4dac97bf5d7450c77753542eee94"
@@ -19,7 +20,7 @@ def main():
     try:
         subprocess.run(["docker", "run", "--detach", "--rm", "--name", name,
                         "-e", "POSTGRES_PASSWORD", "-e", "POSTGRES_DB=adtr_test",
-                        "-p", "127.0.0.1::5432", IMAGE], env=env, check=True, capture_output=True)
+                        "-p", "127.0.0.1::5432", *postgres_image_args(IMAGE)], env=env, check=True, capture_output=True)
         created = True
         for _ in range(60):
             ready = subprocess.run(["docker", "exec", name, "pg_isready", "-h", "127.0.0.1", "-U", "postgres", "-d", "adtr_test"], capture_output=True)
