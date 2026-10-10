@@ -87,7 +87,7 @@ node prototype/adtr/test-browser.cjs
 
 输出在 `prototype/adtr/test-results/`，包括 JSON 报告、四张代表截图及必要失败截图。报告记录源文件 SHA-256、`GITHUB_SHA`（CI checkout）与 `GITHUB_HEAD_SHA`（PR head）；不能用不同提交的结果作为验收证据。该目录是运行产物，默认不跟踪提交。
 
-目前本地 18 项静态/VM 检查通过；本地 Chromium 因执行器 socket/挂载限制未运行成功，云浏览器也未能到达该执行器的回环预览。真实浏览器结果须以独立原型 CI 的精确提交报告为准，详见 [validation.md](validation.md)。未提供虚构截图，未声称键盘、窄屏或 33 个浏览器场景已通过。
+目前本地 19 项静态/VM 检查通过；本地 Chromium 因执行器 socket/挂载限制未运行成功，云浏览器也未能到达该执行器的回环预览。首轮真实 [原型 CI](https://github.com/yunpiao/adtr/actions/runs/38019923715) 在 head `63c1e1d` 上取得 26/33 通过，已生成并检查四张代表截图；七处失败已经修复，修改后仍待精确 head 复测，详见 [validation.md](validation.md)。不把截图或部分通过视为完整浏览器/键盘/窄屏验收。
 
 ## 文件结构
 
