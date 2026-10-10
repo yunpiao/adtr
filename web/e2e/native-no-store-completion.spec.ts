@@ -7,6 +7,7 @@ import { createServer, type ServerResponse } from "node:http";
 import { readFile, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { build } from "vite";
+import { nativeStreamMode, proveNativeStream } from "./native-stream-proof";
 
 const payload = { marker: "synthetic-stream", value: "😀", count: 7 };
 const bytes = Buffer.from(JSON.stringify(payload));
@@ -176,6 +177,10 @@ for (const kind of [
     let caseFailed = false;
     let caseError: unknown;
     const cleanupErrors: unknown[] = [];
+    const mode = nativeStreamMode();
+    if (mode === "stable-body") expect(browser.version()).toBe("141.0.7390.37");
+    let pwTerminalCount = 0,
+      nativeTerminalCount = 0;
     let stage = "fixture-start";
     let evidenceSaved = false;
     let requestCount = 0;
@@ -196,7 +201,10 @@ for (const kind of [
           ).catch(() => null);
       const evidence = {
         kind,
+        mode,
         stage,
+        pwTerminalCount,
+        nativeTerminalCount,
         browser: browser.version(),
         parserSHA256: parserSHA,
         parserBundleSHA256: sha256(bundle),
@@ -247,11 +255,13 @@ for (const kind of [
       };
       const finished = (request: Request) => {
         if (request !== browserRequest) return;
+        pwTerminalCount++;
         pwResult = { event: "finished", failure: null, cancelled: null };
         pw.resolve(pwResult);
       };
       const failed = (request: Request) => {
         if (request !== browserRequest) return;
+        pwTerminalCount++;
         pwResult = {
           event: "failed",
           failure: failureCode(request.failure()?.errorText),
@@ -280,11 +290,13 @@ for (const kind of [
       });
       cdp.on("Network.loadingFinished", (event) => {
         if (!nativeIDs.has(event.requestId)) return;
+        nativeTerminalCount++;
         nativeResult = { event: "finished", failure: null, cancelled: null };
         native.resolve(nativeResult);
       });
       cdp.on("Network.loadingFailed", (event) => {
         if (!nativeIDs.has(event.requestId)) return;
+        nativeTerminalCount++;
         nativeResult = {
           event: "failed",
           failure: failureCode(event.errorText),
@@ -339,6 +351,8 @@ for (const kind of [
       );
       stage = "terminal-before-assertions";
       await saveEvidence();
+      expect(pwTerminalCount).toBe(1);
+      expect(nativeTerminalCount).toBe(1);
       expect(requestCount).toBe(1);
       expect(nativeIDs.size).toBe(1);
       expect(serverState.requests).toBe(1);
@@ -365,17 +379,30 @@ for (const kind of [
         expect(consumed.aborted).toBe(false);
         expect(serverState.finished).toBe(true);
         expect(serverState.prematureClose).toBe(false);
-        // EOF/valid JSON never substitutes for genuine native completion.
-        expect(pwResult).toEqual({
-          event: "finished",
-          failure: null,
-          cancelled: null,
-        });
-        expect(nativeResult).toEqual({
-          event: "finished",
-          failure: null,
-          cancelled: null,
-        });
+        const proof = proveNativeStream(
+          mode,
+          browser.version(),
+          {
+            uncanceledEOF: consumed.eof,
+            expectedByteLength: bytes.length,
+            byteLength: consumed.observedBytes,
+            expectedSHA256: sha256(bytes),
+            sha256: consumed.sha256,
+            readers: consumed.readers,
+            released: consumed.released,
+            signalAborted: consumed.aborted,
+            cancelCalls: consumed.cancelCalls + consumed.bodyCancelCalls,
+            metadataMatches:
+              consumed.status === 200 && consumed.cache === "no-store",
+            identityMatches:
+              requestCount === 1 &&
+              nativeIDs.size === 1 &&
+              serverState.requests === 1,
+          },
+          [pwResult!],
+          [nativeResult!],
+        );
+        console.log(`Native no-store proof: ${JSON.stringify(proof)}`);
       } else {
         expect(consumed.fulfilled).toBe(false);
         expect(consumed.eof).toBe(false);
