@@ -893,3 +893,41 @@ describe("safe navigation state excludes forms and private response bytes", () =
     expectNoMutation();
   });
 });
+
+describe("task visibility remains in the fixed identity", () => {
+  it.each([false, true])(
+    "shows archived=%s while metadata stays collapsed",
+    async (archived) => {
+      writeTaskNavigation(
+        profile,
+        {
+          view: { type: "detail", id: firstID, archived },
+          query: defaultTaskQuery(),
+        },
+        "replace",
+      );
+      override = (url) =>
+        url.startsWith("/api/tasks/detail?")
+          ? response({
+              task: task(firstID, {
+                archived,
+                visibilityVersion: archived ? 1 : 2,
+              }),
+              events: [],
+            })
+          : undefined;
+      render(<TaskWorkspace profile={profile} sessionChanged={vi.fn()} />);
+      await screen.findByTestId("task-detail-identity");
+      const value = archived ? "已归档" : "默认可见";
+      expect(screen.getAllByText(value, { exact: true })).toHaveLength(1);
+      expect(screen.getByText(value, { exact: true })).toBeVisible();
+      expect(
+        document.querySelector(".task-metadata-panel"),
+      ).not.toHaveAttribute("open");
+      expect(document.querySelector(".task-detail-identity")).toHaveTextContent(
+        `可见性：${value}`,
+      );
+      expectNoMutation();
+    },
+  );
+});

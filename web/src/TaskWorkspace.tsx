@@ -988,6 +988,9 @@ function TaskDetails({
             </div>
             <div role="status" aria-live="polite">
               <TaskStatus task={task} />
+              <p>
+                可见性：<strong>{task.archived ? "已归档" : "默认可见"}</strong>
+              </p>
             </div>
           </div>
           <div className="task-state-summary">
@@ -1143,7 +1146,6 @@ function TaskDetails({
                   task.terminalAt ??
                     (terminal(task.state) ? "终态时间未知" : "尚未结束"),
                 ],
-                ["可见性", task.archived ? "已归档" : "默认可见"],
                 ["可见性版本", task.visibilityVersion],
                 ["下一次尝试（UTC）", task.nextAttemptAt ?? "无"],
                 ["错误代码", task.error || "无"],

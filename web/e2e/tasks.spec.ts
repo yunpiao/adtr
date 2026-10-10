@@ -232,6 +232,11 @@ async function expectPersistedDetail(
     detail.getByRole("heading", { name: "任务详情", exact: true }),
   ).toBeVisible();
   await expect(detail.getByTestId("task-detail-identity")).toHaveText(id);
+  await expect(detail.getByText("默认可见", { exact: true })).toBeVisible();
+  await expect(detail.locator(".task-metadata-panel")).toHaveJSProperty(
+    "open",
+    false,
+  );
   await expect(detail.getByLabel("任务持久化进度")).toHaveJSProperty(
     "value",
     100,
