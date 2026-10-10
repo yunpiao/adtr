@@ -203,9 +203,64 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  native-no-store-fixed:
+    # Isolated upstream-fix diagnostic; the pinned baseline and matrix stay intact.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24.19.0'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Install locked browser test dependencies
+        run: npm ci --prefix web --cache /tmp/adtr-npm-cache
+      - name: Install headed browser system dependencies
+        run: cd web && npx playwright install-deps chromium
+      - name: Verify official fixed-build diagnostic browser
+        shell: bash
+        run: |
+          set -euo pipefail
+          fixture="$RUNNER_TEMP/adtr-native-fixed"
+          mkdir -p "$fixture"
+          archive="$fixture/chrome-linux64.zip"
+          curl --fail --show-error --silent --location --proto '=https' --proto-redir '=https' --retry 2 --connect-timeout 10 --max-time 180 \
+            'https://storage.googleapis.com/chrome-for-testing-public/157.0.8092.0/linux64/chrome-linux64.zip' -o "$archive"
+          test "$(stat -c %s "$archive")" -eq 201751736
+          printf '%s  %s\n' '28d4f185c9047a91fe79ee8d31e5e0b5b858fc107129b3df361fdd095dbb2ace' "$archive" | sha256sum --check --strict
+          unzip -q "$archive" -d "$fixture"
+          chrome="$fixture/chrome-linux64/chrome"
+          version="$("$chrome" --version | sed 's/[[:space:]]*$//')"
+          test "$version" = 'Google Chrome for Testing 157.0.8092.0'
+          printf 'ADTR_E2E_CHROMIUM_PATH=%s\n' "$chrome" >> "$GITHUB_ENV"
+          {
+            printf 'channel=Dev\nversion=%s\n' "$version"
+            printf 'source_tag=2b9f0645d8f651a36f74683f22a3746379f13bc6\n'
+            printf 'engine_fix=62473ad0f747e245e514c93e741bb8e168a2a207\n'
+            sha256sum "$archive" web/e2e/native-no-store-completion.spec.ts web/src/directory-v2-json.ts
+          } > "$fixture/provenance.txt"
+          cat "$fixture/provenance.txt"
+      - name: Require identical native stream proof on the fixed engine
+        run: xvfb-run -a npm run test:e2e --prefix web -- e2e/native-no-store-completion.spec.ts --headed
+      - name: Retain fixed-build synthetic diagnostics and provenance
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: native-no-store-fixed-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            web/test-results/**/native-no-store-completion.json
+            ${{ runner.temp }}/adtr-native-fixed/provenance.txt
+          if-no-files-found: error
+          retention-days: 7
+
   verify:
     if: ${{ always() }}
-    needs: [contracts, auth-integration, browser, native-no-store]
+    needs: [contracts, auth-integration, browser, native-no-store, native-no-store-fixed]
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -215,4 +270,5 @@ jobs:
           AUTH_INTEGRATION_RESULT: ${{ needs.auth-integration.result }}
           BROWSER_RESULT: ${{ needs.browser.result }}
           NATIVE_STREAM_RESULT: ${{ needs.native-no-store.result }}
-        run: test "$CONTRACT_RESULT" = success && test "$AUTH_INTEGRATION_RESULT" = success && test "$BROWSER_RESULT" = success && test "$NATIVE_STREAM_RESULT" = success
+          NATIVE_STREAM_FIXED_RESULT: ${{ needs.native-no-store-fixed.result }}
+        run: test "$CONTRACT_RESULT" = success && test "$AUTH_INTEGRATION_RESULT" = success && test "$BROWSER_RESULT" = success && test "$NATIVE_STREAM_RESULT" = success && test "$NATIVE_STREAM_FIXED_RESULT" = success
