@@ -15,8 +15,8 @@ and explicitly labelled scheduling simulations are in
 [ci-acceleration-baseline.json](evidence/ci-acceleration-baseline.json).
 About 83% of browser runner time was real acceptance work, so cache changes alone
 cannot remove most waiting. A four-slot simulation predicts roughly 37–38 minutes
-for the existing browser workload. The four-slot setting is now enabled in this
-candidate; its runtime and reliability still require a new exact-head full run.
+for the existing browser workload. The measured four-slot canary is recorded
+below; the candidate integrated with newer main still needs exact-head full CI.
 
 The preceding unchanged two-slot head `aa6dab827986fae646f9e359579acffe38615ed2`
 passed [all 35 jobs on attempt 1](https://github.com/yunpiao/adtr/actions/runs/38074594460)
@@ -26,6 +26,32 @@ loaded the verified artifact; download steps were 1–19s (median 4s), and
 verification/load was 4–13s (median 7s). The later npm cache restored 26,777,873
 bytes into the intended directory instead of the old 1,074-byte cache. Full
 measurements are preserved in [the two-slot evidence](evidence/ci-image-sharing-two-slot.json).
+
+The four-slot head `fd733de6ab50dc3d3863fa44e6de5ddf92d7546d` completed
+[all 35 gates after a failed-job-only retry](https://github.com/yunpiao/adtr/actions/runs/38080292537).
+Its first attempt took **39m01s**, with all 24 browser suites passing, but the
+existing integration-tagged Go watchdog test timed out and `verify` correctly
+failed. The unchanged contracts retry took 7m42s; total time to green, including
+the observation gap, was **48m32s**, versus two slots' **76m31s**: an observed
+27m59s (36.6%) reduction. The first attempt is not an all-green timing result.
+The browser matrix itself took 38m28s; aggregate browser acceptance work was
+7,050s versus the prior 7,072s. This is one measured comparison, not a guaranteed
+speedup across runners or later source changes.
+
+All 31 required consumer loads passed. Download steps were 1–5s (median 3s),
+verification/load was 4–12s (median 7s), and the observed job-interval peak was
+11 standard runners, including four browser jobs. The retry reused producer
+attempt 1 and artifact `11679857692`; it did not rerun PostgreSQL preparation.
+The watchdog subtest passed unchanged on retry. Its 40ms transient-state window
+can be missed by its polling observer, but the original log lacks final-state
+and scheduling/IO evidence, so the cause remains unestablished. No assertion,
+timeout or Go source was changed. Details and the retained first failure are in
+[the four-slot evidence](evidence/ci-image-sharing-four-slot.json).
+
+Main `ebf6ce321b8d8e99a31c3b3ea7251352389d902c` (PR #94) is now integrated
+normally, including the exact successful task-workspace artifact step. Its
+expanded task coverage is newer than the timed canary above. The integrated
+candidate's real probe, complete 35-job CI and post-merge main CI remain required.
 
 ## Trust chain and failure semantics
 
@@ -117,8 +143,9 @@ The [two-job remote probe](https://github.com/yunpiao/adtr/actions/runs/38074448
 and subsequent 35-job run verified the real transfer, database execution,
 all prior acceptance gates and useful npm cache restoration. Independent byte
 review additionally matched the fixed index, manifest, config, all ten ordered
-layer tar hashes and all 22 content-addressed saved blobs. Four-slot stability,
-actual speedup and post-merge main validation remain open. Product acceptance
+layer tar hashes and all 22 content-addressed saved blobs. One four-slot canary
+has completed with the retry and timing limits above; current integrated-head
+and post-merge main validation remain open. Product acceptance
 remains 0/209; this change does not deploy anything.
 
 References: [artifact validation](https://docs.github.com/en/actions/tutorials/store-and-share-data#validating-artifacts),

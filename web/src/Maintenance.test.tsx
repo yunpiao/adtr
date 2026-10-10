@@ -107,6 +107,7 @@ const response = (v: unknown, status = 200) =>
 let override: (url: string, init: RequestInit) => Promise<Response> | undefined;
 let fetcher: ReturnType<typeof vi.fn>;
 beforeEach(() => {
+  vi.spyOn(window, "scrollTo").mockImplementation(() => {});
   discardTaskIntent(profile);
   discardMaintenanceIntent(profile);
   sessionStorage.clear();
@@ -576,7 +577,7 @@ describe("reversible archive UI", () => {
     );
     proof();
     act(() => window.history.back());
-    await waitFor(() => expect(window.location.hash).toBe("#tasks"));
+    await waitFor(() => expect(window.location.hash).toBe("#tasks/list"));
     await screen.findByRole("table", { name: "任务列表" });
     expect(screen.queryByLabelText("操作者当前密码")).not.toBeInTheDocument();
     override = (url) =>
