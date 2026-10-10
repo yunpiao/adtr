@@ -1371,3 +1371,219 @@ describe("audit stale-data and pagination regressions", () => {
     expect(sessionStorage.length).toBe(0);
   });
 });
+
+describe("SOC audit presentation and inline record lifecycle", () => {
+  it("uses authorized page counts and expands only the list fields without another read", async () => {
+    override = (url) =>
+      url.startsWith("/api/audit?")
+        ? response({
+            ...list(),
+            page: { pageIdx: 1, pageSize: 20, total: 45, totalPage: 3 },
+            exhausted: false,
+          })
+        : undefined;
+    await start();
+    expect(screen.getByLabelText("审计查询结果摘要")).toHaveTextContent(
+      "匹配 45 条",
+    );
+    expect(screen.getByLabelText("审计查询结果摘要")).toHaveTextContent(
+      "本页 1 条",
+    );
+    const requests = fetcher.mock.calls.length;
+    const toggle = screen.getByRole("button", { name: "查看元数据 auth.1" });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(
+      screen.queryByRole("region", { name: "审计记录字段 auth.1" }),
+    ).not.toBeInTheDocument();
+    fireEvent.click(toggle);
+    const fields = screen.getByRole("region", { name: "审计记录字段 auth.1" });
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(toggle).toHaveAttribute("aria-controls", fields.id);
+    expect(fields).toHaveTextContent('{"synthetic":true}');
+    expect(fields).toHaveTextContent("未记录 / 平台操作");
+    expect(fetcher.mock.calls).toHaveLength(requests);
+    click("收起记录字段 auth.1");
+    expect(toggle).toHaveFocus();
+    expect(fields).not.toBeInTheDocument();
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+  });
+  it("renders hostile field text inertly without inventing request metadata", async () => {
+    const text =
+      "<img src=x onerror=alert(1)> https://example.invalid/<script>boom</script>";
+    override = (url) =>
+      url.startsWith("/api/audit?")
+        ? response(
+            list([
+              row({
+                loginUser: text,
+                domainId: text,
+                eventArgs: text,
+                event: text,
+                userId: 3,
+              }),
+            ]),
+          )
+        : undefined;
+    await start();
+    click("查看元数据 auth.1");
+    const fields = screen.getByRole("region", { name: "审计记录字段 auth.1" });
+    expect(fields).toHaveTextContent(text);
+    expect(fields.querySelectorAll("img,script,a")).toHaveLength(0);
+    expect(
+      within(fields).getByText("0", { selector: "dd" }),
+    ).toBeInTheDocument();
+    expect(within(fields).queryByText("请求路径")).not.toBeInTheDocument();
+  });
+  it.each(["筛选审计", "清除审计筛选", "刷新审计列表"])(
+    "clears expanded private fields on %s",
+    async (action) => {
+      await start();
+      click("查看元数据 auth.1");
+      if (action === "筛选审计") fill("审计关键词", "other");
+      click(action);
+      await screen.findByRole("table", { name: "操作审计记录" });
+      expect(
+        screen.queryByRole("region", { name: "审计记录字段 auth.1" }),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "查看元数据 auth.1" }),
+      ).toHaveAttribute("aria-expanded", "false");
+    },
+  );
+  it("clears expansion on paging even if the next page includes the same ID", async () => {
+    override = (url) =>
+      url.startsWith("/api/audit?")
+        ? response({
+            ...list(),
+            page: {
+              pageIdx: Number(
+                new URL(url, "http://localhost").searchParams.get("pageIdx"),
+              ),
+              pageSize: 20,
+              total: 45,
+              totalPage: 3,
+            },
+            exhausted: false,
+          })
+        : undefined;
+    await start();
+    click("查看元数据 auth.1");
+    click("下一页");
+    await screen.findByRole("table", { name: "操作审计记录" });
+    expect(screen.getByLabelText("分页")).toHaveTextContent("第 2 / 3 页");
+    expect(
+      screen.queryByRole("region", { name: "审计记录字段 auth.1" }),
+    ).not.toBeInTheDocument();
+  });
+  it("removes fields during refresh and does not resurrect them after an ignored-abort old response", async () => {
+    await start();
+    click("查看元数据 auth.1");
+    let old!: (value: Response) => void;
+    override = (url) =>
+      url.startsWith("/api/audit?")
+        ? new Promise((resolve) => {
+            old = resolve;
+          })
+        : undefined;
+    click("刷新审计列表");
+    expect(
+      screen.queryByRole("region", { name: "审计记录字段 auth.1" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("table", { name: "操作审计记录" }),
+    ).not.toBeInTheDocument();
+    override = (url) =>
+      url.startsWith("/api/audit?")
+        ? response(list([row({ ID: "auth.2", eventArgs: "new query" })]))
+        : undefined;
+    fill("审计关键词", "new");
+    click("筛选审计");
+    await screen.findByRole("button", { name: "查看元数据 auth.2" });
+    await act(async () =>
+      old(await response(list([row({ eventArgs: "stale private fields" })]))),
+    );
+    expect(screen.queryByText("stale private fields")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "查看元数据 auth.1" }),
+    ).not.toBeInTheDocument();
+  });
+  it.each([401, 403])(
+    "clears records on a refreshed %s response without reporting zero matching records",
+    async (status) => {
+      const changed = vi.fn();
+      await start(changed);
+      click("查看元数据 auth.1");
+      override = (url) =>
+        url.startsWith("/api/audit?")
+          ? response(
+              { error: status === 401 ? "unauthenticated" : "forbidden" },
+              status,
+            )
+          : undefined;
+      click("刷新审计列表");
+      await waitFor(() =>
+        expect(screen.queryByText("正在读取审计记录…")).not.toBeInTheDocument(),
+      );
+      expect(
+        screen.queryByRole("region", { name: "审计记录字段 auth.1" }),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByLabelText("审计查询结果摘要"),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByText("没有符合筛选条件的审计记录。"),
+      ).not.toBeInTheDocument();
+      if (status === 401) expect(changed).toHaveBeenCalled();
+    },
+  );
+  it("unmounts inline records on session change and navigation", async () => {
+    const mounted = await start();
+    click("查看元数据 auth.1");
+    await act(async () =>
+      mounted.rerender(
+        <AuditWorkspace
+          profile={{ ...profile, csrfToken: "new-session" }}
+          sessionChanged={vi.fn()}
+        />,
+      ),
+    );
+    expect(
+      screen.queryByRole("region", { name: "审计记录字段 auth.1" }),
+    ).not.toBeInTheDocument();
+    click("查看元数据 auth.1");
+    click("导出历史");
+    expect(
+      screen.queryByRole("region", { name: "审计记录字段 auth.1" }),
+    ).not.toBeInTheDocument();
+    click("返回审计列表");
+    await screen.findByRole("table", { name: "操作审计记录" });
+    expect(
+      screen.queryByRole("region", { name: "审计记录字段 auth.1" }),
+    ).not.toBeInTheDocument();
+  });
+  it("retains read-only expansion with no mutation or export controls", async () => {
+    override = (url, init) =>
+      url === "/api/access/check"
+        ? response({
+            results: JSON.parse(init.body as string).paths.map(
+              (operation: string) =>
+                ["GET /api/audit", "GET /api/audit/types"].includes(operation),
+            ),
+          })
+        : undefined;
+    await start();
+    click("查看元数据 auth.1");
+    expect(
+      screen.getByRole("region", { name: "审计记录字段 auth.1" }),
+    ).toBeVisible();
+    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+    for (const name of [
+      "当前筛选导出",
+      "隐藏所选记录",
+      "恢复所选记录",
+      "查看导出任务",
+      "导出历史",
+    ])
+      expect(screen.queryByRole("button", { name })).not.toBeInTheDocument();
+  });
+});
