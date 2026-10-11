@@ -37,3 +37,11 @@ Local Docker is unavailable; actual Docker/PostgreSQL acceptance must be recorde
 
 - [Linux cgroup v2](https://docs.kernel.org/admin-guide/cgroup-v2.html): hierarchical constraints, memory.current, memory.max and namespace visibility
 - [Linux cgroup v1 memory](https://docs.kernel.org/admin-guide/cgroup-v1/memory.html): memory usage accounting, hierarchy and limits
+
+## First exact-head CI checkpoint
+
+PR #121 head `a7ca1ad39d8421bef48155d37c979b34894d23db`, run `38159468407`: contracts job `114529290244` passed actual PostgreSQL persistence/precision/segmentation and Docker finite 256 MiB/unconfigured/same-container restart. A real finite sample was 5,410,816 / 268,435,456 bytes = 2.01568603515625%; independent kernel current/limit agreed. Unconfigured Docker actually returned max and retained usage with null ratio. This is v2 runtime evidence, not v1/Windows execution.
+
+System job `114529291219` passed real browser/API/owned Worker/PostgreSQL flows. Artifact `11710437726` ZIP SHA-256 `daec5e3e280a81a8454b2c97a4db2b717c3c17c67791b92d1b2a74ad1efa6e91` matched 43 source hashes and 10 image hashes at tree `8831791f7ade48510f4fdd0a0dc747e5b497dc87`. New desktop/390px images show actual unlimited cgroup usage/source, unavailable ratio and honest empty history without horizontal overflow. The original manifest retained kernel/RAM summaries; the following revision also retains explicitly allowlisted container current/history summaries.
+
+This run is not all green. The existing messages-bulk permission-version recovery assertion failed at line 776, covered by a separately prioritized fix. Auth shard 3 also exposed a fixture defect: its synthetic CPU/RAM healthy scenario mixed in the real CI host's unlimited cgroup, so production correctly reported degraded while the old test expected healthy. The follow-up keeps all synthetic sources deterministic, preserves the original healthy assertion and adds real-PG/HTTP unlimited → unknown/degraded and empty-history assertions. Production behavior is unchanged. New-head complete checks, independent review and post-merge validation remain required; failures are not reclassified as passes.

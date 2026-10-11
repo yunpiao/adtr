@@ -1291,6 +1291,21 @@ test("real browser → Linux sampler → PostgreSQL history/settings and actual 
         observedAt: sample.observedAt,
         cpuPercent: sample.cpu.percent,
         memoryPercent: sample.memory.percent,
+        containerMemory: sample.containerMemory
+          ? {
+              observedAt: sample.containerMemory.observedAt,
+              source: sample.containerMemory.source,
+              scope: sample.containerMemory.scope,
+              availability: sample.containerMemory.availability,
+              reason: sample.containerMemory.reason ?? null,
+              usageBytes: sample.containerMemory.usageBytes,
+              limitBytes: sample.containerMemory.limitBytes,
+              percent: sample.containerMemory.percent,
+              limitState: sample.containerMemory.limitState,
+              hierarchy: sample.containerMemory.hierarchy,
+              sourceID: sample.containerMemory.sourceID ?? null,
+            }
+          : null,
         storageIDs: sample.storage.map(({ id }) => id),
       },
       history: {
@@ -1305,6 +1320,28 @@ test("real browser → Linux sampler → PostgreSQL history/settings and actual 
         statistics: visibleHistory.info[0].data.dataStatistics,
         responseSHA256: createHash("sha256")
           .update(JSON.stringify(visibleHistory))
+          .digest("hex"),
+      },
+      containerHistory: {
+        graphType: containerHistory.graphType,
+        availableSince: containerHistory.availableSince,
+        sampleIntervalSeconds: containerHistory.sampleIntervalSeconds,
+        sampleCount: containerSeries.timestamp.length,
+        gapCount: containerHistory.gaps.length,
+        firstSample: containerSeries.timestamp.at(0) ?? null,
+        lastSample: containerSeries.timestamp.at(-1) ?? null,
+        statistics: containerSeries.dataStatistics,
+        segments:
+          containerHistory.segments?.map(
+            ({ startTime, source, limitBytes, sourceID }) => ({
+              startTime,
+              source,
+              limitBytes,
+              sourceID: sourceID ?? null,
+            }),
+          ) ?? null,
+        responseSHA256: createHash("sha256")
+          .update(JSON.stringify(containerHistory))
           .digest("hex"),
       },
       storage: {

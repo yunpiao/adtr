@@ -79,12 +79,29 @@ func systemAlarmBody(percent int, revision int64) map[string]any {
 	return map[string]any{"instance": "local-api", "storageId": "runtime-root", "setType": "alarm", "percent": percent, "expectedRevision": revision}
 }
 
-func (f *systemFixture) seedObservations() (time.Time, time.Time) {
+func (f *systemFixture) seedObservations(containerState ...string) (time.Time, time.Time) {
 	f.t.Helper()
 	first := time.Now().UTC().Truncate(time.Second).Add(-35 * time.Second)
 	at, counter := first, 100
 	sampler, err := systemhealth.NewSampler(systemhealth.Config{
 		Now: func() time.Time { return at },
+		// All resource sources in this fixture are synthetic. Never mix its
+		// expected aggregate with the CI host's unrelated cgroup configuration.
+		ReadContainerMemory: func(now time.Time) systemhealth.ContainerMemoryMetric {
+			usage, limit, percent := "40", "100", 40.0
+			m := systemhealth.ContainerMemoryMetric{Metadata: systemhealth.Metadata{ObservedAt: now, Source: "cgroup_v2", Scope: "runtime_cgroup", Availability: systemhealth.Available}, UsageBytes: &usage, LimitBytes: &limit, Percent: &percent, LimitState: "finite", Hierarchy: "visible", SourceID: strings.Repeat("a", 64)}
+			if len(containerState) > 0 {
+				if len(containerState) != 1 || containerState[0] != "unlimited" {
+					f.t.Fatal("invalid synthetic cgroup fixture")
+				}
+				m.Availability = systemhealth.Unavailable
+				m.Reason = "unlimited"
+				m.LimitState = "unlimited"
+				m.LimitBytes = nil
+				m.Percent = nil
+			}
+			return m
+		},
 		ReadProc: func(file systemhealth.ProcFile) ([]byte, error) {
 			switch file {
 			case systemhealth.ProcStat:
@@ -353,5 +370,48 @@ func TestSystemHTTPSchemaPregateOutageAndHealthEvidence(t *testing.T) {
 	f.callSystem(admin, "/info", nil, 503)
 	if time.Since(start) > 3*time.Second {
 		t.Fatal("unbounded schema gate")
+	}
+}
+
+func TestSystemHTTPUnlimitedCgroupRemainsUnknown(t *testing.T) {
+	f := newSystemFixture(t)
+	admin := f.client(f.admin)
+	first, last := f.seedObservations("unlimited")
+	for _, cycle := range []systemhealth.WorkerCycle{systemhealth.WorkerQueue, systemhealth.WorkerRecovery} {
+		if err := f.store.RecordWorkerCycle(f.ctx, "synthetic-worker", cycle, systemhealth.WorkerCycleSuccess, ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	health := f.callSystem(admin, "/health", nil, 200)
+	if health["result"] != "degraded" {
+		t.Fatal("unlimited quota became healthy", health)
+	}
+	found := false
+	for _, raw := range health["dependencies"].([]any) {
+		d := raw.(map[string]any)
+		if d["id"] == "sampler" || d["id"] == "worker" {
+			if d["status"] != "healthy" {
+				t.Fatal("unlimited cgroup changed independent evidence", d)
+			}
+		}
+		if d["id"] == "container-memory" {
+			found = true
+			if d["status"] != "unknown" || d["reason"] != "unlimited" {
+				t.Fatal("unlimited cgroup concealed", d)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("missing cgroup dependency")
+	}
+	current := f.callSystem(admin, "/resources/current?instance=local-api", nil, 200)
+	m := current["snapshot"].(map[string]any)["containerMemory"].(map[string]any)
+	if m["usageBytes"] != "40" || m["percent"] != nil || m["limitBytes"] != nil {
+		t.Fatal("unlimited actual persisted fields lost", m)
+	}
+	history := f.callSystem(admin, fmt.Sprintf("/resources/history?instance=local-api&startTime=%d&endTime=%d&graphType=container_ram", first.Add(-time.Minute).Unix(), last.Add(time.Second).Unix()), nil, 200)
+	data := history["info"].([]any)[0].(map[string]any)["data"].(map[string]any)
+	if len(data["value"].([]any)) != 0 || len(history["gaps"].([]any)) != 1 {
+		t.Fatal("unlimited quota fabricated history", history)
 	}
 }
