@@ -17,7 +17,11 @@ export type Availability =
   | "unavailable"
   | "warming_up"
   | "unsupported";
-export type GraphType = "cpu_basic" | "ram_basic" | "disk_usage";
+export type GraphType =
+  | "cpu_basic"
+  | "ram_basic"
+  | "container_ram"
+  | "disk_usage";
 export interface Metadata {
   observedAt: string;
   source: string;
@@ -34,6 +38,15 @@ export interface MemoryMetric extends PercentMetric {
   usedBytes: string | null;
   availableBytes: string | null;
 }
+export interface ContainerMemoryMetric extends PercentMetric {
+  source: "cgroup_v2" | "cgroup_v1" | "cgroup";
+  scope: "runtime_cgroup";
+  usageBytes: string | null;
+  limitBytes: string | null;
+  limitState: "finite" | "unlimited" | "unknown";
+  hierarchy: "visible";
+  sourceID?: string;
+}
 export interface StorageMetric extends PercentMetric {
   id: string;
   mount: string;
@@ -48,6 +61,7 @@ export interface Snapshot {
   observedAt: string;
   cpu: PercentMetric;
   memory: MemoryMetric;
+  containerMemory?: ContainerMemoryMetric;
   uptime: Metadata & { seconds: number | null };
   load: Metadata & {
     values: { one: number; five: number; fifteen: number } | null;
@@ -99,6 +113,12 @@ export interface History {
     };
   }[];
   gaps: { startTime: number; endTime: number }[];
+  segments?: {
+    startTime: number;
+    source: "cgroup_v1" | "cgroup_v2";
+    limitBytes: string;
+    sourceID?: string;
+  }[];
   availableSince: string | null;
   sampleIntervalSeconds: number;
 }
@@ -154,12 +174,62 @@ const storage = (v: unknown): v is StorageMetric =>
   ["totalBytes", "usedBytes", "freeBytes", "reservedBytes"].every((k) =>
     bytes(v[k]),
   );
+// Container pressure can exceed 100% during limit changes; do not clamp it.
+const containerPercent = (v: unknown) => v === null || number(v);
+const uint64Bytes = (v: unknown): v is string =>
+  typeof v === "string" &&
+  /^(0|[1-9][0-9]{0,19})$/.test(v) &&
+  BigInt(v) <= 18446744073709551615n;
+const sourceIdentity = (v: unknown) =>
+  v === undefined || (typeof v === "string" && /^[a-f0-9]{64}$/.test(v));
+export function validContainerMemory(v: unknown): v is ContainerMemoryMetric {
+  if (
+    !meta(v) ||
+    !["cgroup_v2", "cgroup_v1", "cgroup"].includes(v.source) ||
+    v.scope !== "runtime_cgroup" ||
+    v.hierarchy !== "visible" ||
+    !sourceIdentity(v.sourceID)
+  )
+    return false;
+  if (v.limitState === "finite")
+    return (
+      v.source !== "cgroup" &&
+      v.availability === "available" &&
+      (v.reason === undefined || v.reason === "") &&
+      uint64Bytes(v.usageBytes) &&
+      uint64Bytes(v.limitBytes) &&
+      BigInt(v.limitBytes) > 0n &&
+      number(v.percent) &&
+      v.percent === (Number(v.usageBytes) / Number(v.limitBytes)) * 100
+    );
+  if (v.limitState === "unlimited")
+    return (
+      v.source !== "cgroup" &&
+      v.availability === "unavailable" &&
+      v.reason === "unlimited" &&
+      uint64Bytes(v.usageBytes) &&
+      v.limitBytes === null &&
+      v.percent === null
+    );
+  return (
+    v.limitState === "unknown" &&
+    ["unavailable", "unsupported"].includes(v.availability) &&
+    typeof v.reason === "string" &&
+    v.reason.length > 0 &&
+    v.usageBytes === null &&
+    v.limitBytes === null &&
+    v.percent === null
+  );
+}
 const validSnapshot = (v: unknown): v is Snapshot =>
   object(v) &&
   v.instance === "local-api" &&
   date(v.observedAt) &&
   measured(v.cpu) &&
   (v.cpu.intervalStart === undefined || date(v.cpu.intervalStart)) &&
+  (v.containerMemory === undefined ||
+    (validContainerMemory(v.containerMemory) &&
+      Date.parse(v.containerMemory.observedAt) === Date.parse(v.observedAt))) &&
   measured(v.memory) &&
   ["totalBytes", "usedBytes", "availableBytes"].every((k) =>
     bytes((v.memory as unknown as Record<string, unknown>)[k]),
@@ -230,6 +300,8 @@ export function validHistory(v: unknown, query: HistoryInput): v is History {
     v.info.length !== 1
   )
     return false;
+  const validPercent =
+    query.graphType === "container_ram" ? containerPercent : percent;
   return v.info.every((s) => {
     if (!object(s) || s.mode !== query.graphType || !object(s.data))
       return false;
@@ -248,14 +320,40 @@ export function validHistory(v: unknown, query: HistoryInput): v is History {
         (n) =>
           typeof n === "string" &&
           /^(0|[1-9][0-9]*)(\.[0-9]+)?$/.test(n) &&
-          percent(Number(n)),
+          validPercent(Number(n)),
       ) ||
       !object(dataStatistics)
     )
       return false;
+    if (v.segments !== undefined) {
+      if (
+        query.graphType !== "container_ram" ||
+        !Array.isArray(v.segments) ||
+        v.segments.length > timestamp.length ||
+        (timestamp.length > 0 && v.segments.length === 0)
+      )
+        return false;
+      let previousIndex = -1;
+      for (const [index, segment] of v.segments.entries()) {
+        if (
+          !object(segment) ||
+          !integer(segment.startTime, query.startTime, query.endTime - 1) ||
+          !["cgroup_v1", "cgroup_v2"].includes(segment.source as string) ||
+          !uint64Bytes(segment.limitBytes) ||
+          BigInt(segment.limitBytes) === 0n ||
+          !sourceIdentity(segment.sourceID)
+        )
+          return false;
+        const sampleIndex = timestamp.findIndex(
+          (time, i) => i > previousIndex && time === segment.startTime,
+        );
+        if (sampleIndex < 0 || (index === 0 && sampleIndex !== 0)) return false;
+        previousIndex = sampleIndex;
+      }
+    }
     return ["max", "min", "avg", "current"].every((k) =>
       value.length
-        ? dataStatistics[k] !== null && percent(dataStatistics[k])
+        ? dataStatistics[k] !== null && validPercent(dataStatistics[k])
         : dataStatistics[k] === null,
     );
   });

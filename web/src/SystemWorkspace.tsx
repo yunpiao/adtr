@@ -14,6 +14,7 @@ import {
   systemAPI,
   systemOperations,
   type Dependency,
+  type Availability,
   type GraphType,
   type History,
   type HistoryInput,
@@ -182,7 +183,17 @@ function ReadStatus({
     </>
   );
 }
-function MetricSnapshot({ snapshot }: { snapshot: Snapshot | null }) {
+function MetricSnapshot({
+  snapshot,
+  stale,
+  availability,
+  reason,
+}: {
+  snapshot: Snapshot | null;
+  stale: boolean;
+  availability: Availability;
+  reason?: string;
+}) {
   if (!snapshot)
     return (
       <p className="resource-empty" role="status">
@@ -246,6 +257,12 @@ function MetricSnapshot({ snapshot }: { snapshot: Snapshot | null }) {
         {byteText(snapshot.memory.usedBytes)} · 可用：
         {byteText(snapshot.memory.availableBytes)}
       </p>
+      <ContainerMemory
+        snapshot={snapshot}
+        stale={stale}
+        availability={availability}
+        reason={reason}
+      />
       {snapshot.cpu.intervalStart && (
         <p className="muted">
           CPU 采样区间（UTC）：{utc(snapshot.cpu.intervalStart)} 至{" "}
@@ -253,6 +270,88 @@ function MetricSnapshot({ snapshot }: { snapshot: Snapshot | null }) {
         </p>
       )}
     </>
+  );
+}
+function ContainerMemory({
+  snapshot,
+  stale,
+  availability,
+  reason,
+}: {
+  snapshot: Snapshot;
+  stale: boolean;
+  availability: Availability;
+  reason?: string;
+}) {
+  const metric = snapshot.containerMemory;
+  const trusted = !stale && availability === "available";
+  const known = metric?.availability === "available" && trusted;
+  return (
+    <section className="system-container-memory" aria-label="容器内存观测">
+      <div className="system-finding-title">
+        <h3>容器内存使用率</h3>
+        <span
+          className="system-badge"
+          data-state={known ? "observed" : "unknown"}
+        >
+          {stale
+            ? "数据过期"
+            : !trusted
+              ? "不可用 · 观测未确认"
+              : !metric
+                ? "不支持 · 无历史观测"
+                : availabilityLabel(metric.availability)}
+        </span>
+      </div>
+      <strong className="system-value">
+        {metric ? percentText(metric.percent) : "无观测"}
+      </strong>
+      <p>
+        当前使用量：{byteText(metric?.usageBytes ?? null)} · 可见层级上限：
+        {metric?.limitState === "unlimited"
+          ? "无限制"
+          : byteText(metric?.limitBytes ?? null)}
+      </p>
+      <p className="muted">
+        范围：runtime_cgroup · 仅反映可见 cgroup
+        层级；隐藏祖先约束与同组进程竞争仍可能进一步限制可用内存。
+      </p>
+      {!metric ? (
+        <p className="warning">
+          此记录没有容器内存观测字段，无法判断容器内存压力；等待升级后的实际采样。
+        </p>
+      ) : (
+        <>
+          <small className="block">
+            {metric.source} · {metric.scope} · {metric.hierarchy} ·
+            采样（UTC）：{utc(metric.observedAt)}
+          </small>
+          {stale ? (
+            <p className="warning">
+              此值属于过期观测，当前压力未知。检查采样与数据库写入，恢复后刷新确认。
+            </p>
+          ) : !trusted ? (
+            <p className="warning">
+              当前容器内存观测不可用，压力未知。
+              {observationReason(reason || "unavailable_resource_observation")}
+              （{reason || "原因未提供"}）
+            </p>
+          ) : metric.limitState === "unlimited" ? (
+            <p className="warning">
+              可见层级没有有限上限，使用量可读，但无法计算配额使用率；请核对运行环境的内存限制。
+            </p>
+          ) : !known ? (
+            <p className="warning">
+              容器内存压力未知（{metric.reason || "原因未提供"}）。
+              {observationReason(
+                metric.reason || "unavailable_resource_observation",
+              )}
+              检查 cgroup 挂载、内存控制器及读取权限，再等待实际采样。
+            </p>
+          ) : null}
+        </>
+      )}
+    </section>
   );
 }
 function Overview({ context }: { context: SystemContext }) {
@@ -325,7 +424,12 @@ function Overview({ context }: { context: SystemContext }) {
             {...info.current}
             observedAt={info.current.snapshot?.observedAt ?? null}
           />
-          <MetricSnapshot snapshot={info.current.snapshot} />
+          <MetricSnapshot
+            snapshot={info.current.snapshot}
+            stale={info.current.stale}
+            availability={info.current.availability}
+            reason={info.current.reason}
+          />
           <h3>已登记能力</h3>
           <p>
             授权许可、升级、清理、外部引擎与公司元数据按服务器能力展示；未配置项没有可执行操作。
@@ -346,6 +450,7 @@ function Overview({ context }: { context: SystemContext }) {
 const graphLabels: Record<GraphType, string> = {
   cpu_basic: "CPU 使用率",
   ram_basic: "内存使用率",
+  container_ram: "容器内存使用率",
   disk_usage: "API 文件系统使用率",
 };
 function Resources({ context }: { context: SystemContext }) {
@@ -434,7 +539,12 @@ function Resources({ context }: { context: SystemContext }) {
             {...read.data.current}
             observedAt={read.data.current.snapshot?.observedAt ?? null}
           />
-          <MetricSnapshot snapshot={read.data.current.snapshot} />
+          <MetricSnapshot
+            snapshot={read.data.current.snapshot}
+            stale={read.data.current.stale}
+            availability={read.data.current.availability}
+            reason={read.data.current.reason}
+          />
           {read.data.history ? (
             <HistoryView
               key={`${range}:${graph}:${storageId}`}
@@ -467,7 +577,11 @@ function HistoryView({
     40 + ((time - query.startTime) / (query.endTime - query.startTime)) * 700;
   const count = series.timestamp.length,
     pages = Math.max(1, Math.ceil(count / 20)),
-    safePage = Math.min(page, pages);
+    safePage = Math.min(page, pages),
+    scaleMax =
+      query.graphType === "container_ram"
+        ? Math.max(100, ...series.value.map(Number))
+        : 100;
   return (
     <section className="system-history">
       <h3>{graphLabels[query.graphType]}历史</h3>
@@ -483,6 +597,19 @@ function HistoryView({
         仅绘制真实观测点；灰色区域为缺测区间，不补零、不插值。历史最多查询 24
         小时。
       </p>
+      {query.graphType === "container_ram" && (
+        <p className="warning">
+          仅使用已持久化的有限上限观测；无限制、未知与旧记录为缺测。可见层级上限不包含隐藏祖先约束与共享竞争。
+        </p>
+      )}
+      {query.graphType === "container_ram" && (
+        <p className="muted">
+          {history.segments === undefined
+            ? "此历史响应未提供观测分段信息。"
+            : `观测分段：${history.segments.length} 段。`}
+          来源、容器身份或可见上限变化会开始新段；缺少旧记录身份时单独分段。段边界表示计量依据变化，与缺测区间分别展示；各段仍仅绘制实际散点。
+        </p>
+      )}
       {query.graphType === "disk_usage" && (
         <p className="warning">
           此历史属于 API 运行环境文件系统，不代表 PostgreSQL
@@ -503,7 +630,7 @@ function HistoryView({
           <title>实际资源采样点，缺测区间不连线</title>
           <line x1="40" x2="740" y1="145" y2="145" stroke="currentColor" />
           <text x="0" y="20">
-            100%
+            {scaleMax}%
           </text>
           <text x="10" y="149">
             0%
@@ -522,7 +649,7 @@ function HistoryView({
             <circle
               key={`${time}:${i}`}
               cx={x(time)}
-              cy={145 - Number(series.value[i]) * 1.3}
+              cy={145 - (Number(series.value[i]) / scaleMax) * 130}
               r="2.5"
               fill="#075e59"
             >
@@ -981,6 +1108,8 @@ function Services({
 function dependencyAction(dependency: Dependency): string {
   if (dependency.status === "not_configured")
     return "服务器未登记此能力，没有可用检查证据。需要此能力时先确认支持范围与接入配置。";
+  if (dependency.id === "container-memory")
+    return "打开资源与历史核对容器使用量、可见层级上限和采样时间；检查 cgroup 内存控制器、挂载及读取权限。达到上限时核对同组进程占用与配置，隐藏祖先仍可能施加额外约束。";
   if (dependency.id === "worker")
     return "核对下方各循环的最近活动与成功时间；检查 Worker 进程、队列与数据库连接。恢复后刷新，确认完整循环重新有活动。";
   if (dependency.id === "sampler")
