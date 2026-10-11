@@ -57,3 +57,7 @@ PR #103 首轮head `47cb7b305aebc9571a95fa8c904d13c253995345` 的真实domains�
 套件改用 headed Chromium 以取得真实标签生命周期；没有 Xvfb/DISPLAY 时明确失败。整体 Playwright/harness 预算从510/540秒增到630/660秒，仅覆盖新增真实用户改密/MFA和切换，单请求、断言与安全闸门时间不放宽；真实30秒TOTP counter与持久化限流保持。bootstrap高权限写预算为10次，consumer为10次，未重置账本或速率桶。
 
 本地基线完整 `make check` 通过（1418项DOM、100项Python、Go race/vet/build、类型/构建与依赖审计0）；候选结果、精确 head 全36 CI、来源与独立复审在关联 PR 逐项记录。本地真实浏览器因无Xvfb/DISPLAY阻塞；集成/生命周期因无Docker阻塞，均不计通过。#108工程结果保持开放记录，#16与产品验收边界不变。
+
+后续真实运行 `38128252338` 已进入新增回退路径，测试辅助在继续 `/me` 路由时失败；旧错误掩码只保留固定文本，原始异常未保存，不能把推測的具体原因当作已确定。独立复核固定 Playwright 1.56.1 客户端：默认 unroute 不等回调，且多并发回调下仅 unrouteAll(wait) 仍可能被 Page._onRoute 提前关闭 patterns。因此辅助改为释放 gate → 有界排空本 helper 的活动 continuation → unrouteAll(wait)，不用 ignoreErrors。未知错误继续失败；安全诊断保留检查/清理两个阶段的固定类别与可见性/hidden/inert 布尔值，不输出请求、响应、URL、证明或原始异常文本。
+
+新增无浏览器定序回归直接使用固定版本 Page/RouteHandler 的真实客户端方法和受控 continuation，证明两个并发处理器完成前不关闭拦截；另验证清理错误传播和诊断分类不泄漏原文。该测试不验证 Chromium 网络栈，也不证明上述 CI 的具体根因，修正仍必须取得新精确 head 的真实浏览器证据。

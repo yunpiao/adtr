@@ -2,6 +2,7 @@ import { holdConsumedSource } from "./domain-source-delivery-probe";
 import {
   sourceFallbackPage,
   sourceFallbackRefocus,
+  SourceFocusVerificationError,
 } from "./domain-source-fallback";
 import {
   requireSameNativeWindow,
@@ -589,7 +590,9 @@ test("unconfigured bootstrap, explicit own-role reference, real LDAP consumption
     page.getByLabel("确认初始密码", { exact: true }),
     noScopeInitial,
   );
-  await page.getByLabel("角色", { exact: true }).fill("source_no_scope_role_001");
+  await page
+    .getByLabel("角色", { exact: true })
+    .fill("source_no_scope_role_001");
   await proof(page, password, auth);
   const noScopeCreated = await submit(
     page,
@@ -1467,7 +1470,9 @@ test("unconfigured bootstrap, explicit own-role reference, real LDAP consumption
     if (scenarioFailed || cleanupErrors.length)
       throw new AggregateError(
         [...(scenarioFailed ? [scenarioFailure] : []), ...cleanupErrors],
-        "Real source account-switch isolation failed",
+        scenarioFailure instanceof SourceFocusVerificationError
+          ? `Real source account-switch isolation failed; ${scenarioFailure.message}`
+          : "Real source account-switch isolation failed",
       );
   });
   // Finish the genuine receipt read/abort before removing interception and
