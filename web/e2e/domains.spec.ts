@@ -573,6 +573,9 @@ test("real domain enrollment, explicit grant, TLS diagnostics, rotation and loca
   await page
     .getByRole("button", { name: "返回域连接列表", exact: true })
     .click();
+  await page.locator(".domain-advanced-filters summary").click();
+  await expect(page.getByLabel("每页条数", { exact: true })).toBeVisible();
+  await page.getByLabel("每页条数", { exact: true }).selectOption("10");
   await page.getByLabel("域或域控关键词", { exact: true }).fill(domain);
   await page.getByRole("button", { name: "查询域连接", exact: true }).click();
   const domainRow = page.getByRole("button", {
@@ -580,6 +583,8 @@ test("real domain enrollment, explicit grant, TLS diagnostics, rotation and loca
     exact: true,
   });
   await expect(domainRow).toBeVisible();
+  await page.locator(".domain-advanced-filters summary").click();
+  await expect(page.getByLabel("每页条数", { exact: true })).not.toBeVisible();
   await capture("domains-soc-queue-desktop.png");
   await domainRow.click();
   await expect(
@@ -607,7 +612,32 @@ test("real domain enrollment, explicit grant, TLS diagnostics, rotation and loca
   await expect(page.getByLabel("域或域控关键词", { exact: true })).toHaveValue(
     domain,
   );
+  await expect(page.locator(".domain-advanced-filters summary")).toContainText(
+    "每页 10 条",
+  );
   await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByRole("button", { name: "查询域连接", exact: true }).focus();
+  // Genuine keyboard traversal must reach the row action in the compact queue.
+  for (
+    let presses = 0;
+    presses < 8 &&
+    !(await domainRow.evaluate((node) => node === document.activeElement));
+    presses++
+  )
+    await page.keyboard.press("Tab");
+  await expect(domainRow).toBeFocused();
+  expect(
+    await domainRow.evaluate((node) => node.matches(":focus-visible")),
+  ).toBe(true);
+  const queueTitle = await page
+    .getByRole("heading", { name: "域连接", exact: true })
+    .boundingBox();
+  expect(queueTitle!.height).toBeLessThan(50);
+  expect(
+    await page
+      .locator(".domain-table-scroll")
+      .evaluate((node) => node.scrollWidth <= node.clientWidth),
+  ).toBe(true);
   await capture("domains-soc-queue-mobile.png");
   expect(
     await page.evaluate(
@@ -617,6 +647,46 @@ test("real domain enrollment, explicit grant, TLS diagnostics, rotation and loca
   await domainRow.click();
   await expect(
     page.getByRole("heading", { name: `域连接详情：${domain}`, exact: true }),
+  ).toBeVisible();
+  const headingBox = await page.locator(".domain-detail-heading").boundingBox();
+  const guidanceBox = await page
+    .getByRole("region", { name: "诊断与下一步" })
+    .boundingBox();
+  expect(headingBox!.y + headingBox!.height).toBeLessThanOrEqual(
+    guidanceBox!.y,
+  );
+  const dangerContrast = await page
+    .getByRole("button", { name: "删除域连接", exact: true })
+    .evaluate((node) => {
+      const style = getComputedStyle(node);
+      const luminance = (value: string) => {
+        const components = value
+          .match(/[0-9.]+/g)!
+          .slice(0, 3)
+          .map(Number)
+          .map((v) => {
+            const n = v / 255;
+            return n <= 0.04045 ? n / 12.92 : ((n + 0.055) / 1.055) ** 2.4;
+          });
+        return (
+          components[0] * 0.2126 +
+          components[1] * 0.7152 +
+          components[2] * 0.0722
+        );
+      };
+      const foreground = luminance(style.color),
+        background = luminance(style.backgroundColor);
+      return (
+        (Math.max(foreground, background) + 0.05) /
+        (Math.min(foreground, background) + 0.05)
+      );
+    });
+  expect(dangerContrast).toBeGreaterThanOrEqual(4.5);
+  await expect(
+    page.getByText(
+      "再次检测需要新的明确提交；请先核对配置版本与上次检测时间。",
+      { exact: true },
+    ),
   ).toBeVisible();
   await capture("domains-soc-detail-mobile.png");
   expect(
@@ -693,6 +763,7 @@ test("real domain enrollment, explicit grant, TLS diagnostics, rotation and loca
       diagnostic: result1.diagnostic,
     },
     visuals,
+    mobileGeometry: { queueTitle, headingBox, guidanceBox, dangerContrast },
   };
   writeFileSync(
     testInfo.outputPath("domains-soc-evidence.json"),

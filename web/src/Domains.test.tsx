@@ -627,9 +627,8 @@ describe("domain workspace security flows", () => {
         ? response({ error: "unauthenticated" }, 401)
         : undefined;
     render(<DomainsWorkspace profile={profile} sessionChanged={lost} />);
-    click(
-      (await screen.findByRole("button", { name: "查看 synthetic.invalid" }))
-        .textContent!,
+    fireEvent.click(
+      await screen.findByRole("button", { name: "查看 synthetic.invalid" }),
     );
     await screen.findByRole("heading", {
       name: "域连接详情：synthetic.invalid",
@@ -1079,4 +1078,23 @@ it("returns to page two with row focus and resets to page one only on a new filt
   );
   await screen.findByRole("button", { name: "查看 synthetic.invalid" });
   expect(screen.getByRole("button", { name: "上一页" })).toBeDisabled();
+});
+
+it("does not instruct the operator to repair a credential failure after successful verified diagnostics", async () => {
+  const current = connection({
+    connectionState: "verified",
+    latestTaskUUID: taskID,
+    lastDiagnostic: diagnostic(),
+  });
+  override = (url) =>
+    url.split("?")[0] === "/api/domains/detail"
+      ? response({ connection: current })
+      : url.split("?")[0] === "/api/domains/test-result"
+        ? response({ task: task("succeeded"), diagnostic: diagnostic() })
+        : undefined;
+  await detail();
+  await screen.findByText(
+    "再次检测需要新的明确提交；请先核对配置版本与上次检测时间。",
+  );
+  expect(screen.queryByText(/请先修正凭据或证书错误/)).toBeNull();
 });

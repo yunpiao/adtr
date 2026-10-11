@@ -60,9 +60,7 @@
   padding: 0 18px;
 }
 .domain-soc .domain-filter-form {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
+  display: block;
   border: 0;
   border-block: 1px solid #dbe4f0;
   border-radius: 0;
@@ -77,9 +75,6 @@
 .domain-filter-form select {
   min-width: 0;
   width: 100%;
-}
-.domain-filter-form button {
-  justify-self: start;
 }
 .domain-query-summary {
   padding: 12px 18px;
@@ -219,7 +214,6 @@
 }
 @media (max-width: 700px) {
   .domain-soc .domain-filter-form {
-    grid-template-columns: 1fr;
     padding: 14px;
   }
   .domain-guidance,
@@ -239,4 +233,110 @@
     white-space: normal;
     overflow-wrap: anywhere;
   }
+}
+
+/* Workspace headings must not inherit the legacy application header bar. */
+.domain-soc .domain-page-heading {
+  display: block;
+  height: auto;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+.domain-soc .domain-detail-heading {
+  height: auto;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+.domain-primary-filters {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 12px;
+}
+.domain-advanced-filters summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: #3c5d86;
+  margin: 8px 0;
+}
+.domain-advanced-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+.domain-filter-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 12px;
+}
+.domain-table-scroll {
+  margin: 0;
+}
+.domain-table-scroll caption {
+  padding: 12px 18px;
+}
+.domain-list-panel > .pagination {
+  padding: 12px 18px;
+}
+.domain-soc .domain-list-panel > .actions {
+  margin-top: 12px;
+  margin-bottom: 12px;
+}
+@media (max-width: 700px) {
+  .domain-primary-filters,
+  .domain-advanced-grid {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+  .domain-table-scroll table {
+    min-width: 0;
+  }
+  .domain-table-scroll thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+  .domain-table-scroll tbody {
+    display: block;
+  }
+  .domain-table-scroll tr {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    padding: 8px;
+    border-top: 1px solid #dbe4f0;
+  }
+  .domain-table-scroll td {
+    display: block;
+    border: 0;
+    padding: 8px;
+  }
+  .domain-table-scroll td:first-child,
+  .domain-table-scroll td:nth-child(5),
+  .domain-table-scroll td:last-child {
+    grid-column: 1 / -1;
+  }
+  .domain-table-scroll td::before {
+    content: attr(data-label);
+    display: block;
+    color: #586e87;
+    font-size: 12px;
+    margin-bottom: 6px;
+  }
+  .domain-table-scroll td:last-child::before {
+    display: none;
+  }
+}
+
+.domain-soc button.danger {
+  color: #912d22;
+  background: #fff;
+  border-color: #c99a94;
+}
+.domain-soc button.danger:hover:not(:disabled) {
+  color: #782218;
+  background: #fff0ec;
 }
