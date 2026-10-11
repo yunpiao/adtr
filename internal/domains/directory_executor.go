@@ -30,6 +30,10 @@ func (s *Store) DirectoryV2Kind() tasks.Kind {
 	return s.directoryKind(directoryTaskV2)
 }
 
+func (s *Store) DirectoryV3Kind() tasks.Kind {
+	return s.directoryKind(directoryTaskV3)
+}
+
 func (s *Store) directoryKind(profile directoryTaskProfile) tasks.Kind {
 	identity, ok := profile.identity()
 	if !ok {
@@ -159,6 +163,8 @@ func (s *Store) executeDirectoryForProfile(ctx context.Context, ex tasks.Executi
 	var observation ldapconnection.DirectoryObservation
 	var observationV2 ldapconnection.DirectoryV2Observation
 	defer observationV2.Discard()
+	var observationV3 ldapconnection.DirectoryV3Observation
+	defer observationV3.Discard()
 	var readErr error
 	switch profile {
 	case directoryTaskV1:
@@ -173,6 +179,12 @@ func (s *Store) executeDirectoryForProfile(ctx context.Context, ex tasks.Executi
 			Domain: config.Domain, DialIP: ip, Roots: s.runtime.Policy().Roots(),
 			AllowedNetworks: prefixes, Limits: directoryReadLimits(), Authorize: ldapconnection.DirectoryV2ReadAuthorization(authorize),
 		}, ldapconnection.Credential{Username: credential.Username, Password: password})
+	case directoryTaskV3:
+		observationV3, readErr = ldapconnection.ReadDirectoryV3(ctx, ldapconnection.DirectoryV3Config{
+			Mode: ldapconnection.Mode(config.Mode), ServerName: config.DCHostName,
+			Domain: config.Domain, DialIP: ip, Roots: s.runtime.Policy().Roots(),
+			AllowedNetworks: prefixes, Limits: directoryReadLimits(), Authorize: ldapconnection.DirectoryV3ReadAuthorization(authorize),
+		}, ldapconnection.Credential{Username: credential.Username, Password: password})
 	default:
 		return failed("invalid_input")
 	}
@@ -183,7 +195,7 @@ func (s *Store) executeDirectoryForProfile(ctx context.Context, ex tasks.Executi
 	}
 	if readErr != nil {
 		code, _ := probeClassification(readErr)
-		if profile == directoryTaskV2 {
+		if profile == directoryTaskV2 || profile == directoryTaskV3 {
 			var failure *ldapconnection.Error
 			if errors.As(readErr, &failure) && (failure.Code == ldapconnection.CodeDirectoryLimit || failure.Code == ldapconnection.CodeUnsupportedProfile) {
 				code = string(failure.Code)
@@ -200,6 +212,9 @@ func (s *Store) executeDirectoryForProfile(ctx context.Context, ex tasks.Executi
 	if profile == directoryTaskV2 {
 		source = &observationV2.Source
 	}
+	if profile == directoryTaskV3 {
+		source = &observationV3.Source
+	}
 	source.DCHostName, err = CanonicalDNS(source.DCHostName)
 	if err != nil {
 		return failed("invalid_response")
@@ -212,6 +227,8 @@ func (s *Store) executeDirectoryForProfile(ctx context.Context, ex tasks.Executi
 				err = publishDirectoryObservationTx(ctx, tx, ex.Task, pinned, observation)
 			case directoryTaskV2:
 				err = publishDirectoryObservationV2Tx(ctx, tx, ex.Task, pinned, observationV2)
+			case directoryTaskV3:
+				err = publishDirectoryObservationV3Tx(ctx, tx, ex.Task, pinned, observationV3)
 			default:
 				err = errDirectoryUseEvidence
 			}

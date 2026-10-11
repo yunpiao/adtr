@@ -81,6 +81,8 @@ func credentialUseEndpointForPurpose(purpose string) (prefix string, consumerEna
 		return "/api/directory-credential-use", credentialuse.DirectoryConsumerEnabled
 	case credentialuse.DirectoryV2Purpose:
 		return "/api/directory-credential-use/v2", credentialuse.DirectoryV2ConsumerEnabled
+	case credentialuse.DirectoryV3Purpose:
+		return "/api/directory-credential-use/v3", credentialuse.DirectoryV3ConsumerEnabled
 	default:
 		return "", false
 	}
@@ -97,7 +99,7 @@ func credentialUsePathAllowedForPurpose(method, path, role string, grants map[st
 		return false
 	}
 	if suffix == "/effective" {
-		if purpose == credentialuse.DirectoryPurpose || purpose == credentialuse.DirectoryV2Purpose {
+		if purpose == credentialuse.DirectoryPurpose || purpose == credentialuse.DirectoryV2Purpose || purpose == credentialuse.DirectoryV3Purpose {
 			return grants["domains"].Readable && grants["directory_assets"].Readable
 		}
 		return grants["operation_accounts"].Readable

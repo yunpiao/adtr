@@ -171,6 +171,8 @@ jobs:
             command: python3 scripts/test_auth_e2e.py --suite user-assets-v2
           - name: user-assets-v2-readers
             command: python3 scripts/test_auth_e2e.py --suite user-assets-v2-readers
+          - name: directory-v3-backend
+            command: python3 scripts/test_auth_e2e.py --suite directory-v3-backend
           - name: directory-v2
             command: python3 scripts/test_auth_e2e.py --suite directory-v2
           - name: directory-v2-controls
@@ -287,6 +289,14 @@ jobs:
           path: |
             web/test-results/**/production-journal-first-last.json
             web/test-results/**/operational-logs.png
+          if-no-files-found: error
+          retention-days: 7
+      - name: Retain dictionary3 backend per-value evidence
+        if: ${{ success() && matrix.name == 'directory-v3-backend' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: directory-v3-backend-${{ github.run_id }}-${{ github.run_attempt }}
+          path: web/test-results/**/directory-v3-backend-evidence.json
           if-no-files-found: error
           retention-days: 7
       - name: Retain synthetic task workspace evidence
