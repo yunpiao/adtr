@@ -1443,9 +1443,12 @@ test("real dictionary-v3 UI → authenticated API → worker → paged synthetic
   await capture("directory-v3-mobile-collection.png", "collection");
   // A horizontal table stays in its own scroll container at mobile width.
   await table.locator("tbody tr").first().scrollIntoViewIfNeeded();
-  await page.locator(".table-scroll").evaluate((element) => {
-    element.scrollLeft = element.scrollWidth;
-  });
+  await page
+    .getByRole("region", { name: "目录观察", exact: true })
+    .locator(".table-scroll")
+    .evaluate((element) => {
+      element.scrollLeft = element.scrollWidth;
+    });
   await capture("directory-v3-mobile-facts.png", "identity facts");
   await navigateTo(page, "字典 3 目录凭据授权");
   await page

@@ -1010,6 +1010,72 @@ test("UserAssetsV3 real workspace, pins, identity facts and native reader invali
       actualList: list,
       actualDetail: object ?? null,
     });
+    await writeFile(
+      testInfo.outputPath("user-assets-v3-screenshot-bindings.json"),
+      JSON.stringify({ partial: true, screenshots }, null, 2),
+    );
+  };
+  const captureSPNGeometry = async (values: Locator, filename: string) => {
+    // Only layout numbers/styles, never document text or authentication inputs.
+    const geometry = await values.evaluate(async (element) => {
+      const rect = (value: DOMRectReadOnly) => ({
+        x: value.x,
+        y: value.y,
+        width: value.width,
+        height: value.height,
+        top: value.top,
+        right: value.right,
+        bottom: value.bottom,
+        left: value.left,
+      });
+      const intersection = await new Promise<unknown>((resolve) => {
+        const observer = new IntersectionObserver(([entry]) => {
+          observer.disconnect();
+          resolve({
+            ratio: entry.intersectionRatio,
+            bounding: rect(entry.boundingClientRect),
+            intersection: rect(entry.intersectionRect),
+            root: entry.rootBounds ? rect(entry.rootBounds) : null,
+          });
+        });
+        observer.observe(element);
+      });
+      const boxes = [];
+      for (
+        let node: Element | null = element;
+        node;
+        node = node.parentElement
+      ) {
+        const style = getComputedStyle(node);
+        boxes.push({
+          tag: node.tagName,
+          className: node.className,
+          rect: rect(node.getBoundingClientRect()),
+          clientWidth: node.clientWidth,
+          clientHeight: node.clientHeight,
+          scrollWidth: node.scrollWidth,
+          scrollHeight: node.scrollHeight,
+          scrollTop: node.scrollTop,
+          scrollLeft: node.scrollLeft,
+          overflowX: style.overflowX,
+          overflowY: style.overflowY,
+          borderTop: style.borderTopWidth,
+          borderRight: style.borderRightWidth,
+          borderBottom: style.borderBottomWidth,
+          borderLeft: style.borderLeftWidth,
+        });
+      }
+      return {
+        viewport: { width: innerWidth, height: innerHeight },
+        intersection,
+        boxes,
+      };
+    });
+    console.log("SPN layout geometry", JSON.stringify(geometry));
+    await writeFile(
+      testInfo.outputPath(filename),
+      JSON.stringify(geometry, null, 2),
+    );
   };
   const first = await openAssets(page, true);
   expect(first.actorId).toBe(String(actorId));
@@ -1076,12 +1142,16 @@ test("UserAssetsV3 real workspace, pins, identity facts and native reader invali
         );
         await expect(fact("账户控制值（原始整数）")).toHaveText("0");
         await values.scrollIntoViewIfNeeded();
-        await expect(values).toBeInViewport({ ratio: 1 });
+        await captureSPNGeometry(
+          values,
+          "user-assets-v3-desktop-spn-geometry.json",
+        );
         await capture(
           "user-assets-v3-desktop-ordered-spn.png",
           first.value,
           actual.value,
         );
+        await expect(values).toBeInViewport({ ratio: 1 });
       } else {
         await fact("主组 RID（primaryGroupID）").scrollIntoViewIfNeeded();
         await capture(
@@ -1328,7 +1398,10 @@ test("UserAssetsV3 real workspace, pins, identity facts and native reader invali
       exact: true,
     });
     await visibleSPN.scrollIntoViewIfNeeded();
-    await expect(visibleSPN).toBeInViewport({ ratio: 1 });
+    await captureSPNGeometry(
+      visibleSPN,
+      "user-assets-v3-mobile-spn-geometry.json",
+    );
     expect(
       await page.evaluate(
         () => document.documentElement.scrollWidth <= innerWidth,
@@ -1339,6 +1412,7 @@ test("UserAssetsV3 real workspace, pins, identity facts and native reader invali
       first.value,
       actual.value,
     );
+    await expect(visibleSPN).toBeInViewport({ ratio: 1 });
     await page
       .getByRole("button", { name: "关闭用户详情", exact: true })
       .click();
