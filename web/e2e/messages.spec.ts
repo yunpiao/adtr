@@ -370,6 +370,9 @@ test("real health Worker → outbox → message snapshot → browser page and lo
   );
   expect(pageResponse.status()).toBe(200);
   expect((await pageResponse.json()).items).toEqual(snapshot.items);
+  await expect(
+    page.locator(`article[data-message-id="${snapshot.items[1].messageId}"]`),
+  ).toBeFocused();
   await page.getByLabel("关键词", { exact: true }).fill("");
 
   const screenshots = [];
@@ -407,6 +410,12 @@ test("real health Worker → outbox → message snapshot → browser page and lo
       page.locator(`article[data-message-id="${snapshot.items[1].messageId}"]`),
     ).toBeVisible();
     for (const fullPage of [false, true]) {
+      // Preserve the located viewport, then reset document scroll before the
+      // full-page image so sticky/fixed chrome is not painted mid-document.
+      if (fullPage) {
+        await page.evaluate(() => window.scrollTo(0, 0));
+        await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0);
+      }
       const file = `messages-soc-${viewport.width}-${fullPage ? "full" : "viewport"}.png`;
       const path = testInfo.outputPath(file);
       const bytes = await page.screenshot({ path, fullPage });
