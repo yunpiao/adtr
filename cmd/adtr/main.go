@@ -89,7 +89,7 @@ func run() (runErr error) {
 		if err != nil {
 			return fmt.Errorf("system health configuration failed")
 		}
-		taskEngine, err = tasks.New(cfg.Database, tasks.ProductionRegistry(audit.Kind(), domainStore.Kind(), domainStore.AccountKind(), domainStore.DirectoryKind(), domainStore.DirectoryV2Kind(), operationallogs.Kind()), auth.NewTaskAuthorizer(), store.SchemaVersion)
+		taskEngine, err = tasks.New(cfg.Database, tasks.ProductionRegistry(audit.Kind(), domainStore.Kind(), domainStore.AccountKind(), domainStore.DirectoryKind(), domainStore.DirectoryV2Kind(), domainStore.DirectoryV3Kind(), operationallogs.Kind()), auth.NewTaskAuthorizer(), store.SchemaVersion)
 		if err != nil {
 			return fmt.Errorf("task engine configuration failed")
 		}
@@ -195,6 +195,14 @@ func run() (runErr error) {
 			directoryV2Handler := authentication.DirectoryV2Handler(domainStore, taskEngine)
 			mux.Handle("/api/directory/v2", directoryV2Handler)
 			mux.Handle("/api/directory/v2/", directoryV2Handler)
+			directoryV3Handler := authentication.DirectoryV3Handler(domainStore, taskEngine)
+			mux.Handle("/api/directory/v3", directoryV3Handler)
+			mux.Handle("/api/directory/v3/", directoryV3Handler)
+			directoryV3UseHandler := authentication.DirectoryV3CredentialUseHandler(credentialuse.New())
+			mux.Handle("/api/directory-credential-use/v3", directoryV3UseHandler)
+			mux.Handle("/api/directory-credential-use/v3/", directoryV3UseHandler)
+			mux.Handle("/api/user-assets/v3/detail", authentication.UserAssetV3Handler(domainStore))
+
 			userAssetsV2Handler := authentication.UserAssetsV2Handler(domainStore)
 			mux.Handle("/api/user-assets/v2", userAssetsV2Handler)
 			mux.Handle("/api/user-assets/v2/", userAssetsV2Handler)
@@ -257,7 +265,7 @@ func run() (runErr error) {
 		go func() { runScheduleLoop(ctx, scheduleEngine, workerOwner, activityRecorder); close(schedulerDone) }()
 		maintenanceDone := make(chan struct{})
 		reconcileUses := func(c context.Context) error {
-			return reconcileCredentialReservations(c, func(pass context.Context) error {
+			return reconcileCredentialReservationsV3(c, func(pass context.Context) error {
 				_, err := domainStore.ReconcileReservedAccountUses(pass, cfg.Database, 32)
 				return err
 			}, func(pass context.Context) error {
@@ -265,6 +273,9 @@ func run() (runErr error) {
 				return err
 			}, func(pass context.Context) error {
 				_, err := domainStore.ReconcileReservedDirectoryV2Uses(pass, cfg.Database, 32)
+				return err
+			}, func(pass context.Context) error {
+				_, err := domainStore.ReconcileReservedDirectoryV3Uses(pass, cfg.Database, 32)
 				return err
 			})
 		}

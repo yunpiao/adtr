@@ -200,6 +200,15 @@ func migrateTo(ctx context.Context, config *pgx.ConnConfig, target int) error {
 		}
 		version = 18
 	}
+	if version < 19 && target >= 19 {
+		if err := requireDirectoryV3Baseline(ctx, tx); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, credentialuse.DirectoryV3PurposeSchema+domains.DirectoryDependencyV3Schema+domains.DirectoryUseV3Schema+domains.DirectoryObservationV3Schema+domains.DirectoryAuditV3Schema+audit.DirectoryV3ViewSchema); err != nil {
+			return errors.New("directory v3 schema migration failed")
+		}
+		version = 19
+	}
 	if _, err := tx.Exec(ctx, "UPDATE adtr.schema_version SET version=$1 WHERE singleton=true", version); err != nil {
 		return errors.New("schema version update failed")
 	}

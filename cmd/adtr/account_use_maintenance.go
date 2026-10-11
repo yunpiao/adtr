@@ -47,3 +47,17 @@ func reconcileCredentialReservations(ctx context.Context, account, directory, di
 	joined.Wait()
 	return errors.Join(accountErr, directoryErr, directoryV2Err)
 }
+
+// The new fixed profile shares the existing cycle deadline; all four passes join.
+func reconcileCredentialReservationsV3(ctx context.Context, account, directory, directoryV2, directoryV3 func(context.Context) error) error {
+	var previousErr, v3Err error
+	var joined sync.WaitGroup
+	joined.Add(2)
+	go func() {
+		defer joined.Done()
+		previousErr = reconcileCredentialReservations(ctx, account, directory, directoryV2)
+	}()
+	go func() { defer joined.Done(); v3Err = directoryV3(ctx) }()
+	joined.Wait()
+	return errors.Join(previousErr, v3Err)
+}

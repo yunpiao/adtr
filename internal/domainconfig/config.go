@@ -28,6 +28,7 @@ type Runtime struct {
 	probeEnabled           bool
 	directoryReadEnabled   bool
 	directoryReadV2Enabled bool
+	directoryReadV3Enabled bool
 }
 
 func (r *Runtime) Enabled() bool      { return r != nil && r.vault != nil }
@@ -41,6 +42,9 @@ func (r *Runtime) DirectoryReadEnabled() bool { return r.Enabled() && r.director
 // this compiled capability nor either flag supplies a credential-purpose grant.
 func (r *Runtime) DirectoryReadV2Enabled() bool {
 	return r.DirectoryReadEnabled() && r.directoryReadV2Enabled
+}
+func (r *Runtime) DirectoryReadV3Enabled() bool {
+	return r.DirectoryReadEnabled() && r.directoryReadV3Enabled
 }
 func (r *Runtime) Vault() *Vault {
 	if r == nil {
@@ -69,6 +73,7 @@ func Load(getenv func(string) string) (*Runtime, error) {
 	probeFlag := getenv("ADTR_DOMAIN_PROBE_ENABLED")
 	directoryFlag := getenv("ADTR_DIRECTORY_READ_ENABLED")
 	directoryV2Flag := getenv("ADTR_DIRECTORY_READ_V2_ENABLED")
+	directoryV3Flag := getenv("ADTR_DIRECTORY_READ_V3_ENABLED")
 	caPath := getenv("ADTR_LDAP_CA_FILE")
 	policyPath := getenv("ADTR_LDAP_EGRESS_POLICY_FILE")
 	if probeFlag != "" && probeFlag != "true" && probeFlag != "false" {
@@ -80,7 +85,10 @@ func Load(getenv func(string) string) (*Runtime, error) {
 	if directoryV2Flag != "" && directoryV2Flag != "true" && directoryV2Flag != "false" {
 		return nil, ErrConfiguration
 	}
-	if keyID == "" && encodedKey == "" && caPath == "" && policyPath == "" && probeFlag != "true" && directoryFlag != "true" && directoryV2Flag != "true" {
+	if directoryV3Flag != "" && directoryV3Flag != "true" && directoryV3Flag != "false" {
+		return nil, ErrConfiguration
+	}
+	if keyID == "" && encodedKey == "" && caPath == "" && policyPath == "" && probeFlag != "true" && directoryFlag != "true" && directoryV2Flag != "true" && directoryV3Flag != "true" {
 		return &Runtime{}, nil
 	}
 	if !validToken(keyID, 64) || len(encodedKey) != base64.StdEncoding.EncodedLen(32) || (caPath == "") != (policyPath == "") {
@@ -124,13 +132,14 @@ func Load(getenv func(string) string) (*Runtime, error) {
 			return nil, ErrConfiguration
 		}
 	}
-	if probeFlag == "true" || directoryFlag == "true" || directoryV2Flag == "true" {
+	if probeFlag == "true" || directoryFlag == "true" || directoryV2Flag == "true" || directoryV3Flag == "true" {
 		if runtime.policy == nil || len(runtime.policy.targets) == 0 {
 			return nil, ErrConfiguration
 		}
 		runtime.probeEnabled = probeFlag == "true"
 		runtime.directoryReadEnabled = directoryFlag == "true"
 		runtime.directoryReadV2Enabled = directoryV2Flag == "true"
+		runtime.directoryReadV3Enabled = directoryV3Flag == "true"
 	}
 	return runtime, nil
 }

@@ -58,7 +58,7 @@ func TestDirectoryV2AuthorityAndExecutorRejectProfileBeforeSQL(t *testing.T) {
 	if !errors.As(err, &failure) || failure.Code != "directory_read_disabled" {
 		t.Fatal("master gate implied v2 access", err)
 	}
-	for _, profile := range []directoryTaskProfile{0, 3} {
+	for _, profile := range []directoryTaskProfile{0, 4} {
 		if _, _, err := directoryGrantForProfileTx(context.Background(), nil, profile, tasks.Principal{}, row{}); !errors.Is(err, tasks.ErrAuthorization) {
 			t.Fatal("unknown grant profile reached SQL")
 		}

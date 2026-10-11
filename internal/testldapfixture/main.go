@@ -24,6 +24,7 @@ type configuration struct {
 	controlDir                               string
 	directoryMode                            bool
 	directoryV2                              bool
+	directoryV3                              bool
 	userAssetsV2                             bool
 	directoryEmpty, directorySlow            bool
 	username, password                       []byte
@@ -38,6 +39,7 @@ func readConfiguration(args []string, getenv func(string) string) (configuration
 	flags.StringVar(&cfg.controlDir, "control-dir", "", "optional disposable integration control directory")
 	flags.BoolVar(&cfg.directoryMode, "directory-mode", false, "enable the fixed synthetic directory dictionary for integration tests")
 	flags.BoolVar(&cfg.directoryV2, "directory-v2", false, "select the fixed eight-attribute dictionary; requires directory mode")
+	flags.BoolVar(&cfg.directoryV3, "directory-v3", false, "select the fixed ten-attribute dictionary; requires directory mode")
 	flags.BoolVar(&cfg.userAssetsV2, "user-assets-v2", false, "select isolated user-asset rows; requires dictionary 2 and nonempty fast mode")
 	flags.BoolVar(&cfg.directoryEmpty, "directory-empty", false, "return zero synthetic objects; requires directory mode")
 	flags.BoolVar(&cfg.directorySlow, "directory-slow", false, "return five synthetic pages with a fixed two-second delay each; requires directory mode")
@@ -45,7 +47,8 @@ func readConfiguration(args []string, getenv func(string) string) (configuration
 	flags.StringVar(&cfg.ldapsAddress, "ldaps-listen", "127.0.0.1:636", "fixture LDAPS IP:636")
 	if flags.Parse(args) != nil || flags.NArg() != 0 || cfg.cert == "" || cfg.key == "" ||
 		!validListenAddress(cfg.startTLSAddress, "389") || !validListenAddress(cfg.ldapsAddress, "636") ||
-		((cfg.directoryV2 || cfg.directoryEmpty || cfg.directorySlow) && !cfg.directoryMode) ||
+		((cfg.directoryV2 || cfg.directoryV3 || cfg.directoryEmpty || cfg.directorySlow) && !cfg.directoryMode) ||
+		(cfg.directoryV3 && (cfg.directoryV2 || cfg.userAssetsV2)) ||
 		(cfg.userAssetsV2 && (!cfg.directoryMode || !cfg.directoryV2 || cfg.directoryEmpty || cfg.directorySlow)) {
 		return configuration{}, errors.New("invalid synthetic LDAP fixture configuration")
 	}
@@ -111,6 +114,7 @@ func run(ctx context.Context, args []string, getenv func(string) string, output 
 		control:        control,
 		directoryMode:  cfg.directoryMode,
 		directoryV2:    cfg.directoryV2,
+		directoryV3:    cfg.directoryV3,
 		userAssetsV2:   cfg.userAssetsV2,
 		directoryEmpty: cfg.directoryEmpty,
 		directorySlow:  cfg.directorySlow,

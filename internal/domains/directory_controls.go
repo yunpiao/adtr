@@ -19,6 +19,10 @@ func (s *Store) DirectoryV2ReceiptTx(ctx context.Context, tx pgx.Tx, engine *tas
 	return s.directoryReceiptForProfileTx(ctx, tx, engine, p, domainID, key, directoryTaskV2)
 }
 
+func (s *Store) DirectoryV3ReceiptTx(ctx context.Context, tx pgx.Tx, engine *tasks.Engine, p tasks.Principal, domainID, key string) (tasks.Task, error) {
+	return s.directoryReceiptForProfileTx(ctx, tx, engine, p, domainID, key, directoryTaskV3)
+}
+
 func (s *Store) directoryReceiptForProfileTx(ctx context.Context, tx pgx.Tx, engine *tasks.Engine, p tasks.Principal, domainID, key string, profile directoryTaskProfile) (tasks.Task, error) {
 	identity, ok := profile.identity()
 	if !ok {
@@ -56,6 +60,10 @@ func (s *Store) CancelDirectoryTx(ctx context.Context, tx pgx.Tx, engine *tasks.
 
 func (s *Store) CancelDirectoryV2Tx(ctx context.Context, tx pgx.Tx, engine *tasks.Engine, p tasks.Principal, id string, allowed []string) (tasks.Task, error) {
 	return s.cancelDirectoryForProfileTx(ctx, tx, engine, p, id, allowed, directoryTaskV2)
+}
+
+func (s *Store) CancelDirectoryV3Tx(ctx context.Context, tx pgx.Tx, engine *tasks.Engine, p tasks.Principal, id string, allowed []string) (tasks.Task, error) {
+	return s.cancelDirectoryForProfileTx(ctx, tx, engine, p, id, allowed, directoryTaskV3)
 }
 
 func (s *Store) cancelDirectoryForProfileTx(ctx context.Context, tx pgx.Tx, engine *tasks.Engine, p tasks.Principal, id string, allowed []string, profile directoryTaskProfile) (tasks.Task, error) {

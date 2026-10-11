@@ -28,12 +28,15 @@ func reserveDirectoryUseForProfileTx(ctx context.Context, tx pgx.Tx, profile dir
 		return errDirectoryUseEvidence
 	}
 	// The old wrapper preserves historical INSERTs; migration 16 defaults
-	// absent provenance to dictionary 1. V2 always records its explicit pin.
+	// absent provenance to dictionary 1. Versioned profiles record explicit pins.
 	statement := `INSERT INTO adtr.domain_directory_task_uses(tenant_id,domain_id,task_id,account_id,account_credential_revision,connection_revision,connection_credential_generation,policy_revision,grant_role_id,grant_revision,actor_id,purpose,state)
  VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'reserved')`
 	if profile == directoryTaskV2 {
 		statement = `INSERT INTO adtr.domain_directory_task_uses(tenant_id,domain_id,task_id,account_id,account_credential_revision,connection_revision,connection_credential_generation,policy_revision,grant_role_id,grant_revision,actor_id,purpose,state,dictionary_version)
  VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'reserved',2)`
+	} else if profile == directoryTaskV3 {
+		statement = `INSERT INTO adtr.domain_directory_task_uses(tenant_id,domain_id,task_id,account_id,account_credential_revision,connection_revision,connection_credential_generation,policy_revision,grant_role_id,grant_revision,actor_id,purpose,state,dictionary_version)
+ VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'reserved',3)`
 	}
 	_, err = tx.Exec(ctx, statement, t.TenantID, t.DomainID, t.ID, p.AccountID, p.AccountCredentialRevision, p.ConnectionRevision, p.ConnectionCredentialGeneration, p.PolicyRevision, p.GrantRoleID, p.GrantRevision, t.ActorID, identity.purpose)
 	if err != nil {
@@ -253,6 +256,9 @@ func (s *Store) ReconcileReservedDirectoryUses(ctx context.Context, cfg *pgx.Con
 // a backlog in one profile cannot starve the other profile's terminal cleanup.
 func (s *Store) ReconcileReservedDirectoryV2Uses(ctx context.Context, cfg *pgx.ConnConfig, limit int) (int, error) {
 	return s.reconcileReservedDirectoryUsesForProfile(ctx, cfg, directoryTaskV2, limit)
+}
+func (s *Store) ReconcileReservedDirectoryV3Uses(ctx context.Context, cfg *pgx.ConnConfig, limit int) (int, error) {
+	return s.reconcileReservedDirectoryUsesForProfile(ctx, cfg, directoryTaskV3, limit)
 }
 
 func (s *Store) reconcileReservedDirectoryUsesForProfile(ctx context.Context, cfg *pgx.ConnConfig, profile directoryTaskProfile, limit int) (int, error) {
