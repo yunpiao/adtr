@@ -630,10 +630,11 @@ test("real dictionary-v2 UI → authenticated API → worker → paged synthetic
 
   // Production allows ten sensitive actions per actor per fifteen minutes.
   // Bootstrap: password/MFA start/enable (3), domain/group/assignment (3),
-  // producer creation (1), later source edit (1) = 8. The assignment revokes
-  // the bootstrap session; create the producer only after that UI re-login.
-  // Producer: password/MFA (3), account/connection grant/binding (3), v1 grant
-  // (1), denied v2 sync (1), v2 grant (1), committed v2 sync (1) = 10.
+  // producer creation (1), account/connection grant (2), later source edit (1)
+  // = 10. The assignment revokes the bootstrap session; create the producer
+  // and shared scoped account only after that UI re-login.
+  // Producer: password/MFA (3), binding/v1 grant (2), denied v2 sync (1),
+  // v2 grant/committed sync (2), lost conflict/original conflict retry (2) = 10.
   // The forbidden sync still consumes rate budget. Login/logout never resets it.
   await navigateTo(page, "访问管理");
   await page.getByRole("button", { name: "用户管理", exact: true }).click();
@@ -657,33 +658,6 @@ test("real dictionary-v2 UI → authenticated API → worker → paged synthetic
   });
   expect(producer.value.ID).toBeGreaterThan(0);
   expect(producer.value.ID).not.toBe(actorId);
-  await navigateTo(page, "退出登录");
-  await login(page, producerUsername, producerInitial);
-  await expect(
-    page.getByRole("heading", { name: "修改密码", exact: true }),
-  ).toBeVisible();
-  await fillSecret(
-    page.getByLabel("当前密码", { exact: true }),
-    producerInitial,
-  );
-  await fillSecret(
-    page.getByLabel("新密码", { exact: true }),
-    producerPassword,
-  );
-  await fillSecret(
-    page.getByLabel("确认新密码", { exact: true }),
-    producerPassword,
-  );
-  await page.getByRole("button", { name: "更新密码", exact: true }).click();
-  await expect(
-    page.getByRole("heading", { name: "账户概览", exact: true }),
-  ).toBeVisible();
-  auth = await enrollMfa(page, producerPassword);
-  secrets.push(auth.secret);
-  username = producerUsername;
-  password = producerPassword;
-  actorId = (await readJSON(context, "/api/auth/me")).ID as number;
-  expect(actorId).toBe(producer.value.ID);
 
   await navigateTo(page, "管理操作账户");
   await page.getByRole("button", { name: "新增操作账户", exact: true }).click();
@@ -719,6 +693,34 @@ test("real dictionary-v2 UI → authenticated API → worker → paged synthetic
     allowed: true,
   });
   safe(connectionGrant.value);
+
+  await navigateTo(page, "退出登录");
+  await login(page, producerUsername, producerInitial);
+  await expect(
+    page.getByRole("heading", { name: "修改密码", exact: true }),
+  ).toBeVisible();
+  await fillSecret(
+    page.getByLabel("当前密码", { exact: true }),
+    producerInitial,
+  );
+  await fillSecret(
+    page.getByLabel("新密码", { exact: true }),
+    producerPassword,
+  );
+  await fillSecret(
+    page.getByLabel("确认新密码", { exact: true }),
+    producerPassword,
+  );
+  await page.getByRole("button", { name: "更新密码", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "账户概览", exact: true }),
+  ).toBeVisible();
+  auth = await enrollMfa(page, producerPassword);
+  secrets.push(auth.secret);
+  username = producerUsername;
+  password = producerPassword;
+  actorId = (await readJSON(context, "/api/auth/me")).ID as number;
+  expect(actorId).toBe(producer.value.ID);
 
   await navigateTo(page, "域连接");
   const backToDomains = page.getByRole("button", {

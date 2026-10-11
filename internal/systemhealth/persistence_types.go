@@ -56,13 +56,21 @@ type HistoryGap struct {
 	StartTime int64 `json:"startTime"`
 	EndTime   int64 `json:"endTime"`
 }
+type HistorySegment struct {
+	StartTime  int64  `json:"startTime"`
+	Source     string `json:"source"`
+	LimitBytes string `json:"limitBytes"`
+	SourceID   string `json:"sourceID,omitempty"`
+}
+
 type History struct {
-	Instance              string          `json:"instance"`
-	GraphType             string          `json:"graphType"`
-	Info                  []HistorySeries `json:"info"`
-	Gaps                  []HistoryGap    `json:"gaps"`
-	AvailableSince        *time.Time      `json:"availableSince"`
-	SampleIntervalSeconds int64           `json:"sampleIntervalSeconds"`
+	Segments              []HistorySegment `json:"segments,omitempty"`
+	Instance              string           `json:"instance"`
+	GraphType             string           `json:"graphType"`
+	Info                  []HistorySeries  `json:"info"`
+	Gaps                  []HistoryGap     `json:"gaps"`
+	AvailableSince        *time.Time       `json:"availableSince"`
+	SampleIntervalSeconds int64            `json:"sampleIntervalSeconds"`
 }
 
 type AlarmInput struct {

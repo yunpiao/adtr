@@ -147,6 +147,22 @@ export function observationReason(reason: string): string {
       "资源指标暂无可用观测；请核对采样来源与服务日志。",
     unsupported_platform:
       "当前平台不支持这些采样来源；请核对运行平台与采样能力。",
+    fresh_cgroup_observation:
+      "已取得新鲜的容器内存观测，使用量低于可见层级上限；隐藏祖先约束和共享竞争仍需单独核对。",
+    visible_limit_reached:
+      "容器内存使用量已达到或超过可见层级上限；请核对同组进程占用及限制配置。",
+    cgroup_not_found:
+      "当前进程未发现可用的 cgroup 内存层级，请检查挂载与内存控制器后等待新采样。",
+    zero_limit:
+      "可见 cgroup 内存上限为零，无法计算有效配额比例；请核对运行环境的内存限制配置，恢复后等待新采样。",
+    unlimited:
+      "可见 cgroup 层级没有有限内存上限，无法计算配额使用率；请核对运行环境的内存限制。",
+    hierarchy_disabled:
+      "cgroup v1 未启用层级内存统计，无法确认可见层级上限；请核对内存控制器配置。",
+    cgroup_changed:
+      "采样期间进程所属 cgroup 发生变化，此次观测无法确认；等待归属稳定后的新采样。",
+    no_cgroup_observation:
+      "此记录没有容器内存观测，无法判断容器内存压力；等待升级后的实际采样。",
     not_configured: "服务器未配置此能力，尚无检查证据。",
     read_failed: "采样来源读取失败；请核对读取权限和采样日志。",
     invalid_data: "采样来源格式无法验证；请核对来源内容与采样日志。",

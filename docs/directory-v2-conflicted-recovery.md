@@ -45,8 +45,10 @@ not modify backend, schema, task registration, native guards, or product scope.
   409 come from the real API. Then verify proof cleanup, no replacement POST,
   exact original receipt queries, no-store/current-actor headers, browser Back/Forward/Back,
   reload, and explicit current-source re-selection. There is no fabricated API
-  response, database write, or altered clock. The producer uses nine sensitive
-  actions, within the existing ten-action limit.
+  response, database write, or altered clock. Account creation and connection
+  grant use the existing authorized bootstrap actor; each actor uses exactly
+  ten sensitive actions, including password/MFA setup and rejected syncs.
+  Login/logout does not reset the unchanged fifteen-minute production budget.
 
 Local browser execution was attempted with
 `python3 scripts/test_auth_e2e.py --suite directory-v2` and is blocked because
@@ -55,3 +57,21 @@ check, not browser execution. Exact-head required CI must run the real
 browser/API/worker/PostgreSQL/synthetic TLS LDAP scenario before merge.
 Real AD, Windows compatibility, capacity, full product acceptance, and
 production deployment are not established by this repair.
+
+
+## Initial CI failure and harness correction
+
+[Run 38171401742, directory-v2 job 114564893753](https://github.com/yunpiao/adtr/actions/runs/38171401742/job/114564893753)
+failed on head `060952825667f5681f5c7d217df4dfd3a3279669`: the first new
+stale-sync request returned HTTP 429, where the test required the real 409
+revision conflict. The producer's original scenario already spent ten sensitive
+actions, including password change and both MFA setup calls. The two new syncs
+exceeded that budget; the earlier nine-action estimate omitted setup calls.
+
+The harness now performs account creation and its connection-purpose grant
+with the existing authorized bootstrap actor. This moves two setup actions
+without changing resource scope or the producer that owns the original and
+recovered v2 sync requests. Both actors then stay within ten actions. No rate
+limit, authentication check, clock, native response guard, or expected response
+was weakened. This source correction still requires fresh exact-head CI; the
+failed run remains evidence and is not reclassified as passing.

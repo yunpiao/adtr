@@ -80,13 +80,14 @@ type StorageMetric struct {
 }
 
 type Snapshot struct {
-	Instance   string          `json:"instance"`
-	ObservedAt time.Time       `json:"observedAt"`
-	CPU        PercentMetric   `json:"cpu"`
-	Memory     MemoryMetric    `json:"memory"`
-	Uptime     UptimeMetric    `json:"uptime"`
-	Load       LoadMetric      `json:"load"`
-	Storage    []StorageMetric `json:"storage"`
+	Instance        string                 `json:"instance"`
+	ObservedAt      time.Time              `json:"observedAt"`
+	ContainerMemory *ContainerMemoryMetric `json:"containerMemory,omitempty"`
+	CPU             PercentMetric          `json:"cpu"`
+	Memory          MemoryMetric           `json:"memory"`
+	Uptime          UptimeMetric           `json:"uptime"`
+	Load            LoadMetric             `json:"load"`
+	Storage         []StorageMetric        `json:"storage"`
 }
 
 // ProcFile identifies one fixed kernel source, never an arbitrary path.
@@ -122,10 +123,11 @@ type StorageTarget struct {
 // runtime-root; an explicitly empty slice disables storage sampling. Hooks are
 // for deterministic tests or trusted adapters, not request-controlled I/O.
 type Config struct {
-	Storage  []StorageTarget
-	ReadProc func(ProcFile) ([]byte, error)
-	StatFS   func(string) (FileSystemStats, error)
-	Now      func() time.Time
+	Storage             []StorageTarget
+	ReadProc            func(ProcFile) ([]byte, error)
+	StatFS              func(string) (FileSystemStats, error)
+	Now                 func() time.Time
+	ReadContainerMemory func(time.Time) ContainerMemoryMetric
 }
 
 var (
