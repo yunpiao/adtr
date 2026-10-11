@@ -17,6 +17,10 @@ import { PermissionEditor } from "./access-common";
 import {
   systemAPI,
   systemOperations,
+  validCurrent,
+  validContainerMemory,
+  validHistory,
+  type ContainerMemoryMetric,
   type Current,
   type HistoryInput,
   type StorageItem,
@@ -1152,5 +1156,388 @@ describe("system table accessibility", () => {
       6,
     );
     assertColumns(screen.getByRole("table", { name: "Worker 循环观测" }), 7);
+  });
+});
+
+const containerMetric = (): ContainerMemoryMetric => ({
+  observedAt: now,
+  source: "cgroup_v2",
+  scope: "runtime_cgroup",
+  availability: "available",
+  usageBytes: "1250",
+  limitBytes: "1000",
+  percent: 125,
+  limitState: "finite",
+  hierarchy: "visible",
+});
+describe("container memory contract and interface", () => {
+  it("accepts finite, unlimited, unknown and legacy observations while preserving kernel memory", () => {
+    const raw = current();
+    expect(validCurrent(raw)).toBe(true);
+    raw.snapshot!.containerMemory = containerMetric();
+    expect(validCurrent(raw)).toBe(true);
+    expect(raw.snapshot!.memory.percent).toBe(20);
+    expect(
+      validContainerMemory({
+        ...containerMetric(),
+        source: "cgroup_v1",
+        usageBytes: "0",
+        percent: 0,
+      }),
+    ).toBe(true);
+    expect(
+      validContainerMemory({
+        ...containerMetric(),
+        availability: "unavailable",
+        reason: "unlimited",
+        limitState: "unlimited",
+        limitBytes: null,
+        percent: null,
+      }),
+    ).toBe(true);
+    for (const availability of ["unsupported", "unavailable"])
+      expect(
+        validContainerMemory({
+          ...containerMetric(),
+          availability,
+          reason: "read_failed",
+          limitState: "unknown",
+          usageBytes: null,
+          limitBytes: null,
+          percent: null,
+        }),
+      ).toBe(true);
+  });
+  it.each([
+    { percent: 0 },
+    { reason: "unlimited" },
+    { observedAt: "2026-10-06T08:00:00Z" },
+    { percent: -1 },
+    { percent: Infinity },
+    { percent: NaN },
+    { percent: null },
+    { limitBytes: "0" },
+    { usageBytes: "-1" },
+    { usageBytes: "18446744073709551616" },
+    { limitBytes: "1.5" },
+    { limitBytes: 1000 },
+    { scope: "kernel_visible" },
+    { hierarchy: "effective" },
+    { source: "linux_proc" },
+    { source: "cgroup" },
+    { observedAt: "invalid" },
+    { availability: "unavailable" },
+    { limitState: "unknown" },
+    {
+      limitState: "unlimited",
+      availability: "unavailable",
+      reason: "unlimited",
+      percent: null,
+    },
+    {
+      limitState: "unknown",
+      availability: "unsupported",
+      usageBytes: null,
+      limitBytes: null,
+      percent: null,
+    },
+  ])("rejects malformed or contradictory container data: %j", (patch) => {
+    const raw = current();
+    raw.snapshot!.containerMemory = {
+      ...containerMetric(),
+      ...patch,
+    } as ContainerMemoryMetric;
+    expect(validCurrent(raw)).toBe(false);
+  });
+  it("permits above-100 container history but keeps kernel graph validation bounded", () => {
+    const query: HistoryInput = {
+      instance: "local-api",
+      graphType: "container_ram",
+      startTime: seconds - 900,
+      endTime: seconds,
+    };
+    const raw = history(
+      new URLSearchParams({
+        graphType: query.graphType,
+        startTime: String(query.startTime),
+      }),
+    );
+    raw.info[0].data.value = ["125", "130"];
+    raw.info[0].data.dataStatistics = {
+      max: 130,
+      min: 125,
+      avg: 127.5,
+      current: 130,
+    };
+    expect(validHistory(raw, query)).toBe(true);
+    raw.graphType = "ram_basic";
+    raw.info[0].mode = "ram_basic";
+    expect(validHistory(raw, { ...query, graphType: "ram_basic" })).toBe(false);
+  });
+  it("shows actual container usage and visible hierarchy without relabeling kernel RAM", async () => {
+    const value = info();
+    value.current.snapshot!.containerMemory = containerMetric();
+    override = (url) =>
+      url === "/api/system/info" ? response(value) : undefined;
+    await start();
+    const card = screen.getByRole("region", { name: "容器内存观测" });
+    expect(within(card).getByText("125.00%")).toBeVisible();
+    expect(within(card).getByText(/可见层级上限：1,000 B/)).toBeVisible();
+    expect(within(card).getByText(/隐藏祖先约束与同组进程竞争/)).toBeVisible();
+    expect(within(card).queryByText("健康")).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "内存使用率" })).toBeVisible();
+  });
+  it.each(["legacy", "unlimited", "unknown", "stale"])(
+    "keeps %s container state explicitly unconfirmed",
+    async (state) => {
+      const value = info();
+      if (state !== "legacy")
+        value.current.snapshot!.containerMemory = containerMetric();
+      if (state === "unlimited")
+        Object.assign(value.current.snapshot!.containerMemory!, {
+          availability: "unavailable",
+          reason: "unlimited",
+          limitState: "unlimited",
+          limitBytes: null,
+          percent: null,
+        });
+      if (state === "unknown")
+        Object.assign(value.current.snapshot!.containerMemory!, {
+          availability: "unsupported",
+          reason: "memory_controller_missing",
+          limitState: "unknown",
+          usageBytes: null,
+          limitBytes: null,
+          percent: null,
+        });
+      if (state === "stale") value.current.stale = true;
+      override = (url) =>
+        url === "/api/system/info" ? response(value) : undefined;
+      await start();
+      const card = screen.getByRole("region", { name: "容器内存观测" });
+      expect(card.querySelector('[data-state="unknown"]')).not.toBeNull();
+      expect(card.querySelector('[data-state="healthy"]')).toBeNull();
+      const expected = {
+        legacy: /没有容器内存观测字段/,
+        unlimited: /无法计算配额使用率/,
+        unknown: /容器内存压力未知/,
+        stale: /当前压力未知/,
+      }[state]!;
+      expect(within(card).getByText(expected)).toBeVisible();
+    },
+  );
+  it("clears invalid container API output instead of showing healthy data", async () => {
+    const value = info();
+    value.current.snapshot!.containerMemory = {
+      ...containerMetric(),
+      percent: -1,
+    };
+    override = (url) =>
+      url === "/api/system/info" ? response(value) : undefined;
+    render(<SystemWorkspace profile={profile} sessionChanged={vi.fn()} />);
+    await screen.findByText(/服务器结果无法确认/);
+    expect(
+      screen.queryByRole("region", { name: "容器内存观测" }),
+    ).not.toBeInTheDocument();
+  });
+  it("queries persisted container history and scales actual points above 100%", async () => {
+    override = (url) => {
+      if (!url.includes("/resources/history") || !url.includes("container_ram"))
+        return undefined;
+      const raw = history(new URLSearchParams(url.split("?")[1]));
+      raw.info[0].data.value = ["125", "130"];
+      raw.info[0].data.dataStatistics = {
+        max: 130,
+        min: 125,
+        avg: 127.5,
+        current: 130,
+      };
+      return response(raw);
+    };
+    await start();
+    click("资源与历史");
+    await screen.findByRole("img", { name: /2 个实际样本/ });
+    fill("历史指标", "container_ram");
+    const graph = await screen.findByRole("img", {
+      name: /容器内存使用率：2 个实际样本/,
+    });
+    expect(within(graph).getByText("130%")).toBeInTheDocument();
+    for (const point of graph.querySelectorAll("circle"))
+      expect(Number(point.getAttribute("cy"))).toBeGreaterThanOrEqual(15);
+    expect(calls("/resources/history").at(-1)![0]).toContain(
+      "graphType=container_ram",
+    );
+    expect(screen.getByText(/仅使用已持久化的有限上限观测/)).toBeVisible();
+  });
+});
+
+describe("container memory health diagnostics", () => {
+  it.each([
+    ["unknown", "unlimited"],
+    ["unhealthy", "visible_limit_reached"],
+  ])("explains %s evidence and next steps", async (status, reason) => {
+    const raw = health();
+    raw.dependencies.push({
+      id: "container-memory",
+      name: "Runtime cgroup memory",
+      type: "service",
+      status,
+      reason,
+      source: "cgroup_v2",
+      scope: "runtime_cgroup",
+      checkedAt: now,
+      observedAt: now,
+    });
+    override = (url) =>
+      url === "/api/system/health" ? response(raw) : undefined;
+    await start();
+    click("平台依赖健康");
+    const dashboard = await screen.findByRole("region", {
+      name: "依赖诊断工作台",
+    });
+    const finding = within(dashboard)
+      .getByText("Runtime cgroup memory")
+      .closest("li")!;
+    expect(finding).toHaveTextContent(observationReason(reason));
+    expect(finding).toHaveTextContent("隐藏祖先仍可能施加额外约束");
+    expect(finding.querySelector('[data-state="healthy"]')).toBeNull();
+  });
+});
+
+describe("container observation trust and boundaries", () => {
+  const query: HistoryInput = {
+    instance: "local-api",
+    graphType: "container_ram",
+    startTime: seconds - 900,
+    endTime: seconds,
+  };
+  const segmented = () => ({
+    ...history(
+      new URLSearchParams({
+        graphType: query.graphType,
+        startTime: String(query.startTime),
+      }),
+    ),
+    segments: [
+      {
+        startTime: seconds - 30,
+        source: "cgroup_v2",
+        limitBytes: "1000",
+        sourceID: "a".repeat(64),
+      },
+      { startTime: seconds - 15, source: "cgroup_v1", limitBytes: "2000" },
+    ],
+  });
+  it.each([undefined, "a".repeat(64), "0123456789abcdef".repeat(4)])(
+    "accepts legacy or valid source identity %s",
+    (sourceID) => {
+      expect(validContainerMemory({ ...containerMetric(), sourceID })).toBe(
+        true,
+      );
+    },
+  );
+  it.each(["", "a".repeat(63), "a".repeat(65), "z".repeat(64), 123, null])(
+    "rejects invalid source identity %s",
+    (sourceID) => {
+      expect(validContainerMemory({ ...containerMetric(), sourceID })).toBe(
+        false,
+      );
+    },
+  );
+  it("validates real ordered boundaries including legacy identity absence", () => {
+    expect(validHistory(segmented(), query)).toBe(true);
+    const raw = segmented();
+    raw.segments = [];
+    expect(validHistory(raw, query)).toBe(false);
+    const empty = {
+      ...raw,
+      info: [
+        {
+          mode: query.graphType,
+          data: {
+            timestamp: [],
+            value: [],
+            dataStatistics: { max: null, min: null, avg: null, current: null },
+          },
+        },
+      ],
+    };
+    expect(validHistory(empty, query)).toBe(true);
+  });
+  it.each([
+    { startTime: seconds - 29 },
+    { startTime: seconds },
+    { startTime: seconds - 901 },
+    { source: "cgroup" },
+    { source: "linux_proc" },
+    { limitBytes: "0" },
+    { limitBytes: "-1" },
+    { limitBytes: "18446744073709551616" },
+    { sourceID: "x".repeat(64) },
+    { sourceID: "" },
+  ])("rejects invalid boundary %j", (patch) => {
+    const raw = segmented();
+    Object.assign(raw.segments[0], patch);
+    expect(validHistory(raw, query)).toBe(false);
+  });
+  it("rejects unordered, repeated, missing-first and excessive boundaries", () => {
+    const raw = segmented();
+    raw.segments.reverse();
+    expect(validHistory(raw, query)).toBe(false);
+    raw.segments = [segmented().segments[1]];
+    expect(validHistory(raw, query)).toBe(false);
+    raw.segments = [segmented().segments[0], segmented().segments[0]];
+    expect(validHistory(raw, query)).toBe(false);
+    raw.segments = [...segmented().segments, segmented().segments[1]];
+    expect(validHistory(raw, query)).toBe(false);
+  });
+  it("preserves distinct boundary points recorded in the same Unix second", () => {
+    const raw = segmented();
+    raw.info[0].data.timestamp[1] = seconds - 30;
+    raw.segments[1].startTime = seconds - 30;
+    expect(validHistory(raw, query)).toBe(true);
+  });
+  it("keeps clock-skew samples unavailable even when stale is false", async () => {
+    const value = info();
+    value.current.snapshot!.containerMemory = containerMetric();
+    value.current.availability = "unavailable";
+    value.current.stale = false;
+    value.current.reason = "clock_skew";
+    override = (url) =>
+      url === "/api/system/info" ? response(value) : undefined;
+    await start();
+    const card = screen.getByRole("region", { name: "容器内存观测" });
+    expect(card.querySelector('[data-state="observed"]')).toBeNull();
+    expect(within(card).getByText("不可用 · 观测未确认")).toBeVisible();
+    expect(
+      within(card).getByText(/当前容器内存观测不可用，压力未知/),
+    ).toHaveTextContent("时钟证据不一致");
+  });
+  it("explains source and limit boundary segments separately from sampling gaps", async () => {
+    override = (url) =>
+      url.includes("/resources/history") && url.includes("container_ram")
+        ? response(segmented())
+        : undefined;
+    await start();
+    click("资源与历史");
+    await screen.findByRole("img", { name: /2 个实际样本/ });
+    fill("历史指标", "container_ram");
+    await screen.findByRole("img", {
+      name: /容器内存使用率：2 个实际样本，1 个缺测区间/,
+    });
+    expect(screen.getByText(/观测分段：2 段/)).toHaveTextContent(
+      "段边界表示计量依据变化，与缺测区间分别展示",
+    );
+  });
+  it("explains a zero limit without claiming malformed kernel data", () => {
+    expect(observationReason("zero_limit")).toContain("内存上限为零");
+    expect(observationReason("zero_limit")).toContain(
+      "核对运行环境的内存限制配置",
+    );
+  });
+  it("translates the actual missing-observation backend reason", () => {
+    expect(observationReason("no_cgroup_observation")).toContain(
+      "此记录没有容器内存观测",
+    );
   });
 });
