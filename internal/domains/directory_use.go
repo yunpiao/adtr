@@ -254,6 +254,9 @@ func (s *Store) ReconcileReservedDirectoryUses(ctx context.Context, cfg *pgx.Con
 func (s *Store) ReconcileReservedDirectoryV2Uses(ctx context.Context, cfg *pgx.ConnConfig, limit int) (int, error) {
 	return s.reconcileReservedDirectoryUsesForProfile(ctx, cfg, directoryTaskV2, limit)
 }
+func (s *Store) ReconcileReservedDirectoryV3Uses(ctx context.Context, cfg *pgx.ConnConfig, limit int) (int, error) {
+	return s.reconcileReservedDirectoryUsesForProfile(ctx, cfg, directoryTaskV3, limit)
+}
 
 func (s *Store) reconcileReservedDirectoryUsesForProfile(ctx context.Context, cfg *pgx.ConnConfig, profile directoryTaskProfile, limit int) (int, error) {
 	identity, ok := profile.identity()

@@ -81,9 +81,12 @@ type directoryProfile uint8
 const (
 	directoryProfileV1 directoryProfile = 1
 	directoryProfileV2 directoryProfile = 2
+	directoryProfileV3 directoryProfile = 3
 )
 
-func (p directoryProfile) valid() bool { return p == directoryProfileV1 || p == directoryProfileV2 }
+func (p directoryProfile) valid() bool {
+	return p == directoryProfileV1 || p == directoryProfileV2 || p == directoryProfileV3
+}
 
 func (p directoryProfile) searchPacket(base string, id, size int, cookie []byte) []byte {
 	switch p {
@@ -91,6 +94,8 @@ func (p directoryProfile) searchPacket(base string, id, size int, cookie []byte)
 		return directorySearchPacket(base, id, size, cookie)
 	case directoryProfileV2:
 		return directorySearchPacketV2(base, id, size, cookie)
+	case directoryProfileV3:
+		return directorySearchPacketV3(base, id, size, cookie)
 	default:
 		return nil
 	}
@@ -102,17 +107,19 @@ func (p directoryProfile) entry(body []byte, base string) (directoryassets.Entry
 		return directoryEntry(body, base)
 	case directoryProfileV2:
 		return directoryEntryV2(body, base)
+	case directoryProfileV3:
+		return directoryEntryV3(body, base)
 	default:
 		return directoryassets.Entry{}, failure(CodeInvalidConfig, StageValidate)
 	}
 }
 
 func directoryProfileError(profile directoryProfile, err error) error {
-	if profile == directoryProfileV2 && errors.Is(err, directoryassets.ErrLimit) {
+	if (profile == directoryProfileV2 || profile == directoryProfileV3) && errors.Is(err, directoryassets.ErrLimit) {
 		return failure(CodeDirectoryLimit, StageSearch)
 	}
-	if profile == directoryProfileV2 && (errors.Is(err, directoryassets.ErrSupplementalLimit) ||
-		errors.Is(err, directoryassets.ErrSIDProfile) || errors.Is(err, directoryassets.ErrWhenCreatedProfile)) {
+	if (profile == directoryProfileV2 || profile == directoryProfileV3) && (errors.Is(err, directoryassets.ErrSupplementalLimit) ||
+		errors.Is(err, directoryassets.ErrSIDProfile) || errors.Is(err, directoryassets.ErrWhenCreatedProfile) || errors.Is(err, directoryassets.ErrPrimaryGroupProfile)) {
 		return failure(CodeUnsupportedProfile, StageSearch)
 	}
 	return failure(CodeInvalidResponse, StageSearch)
@@ -121,16 +128,19 @@ func directoryProfileError(profile directoryProfile, err error) error {
 type directoryReadResult struct {
 	DirectoryObservation
 	objectsV2 []directoryassets.StoredObjectV2
+	objectsV3 []directoryassets.StoredObjectV3
 }
 
 func (r *directoryReadResult) discard() {
 	directoryassets.ClearStoredObjectsV2(r.objectsV2)
+	directoryassets.ClearStoredObjectsV3(r.objectsV3)
 	*r = directoryReadResult{}
 }
 
 type directoryAccumulator struct {
 	v1 *directoryassets.Accumulator
 	v2 *directoryassets.AccumulatorV2
+	v3 *directoryassets.AccumulatorV3
 }
 
 func newDirectoryAccumulator(profile directoryProfile, limits directoryassets.Limits) (directoryAccumulator, error) {
@@ -144,6 +154,11 @@ func newDirectoryAccumulator(profile directoryProfile, limits directoryassets.Li
 			return out, directoryassets.ErrLimits
 		}
 		out.v2, err = directoryassets.NewAccumulatorV2(limits)
+	case directoryProfileV3:
+		if limits.MaxRows > 10000 || limits.MaxPages > 100 || limits.MaxBytes > 16<<20 {
+			return out, directoryassets.ErrLimits
+		}
+		out.v3, err = directoryassets.NewAccumulatorV3(limits)
 	default:
 		err = directoryassets.ErrLimits
 	}
@@ -154,7 +169,10 @@ func (a directoryAccumulator) AddPage(entries []directoryassets.Entry, request, 
 	if a.v1 != nil {
 		return a.v1.AddPage(entries, request, response)
 	}
-	return a.v2.AddPage(entries, request, response)
+	if a.v2 != nil {
+		return a.v2.AddPage(entries, request, response)
+	}
+	return a.v3.AddPage(entries, request, response)
 }
 
 func (a directoryAccumulator) Result() (directoryReadResult, error) {
@@ -162,8 +180,10 @@ func (a directoryAccumulator) Result() (directoryReadResult, error) {
 	var err error
 	if a.v1 != nil {
 		out.Objects, err = a.v1.Result()
-	} else {
+	} else if a.v2 != nil {
 		out.objectsV2, err = a.v2.Result()
+	} else {
+		out.objectsV3, err = a.v3.Result()
 	}
 	return out, err
 }
@@ -174,5 +194,8 @@ func (a directoryAccumulator) Discard() {
 	}
 	if a.v2 != nil {
 		a.v2.Discard()
+	}
+	if a.v3 != nil {
+		a.v3.Discard()
 	}
 }
