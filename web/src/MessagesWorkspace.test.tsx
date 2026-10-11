@@ -60,7 +60,9 @@ beforeEach(() => {
           menu: [{ mark: "tasks", auth: { readable: true, writeable: false } }],
         });
       if (url === "/api/access/check")
-        return json({ results: [true, true, true, true, true] });
+        return json({
+          results: [true, true, true, true, true, true, true, true],
+        });
       if (url === "/api/messages/query") return query(init);
       if (url.startsWith("/api/messages/page?")) return page(url);
       if (url.startsWith("/api/messages/locate?")) return locate();
@@ -335,7 +337,7 @@ it("requires exact route checks and disables unauthorized locate", async () => {
   const delegate = vi.mocked(fetch).getMockImplementation()!;
   vi.mocked(fetch).mockImplementation((url, init) =>
     url === "/api/access/check"
-      ? json({ results: [true, true, false, true, true] })
+      ? json({ results: [true, true, false, true, true, true, true, true] })
       : delegate(url, init),
   );
   await mount();

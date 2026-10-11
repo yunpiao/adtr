@@ -15,6 +15,9 @@ export const messageOperations = [
   "GET /api/messages/locate",
   "POST /api/messages/read",
   "GET /api/messages/read-operation",
+  "POST /api/messages/bulk-read",
+  "GET /api/messages/bulk-read-operation",
+  "POST /api/messages/bulk-read-cancel",
 ] as const;
 export interface MessageEntry {
   messageId: string;
@@ -120,7 +123,7 @@ export function validMessageSnapshot(v: unknown): v is MessageSnapshot {
     new Set(v.items.map((row) => row.messageId)).size === v.items.length
   );
 }
-async function request(
+export async function messageRequest(
   path: string,
   signal: AbortSignal,
   body?: unknown,
@@ -258,13 +261,13 @@ export function validMessageReadReceipt(
 export const messageAPI = {
   async markRead(input: MessageReadInput, csrf: string, signal: AbortSignal) {
     if (!validMessageReadInput(input)) throw new ApiError("invalid_input");
-    const value = await request("/read", signal, input, csrf);
+    const value = await messageRequest("/read", signal, input, csrf);
     if (!validMessageReadReceipt(value, input)) return fail();
     return value;
   },
   async readOperation(input: MessageReadInput, signal: AbortSignal) {
     if (!validMessageReadInput(input)) throw new ApiError("invalid_input");
-    const value = await request(
+    const value = await messageRequest(
       `/read-operation?${new URLSearchParams({ operationId: input.operationId })}`,
       signal,
     );
@@ -273,7 +276,7 @@ export const messageAPI = {
   },
   async query(query: MessageQuery, csrf: string, signal: AbortSignal) {
     const body = messageQueryBody(query),
-      value = await request("/query", signal, body, csrf);
+      value = await messageRequest("/query", signal, body, csrf);
     if (
       !validMessageSnapshot(value) ||
       value.offset !== 0 ||
@@ -299,7 +302,7 @@ export const messageAPI = {
       offset: String(offset),
       limit: String(snapshot.limit),
     });
-    const value = await request(`/page?${params}`, signal);
+    const value = await messageRequest(`/page?${params}`, signal);
     if (
       !validMessageSnapshot(value) ||
       value.resultId !== snapshot.resultId ||
@@ -335,7 +338,7 @@ export const messageAPI = {
       messageId: id,
       limit: String(snapshot.limit),
     });
-    const value = await request(`/locate?${params}`, signal);
+    const value = await messageRequest(`/locate?${params}`, signal);
     if (
       !object(value) ||
       !exact(value, ["resultId", "found", "index", "page"]) ||
