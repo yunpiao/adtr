@@ -680,7 +680,8 @@ func TestUserAssetsV2PublishedExactSAMCreatedRangeAndStablePinnedSort(t *testing
 	empty := directoryV2RuntimeObservation()
 	defer empty.Discard()
 	directoryassets.ClearStoredObjectsV2(empty.Objects)
-	empty.Objects = nil
+	// The codec distinguishes an observed empty collection from a missing body.
+	empty.Objects = []directoryassets.StoredObjectV2{}
 	fresh := publishUserAssetsV2(f, empty, "new-filter-source")
 	q.PageIdx = 1
 	q.SAMAccountName = "same-observed-sam"
