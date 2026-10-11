@@ -155,6 +155,17 @@ async function captureSystemViews(
   ] as const) {
     await page.setViewportSize(viewport);
     await assertView();
+    const heading = page.locator(".system-soc-heading");
+    const headingBounds = await heading.boundingBox();
+    expect(headingBounds).not.toBeNull();
+    for (const child of await heading.locator(":scope > *").all()) {
+      const bounds = await child.boundingBox();
+      expect(bounds).not.toBeNull();
+      expect(bounds!.y).toBeGreaterThanOrEqual(headingBounds!.y);
+      expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(
+        headingBounds!.y + headingBounds!.height,
+      );
+    }
     await expect(page.locator('input[type="password"]')).toHaveCount(0);
     for (const label of ["未使用的认证器验证码", "认证器验证码", "设置密钥"])
       await expect(page.getByLabel(label, { exact: true })).toHaveCount(0);

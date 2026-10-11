@@ -4,6 +4,9 @@
   color: #19334d;
 }
 .system-soc .system-soc-heading {
+  height: auto;
+  border: 0;
+  background: transparent;
   display: flex;
   justify-content: space-between;
   align-items: center;
