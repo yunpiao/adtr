@@ -47,7 +47,7 @@ export function expectedComputers() {
       kind: "computer",
       objectClass: [
         "computer",
-        "organizationalPerson",
+        "organizationalperson",
         "person",
         "top",
         "user",

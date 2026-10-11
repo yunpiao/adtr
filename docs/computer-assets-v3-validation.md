@@ -70,3 +70,17 @@ gates remain the way to establish the registered producer/PG/browser evidence.
 This draft depends on PR126's exact v3 parser, not PR128's collection UI. Final
 retarget to main must preserve PR128's additive navigation/harness wiring if it
 has merged; the resulting union then has46 required jobs rather than this43.
+
+## First real CI findings (run154, head f1338d6)
+
+Auth shard1 reached the computer HTTP test but the staged read returned the generic
+404 text response. The shared stageV3 helper rebuilds the fixture mux/store; the
+computer-specific route must be remounted after that reset, as in the existing
+user-v3 suite. A test-only remount is prepared; production registration is unchanged.
+
+The standard computer browser chain reached its first exact API facts comparison.
+Its oracle incorrectly expected mixed-case organizationalPerson; the established
+decoder lowercases/sorts objectClass and returned organizationalperson. The oracle
+is corrected without reducing deep equality, and both real in-process TLS fixture
+modes now assert the canonical class list. These local checks do not establish a
+passing real PG/browser rerun; remaining runtime and visual gates still apply.

@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"github.com/yunpiao/adtr/internal/directoryassets"
 	"io"
+	"slices"
 	"testing"
 )
 
@@ -67,6 +68,9 @@ func TestComputerAssetsV3RealTLSBERClosedFactsAndPages(t *testing.T) {
 				t.Fatal(counts)
 			}
 			firstRow, _ := directoryassets.ProjectV3(rows[0])
+			if !slices.Equal(firstRow.Classes, []string{"computer", "organizationalperson", "person", "top", "user"}) {
+				t.Fatal("objectClass must use existing decoder lowercase/sort contract", firstRow.Classes)
+			}
 			if firstRow.PrimaryGroupID == nil || *firstRow.PrimaryGroupID != 0 || firstRow.UserAccountControl == nil || *firstRow.UserAccountControl != 0 || firstRow.WhenCreated == nil || *firstRow.WhenCreated != "0001-01-01T00:00:00Z" || firstRow.ServicePrincipalName[1] != "host/a\x00\n😀<script>" {
 				t.Fatal("lost boundary facts")
 			}

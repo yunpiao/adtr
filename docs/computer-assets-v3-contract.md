@@ -65,7 +65,7 @@ and source appear iff available. observedComputerCount=null with no eligible
 observation, else kind=computer count before predicates. Thus unavailable,
 observed zero computers, and nonzero observed computers with zero matches are
 distinct. This is a count within this observation, not a live/domain-wide count.
-Each row is unchanged closed PublicObjectV3 with kind=computer: GUID/DN/kind/
+Each row reuses the closed PublicObjectV3 projection unchanged, with kind=computer: GUID/DN/kind/
 objectClass/SAM/UAC/SID/mail/description/whenCreated/primaryGroupID/SPN. Optional
 facts remain null when requested but unreturned, and real 0 remains 0. No aliases
 id/name/status or physical-device identity are manufactured.
@@ -121,3 +121,12 @@ main CI are required before merge. Missing Docker/DSN/browser execution is
 blocked, never passed. No new schema/producer/gate/default change, real AD,
 eight-Windows compatibility, target capacity, export/address relationships,
 production deployment, complete feature parity or product acceptance is claimed.
+
+### Canonical facts versus LDAP bytes
+
+ObjectClass follows the existing decoder contract: ASCII class names are lowercased,
+deduplicated by rejection and sorted. These are canonical observed facts, not
+unchanged LDAP attribute bytes. The computer list adds no further transformation.
+The RID is the decoded uint32 value (including zero); SPN values preserve their
+validated strings and order before safe display escaping. Neither makes claims
+about device identity or relationships.

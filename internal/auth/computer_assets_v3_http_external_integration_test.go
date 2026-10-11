@@ -49,7 +49,10 @@ func TestComputerAssetsV3MigratedHTTPCurrentAuthorityAndObservedFacts(t *testing
 		o.Objects[i].Base.SAMAccountName = &sam
 	}
 	o.Objects = append(o.Objects, directoryassets.StoredObjectV3{Base: directoryassets.Object{GUID: "ffffffff-0000-0000-0000-000000000001", DN: "CN=user,DC=one,DC=invalid", Kind: directoryassets.User, Classes: []string{"top", "user"}}})
+	// stageV3 installs the synthetic executor and rebuilds the fixture mux.
+	// Restore this endpoint before testing staged and committed reads.
 	run := f.stageV3(o)
+	mountComputerHTTP(f)
 	path = computerHTTPPath + "?" + userAssetsV3HTTPQuery("2")
 	staged := operationalDecode[domains.ComputerAssetsV3List](t, f.request("directory-http-reader", path, nil, 200).Body.Bytes())
 	if staged.Available {
