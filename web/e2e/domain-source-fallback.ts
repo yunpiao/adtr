@@ -4,6 +4,7 @@ import {
   type Page,
   type Route,
 } from "@playwright/test";
+import { sourceProbeDeadline } from "./domain-source-delivery-probe";
 import { useNativeTabLifecycle } from "./native-tab-lifecycle";
 
 export async function sourceFallbackPage(
@@ -14,13 +15,16 @@ export async function sourceFallbackPage(
   // intent. Do not manufacture intent or identity in browser storage.
   let page: Page;
   if (opener) {
-    const opened = context.waitForEvent("page");
-    await opener.evaluate(() => {
-      window.open("about:blank", "_blank");
-    });
+    const opened = context.waitForEvent("page", { timeout: 20_000 });
+    void opened.catch(() => {});
+    await sourceProbeDeadline(
+      opener.evaluate(() => {
+        window.open("about:blank", "_blank");
+      }),
+    );
     page = await opened;
-  } else page = await context.newPage();
-  await useNativeTabLifecycle(page);
+  } else page = await sourceProbeDeadline(context.newPage());
+  await sourceProbeDeadline(useNativeTabLifecycle(page));
   await page.addInitScript(() => {
     Object.defineProperty(window, "BroadcastChannel", {
       configurable: true,
@@ -94,6 +98,35 @@ export function sourceVerificationFailure(error: unknown) {
   return "other";
 }
 
+export async function sourceDiagnosticState(
+  page: Pick<Page, "isClosed" | "evaluate">,
+) {
+  let diagnosticTimer: ReturnType<typeof setTimeout> | undefined;
+  return page.isClosed()
+    ? { closed: true }
+    : await Promise.race([
+        page
+          .evaluate(() => {
+            const main = document.querySelector<HTMLElement>("main.soc-main");
+            return {
+              closed: false,
+              visible: document.visibilityState,
+              focused: document.hasFocus(),
+              mainExists: !!main,
+              mainHidden: main?.hidden ?? null,
+              mainInert: main?.inert ?? null,
+            };
+          })
+          .catch(() => ({ stateReadable: false })),
+        new Promise<{ stateReadable: false }>((resolve) => {
+          diagnosticTimer = setTimeout(
+            () => resolve({ stateReadable: false }),
+            1_000,
+          );
+        }),
+      ]).finally(() => clearTimeout(diagnosticTimer));
+}
+
 export class SourceFocusVerificationError extends Error {}
 
 export async function sourceFallbackRefocus(page: Page, actor: number) {
@@ -109,11 +142,13 @@ export async function sourceFallbackRefocus(page: Page, actor: number) {
         })),
       )
       .toEqual({ visible: "hidden", focused: false });
-    await page.evaluate(() => {
-      (
-        window as unknown as { __sourceLifecycle: unknown[] }
-      ).__sourceLifecycle.length = 0;
-    });
+    await sourceProbeDeadline(
+      page.evaluate(() => {
+        (
+          window as unknown as { __sourceLifecycle: unknown[] }
+        ).__sourceLifecycle.length = 0;
+      }),
+    );
     let release!: () => void;
     const gate = new Promise<void>((resolve) => {
       release = resolve;
@@ -149,18 +184,20 @@ export async function sourceFallbackRefocus(page: Page, actor: number) {
     await page.route(path, hold);
     const verificationRequested = page.waitForRequest(
       (request) => new URL(request.url()).pathname === "/api/auth/me",
+      { timeout: 20_000 },
     );
     const verified = page.waitForResponse(
       (response) =>
         new URL(response.url()).pathname === "/api/auth/me" &&
         response.request().method() === "GET" &&
         response.status() === 200,
+      { timeout: 20_000 },
     );
     void verificationRequested.catch(() => {});
     void verified.catch(() => {});
     try {
       phase = "trusted_refocus";
-      await page.bringToFront();
+      await sourceProbeDeadline(page.bringToFront());
       await verificationRequested;
       phase = "checking_hidden_inert";
       await expect(page.locator("main.soc-main")).toHaveAttribute("hidden", "");
@@ -178,7 +215,8 @@ export async function sourceFallbackRefocus(page: Page, actor: number) {
     phase = "read_actual_me";
     expect(continuationFailures).toEqual([]);
     const response = await verified;
-    const actualActor = (await response.json()).ID as number;
+    const actualActor = (await sourceProbeDeadline(response.json()))
+      .ID as number;
     expect(actualActor).toBe(actor);
     phase = "trusted_lifecycle_settled";
     await expect
@@ -201,10 +239,12 @@ export async function sourceFallbackRefocus(page: Page, actor: number) {
     await expect(
       page.getByRole("status").filter({ hasText: "正在核验当前会话" }),
     ).toHaveCount(0);
-    const lifecycle = await page.evaluate(
-      () =>
-        (window as unknown as { __sourceLifecycle: unknown[] })
-          .__sourceLifecycle,
+    const lifecycle = await sourceProbeDeadline(
+      page.evaluate(
+        () =>
+          (window as unknown as { __sourceLifecycle: unknown[] })
+            .__sourceLifecycle,
+      ),
     );
     return {
       actorID: actualActor,
@@ -214,23 +254,14 @@ export async function sourceFallbackRefocus(page: Page, actor: number) {
       lifecycle,
     };
   } catch (error) {
-    const state = page.isClosed()
-      ? { closed: true }
-      : await page
-          .evaluate(() => {
-            const main = document.querySelector<HTMLElement>("main.soc-main");
-            return {
-              closed: false,
-              visible: document.visibilityState,
-              focused: document.hasFocus(),
-              mainExists: !!main,
-              mainHidden: main?.hidden ?? null,
-              mainInert: main?.inert ?? null,
-            };
-          })
-          .catch(() => ({ stateReadable: false }));
     if (!failures.length)
       failures.push({ phase, category: sourceVerificationFailure(error) });
+    // Emit fixed diagnostic fields before asking a possibly stalled page.
+    console.error(
+      "Source focus verification failed",
+      JSON.stringify({ failures, continuationFailures }),
+    );
+    const state = await sourceDiagnosticState(page);
     throw new SourceFocusVerificationError(
       `Source focus verification failed: ${JSON.stringify({ failures, continuationFailures, state })}`,
     );

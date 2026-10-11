@@ -1,6 +1,24 @@
 import { expect, type Page, type Request } from "@playwright/test";
 import { createHash } from "node:crypto";
 
+// Test-control reads must fail locally rather than consume the entire suite.
+export async function sourceProbeDeadline<T>(promise: Promise<T>): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error("Source probe control read timed out")),
+          20_000,
+        );
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 // Test-only post-consumption scheduling seam. Native fetch, its promise,
 // Response, json parser and AbortSignal are preserved. No production hook exists.
 export async function holdConsumedSource(
@@ -38,8 +56,8 @@ export async function holdConsumedSource(
     { timeout: 20_000 },
   );
   void nativeResponse.catch(() => {});
-  const control = await page
-    .evaluateHandle(
+  const control = await sourceProbeDeadline(
+    page.evaluateHandle(
       ({ fullURL, actor }) => {
         const originalDescriptor = Object.getOwnPropertyDescriptor(
           Response.prototype,
@@ -138,11 +156,11 @@ export async function holdConsumedSource(
         };
       },
       { fullURL, actor },
-    )
-    .catch((error) => {
-      page.off("requestfinished", finished);
-      throw error;
-    });
+    ),
+  ).catch((error) => {
+    page.off("requestfinished", finished);
+    throw error;
+  });
   let originalSHA256 = "";
   let nativeParsedSHA256 = "";
   return {
@@ -150,9 +168,9 @@ export async function holdConsumedSource(
       const response = await nativeResponse;
       expect(response.status()).toBe(200);
       expect(response.headers()["x-adtr-user-id"]).toBe(String(actor));
-      expect(await response.finished()).toBeNull();
+      expect(await sourceProbeDeadline(response.finished())).toBeNull();
       await expect.poll(() => matched === response.request()).toBe(true);
-      const bytes = await response.body();
+      const bytes = await sourceProbeDeadline(response.body());
       expect(bytes.length).toBeLessThan(256 * 1024);
       const value: unknown = JSON.parse(bytes.toString("utf8"));
       check(value);
@@ -183,7 +201,7 @@ export async function holdConsumedSource(
         event: "verified_session_before_release",
         nodeMilliseconds: verified.verifiedAtNode - started,
       });
-      await control.evaluate((c) => c.release());
+      await sourceProbeDeadline(control.evaluate((c) => c.release()));
       await expect
         .poll(() => control.evaluate((c) => c.read().released))
         .toBe(true);
@@ -191,7 +209,9 @@ export async function holdConsumedSource(
         event: "application_value_released",
         nodeMilliseconds: performance.now() - started,
       });
-      const evidence = await control.evaluate((c) => c.read());
+      const evidence = await sourceProbeDeadline(
+        control.evaluate((c) => c.read()),
+      );
       expect(evidence).toMatchObject({
         parsedSHA256: nativeParsedSHA256,
         error: false,
@@ -209,9 +229,9 @@ export async function holdConsumedSource(
     async cleanup() {
       page.off("requestfinished", finished);
       try {
-        await control.evaluate((c) => c.close());
+        await sourceProbeDeadline(control.evaluate((c) => c.close()));
       } finally {
-        await control.dispose();
+        await sourceProbeDeadline(control.dispose());
       }
     },
   };

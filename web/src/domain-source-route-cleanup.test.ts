@@ -7,7 +7,9 @@ import { dirname, join } from "node:path";
 import {
   drainSourceVerificationRoutes,
   sourceVerificationFailure,
+  sourceDiagnosticState,
 } from "../e2e/domain-source-fallback";
+import { sourceProbeDeadline } from "../e2e/domain-source-delivery-probe";
 const require = createRequire(import.meta.url);
 const root = dirname(require.resolve("playwright-core/package.json"));
 const { Page } = require(join(root, "lib/client/page.js"));
@@ -142,4 +144,58 @@ test("diagnostics expose fixed classes, never raw response or request details", 
   expect(
     sourceVerificationFailure(new Error("unexpected private-canary")),
   ).toBe("other");
+});
+
+test("route drain times out without removing an active route or claiming success", async () => {
+  vi.useFakeTimers();
+  const pending = deferred();
+  const active = new Set([pending.promise]);
+  void pending.promise.then(() => active.delete(pending.promise));
+  const unrouteAll = vi.fn(async () => {});
+  try {
+    const result = expect(
+      drainSourceVerificationRoutes({ unrouteAll }, () => {}, active),
+    ).rejects.toThrow("Source verification route drain timed out");
+    await vi.advanceTimersByTimeAsync(10_000);
+    await result;
+    expect(unrouteAll).not.toHaveBeenCalled();
+    pending.resolve();
+    await vi.advanceTimersByTimeAsync(0);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("safe failure diagnostics finish even when browser evaluation never responds", async () => {
+  vi.useFakeTimers();
+  try {
+    const result = sourceDiagnosticState({
+      isClosed: () => false,
+      evaluate: (() => new Promise(() => {})) as never,
+    });
+    await vi.advanceTimersByTimeAsync(1_000);
+    await expect(result).resolves.toEqual({ stateReadable: false });
+    expect(vi.getTimerCount()).toBe(0);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("probe body or control reads time out locally without replacing the failure", async () => {
+  vi.useFakeTimers();
+  try {
+    const result = expect(
+      sourceProbeDeadline(new Promise(() => {})),
+    ).rejects.toThrow("Source probe control read timed out");
+    await vi.advanceTimersByTimeAsync(20_000);
+    await result;
+    expect(vi.getTimerCount()).toBe(0);
+    const original = new Error("controlled body failure");
+    await expect(sourceProbeDeadline(Promise.reject(original))).rejects.toBe(
+      original,
+    );
+    expect(vi.getTimerCount()).toBe(0);
+  } finally {
+    vi.useRealTimers();
+  }
 });

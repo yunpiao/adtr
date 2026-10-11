@@ -3,6 +3,7 @@ import {
   sourceFallbackPage,
   sourceFallbackRefocus,
   SourceFocusVerificationError,
+  sourceVerificationFailure,
 } from "./domain-source-fallback";
 import {
   requireSameNativeWindow,
@@ -929,6 +930,9 @@ test("unconfigured bootstrap, explicit own-role reference, real LDAP consumption
     0,
   );
   await test.step("isolate an unresolved source receipt, candidate draft and late reads across real account switching", async () => {
+    // Only this added isolation scenario tightens the default unbounded actions.
+    context.setDefaultTimeout(20_000);
+    context.setDefaultNavigationTimeout(20_000);
     // Both existing accounts have this domain's explicit scope. The boundary
     // under test is the original operator's receipt and browser draft, not a
     // fabricated denial of B's independently authorized domain reads.
@@ -947,6 +951,18 @@ test("unconfigured bootstrap, explicit own-role reference, real LDAP consumption
       foreignReceiptReads: string[] = [];
     const outcomes: { outcome: string }[] = [];
     const cleanupErrors: unknown[] = [];
+    let stage = "capture_native_receipt";
+    const stageStarted = performance.now();
+    const mark = (next: string) => {
+      stage = next;
+      console.log(
+        "Source B2 checkpoint",
+        JSON.stringify({
+          stage,
+          elapsedMilliseconds: Math.round(performance.now() - stageStarted),
+        }),
+      );
+    };
     let switched = false;
     let scenarioFailed = false,
       scenarioFailure: unknown;
@@ -955,6 +971,7 @@ test("unconfigured bootstrap, explicit own-role reference, real LDAP consumption
       extra.on("pageerror", (error) => consoles.push(error.message));
     }
     try {
+      mark("capture_native_receipt");
       const receipt = await holdSourceRead(
         page,
         (url) => url.pathname === "/api/domains/credential-source/mutation",
@@ -982,6 +999,7 @@ test("unconfigured bootstrap, explicit own-role reference, real LDAP consumption
         }),
       ).toBeVisible();
 
+      mark("prepare_native_candidates");
       await draft.goto("/");
       await expect(draft.locator(".signed-in strong")).toHaveText(username);
       await openSource(draft);
@@ -1040,6 +1058,7 @@ test("unconfigured bootstrap, explicit own-role reference, real LDAP consumption
         }),
       ).toHaveAttribute("aria-pressed", "true");
 
+      mark("prepare_native_source");
       await detail.goto("/");
       await expect(detail.locator(".signed-in strong")).toHaveText(username);
       await openSource(detail);
@@ -1069,6 +1088,7 @@ test("unconfigured bootstrap, explicit own-role reference, real LDAP consumption
       // Additional tabs deliberately lack both notification channels. Their
       // original response bodies finish in A; only the parsed application value
       // is delayed. Existing native-cancellation tabs above remain unchanged.
+      mark("consume_fallback_receipt");
       const fallbackReceipt = await sourceFallbackPage(context, page);
       fallbackTabs.push(fallbackReceipt);
       const consumedReceipt = await holdConsumedSource(
@@ -1084,6 +1104,7 @@ test("unconfigured bootstrap, explicit own-role reference, real LDAP consumption
           receipt: { operation: "reference", domainId, replayed: true },
         });
       });
+      mark("consume_fallback_candidates");
       const fallbackCandidates = await sourceFallbackPage(context);
       fallbackTabs.push(fallbackCandidates);
       await openSource(fallbackCandidates);
@@ -1118,6 +1139,7 @@ test("unconfigured bootstrap, explicit own-role reference, real LDAP consumption
           ]),
         });
       });
+      mark("consume_fallback_source");
       const fallbackSource = await sourceFallbackPage(context);
       fallbackTabs.push(fallbackSource);
       await openSource(fallbackSource);
@@ -1138,6 +1160,7 @@ test("unconfigured bootstrap, explicit own-role reference, real LDAP consumption
           reference: { accountId, label },
         });
       });
+      mark("prepare_shared_session_switch");
       await requireSameNativeWindow([...fallbackTabs, switching]);
       await switching.goto("/");
       await switching.bringToFront();
@@ -1177,6 +1200,7 @@ test("unconfigured bootstrap, explicit own-role reference, real LDAP consumption
           ),
         );
       }
+      mark("login_scoped_B");
       await login(switching, bootstrapActor.username, bootstrapActor.password);
       await fillSecret(
         switching.getByLabel("二次认证验证码", { exact: true }),
@@ -1197,6 +1221,7 @@ test("unconfigured bootstrap, explicit own-role reference, real LDAP consumption
           bootstrapActor.username,
         );
 
+      mark("verify_scoped_B_backend");
       const denied = await context.request.get(
         `/api/domains/credential-source/mutation?idempotencyKey=${committedKey}`,
       );
@@ -1221,6 +1246,7 @@ test("unconfigured bootstrap, explicit own-role reference, real LDAP consumption
         credentialSource: "operation_account",
         reference: { accountId, explicitlyGranted: true, eligible: true },
       });
+      mark("release_native_reads");
       for (const response of held) outcomes.push(await response.release());
       for (const tab of oldTabs) {
         await expect(
@@ -1238,11 +1264,13 @@ test("unconfigured bootstrap, explicit own-role reference, real LDAP consumption
       // A's metadata-only recovery intent stays owner-keyed for A's return. B
       // neither claims it nor creates a copy under B's own identity.
       expect((await safeBrowser()).session).toEqual(pending.session);
+      mark("verify_scoped_B_domain");
       await navigateTo(draft, "域连接");
       await expect(
         draft.getByRole("button", { name: `查看 ${domain}`, exact: true }),
       ).toBeVisible();
       await safeBrowser(draft);
+      mark("capture_safe_scoped_B");
       const switchScreenshot = await draft.screenshot({
         path: testInfo.outputPath("source-account-switch.png"),
         fullPage: true,
@@ -1267,6 +1295,7 @@ test("unconfigured bootstrap, explicit own-role reference, real LDAP consumption
       }
       witnesses.length = 0;
       await navigateTo(switching, "退出登录");
+      mark("login_no_scope_B");
       await login(switching, noScopeUsername, noScopePassword);
       await fillSecret(
         switching.getByLabel("二次认证验证码", { exact: true }),
@@ -1279,6 +1308,7 @@ test("unconfigured bootstrap, explicit own-role reference, real LDAP consumption
         noScopeUsername,
       );
       expect((await readJSON(context, "/api/auth/me")).ID).toBe(noScopeId);
+      mark("verify_no_scope_B_backend");
       const noScopeSession = await readJSON(context, "/api/auth/me");
       const functionCheck = await context.request.post("/api/access/check", {
         headers: {
@@ -1316,11 +1346,13 @@ test("unconfigured bootstrap, explicit own-role reference, real LDAP consumption
         expect(denied.headers()["cache-control"]).toBe("no-store");
         expect(await denied.json()).toEqual({ error: "not_found" });
       }
+      mark("refocus_fallback_tabs");
       for (let index = 0; index < fallbackTabs.length; index++) {
         const tab = fallbackTabs[index];
         // Real hidden tabs still have A's view because both notice mechanisms
         // failed. A trusted foreground event must invoke the production /me.
         await expect(tab.locator(".signed-in strong")).toHaveText(username);
+        mark(`refocus_${["receipt", "candidates", "source"][index]}`);
         const lifecycle = await sourceFallbackRefocus(tab, noScopeId);
         await expect(tab.locator(".signed-in strong")).toHaveText(
           noScopeUsername,
@@ -1333,6 +1365,7 @@ test("unconfigured bootstrap, explicit own-role reference, real LDAP consumption
           committedKey,
         );
         witnesses.push(witness);
+        mark(`release_consumed_${["receipt", "candidates", "source"][index]}`);
         consumedEvidence.push({
           target: ["receipt", "candidates", "source"][index],
           lifecycle,
@@ -1376,6 +1409,7 @@ test("unconfigured bootstrap, explicit own-role reference, real LDAP consumption
       expect(browserWrites).toEqual([]);
       expect(foreignReceiptReads).toEqual([]);
       expect(sourcePosts).toBe(1);
+      mark("write_evidence");
       const root = execFileSync("git", ["rev-parse", "--show-toplevel"], {
         encoding: "utf8",
       }).trim();
@@ -1429,6 +1463,7 @@ test("unconfigured bootstrap, explicit own-role reference, real LDAP consumption
           2,
         ),
       );
+      mark("restore_A");
       switched = false;
       await navigateTo(switching, "退出登录");
       await login(switching, username, password);
@@ -1439,13 +1474,23 @@ test("unconfigured bootstrap, explicit own-role reference, real LDAP consumption
       await switching
         .getByRole("button", { name: "登录", exact: true })
         .click();
+      mark("verify_restored_A");
       await expect(page.locator(".signed-in strong")).toHaveText(username);
       expect((await readJSON(context, "/api/auth/me")).ID).toBe(actorId);
     } catch (error) {
       scenarioFailed = true;
       scenarioFailure = error;
+      console.error(
+        "Source B2 failed",
+        JSON.stringify({ stage, category: sourceVerificationFailure(error) }),
+      );
     } finally {
+      const failedStage = stage;
+      mark("cleanup");
+      stage = failedStage;
+      let cleanupStep = 0;
       const cleanup = async (operation: () => Promise<unknown>) => {
+        const step = cleanupStep++;
         try {
           await bounded(
             operation(),
@@ -1454,6 +1499,13 @@ test("unconfigured bootstrap, explicit own-role reference, real LDAP consumption
           );
         } catch (error) {
           cleanupErrors.push(error);
+          console.error(
+            "Source B2 cleanup failed",
+            JSON.stringify({
+              step,
+              category: sourceVerificationFailure(error),
+            }),
+          );
         }
       };
       for (const response of consumedReads)
@@ -1466,13 +1518,38 @@ test("unconfigured bootstrap, explicit own-role reference, real LDAP consumption
       for (const { tab, listener } of listeners) tab.off("request", listener);
       for (const extra of [draft, detail, switching, ...fallbackTabs])
         await cleanup(() => extra.close());
+      context.setDefaultTimeout(0);
+      context.setDefaultNavigationTimeout(0);
     }
     if (scenarioFailed || cleanupErrors.length)
       throw new AggregateError(
-        [...(scenarioFailed ? [scenarioFailure] : []), ...cleanupErrors],
+        [
+          ...(scenarioFailed
+            ? [
+                new Error(
+                  scenarioFailure instanceof SourceFocusVerificationError
+                    ? scenarioFailure.message
+                    : JSON.stringify({
+                        stage,
+                        category: sourceVerificationFailure(scenarioFailure),
+                      }),
+                ),
+              ]
+            : []),
+          ...cleanupErrors.map(
+            (error, step) =>
+              new Error(
+                JSON.stringify({
+                  stage: "cleanup",
+                  step,
+                  category: sourceVerificationFailure(error),
+                }),
+              ),
+          ),
+        ],
         scenarioFailure instanceof SourceFocusVerificationError
           ? `Real source account-switch isolation failed; ${scenarioFailure.message}`
-          : "Real source account-switch isolation failed",
+          : `Real source account-switch isolation failed: ${JSON.stringify({ stage, category: sourceVerificationFailure(scenarioFailure), cleanupFailures: cleanupErrors.map(sourceVerificationFailure) })}`,
       );
   });
   // Finish the genuine receipt read/abort before removing interception and
