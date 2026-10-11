@@ -806,6 +806,43 @@ describe("credential governance views", () => {
     ).toBe(false);
     expect(screen.getByRole("button", { name: "审阅角色授权" })).toBeDisabled();
   });
+  it("contains both v3 governance tables in named keyboard-scroll regions", async () => {
+    grants = [grant()];
+    render(
+      <DirectoryV3CredentialUseWorkspace
+        profile={profile}
+        sessionChanged={vi.fn()}
+      />,
+    );
+    const accounts = await screen.findByRole("table", {
+      name: "具有已保存目录读取授权的账户",
+    });
+    const accountScroll = screen.getByRole("region", {
+      name: "字典 3 授权账户表，可横向滚动",
+    });
+    expect(accountScroll).toContainElement(accounts);
+    expect(accountScroll).toHaveAttribute("tabindex", "0");
+    expect(accountScroll).toHaveClass(
+      "table-scroll",
+      "directory-v3-governance-scroll",
+    );
+    click("清理 测试凭据");
+    const roles = await screen.findByRole("table", {
+      name: "已保存的角色目录读取授权",
+    });
+    const roleScroll = screen.getByRole("region", {
+      name: "字典 3 角色授权表，可横向滚动",
+    });
+    expect(roleScroll).toContainElement(roles);
+    expect(roleScroll).toHaveAttribute("tabindex", "0");
+    expect(roleScroll).toHaveClass(
+      "table-scroll",
+      "directory-v3-governance-scroll",
+    );
+    expect(roleScroll).toContainElement(
+      screen.getByRole("button", { name: "撤销 platform_admin" }),
+    );
+  });
   it("honors deny path checks for the cleanup catalogue", async () => {
     paths[0] = false;
     render(

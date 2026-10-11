@@ -1516,8 +1516,41 @@ test("real dictionary-v3 UI → authenticated API → worker → paged synthetic
     "directory-v3-mobile-governance.png",
     "exact-purpose governance",
   );
+  const grantScroll = page.getByRole("region", {
+    name: "字典 3 角色授权表，可横向滚动",
+    exact: true,
+  });
+  const revokeButton = grantScroll.getByRole("button", {
+    name: "撤销 platform_admin",
+    exact: true,
+  });
+  await grantScroll.focus();
+  await expect(grantScroll).toBeFocused();
+  await grantScroll.press("ArrowRight");
+  expect(
+    await grantScroll.evaluate(
+      (element) => getComputedStyle(element).outlineStyle,
+    ),
+  ).toBe("solid");
+  await expect
+    .poll(() => grantScroll.evaluate((element) => element.scrollLeft))
+    .toBeGreaterThan(0);
+  // Native keyboard focus must reveal the rightmost action without page scroll.
+  await grantScroll.press("Tab");
+  await expect(revokeButton).toBeFocused();
+  await expect(revokeButton).toBeInViewport({ ratio: 1 });
+  await capture(
+    "directory-v3-mobile-governance-action.png",
+    "keyboard-reachable revoke action",
+  );
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.evaluate(() => scrollTo(0, 0));
+  expect(
+    await grantScroll.evaluate(
+      (element) => element.scrollWidth <= element.clientWidth,
+    ),
+  ).toBe(true);
+  await expect(revokeButton).toBeInViewport({ ratio: 1 });
   await capture(
     "directory-v3-desktop-governance.png",
     "exact-purpose governance",

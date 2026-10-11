@@ -1,3 +1,4 @@
+import "./directory-v3-controls.css";
 import { useEffect, useState, type FormEvent } from "react";
 import { ApiError, type Profile } from "./api";
 import { accessRequest, queryString, type Permission } from "./access-api";
@@ -246,35 +247,42 @@ function CleanupCatalogue({ context }: { context: Context }) {
           {read.data && (
             <>
               {read.data.List.length ? (
-                <table>
-                  <caption>具有已保存目录读取授权的账户</caption>
-                  <thead>
-                    <tr>
-                      <th>账户</th>
-                      <th>所属域</th>
-                      <th>操作</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {read.data.List.map((account) => (
-                      <tr key={account.accountId}>
-                        <th scope="row">
-                          {account.label || account.accountId}
-                          <small className="block">{account.accountId}</small>
-                        </th>
-                        <td>{account.domain}</td>
-                        <td>
-                          <button
-                            disabled={!!pending}
-                            onClick={() => setAccountId(account.accountId)}
-                          >
-                            清理 {account.label || account.accountId}
-                          </button>
-                        </td>
+                <div
+                  className="table-scroll directory-v3-governance-scroll"
+                  role="region"
+                  aria-label="字典 3 授权账户表，可横向滚动"
+                  tabIndex={0}
+                >
+                  <table>
+                    <caption>具有已保存目录读取授权的账户</caption>
+                    <thead>
+                      <tr>
+                        <th>账户</th>
+                        <th>所属域</th>
+                        <th>操作</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {read.data.List.map((account) => (
+                        <tr key={account.accountId}>
+                          <th scope="row">
+                            {account.label || account.accountId}
+                            <small className="block">{account.accountId}</small>
+                          </th>
+                          <td>{account.domain}</td>
+                          <td>
+                            <button
+                              disabled={!!pending}
+                              onClick={() => setAccountId(account.accountId)}
+                            >
+                              清理 {account.label || account.accountId}
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               ) : (
                 <p role="status">当前范围内没有需要清理的已保存授权。</p>
               )}
@@ -480,50 +488,58 @@ function GrantManagement({
             {grants.data.account.credentialRevision}
           </p>
           {grants.data.grants.length ? (
-            <table>
-              <caption>已保存的角色目录读取授权</caption>
-              <thead>
-                <tr>
-                  <th>角色</th>
-                  <th>已保存授权</th>
-                  <th>授权版本 / 凭据版本</th>
-                  <th>操作</th>
-                </tr>
-              </thead>
-              <tbody>
-                {grants.data.grants.map((grant) => (
-                  <tr key={grant.roleId}>
-                    <th scope="row">
-                      {grant.roleName}
-                      <small className="block">{grant.roleId}</small>
-                    </th>
-                    <td>{grant.allowed ? "允许" : "已撤销"}</td>
-                    <td>
-                      {grant.grantRevision} / {grant.accountCredentialRevision}
-                    </td>
-                    <td>
-                      {grant.allowed &&
-                        context.can(
-                          "POST /api/directory-credential-use/v3/revoke",
-                        ) && (
-                          <button
-                            className="secondary danger"
-                            disabled={!!choice}
-                            onClick={() =>
-                              setChoice({
-                                kind: "revoke",
-                                roleId: grant.roleId,
-                              })
-                            }
-                          >
-                            撤销 {grant.roleName}
-                          </button>
-                        )}
-                    </td>
+            <div
+              className="table-scroll directory-v3-governance-scroll"
+              role="region"
+              aria-label="字典 3 角色授权表，可横向滚动"
+              tabIndex={0}
+            >
+              <table>
+                <caption>已保存的角色目录读取授权</caption>
+                <thead>
+                  <tr>
+                    <th>角色</th>
+                    <th>已保存授权</th>
+                    <th>授权版本 / 凭据版本</th>
+                    <th>操作</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {grants.data.grants.map((grant) => (
+                    <tr key={grant.roleId}>
+                      <th scope="row">
+                        {grant.roleName}
+                        <small className="block">{grant.roleId}</small>
+                      </th>
+                      <td>{grant.allowed ? "允许" : "已撤销"}</td>
+                      <td>
+                        {grant.grantRevision} /{" "}
+                        {grant.accountCredentialRevision}
+                      </td>
+                      <td>
+                        {grant.allowed &&
+                          context.can(
+                            "POST /api/directory-credential-use/v3/revoke",
+                          ) && (
+                            <button
+                              className="secondary danger"
+                              disabled={!!choice}
+                              onClick={() =>
+                                setChoice({
+                                  kind: "revoke",
+                                  roleId: grant.roleId,
+                                })
+                              }
+                            >
+                              撤销 {grant.roleName}
+                            </button>
+                          )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           ) : (
             <p role="status">
               没有显式使用授权，所有角色（包括平台管理员）默认拒绝。

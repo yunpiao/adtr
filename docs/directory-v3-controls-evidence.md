@@ -118,3 +118,28 @@ separate total count. Only this suite's existing narrow evidence pattern is
 retained on failure. No product layout change or assertion relaxation is included.
 Dependency e60a507 and actual main6beb495 are normally integrated; final exact
 candidate CI and pixel inspection are still required.
+
+## Actual mobile layout diagnosis and scoped repair
+
+[Run38177868096](https://github.com/yunpiao/adtr/actions/runs/38177868096), event
+head b7f4466, actually checked out merge a505f69b0e5859e4c5de42ae9e40e10cf76809fe,
+tree abe100752622753fafa9021c515a7926fe82b371. Artifact11716279902 contains four
+clean screenshots and their bindings; each PNG SHA256 was independently verified.
+Desktop collection width1440/1440 and mobile collection/facts390/390 pass. Actual
+pixels show readable v3 headings, source controls and primaryGroupID/SPN facts.
+Mobile governance measures document463/viewport390: its uncontained grant table
+is431.875px wide, right edge462.875px; the revoke button reaches452.875px and is
+visibly cropped. This is a product layout defect, not an assertion/fixture issue.
+
+The repair wraps only the two v3 governance tables in existing local horizontal
+scroll containers with accessible region names and keyboard focus. A scoped
+focus-visible outline identifies the focused surface. All authority data and
+actions remain present; no global overflow hiding or v1/v2 layout change occurs.
+A DOM regression checks both named regions, table containment and keyboard entry.
+Real acceptance adds ArrowRight scroll, visible keyboard focus and Tab access to
+the complete revoke button with ratio1, a rightmost-action screenshot and desktop
+no-inner-overflow regression. These corrected pixels/runtime checks remain pending.
+
+The normal integration of dependency9280049 includes actual mainaf9d9f5's safe
+CI diagnostics. Runner conflict resolution retains both original diagnostic
+phases and existing v3 time budgets. No native guard or failure threshold changes.
