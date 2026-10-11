@@ -70,12 +70,37 @@ func validateDirectoryV2Payload(raw json.RawMessage) (json.RawMessage, error) {
 	return p.json(), nil
 }
 
+// directoryV3PinnedPayload extends only the separately named dictionary-3 task.
+// The legacy payload remains the exact original eight fields.
+type directoryV3PinnedPayload struct {
+	directoryPinnedPayload
+	DictionaryVersion int `json:"dictionaryVersion"`
+}
+
+func (p directoryV3PinnedPayload) json() json.RawMessage { b, _ := json.Marshal(p); return b }
+
+func validateDirectoryV3Payload(raw json.RawMessage) (json.RawMessage, error) {
+	if len(raw) > 2048 || !exactObject(raw, "credentialSource", "connectionRevision", "connectionCredentialGeneration", "accountId", "accountCredentialRevision", "grantRoleId", "grantRevision", "policyRevision", "dictionaryVersion") {
+		return nil, problem(400, "invalid_payload")
+	}
+	var p directoryV3PinnedPayload
+	if json.Unmarshal(raw, &p) != nil || p.DictionaryVersion != 3 {
+		return nil, problem(400, "invalid_payload")
+	}
+	if _, err := validateDirectoryPayload(p.directoryPinnedPayload.json()); err != nil {
+		return nil, err
+	}
+	return p.json(), nil
+}
+
 func validateDirectoryPayloadForProfile(profile directoryTaskProfile, raw json.RawMessage) (json.RawMessage, error) {
 	switch profile {
 	case directoryTaskV1:
 		return validateDirectoryPayload(raw)
 	case directoryTaskV2:
 		return validateDirectoryV2Payload(raw)
+	case directoryTaskV3:
+		return validateDirectoryV3Payload(raw)
 	default:
 		return nil, problem(400, "invalid_payload")
 	}

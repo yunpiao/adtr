@@ -136,6 +136,9 @@ func taskAuthorizer(now func() time.Time) tasks.Authorizer {
 				if scope.TaskName == domains.DirectoryV2KindName {
 					purpose = "domain.directory_read.v2"
 				}
+				if scope.TaskName == domains.DirectoryV3KindName {
+					purpose = "domain.directory_read.v3"
+				}
 				eligibility = "adtr.credential_use_role_eligible_for_purpose(c.tenant_id,c.domain_id,$3,$4)"
 			}
 			var allowed bool

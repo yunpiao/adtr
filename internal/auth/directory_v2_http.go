@@ -13,6 +13,7 @@ type directoryHTTPProfile uint8
 const (
 	directoryHTTPV1 directoryHTTPProfile = iota + 1
 	directoryHTTPV2
+	directoryHTTPV3
 )
 
 func directoryHTTPEndpoint(profile directoryHTTPProfile) (prefix, kind string) {
@@ -21,13 +22,15 @@ func directoryHTTPEndpoint(profile directoryHTTPProfile) (prefix, kind string) {
 		return "/api/directory", domains.DirectoryKindName
 	case directoryHTTPV2:
 		return "/api/directory/v2", domains.DirectoryV2KindName
+	case directoryHTTPV3:
+		return "/api/directory/v3", domains.DirectoryV3KindName
 	default:
 		return "", ""
 	}
 }
 
 func isDirectoryTaskKind(kind string) bool {
-	return kind == domains.DirectoryKindName || kind == domains.DirectoryV2KindName
+	return kind == domains.DirectoryKindName || kind == domains.DirectoryV2KindName || kind == domains.DirectoryV3KindName
 }
 
 func directoryV2PathAllowed(method, path string, grants map[string]AccessAuth) bool {

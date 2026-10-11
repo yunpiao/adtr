@@ -41,6 +41,11 @@ func (s *Store) SubmitDirectoryV2Tx(ctx context.Context, tx pgx.Tx, engine *task
 	return s.submitDirectoryForProfileTx(ctx, tx, engine, p, in, directoryTaskV2)
 }
 
+// SubmitDirectoryV3Tx admits only the separately granted fixed dictionary 3.
+func (s *Store) SubmitDirectoryV3Tx(ctx context.Context, tx pgx.Tx, engine *tasks.Engine, p tasks.Principal, in DirectoryInput) (tasks.Submission, error) {
+	return s.submitDirectoryForProfileTx(ctx, tx, engine, p, in, directoryTaskV3)
+}
+
 func (s *Store) submitDirectoryForProfileTx(ctx context.Context, tx pgx.Tx, engine *tasks.Engine, p tasks.Principal, in DirectoryInput, profile directoryTaskProfile) (tasks.Submission, error) {
 	identity, ok := profile.identity()
 	if !ok {
