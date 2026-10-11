@@ -589,7 +589,7 @@ test("unconfigured bootstrap, explicit own-role reference, real LDAP consumption
     page.getByLabel("确认初始密码", { exact: true }),
     noScopeInitial,
   );
-  await page.getByLabel("角色", { exact: true }).fill("source_no_scope");
+  await page.getByLabel("角色", { exact: true }).fill("source_no_scope_role_001");
   await proof(page, password, auth);
   const noScopeCreated = await submit(
     page,

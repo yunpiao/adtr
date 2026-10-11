@@ -52,7 +52,7 @@ PR #103 首轮head `47cb7b305aebc9571a95fa8c904d13c253995345` 的真实domains�
 
 新增标签通过测试侧故障同时禁用 BroadcastChannel 与 localStorage；原生窗口/标签、真实 hidden/失焦、`bringToFront` 和 `isTrusted` 事件证明焦点/可见性回退，未派发合成事件。真实 `/me` 待返回期间检查旧 main 为 hidden/inert，核验完成后旧编辑器、证明、候选和确认提示必须消失。回执标签通过真实 `window.open` 的 sessionStorage 拷贝继承 A 元数据意图，不伪造存储。
 
-无域 B 使用只在该套件随机独占数据库中安装的合成 `source_no_scope` 角色；角色种子使用正常表与约束且零资源组关联，真实 UI 创建用户、改初始密码、启用 MFA。角色具备 domains 读写及 operation_accounts 只读：domains 写功能权是读取原回执接口的前置条件，删除它会先得功能 403，无法单独测资源/归属边界。真实 `/access/check` 四项 true 后检查域列表/同域候选为空，指定来源/他人回执 404。此种子不证明角色配置 UI 验收，不修改内置角色或生产默认权限。
+无域 B 使用只在该套件随机独占数据库中安装的合成 `source_no_scope_role_001` 角色；角色种子使用正常表与约束且零资源组关联，真实 UI 创建用户、改初始密码、启用 MFA。角色具备 domains 读写及 operation_accounts 只读：domains 写功能权是读取原回执接口的前置条件，删除它会先得功能 403，无法单独测资源/归属边界。真实 `/access/check` 四项 true 后检查域列表/同域候选为空，指定来源/他人回执 404。此种子不证明角色配置 UI 验收，不修改内置角色或生产默认权限。
 
 套件改用 headed Chromium 以取得真实标签生命周期；没有 Xvfb/DISPLAY 时明确失败。整体 Playwright/harness 预算从510/540秒增到630/660秒，仅覆盖新增真实用户改密/MFA和切换，单请求、断言与安全闸门时间不放宽；真实30秒TOTP counter与持久化限流保持。bootstrap高权限写预算为10次，consumer为10次，未重置账本或速率桶。
 

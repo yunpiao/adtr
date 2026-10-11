@@ -89,6 +89,7 @@ type Message = {
   type: string;
   subType: string;
   read: boolean;
+  firstReadAt: string | null;
 };
 type Snapshot = {
   resultId: string;
@@ -139,6 +140,71 @@ function projectedSources(container: string, taskIDs: string[]) {
       { encoding: "utf8", timeout: 10_000 },
     ),
   );
+}
+
+type ReadIntent = { resultId: string; messageId: string; operationId: string };
+type ReadReceipt = ReadIntent & {
+  firstReadAt: string;
+  committedAt: string;
+  progress: {
+    target: number;
+    processed: number;
+    newlyRead: number;
+    alreadyRead: number;
+    failed: number;
+    remaining: number;
+  };
+};
+
+function persistedReadProof(container: string, operationId: string) {
+  expect(operationId).toMatch(/^[A-Za-z0-9_-]{1,128}$/);
+  const sql = `SELECT COALESCE(json_agg(row_to_json(proof)), '[]'::json) FROM (
+    SELECT o.operation_id AS "operationId", o.result_id AS "resultId",
+      o.message_id AS "messageId", o.newly_read AS "newlyRead",
+      o.first_read_at=r.first_read_at AS "sameFirstReadAt",
+      o.user_id=m.recipient_user_id AS "originalRecipient"
+    FROM adtr.message_read_operations o JOIN adtr.message_reads r
+      ON r.tenant_id=o.tenant_id AND r.user_id=o.user_id AND r.message_id=o.message_id
+    JOIN adtr.messages m ON m.tenant_id=o.tenant_id AND m.recipient_user_id=o.user_id AND m.message_id=o.message_id
+    WHERE o.operation_id='${operationId}'
+  ) proof`;
+  return JSON.parse(
+    execFileSync(
+      "docker",
+      [
+        "exec",
+        "-e",
+        "PGOPTIONS=-c default_transaction_read_only=on",
+        container,
+        "psql",
+        "-U",
+        "postgres",
+        "-d",
+        "adtr_e2e",
+        "-A",
+        "-t",
+        "-v",
+        "ON_ERROR_STOP=1",
+        "-c",
+        sql,
+      ],
+      { encoding: "utf8", timeout: 10_000 },
+    ),
+  );
+}
+
+async function submitAccessMutation(page: Page, path: string, button: string) {
+  const [response] = await Promise.all([
+    page.waitForResponse(
+      (r) =>
+        new URL(r.url()).pathname === path && r.request().method() === "POST",
+    ),
+    page.getByRole("button", { name: button, exact: true }).click(),
+  ]);
+  expect(response.status()).toBe(200);
+  const value = await response.json();
+  expect(value).toMatchObject({ result: "SUCCESS", sessionRevoked: false });
+  return value;
 }
 
 // Automatic artifacts during login/MFA would expose synthetic proof fields.
@@ -441,6 +507,441 @@ test("real health Worker → outbox → message snapshot → browser page and lo
       ].includes(r.path),
     ),
   ).toBe(true);
+  // All original read-only assertions above stay intact. Fault injection below
+  // drops transport only: it never fabricates a response or a message producer.
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const operationPanel = page.getByRole("region", {
+    name: "单条已读操作",
+    exact: true,
+  });
+  const savedInputs = () =>
+    page.evaluate(() =>
+      Object.keys(localStorage)
+        .filter((key) => key.startsWith("adtr.message-read.v1."))
+        .map((key) => JSON.parse(localStorage.getItem(key)!).input),
+    );
+  const readRequests: ReadIntent[] = [];
+  page.on("request", (request) => {
+    if (
+      new URL(request.url()).pathname === "/api/messages/read" &&
+      request.method() === "POST"
+    )
+      readRequests.push(request.postDataJSON());
+  });
+  const receiptURL = (id: string) =>
+    `/api/messages/read-operation?operationId=${encodeURIComponent(id)}`;
+  const expectReceipt = (value: ReadReceipt, intent: ReadIntent) => {
+    expect(value).toMatchObject({
+      ...intent,
+      progress: {
+        target: 1,
+        processed: 1,
+        newlyRead: 1,
+        alreadyRead: 0,
+        failed: 0,
+        remaining: 0,
+      },
+    });
+    expect(Number.isFinite(Date.parse(value.firstReadAt))).toBe(true);
+    expect(Number.isFinite(Date.parse(value.committedAt))).toBe(true);
+  };
+  const captureReadState = async (state: string) => {
+    for (const viewport of [
+      { width: 1440, height: 900 },
+      { width: 390, height: 844 },
+    ]) {
+      await page.setViewportSize(viewport);
+      await operationPanel
+        .locator(".message-read-operation")
+        .last()
+        .scrollIntoViewIfNeeded();
+      await expect(operationPanel).toBeVisible();
+      expect(
+        await page.evaluate(
+          () => document.documentElement.scrollWidth <= innerWidth,
+        ),
+      ).toBe(true);
+      for (const fullPage of [false, true]) {
+        if (fullPage) {
+          await page.evaluate(() => window.scrollTo(0, 0));
+          await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0);
+        }
+        const file = `messages-soc-read-${state}-${viewport.width}-${fullPage ? "full" : "viewport"}.png`;
+        const path = testInfo.outputPath(file);
+        const bytes = await page.screenshot({ path, fullPage });
+        await testInfo.attach(file, { path, contentType: "image/png" });
+        screenshots.push({
+          file,
+          viewport,
+          fullPage,
+          sha256: createHash("sha256").update(bytes).digest("hex"),
+        });
+      }
+    }
+    await page.setViewportSize({ width: 1440, height: 900 });
+  };
+  const assertOldSnapshot = async () => {
+    const response = await context.request.get(
+      `/api/messages/page?resultId=${snapshot.resultId}&offset=0&limit=20`,
+    );
+    expect(response.status()).toBe(200);
+    expect(await response.json()).toEqual(snapshot);
+    await expect(
+      page.getByRole("region", { name: "查询时消息统计" }),
+    ).toContainText("查询时未读2");
+  };
+
+  // First message: request never reaches the server. A 404 receipt does not
+  // authorize changing the intent; the explicit replay must use all three IDs.
+  let releaseFirst!: () => void;
+  const firstBlocked = new Promise<void>((resolve) => {
+    releaseFirst = resolve;
+  });
+  let firstCaptured!: (value: ReadIntent) => void;
+  const firstIntentPromise = new Promise<ReadIntent>((resolve) => {
+    firstCaptured = resolve;
+  });
+  await page.route(
+    "**/api/messages/read",
+    async (route) => {
+      const input = route.request().postDataJSON();
+      expect(await savedInputs()).toContainEqual(input);
+      firstCaptured(input);
+      await firstBlocked;
+      await route.abort("failed");
+    },
+    { times: 1 },
+  );
+  const firstButton = page
+    .locator(`article[data-message-id="${snapshot.items[0].messageId}"]`)
+    .getByRole("button", { name: "标记为已读", exact: true });
+  await firstButton.dblclick();
+  const firstIntent = await firstIntentPromise;
+  expect(firstIntent).toEqual({
+    resultId: snapshot.resultId,
+    messageId: snapshot.items[0].messageId,
+    operationId: expect.stringMatching(/^[A-Za-z0-9_-]{1,128}$/),
+  });
+  expect(readRequests).toEqual([firstIntent]);
+  releaseFirst();
+  await expect(
+    operationPanel.getByRole("button", { name: "查询原操作结果", exact: true }),
+  ).toBeEnabled();
+  await expect(
+    operationPanel.getByRole("button", { name: "重放原操作", exact: true }),
+  ).toHaveCount(0);
+  const [missingReceipt] = await Promise.all([
+    page.waitForResponse(
+      (r) => new URL(r.url()).pathname === "/api/messages/read-operation",
+    ),
+    operationPanel
+      .getByRole("button", { name: "查询原操作结果", exact: true })
+      .click(),
+  ]);
+  expect(missingReceipt.status()).toBe(404);
+  expect(persistedReadProof(container, firstIntent.operationId)).toEqual([]);
+  const [replayedResponse] = await Promise.all([
+    page.waitForResponse(
+      (r) =>
+        new URL(r.url()).pathname === "/api/messages/read" &&
+        r.request().method() === "POST",
+    ),
+    operationPanel
+      .getByRole("button", { name: "重放原操作", exact: true })
+      .click(),
+  ]);
+  expect(replayedResponse.status()).toBe(200);
+  expect(replayedResponse.headers()["cache-control"]).toBe("no-store");
+  expect(replayedResponse.request().postDataJSON()).toEqual(firstIntent);
+  const firstReceipt: ReadReceipt = await replayedResponse.json();
+  expectReceipt(firstReceipt, firstIntent);
+  await expect(operationPanel).toContainText("已确认单条已读");
+  await assertOldSnapshot();
+  expect(readRequests).toEqual([firstIntent, firstIntent]);
+
+  // Second message: actually commit at the server, then discard the HTTP
+  // response. This is a real ambiguous outcome, not a synthetic success body.
+  let secondCommitted!: (value: {
+    intent: ReadIntent;
+    receipt: ReadReceipt;
+  }) => void;
+  const secondCommit = new Promise<{
+    intent: ReadIntent;
+    receipt: ReadReceipt;
+  }>((resolve) => {
+    secondCommitted = resolve;
+  });
+  await page.route(
+    "**/api/messages/read",
+    async (route) => {
+      const intent: ReadIntent = route.request().postDataJSON();
+      expect(await savedInputs()).toContainEqual(intent);
+      const response = await route.fetch({ maxRetries: 0 });
+      expect(response.status()).toBe(200);
+      expect(response.headers()["cache-control"]).toBe("no-store");
+      const receipt: ReadReceipt = await response.json();
+      expectReceipt(receipt, intent);
+      secondCommitted({ intent, receipt });
+      await route.abort("failed");
+    },
+    { times: 1 },
+  );
+  await page
+    .locator(`article[data-message-id="${snapshot.items[1].messageId}"]`)
+    .getByRole("button", { name: "标记为已读", exact: true })
+    .dblclick();
+  const { intent: secondIntent, receipt: committedReceipt } =
+    await secondCommit;
+  expect(secondIntent.resultId).toBe(snapshot.resultId);
+  expect(secondIntent.messageId).toBe(snapshot.items[1].messageId);
+  expect(secondIntent.operationId).not.toBe(firstIntent.operationId);
+  await expect(
+    operationPanel.getByRole("button", { name: "查询原操作结果", exact: true }),
+  ).toBeEnabled();
+  await assertOldSnapshot();
+  await captureReadState("unknown");
+  expect(await savedInputs()).toEqual([secondIntent]);
+  const mutationCount = readRequests.length;
+  expect(mutationCount).toBe(3);
+  await navigateTo(page, "账户概览");
+  await page.goBack();
+  await expect(
+    operationPanel.getByRole("button", { name: "查询原操作结果", exact: true }),
+  ).toBeEnabled();
+  await page.reload();
+  await expect(
+    operationPanel.getByRole("button", { name: "查询原操作结果", exact: true }),
+  ).toBeEnabled();
+  expect(readRequests).toHaveLength(mutationCount);
+
+  const recoveryTab = await context.newPage();
+  const tabWrites: string[] = [];
+  recoveryTab.on("request", (request) => {
+    if (
+      request.method() === "POST" &&
+      new URL(request.url()).pathname.startsWith("/api/messages/")
+    )
+      tabWrites.push(request.url());
+  });
+  await recoveryTab.goto(page.url());
+  await expect(
+    recoveryTab
+      .getByRole("region", { name: "单条已读操作", exact: true })
+      .getByRole("button", { name: "查询原操作结果", exact: true }),
+  ).toBeEnabled();
+  expect(tabWrites).toEqual([]);
+  await recoveryTab.close();
+  expect(await savedInputs()).toEqual([secondIntent]);
+
+  // Logout revokes the old cookie, while a newly authenticated session for the
+  // same actor can recover the original committed receipt, not the old result.
+  const oldState = await context.storageState();
+  const oldProfile = await context.request.get("/api/auth/me");
+  expect(oldProfile.status()).toBe(200);
+  const oldCSRF = (await oldProfile.json()).csrfToken;
+  await navigateTo(page, "退出登录");
+  await expect(
+    page.getByRole("heading", { name: "登录账户", exact: true }),
+  ).toBeVisible();
+  await expect(operationPanel).toHaveCount(0);
+  const oldContext = await context.browser()!.newContext({
+    baseURL: new URL(page.url()).origin,
+    storageState: oldState,
+  });
+  try {
+    const denied = await oldContext.request.get(
+      receiptURL(secondIntent.operationId),
+    );
+    expect(denied.status()).toBe(401);
+  } finally {
+    await oldContext.close();
+  }
+  await login(page, username, changed);
+  await page
+    .getByLabel("二次认证验证码", { exact: true })
+    .fill(await freshCode(mfa));
+  await page.getByRole("button", { name: "登录", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "账户概览", exact: true }),
+  ).toBeVisible();
+  const newProfile = await context.request.get("/api/auth/me");
+  expect(newProfile.status()).toBe(200);
+  const newCSRF = (await newProfile.json()).csrfToken;
+  expect(newCSRF).not.toBe(oldCSRF);
+  await navigateTo(page, "站内消息");
+  await expect(
+    operationPanel.getByRole("button", { name: "查询原操作结果", exact: true }),
+  ).toBeEnabled();
+  expect(readRequests).toHaveLength(mutationCount);
+  const [recoveredResponse] = await Promise.all([
+    page.waitForResponse(
+      (r) => new URL(r.url()).pathname === "/api/messages/read-operation",
+    ),
+    operationPanel
+      .getByRole("button", { name: "查询原操作结果", exact: true })
+      .click(),
+  ]);
+  expect(recoveredResponse.status()).toBe(200);
+  expect(recoveredResponse.headers()["cache-control"]).toBe("no-store");
+  expect(await recoveredResponse.json()).toEqual(committedReceipt);
+  await expect(operationPanel).toContainText("已确认单条已读");
+  expect(readRequests).toHaveLength(mutationCount);
+  await captureReadState("confirmed");
+  const expiredSessionResult = await context.request.get(
+    `/api/messages/page?resultId=${snapshot.resultId}&offset=0&limit=20`,
+  );
+  expect(expiredSessionResult.status()).toBe(410);
+  const replayConfirmed = await context.request.post("/api/messages/read", {
+    headers: { Origin: new URL(page.url()).origin, "X-CSRF-Token": newCSRF },
+    data: secondIntent,
+  });
+  expect(replayConfirmed.status()).toBe(200);
+  expect(await replayConfirmed.json()).toEqual(committedReceipt);
+  expect(await savedInputs()).toEqual([]);
+  expect(
+    requests.filter(
+      (r) => r.method === "POST" && r.path === "/api/messages/query",
+    ),
+  ).toHaveLength(1);
+  const [refreshedResponse] = await Promise.all([
+    page.waitForResponse(
+      (r) =>
+        new URL(r.url()).pathname === "/api/messages/query" &&
+        r.request().method() === "POST",
+    ),
+    page.getByRole("button", { name: "确认查询", exact: true }).click(),
+  ]);
+  expect(refreshedResponse.status()).toBe(200);
+  const refreshed: Snapshot = await refreshedResponse.json();
+  expect(refreshed.resultId).not.toBe(snapshot.resultId);
+  expect(refreshed.counts).toEqual({ all: 2, unread: 0, read: 2 });
+  expect(refreshed.total).toBe(2);
+  for (const receipt of [firstReceipt, committedReceipt]) {
+    expect(
+      refreshed.items.find((item) => item.messageId === receipt.messageId),
+    ).toMatchObject({ read: true, firstReadAt: receipt.firstReadAt });
+    expect(persistedReadProof(container, receipt.operationId)).toEqual([
+      {
+        operationId: receipt.operationId,
+        resultId: receipt.resultId,
+        messageId: receipt.messageId,
+        newlyRead: true,
+        sameFirstReadAt: true,
+        originalRecipient: true,
+      },
+    ]);
+  }
+  await expect(
+    page.getByRole("region", { name: "查询时消息统计" }),
+  ).toContainText("查询时未读0");
+  await expect(
+    page.getByRole("button", { name: "标记为已读", exact: true }),
+  ).toHaveCount(0);
+
+  // Another real user has tasks.readable but no task-write permission or MFA.
+  // Its 404 proves receipt ownership rather than a permission-denied shortcut.
+  await navigateTo(page, "访问管理");
+  await page.getByRole("button", { name: "角色管理", exact: true }).click();
+  await page.getByRole("button", { name: "新增角色", exact: true }).click();
+  await page
+    .getByLabel("角色名称", { exact: true })
+    .fill("Synthetic Message Reader");
+  await page
+    .getByRole("checkbox", { name: "后台任务：读取", exact: true })
+    .check();
+  await page.getByLabel("操作者当前密码", { exact: true }).fill(changed);
+  await page
+    .getByLabel("未使用的认证器验证码", { exact: true })
+    .fill(await freshCode(mfa));
+  const role = await submitAccessMutation(
+    page,
+    "/api/access/roles/save",
+    "保存角色",
+  );
+  await page.getByRole("button", { name: "用户管理", exact: true }).click();
+  await page.getByRole("button", { name: "新增用户", exact: true }).click();
+  const readerName = "synthetic.message.reader",
+    readerInitial = "Initial Message Reader 123",
+    readerChanged = "Changed Message Reader 456";
+  await page.getByLabel("用户名", { exact: true }).fill(readerName);
+  await page.getByLabel("初始密码", { exact: true }).fill(readerInitial);
+  await page.getByLabel("确认初始密码", { exact: true }).fill(readerInitial);
+  await page.getByLabel("角色", { exact: true }).fill(role.roleID);
+  await page.getByLabel("操作者当前密码", { exact: true }).fill(changed);
+  await page
+    .getByLabel("未使用的认证器验证码", { exact: true })
+    .fill(await freshCode(mfa));
+  await submitAccessMutation(page, "/api/access/users/create", "创建用户");
+  const readerContext = await context.browser()!.newContext({
+    baseURL: new URL(page.url()).origin,
+    storageState: { cookies: [], origins: oldState.origins },
+  });
+  try {
+    const reader = await readerContext.newPage();
+    await reader.goto("/");
+    await login(reader, readerName, readerInitial);
+    await changeInitialPassword(reader, readerInitial, readerChanged);
+    await navigateTo(reader, "站内消息");
+    await expect(
+      reader.getByRole("region", { name: "单条已读操作", exact: true }),
+    ).toHaveCount(0);
+    const privateReceipt = await readerContext.request.get(
+      receiptURL(secondIntent.operationId),
+    );
+    expect(privateReceipt.status()).toBe(404);
+    const [ownQuery] = await Promise.all([
+      reader.waitForResponse(
+        (r) =>
+          new URL(r.url()).pathname === "/api/messages/query" &&
+          r.request().method() === "POST",
+      ),
+      reader.getByRole("button", { name: "确认查询", exact: true }).click(),
+    ]);
+    expect(ownQuery.status()).toBe(200);
+    expect(await ownQuery.json()).toMatchObject({
+      total: 0,
+      items: [],
+      counts: { all: 0, unread: 0, read: 0 },
+    });
+    const privateSnapshot = await readerContext.request.get(
+      `/api/messages/page?resultId=${refreshed.resultId}&offset=0&limit=20`,
+    );
+    expect(privateSnapshot.status()).toBe(404);
+    const readerProfile = await readerContext.request.get("/api/auth/me");
+    expect(readerProfile.status()).toBe(200);
+    const readerCSRF = (await readerProfile.json()).csrfToken;
+    const privateReplay = await readerContext.request.post(
+      "/api/messages/read",
+      {
+        headers: {
+          Origin: new URL(reader.url()).origin,
+          "X-CSRF-Token": readerCSRF,
+        },
+        data: secondIntent,
+      },
+    );
+    expect(privateReplay.status()).toBe(404);
+  } finally {
+    await readerContext.close();
+  }
+  const readRecovery = {
+    firstIntent,
+    firstReceipt,
+    secondIntent,
+    committedReceipt,
+    refreshed,
+    browserMutationCount: mutationCount,
+    recoveredInNewSession: true,
+    oldCookieStatus: 401,
+    oldSnapshotNewSessionStatus: 410,
+    otherUserReceiptStatus: 404,
+    otherUserSnapshotStatus: 404,
+    persisted: [
+      persistedReadProof(container, firstIntent.operationId),
+      persistedReadProof(container, secondIntent.operationId),
+    ],
+  };
+
   const root = execFileSync("git", ["rev-parse", "--show-toplevel"], {
     encoding: "utf8",
   }).trim();
@@ -452,7 +953,7 @@ test("real health Worker → outbox → message snapshot → browser page and lo
     formatVersion: 1,
     suite: "messages",
     chain:
-      "real browser → API → Worker → PostgreSQL outbox → message projection → browser snapshot/page/locate",
+      "real browser → API → Worker → PostgreSQL outbox → message projection → fixed snapshot → read transport loss → receipt recovery → explicit refreshed snapshot",
     recordedAt: new Date().toISOString(),
     checkoutCommit: execFileSync("git", ["rev-parse", "HEAD"], {
       encoding: "utf8",
@@ -469,6 +970,7 @@ test("real health Worker → outbox → message snapshot → browser page and lo
     snapshot,
     pages,
     browserRequests: requests,
+    readRecovery,
     screenshots,
     sourceSHA256: Object.fromEntries(
       [
@@ -476,6 +978,8 @@ test("real health Worker → outbox → message snapshot → browser page and lo
         "web/src/MessagesWorkspace.tsx",
         "web/src/message-api.ts",
         "web/src/message-query.ts",
+        "web/src/message-read-intent.ts",
+        "web/src/message-read.tsx",
         "web/src/message-soc.css",
         "web/package-lock.json",
         "scripts/test_auth_e2e.py",

@@ -102,7 +102,7 @@ def main():
             # Isolated synthetic role: real function permission with no resource
             # groups. The browser creates its user and authenticates normally.
             subprocess.run(["docker", "exec", name, "psql", "-U", "postgres", "-d", "adtr_e2e", "-v", "ON_ERROR_STOP=1", "-c",
-                            "BEGIN; INSERT INTO adtr.access_roles(tenant_id,id,name) VALUES('default','source_no_scope','Source no domain scope'); INSERT INTO adtr.access_permissions(tenant_id,role_id,mark,readable,writeable) VALUES('default','source_no_scope','domains',true,true),('default','source_no_scope','operation_accounts',true,false); COMMIT;"],
+                            "BEGIN; INSERT INTO adtr.access_roles(tenant_id,id,name) VALUES('default','source_no_scope_role_001','Source no domain scope'); INSERT INTO adtr.access_permissions(tenant_id,role_id,mark,readable,writeable) VALUES('default','source_no_scope_role_001','domains',true,true),('default','source_no_scope_role_001','operation_accounts',true,false); COMMIT;"],
                            check=True, capture_output=True, timeout=30)
         if args.suite == "resource":
             subprocess.run(["docker", "exec", name, "psql", "-U", "postgres", "-d", "adtr_e2e", "-v", "ON_ERROR_STOP=1", "-c",

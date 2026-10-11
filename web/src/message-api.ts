@@ -13,6 +13,8 @@ export const messageOperations = [
   "POST /api/messages/query",
   "GET /api/messages/page",
   "GET /api/messages/locate",
+  "POST /api/messages/read",
+  "GET /api/messages/read-operation",
 ] as const;
 export interface MessageEntry {
   messageId: string;
@@ -190,7 +192,85 @@ export function matchesMessageQuery(
     })
   );
 }
+export interface MessageReadInput {
+  resultId: string;
+  messageId: string;
+  operationId: string;
+}
+export interface MessageReadReceipt extends MessageReadInput {
+  firstReadAt: string;
+  committedAt: string;
+  progress: {
+    target: 1;
+    processed: 1;
+    newlyRead: number;
+    alreadyRead: number;
+    failed: 0;
+    remaining: 0;
+  };
+}
+export function validMessageReadInput(v: unknown): v is MessageReadInput {
+  return (
+    object(v) &&
+    exact(v, ["resultId", "messageId", "operationId"]) &&
+    messageID(v.resultId) &&
+    messageID(v.messageId) &&
+    messageID(v.operationId)
+  );
+}
+export function validMessageReadReceipt(
+  v: unknown,
+  input: MessageReadInput,
+): v is MessageReadReceipt {
+  return (
+    object(v) &&
+    exact(v, [
+      "resultId",
+      "messageId",
+      "operationId",
+      "firstReadAt",
+      "committedAt",
+      "progress",
+    ]) &&
+    v.resultId === input.resultId &&
+    v.messageId === input.messageId &&
+    v.operationId === input.operationId &&
+    validUTC(v.firstReadAt) &&
+    validUTC(v.committedAt) &&
+    object(v.progress) &&
+    exact(v.progress, [
+      "target",
+      "processed",
+      "newlyRead",
+      "alreadyRead",
+      "failed",
+      "remaining",
+    ]) &&
+    v.progress.target === 1 &&
+    v.progress.processed === 1 &&
+    v.progress.failed === 0 &&
+    v.progress.remaining === 0 &&
+    integer(v.progress.newlyRead, 0, 1) &&
+    integer(v.progress.alreadyRead, 0, 1) &&
+    v.progress.newlyRead + v.progress.alreadyRead === 1
+  );
+}
 export const messageAPI = {
+  async markRead(input: MessageReadInput, csrf: string, signal: AbortSignal) {
+    if (!validMessageReadInput(input)) throw new ApiError("invalid_input");
+    const value = await request("/read", signal, input, csrf);
+    if (!validMessageReadReceipt(value, input)) return fail();
+    return value;
+  },
+  async readOperation(input: MessageReadInput, signal: AbortSignal) {
+    if (!validMessageReadInput(input)) throw new ApiError("invalid_input");
+    const value = await request(
+      `/read-operation?${new URLSearchParams({ operationId: input.operationId })}`,
+      signal,
+    );
+    if (!validMessageReadReceipt(value, input)) return fail();
+    return value;
+  },
   async query(query: MessageQuery, csrf: string, signal: AbortSignal) {
     const body = messageQueryBody(query),
       value = await request("/query", signal, body, csrf);
