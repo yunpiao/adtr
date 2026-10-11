@@ -2,6 +2,8 @@ package systemhealth
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"strconv"
 	"time"
 
@@ -13,7 +15,7 @@ func (s *Store) validateHistory(in HistoryInput, now time.Time) error {
 		return problem(400, "invalid_time_range")
 	}
 	switch in.GraphType {
-	case "cpu_basic", "ram_basic":
+	case "cpu_basic", "ram_basic", "container_ram":
 		if in.StorageID != "" {
 			return problem(400, "invalid_storage_id")
 		}
@@ -47,6 +49,9 @@ func (s *Store) history(ctx context.Context, tx pgx.Tx, tenant string, in Histor
 	}
 	if err := s.validateHistory(in, now); err != nil {
 		return out, err
+	}
+	if in.GraphType == "container_ram" {
+		return s.containerHistory(ctx, tx, tenant, in, out)
 	}
 	column, table, filter := "cpu_percent", "adtr.system_resource_samples", ""
 	args := []any{tenant, in.Instance}
@@ -123,4 +128,60 @@ func historyData(in HistoryInput, times []time.Time, values []float64) (HistoryD
 	avg, current := total/float64(len(values)), values[len(values)-1]
 	data.DataStatistics = DataStatistics{Min: &minValue, Max: &maxValue, Avg: &avg, Current: &current}
 	return data, gaps
+}
+
+// JSON-backed history keeps old RAM columns and schema unchanged. Invalid
+// persisted observations fail closed, never become zero or a healthy point.
+func (s *Store) containerHistory(ctx context.Context, tx pgx.Tx, tenant string, in HistoryInput, out History) (History, error) {
+	const base = ` FROM adtr.system_resource_samples WHERE tenant_id=$1 AND instance_id=$2 AND snapshot->'containerMemory'->>'availability'='available'`
+	decode := func(data []byte, at time.Time) (*ContainerMemoryMetric, error) {
+		var snapshot Snapshot
+		if json.Unmarshal(data, &snapshot) != nil || !snapshot.ObservedAt.Truncate(time.Microsecond).Equal(at) || snapshot.ContainerMemory == nil || !validContainerMemory(snapshot.ContainerMemory, snapshot.ObservedAt) || snapshot.ContainerMemory.Percent == nil {
+			return nil, problem(503, "invalid_stored_observation")
+		}
+		return snapshot.ContainerMemory, nil
+	}
+	var first time.Time
+	var data []byte
+	err := tx.QueryRow(ctx, "SELECT observed_at,snapshot"+base+" ORDER BY observed_at ASC LIMIT 1", tenant, in.Instance).Scan(&first, &data)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return out, err
+	}
+	if err == nil {
+		if _, err = decode(data, first); err != nil {
+			return out, err
+		}
+		out.AvailableSince = &first
+	}
+	rows, err := tx.Query(ctx, "SELECT observed_at,snapshot"+base+" AND observed_at >= $3 AND observed_at < $4 ORDER BY observed_at ASC LIMIT 5761", tenant, in.Instance, time.Unix(in.StartTime, 0).UTC(), time.Unix(in.EndTime, 0).UTC())
+	if err != nil {
+		return out, err
+	}
+	defer rows.Close()
+	times, values := []time.Time{}, []float64{}
+	var previous *ContainerMemoryMetric
+	for rows.Next() {
+		var at time.Time
+		if err = rows.Scan(&at, &data); err != nil {
+			return out, err
+		}
+		value, e := decode(data, at)
+		if e != nil {
+			return out, e
+		}
+		times = append(times, at)
+		values = append(values, *value.Percent)
+		if previous == nil || previous.SourceID == "" || value.SourceID == "" || previous.SourceID != value.SourceID || previous.Source != value.Source || *previous.LimitBytes != *value.LimitBytes {
+			out.Segments = append(out.Segments, HistorySegment{StartTime: at.Unix(), Source: value.Source, LimitBytes: *value.LimitBytes, SourceID: value.SourceID})
+		}
+		previous = value
+	}
+	if err = rows.Err(); err != nil {
+		return out, err
+	}
+	if len(times) > MaxHistoryPoints {
+		return out, problem(422, "history_point_limit")
+	}
+	out.Info[0].Data, out.Gaps = historyData(in, times, values)
+	return out, nil
 }
