@@ -1141,7 +1141,11 @@ test("UserAssetsV3 real workspace, pins, identity facts and native reader invali
           "Line 1\\u0000\\u000a\\u0009😀\\u202e",
         );
         await expect(fact("账户控制值（原始整数）")).toHaveText("0");
-        await values.scrollIntoViewIfNeeded();
+        // Center the real scroll target: nearest-edge scrolling can leave a
+        // fractional bottom border behind the drawer scrollport (run 141).
+        await values.evaluate((element) =>
+          element.scrollIntoView({ block: "center", inline: "nearest" }),
+        );
         await captureSPNGeometry(
           values,
           "user-assets-v3-desktop-spn-geometry.json",
@@ -1397,7 +1401,9 @@ test("UserAssetsV3 real workspace, pins, identity facts and native reader invali
       name: "完整 SPN 原始值（展示转义）",
       exact: true,
     });
-    await visibleSPN.scrollIntoViewIfNeeded();
+    await visibleSPN.evaluate((element) =>
+      element.scrollIntoView({ block: "center", inline: "nearest" }),
+    );
     await captureSPNGeometry(
       visibleSPN,
       "user-assets-v3-mobile-spn-geometry.json",
