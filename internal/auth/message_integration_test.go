@@ -117,7 +117,7 @@ func TestMessagesRealHealthWorkerSnapshotAndDurableRead(t *testing.T) {
 	task := f.realHealth(operator, "real-health")
 	// Current read-only grant suffices; no MFA remains on this actor.
 	f.exec("UPDATE adtr.access_permissions SET writeable=false WHERE tenant_id='one' AND role_id=$1 AND mark='tasks'", narrowResourceRole)
-	f.exec("UPDATE adtr.users SET mfa_secret=NULL WHERE id=$1", f.operator)
+	f.exec("UPDATE adtr.users SET mfa_secret='' WHERE id=$1", f.operator)
 	snap := f.query(operator, "unread")
 	if len(snap.Items) != 1 || snap.Total != 1 || snap.Counts.Unread != 1 || snap.Items[0].TaskID != task || snap.Items[0].SubType != "succeeded" || snap.Items[0].Read {
 		t.Fatal(snap)
