@@ -125,7 +125,7 @@ func TestSystemHTTPRealOwnerScopeAndCurrentObservations(t *testing.T) {
 	f.callSystem(nil, "/info", nil, 401)
 	f.callSystem(f.client(f.viewer), "/info", nil, 403)
 	f.callSystem(operator, "/info", nil, 403)
-	for _, path := range []string{"/info", "/nodes", "/resources/current?instance=local-api", "/resources/history?instance=local-api&startTime=0&endTime=10&graphType=cpu_basic", "/storage?instance=local-api", "/services", "/health"} {
+	for _, path := range []string{"/info", "/nodes", "/resources/current?instance=local-api", "/resources/history?instance=local-api&startTime=0&endTime=10&graphType=cpu_basic", "/resources/history?instance=local-api&startTime=0&endTime=10&graphType=container_ram", "/storage?instance=local-api", "/services", "/health"} {
 		f.callSystem(f.client(f.other), path, nil, 403)
 	}
 	empty := f.callSystem(admin, "/resources/current?instance=local-api", nil, 200)
@@ -136,6 +136,8 @@ func TestSystemHTTPRealOwnerScopeAndCurrentObservations(t *testing.T) {
 	f.callSystem(operator, "/info", nil, 200)
 	f.callSystem(operator, "/storage/settings", f.proof(systemAlarmBody(87, 0)), 403)
 	first, last := f.seedObservations()
+	containerPath := fmt.Sprintf("/resources/history?instance=local-api&startTime=%d&endTime=%d&graphType=container_ram", first.Add(-time.Minute).Unix(), last.Add(time.Second).Unix())
+	f.callSystem(operator, containerPath, nil, 200)
 	current := f.callSystem(admin, "/resources/current?instance=local-api", nil, 200)
 	snapshot := current["snapshot"].(map[string]any)
 	if snapshot["cpu"].(map[string]any)["percent"] != float64(25) || snapshot["memory"].(map[string]any)["percent"] != float64(60) {
@@ -164,6 +166,7 @@ func TestSystemHTTPRealOwnerScopeAndCurrentObservations(t *testing.T) {
 	f.callSystem(admin, fmt.Sprintf("/resources/history?instance=local-api&startTime=%d&endTime=%d&graphType=disk_usage&storageId=unknown", first.Unix(), last.Unix()), nil, 404)
 	f.exec(`UPDATE adtr.access_permissions SET readable=false WHERE tenant_id='default' AND role_id=$1 AND mark='system'`, narrowResourceRole)
 	f.callSystem(operator, "/info", nil, 403)
+	f.callSystem(operator, containerPath, nil, 403)
 }
 
 func TestSystemHTTPFreshProofCASAndAtomicAudit(t *testing.T) {

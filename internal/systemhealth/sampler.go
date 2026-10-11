@@ -15,13 +15,14 @@ import (
 // race-safe. Its allowlist is copied on construction and cannot be changed by a
 // sampling request. Keep one sampler per API process to retain CPU observations.
 type Sampler struct {
-	mu         sync.Mutex
-	storage    []StorageTarget
-	readProc   func(ProcFile) ([]byte, error)
-	statFS     func(string) (FileSystemStats, error)
-	now        func() time.Time
-	previous   *cpuObservation
-	previousAt time.Time
+	mu                  sync.Mutex
+	storage             []StorageTarget
+	readProc            func(ProcFile) ([]byte, error)
+	statFS              func(string) (FileSystemStats, error)
+	now                 func() time.Time
+	readContainerMemory func(time.Time) ContainerMemoryMetric
+	previous            *cpuObservation
+	previousAt          time.Time
 }
 
 func NewSampler(config Config) (*Sampler, error) {
@@ -48,12 +49,15 @@ func NewSampler(config Config) (*Sampler, error) {
 	if config.StatFS == nil {
 		config.StatFS = statFS
 	}
+	if config.ReadContainerMemory == nil {
+		config.ReadContainerMemory = readContainerMemory
+	}
 	if config.Now == nil {
 		config.Now = time.Now
 	}
 	return &Sampler{
 		storage: append([]StorageTarget(nil), targets...), readProc: config.ReadProc,
-		statFS: config.StatFS, now: config.Now,
+		statFS: config.StatFS, now: config.Now, readContainerMemory: config.ReadContainerMemory,
 	}, nil
 }
 
@@ -96,6 +100,8 @@ func (s *Sampler) Sample() Snapshot {
 	result := Snapshot{Instance: LocalInstanceID, ObservedAt: now, Storage: make([]StorageMetric, 0, len(s.storage))}
 	result.CPU = s.sampleCPU(now)
 	result.Memory = s.sampleMemory(now)
+	containerMemory := s.readContainerMemory(now)
+	result.ContainerMemory = &containerMemory
 	result.Uptime = s.sampleUptime(now)
 	result.Load = s.sampleLoad(now)
 	for _, target := range s.storage {

@@ -136,7 +136,12 @@ async function submitMutation(page: Page, path: string, button: string) {
 
 type SystemVisual = {
   file: string;
-  state: "healthy" | "history" | "worker-stale" | "recovered";
+  state:
+    | "healthy"
+    | "history"
+    | "container-memory"
+    | "worker-stale"
+    | "recovered";
   sha256: string;
   viewport: { width: number; height: number };
   documentWidth: number;
@@ -238,6 +243,31 @@ function healthEvidence(health: SystemHealth) {
       ),
     },
   };
+}
+
+function expectedHealthResult(health: SystemHealth) {
+  return health.dependencies.some(
+    (d) => d.status === "unknown" || d.status === "unhealthy",
+  )
+    ? "degraded"
+    : "healthy";
+}
+function expectContainerHealthEvidence(health: SystemHealth) {
+  const container = health.dependencies.find(
+    (d) => d.id === "container-memory",
+  );
+  expect(container).toBeDefined();
+  expect(container!.scope).toBe("runtime_cgroup");
+  expect(["cgroup", "cgroup_v1", "cgroup_v2"]).toContain(container!.source);
+  expect(container!.reason.length).toBeGreaterThan(0);
+  expect(container!.status).toBe(
+    container!.reason === "fresh_cgroup_observation"
+      ? "healthy"
+      : container!.reason === "visible_limit_reached"
+        ? "unhealthy"
+        : "unknown",
+  );
+  expect(health.result).toBe(expectedHealthResult(health));
 }
 
 async function expectHealthWorkspace(page: Page, health: SystemHealth) {
@@ -443,6 +473,86 @@ test("real browser → Linux sampler → PostgreSQL history/settings and actual 
     await page.getByLabel("历史时间范围", { exact: true }).selectOption(range);
     await expect(page.getByRole("img", { name: /实际样本/ })).toBeVisible();
   }
+  // This reads the actual persisted cgroup series. Unlimited/unsupported hosts
+  // must show a real gap rather than a fabricated zero or kernel RAM series.
+  const containerResponse = page.waitForResponse((response) => {
+    const url = new URL(response.url());
+    return (
+      url.pathname === "/api/system/resources/history" &&
+      url.searchParams.get("graphType") === "container_ram"
+    );
+  });
+  await page
+    .getByLabel("历史指标", { exact: true })
+    .selectOption("container_ram");
+  const containerHistoryResponse = await containerResponse;
+  expect(containerHistoryResponse.status()).toBe(200);
+  const containerHistory: History = await containerHistoryResponse.json();
+  expect(containerHistory.graphType).toBe("container_ram");
+  const containerSeries = containerHistory.info[0].data;
+  expect(containerSeries.timestamp).toHaveLength(containerSeries.value.length);
+  for (const value of containerSeries.value) {
+    expect(Number.isFinite(Number(value))).toBe(true);
+    expect(Number(value)).toBeGreaterThanOrEqual(0);
+  }
+  if (containerSeries.value.length) {
+    expect(containerHistory.segments?.length).toBeGreaterThan(0);
+    expect(containerHistory.segments![0].startTime).toBe(
+      containerSeries.timestamp[0],
+    );
+    for (const segment of containerHistory.segments!) {
+      expect(containerSeries.timestamp).toContain(segment.startTime);
+      expect(["cgroup_v1", "cgroup_v2"]).toContain(segment.source);
+      expect(BigInt(segment.limitBytes)).toBeGreaterThan(0n);
+      expect(segment.sourceID).toMatch(/^[a-f0-9]{64}$/);
+    }
+    await expect(
+      page.getByText(`观测分段：${containerHistory.segments!.length} 段。`, {
+        exact: false,
+      }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("img", {
+        name: `容器内存使用率：${containerSeries.value.length} 个实际样本，${containerHistory.gaps.length} 个缺测区间`,
+      }),
+    ).toBeVisible();
+  } else {
+    await expect(
+      page.getByText("此范围没有真实历史样本，统计值不可用。"),
+    ).toBeVisible();
+    expect(containerSeries.dataStatistics).toEqual({
+      max: null,
+      min: null,
+      avg: null,
+      current: null,
+    });
+  }
+  await expect(
+    page.getByRole("region", { name: "容器内存观测" }),
+  ).toBeVisible();
+  await expect(page.getByText(/隐藏祖先约束与同组进程竞争/)).toBeVisible();
+  expect(sample.containerMemory).toBeDefined();
+  expect(sample.containerMemory!.scope).toBe("runtime_cgroup");
+  expect(sample.containerMemory!.hierarchy).toBe("visible");
+  if (sample.containerMemory!.usageBytes !== null)
+    expect(sample.containerMemory!.sourceID).toMatch(/^[a-f0-9]{64}$/);
+  await captureSystemViews(
+    page,
+    testInfo,
+    "container-memory",
+    visuals,
+    async () => {
+      const card = page.getByRole("region", { name: "容器内存观测" });
+      await expect(card).toBeVisible();
+      await expect(card).toContainText(sample.containerMemory!.source);
+      await expect(card).toContainText("runtime_cgroup");
+      await expect(card).toContainText("可见层级上限");
+      await expect(page.getByLabel("历史指标", { exact: true })).toHaveValue(
+        "container_ram",
+      );
+      await expect(card.locator('[data-state="healthy"]')).toHaveCount(0);
+    },
+  );
   const endTime = Math.floor(Date.now() / 1000),
     startTime = endTime - 86400;
   const history: History = await readJSON(
@@ -726,7 +836,7 @@ test("real browser → Linux sampler → PostgreSQL history/settings and actual 
     )
     .toBe("available");
   const healthy: SystemHealth = await readJSON(context, "/api/system/health");
-  expect(healthy.result).toBe("healthy");
+  expectContainerHealthEvidence(healthy);
   for (const id of ["api", "postgresql", "sampler", "worker"])
     expect(healthy.dependencies.find((d) => d.id === id)?.status).toBe(
       "healthy",
@@ -997,7 +1107,12 @@ test("real browser → Linux sampler → PostgreSQL history/settings and actual 
             "/api/system/health",
           );
           if (
-            next.result !== "healthy" ||
+            next.result !== expectedHealthResult(next) ||
+            ["api", "postgresql", "sampler", "worker"].some(
+              (id) =>
+                next.dependencies.find((d) => d.id === id)?.status !==
+                "healthy",
+            ) ||
             next.worker.availability !== "available"
           )
             return false;
@@ -1026,7 +1141,11 @@ test("real browser → Linux sampler → PostgreSQL history/settings and actual 
       )
       .toBe(true);
     recovered = await readJSON(context, "/api/system/health");
-    expect(recovered.result).toBe("healthy");
+    expectContainerHealthEvidence(recovered);
+    for (const id of ["api", "postgresql", "sampler", "worker"])
+      expect(recovered.dependencies.find((d) => d.id === id)?.status).toBe(
+        "healthy",
+      );
     expect(recovered.worker.availability).toBe("available");
     expect(recovered.worker.cycles.map((c) => [c.workerId, c.cycle])).toEqual(
       stopped.worker.cycles.map((c) => [c.workerId, c.cycle]),
@@ -1116,8 +1235,14 @@ test("real browser → Linux sampler → PostgreSQL history/settings and actual 
     .update(readFileSync(`/proc/${workerPID}/exe`))
     .digest("hex");
   expect(runningWorkerSHA256).toBe(apiWorkerSHA256);
-  expect(visuals).toHaveLength(8);
-  for (const state of ["healthy", "history", "worker-stale", "recovered"])
+  expect(visuals).toHaveLength(10);
+  for (const state of [
+    "healthy",
+    "history",
+    "container-memory",
+    "worker-stale",
+    "recovered",
+  ])
     expect(visuals.filter((visual) => visual.state === state)).toHaveLength(2);
   const manifest = {
     formatVersion: 1,
@@ -1206,7 +1331,7 @@ test("real browser → Linux sampler → PostgreSQL history/settings and actual 
       allCyclesCompletedAfterResume: true,
     },
     checks: [
-      "1440×900 and 390×844 healthy, history, stale worker and recovered views",
+      "1440×900 and 390×844 kernel/worker-confirmed, history, container memory, stale worker and recovered views",
       "no document horizontal overflow in any captured view",
       "anomaly cards include actual evidence and a handling suggestion",
       "unconfigured capabilities remain separate and never show healthy status",
