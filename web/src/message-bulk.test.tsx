@@ -8,6 +8,7 @@ import {
 } from "@testing-library/react";
 import { beforeEach, afterEach, expect, it, vi } from "vitest";
 import { StrictMode } from "react";
+import { useMessageBulk } from "./message-bulk";
 import MessagesWorkspace from "./MessagesWorkspace";
 import { type Profile } from "./api";
 import { sampleSnapshot } from "./message-test-fixtures";
@@ -255,9 +256,6 @@ it("cancel only uses original operation, checks it first, and preserves committe
   lookup = () => json(result(input, 51, "running", 50));
   cancel = () => json(result(input, 51, "cancelled", 50));
   await mount();
-  fireEvent.click(
-    within(panel()).getByRole("button", { name: "查询原批次进度" }),
-  );
   await screen.findByRole("button", { name: "取消剩余项目" });
   fireEvent.click(screen.getByRole("button", { name: "取消剩余项目" }));
   await waitFor(() => expect(panel()).toHaveTextContent("已取消剩余项目"));
@@ -351,8 +349,7 @@ it("late old-session progress cannot repopulate new actor UI", async () => {
 it("permission denied suspends private progress and no old intent executes", async () => {
   persistBulkIntent(profile, { input, target: 1 });
   lookup = () => json({ error: "forbidden" }, 403);
-  await mount();
-  fireEvent.click(screen.getByRole("button", { name: "查询原批次进度" }));
+  render(<MessagesWorkspace profile={profile} sessionChanged={changed} />);
   await screen.findByRole("button", { name: "重新核验权限" });
   expect(screen.queryByText(input.operationId)).not.toBeInTheDocument();
   expect(saved()).toHaveLength(1);
@@ -511,9 +508,10 @@ it("a hanging response times out without losing the ID and rejects late progress
     new Promise((r) => {
       resolve = r;
     });
-  await mount();
   vi.useFakeTimers();
-  fireEvent.click(screen.getByRole("button", { name: "查询原批次进度" }));
+  await act(async () => {
+    render(<RecoveryHarness />);
+  });
   await act(async () => {
     await vi.advanceTimersByTimeAsync(15001);
   });
@@ -524,5 +522,206 @@ it("a hanging response times out without losing the ID and rejects late progress
   );
   expect(panel()).not.toHaveTextContent("批量已读完成");
   expect(saved()).toEqual([{ input, target: 1 }]);
+  expect(calls("bulk-read")).toHaveLength(0);
+});
+
+function RecoveryHarness({
+  p = profile,
+  allowed = true,
+}: {
+  p?: Profile;
+  allowed?: boolean;
+}) {
+  return useMessageBulk(p, allowed, undefined, changed).panel;
+}
+
+for (const epochID of ["a-bulk", "b-bulk", "c-bulk"]) {
+  it(`recovers three terminal intents within two poll intervals with epoch ${epochID}`, async () => {
+    vi.useFakeTimers();
+    const inputs = ["c-bulk", "a-bulk", "b-bulk"].map((operationId) => ({
+      ...input,
+      operationId,
+    }));
+    for (const i of inputs) persistBulkIntent(profile, { input: i, target: 1 });
+    const readIDs: string[] = [];
+    vi.mocked(fetch).mockImplementation((url) => {
+      const id = new URL(String(url), "http://localhost").searchParams.get(
+        "operationId",
+      )!;
+      readIDs.push(id);
+      const i = inputs.find((v) => v.operationId === id)!;
+      return json(
+        result(
+          i,
+          1,
+          id === epochID ? "authorization_blocked" : "completed",
+          id === epochID ? 0 : 1,
+        ),
+      );
+    });
+    await act(async () => {
+      render(<RecoveryHarness />);
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(4000);
+    });
+    expect(readIDs).toEqual(["a-bulk", "b-bulk", "c-bulk"]);
+    expect(panel()).toHaveTextContent("权限版本变化，剩余项目已停止");
+    expect(panel()).not.toHaveTextContent("批量操作结果待确认");
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10000);
+    });
+    expect(readIDs).toHaveLength(3);
+    expect(calls("bulk-read")).toHaveLength(0);
+    expect(calls("bulk-read-cancel")).toHaveLength(0);
+  });
+}
+
+it("keeps the ID cursor when a terminal is dismissed and another tab adds an earlier ID", async () => {
+  vi.useFakeTimers();
+  const intents = ["a-bulk", "b-bulk", "c-bulk", "aa-bulk"].map(
+    (operationId) => ({ ...input, operationId }),
+  );
+  for (const i of intents.slice(0, 3))
+    persistBulkIntent(profile, { input: i, target: 1 });
+  const readIDs: string[] = [];
+  vi.mocked(fetch).mockImplementation((url) => {
+    const id = new URL(String(url), "http://localhost").searchParams.get(
+      "operationId",
+    )!;
+    readIDs.push(id);
+    return json(
+      result(intents.find((i) => i.operationId === id)!, 1, "completed", 1),
+    );
+  });
+  await act(async () => {
+    render(<RecoveryHarness />);
+  });
+  expect(readIDs).toEqual(["a-bulk"]);
+  fireEvent.click(screen.getByRole("button", { name: "收起已结束批次" }));
+  persistBulkIntent(profile, { input: intents[3], target: 1 });
+  fireEvent(window, new Event("storage"));
+  fireEvent.focus(window);
+  expect(readIDs).toEqual(["a-bulk"]);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(6000);
+  });
+  expect(readIDs).toEqual(["a-bulk", "aa-bulk", "b-bulk", "c-bulk"]);
+  expect(panel()).not.toHaveTextContent("批量操作结果待确认");
+  expect(calls("bulk-read")).toHaveLength(0);
+});
+
+it("skips in-flight ticks and rotates past a failed read without flooding retries", async () => {
+  vi.useFakeTimers();
+  const intents = ["a-bulk", "b-bulk", "c-bulk"].map((operationId) => ({
+    ...input,
+    operationId,
+  }));
+  for (const i of intents) persistBulkIntent(profile, { input: i, target: 1 });
+  const readIDs: string[] = [];
+  let resolve!: (r: Response) => void;
+  vi.mocked(fetch).mockImplementation((url) => {
+    const id = new URL(String(url), "http://localhost").searchParams.get(
+      "operationId",
+    )!;
+    readIDs.push(id);
+    return id === "a-bulk"
+      ? new Promise((r) => {
+          resolve = r;
+        })
+      : json(
+          result(intents.find((i) => i.operationId === id)!, 1, "completed", 1),
+        );
+  });
+  const view = render(<RecoveryHarness />);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(4000);
+  });
+  expect(readIDs).toEqual(["a-bulk"]);
+  await act(async () => {
+    resolve(
+      new Response(JSON.stringify({ error: "internal" }), { status: 503 }),
+    );
+  });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(5999);
+  });
+  expect(readIDs).toEqual(["a-bulk", "b-bulk", "c-bulk"]);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(1);
+  });
+  expect(readIDs).toEqual(["a-bulk", "b-bulk", "c-bulk", "a-bulk"]);
+  const signal = calls("bulk-read-operation").at(-1)![1]!.signal!;
+  view.unmount();
+  expect(signal.aborted).toBe(true);
+  await act(async () => {
+    resolve(
+      new Response(JSON.stringify(result(intents[0], 1, "completed", 1))),
+    );
+    await vi.advanceTimersByTimeAsync(20000);
+  });
+  expect(readIDs).toHaveLength(4);
+  expect(calls("bulk-read")).toHaveLength(0);
+  expect(calls("bulk-read-cancel")).toHaveLength(0);
+});
+
+it("aborts immediate recovery on permission loss and rejects its late response after reauthorization", async () => {
+  vi.useFakeTimers();
+  persistBulkIntent(profile, { input, target: 1 });
+  let resolve!: (r: Response) => void;
+  lookup = () =>
+    new Promise((r) => {
+      resolve = r;
+    });
+  const view = render(<RecoveryHarness />);
+  const signal = calls("bulk-read-operation")[0][1]!.signal!;
+  view.rerender(<RecoveryHarness allowed={false} />);
+  expect(signal.aborted).toBe(true);
+  expect(
+    screen.queryByRole("region", { name: "批量已读操作" }),
+  ).not.toBeInTheDocument();
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(20000);
+  });
+  expect(calls("bulk-read-operation")).toHaveLength(1);
+  lookup = () => json(result(input, 1, "authorization_blocked"));
+  await act(async () => {
+    view.rerender(<RecoveryHarness />);
+  });
+  await act(async () => {
+    resolve(new Response(JSON.stringify(result(input, 1, "completed", 1))));
+  });
+  expect(panel()).toHaveTextContent("权限版本变化，剩余项目已停止");
+  expect(panel()).not.toHaveTextContent("批量已读完成");
+  expect(calls("bulk-read-operation")).toHaveLength(2);
+});
+
+it("StrictMode discards the first immediate read and only accepts the live recovery", async () => {
+  vi.useFakeTimers();
+  persistBulkIntent(profile, { input, target: 1 });
+  const pending: ((r: Response) => void)[] = [];
+  lookup = () =>
+    new Promise((r) => {
+      pending.push(r);
+    });
+  render(
+    <StrictMode>
+      <RecoveryHarness />
+    </StrictMode>,
+  );
+  expect(calls("bulk-read-operation")).toHaveLength(2);
+  expect(calls("bulk-read-operation")[0][1]!.signal!.aborted).toBe(true);
+  await act(async () => {
+    pending[1](
+      new Response(JSON.stringify(result(input, 1, "authorization_blocked"))),
+    );
+  });
+  await act(async () => {
+    pending[0](new Response(JSON.stringify(result(input, 1, "completed", 1))));
+    await vi.advanceTimersByTimeAsync(6000);
+  });
+  expect(panel()).toHaveTextContent("权限版本变化，剩余项目已停止");
+  expect(panel()).not.toHaveTextContent("批量已读完成");
+  expect(calls("bulk-read-operation")).toHaveLength(2);
   expect(calls("bulk-read")).toHaveLength(0);
 });
