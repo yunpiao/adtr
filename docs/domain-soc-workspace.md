@@ -41,3 +41,19 @@ PR #103 首轮head `47cb7b305aebc9571a95fa8c904d13c253995345` 的真实domains�
 修正保持域局部：显式重置工作区标题header、折叠高级筛选、手机队列改完整事实卡片、危险按钮白底红字与独立hover/focus、成功尾注按已完成诊断提示版本/时间。新增实际浏览器窄屏标题/区块几何、表格无横向隐藏、危险文字对比度≥4.5:1、键盘Tab到行操作及focus-visible验证。新的精确head、真实截图与独立复审完成后才可解除该视觉门禁。
 
 修正head `0fbc1ef5c51fa6b4ee7dc42005d7893023df9547` 的真实domains及新几何/对比/焦点断言通过，artifact `11692277400` 的来源与实际像素独立复审确认四项旧阻断已修。危险文字实测对比8.07:1。该轮手机队列fullPage在Tab滚动后捕获，粘性顶栏画在整图中段，属于截图构图限制，不能用于宣称整页无遮挡。后续整合head补顶端完整图与实际焦点视口双证据，再按新来源复审。
+
+## B2 补充：应用交付、通知回退与无域资源账户（Issue #108）
+
+基线 main `4aa9eedbfa0061c731031b749b350238a8337e11`；本切片只增测试、隔离夹具和证据，不改生产代码。保留原三路 `route.fetch` 迟到响应及 `delivered` / `browser_cancelled` 分类，不以新证据覆盖旧取消证据。
+
+三个新增旧标签分别持有来源回执、候选账户/未提交证明、来源详情。浏览器原生 `Response.json()` 先消费真实 API 正文；测试仅在该原解析值返回调用方前暂停，再由真实账户切换和 `/api/auth/me` 重核验清理旧页面，最后释放同一解析对象。限定同源、完整 URL、单次读取及原 actor 响应头，非目标调用原样直通；恢复原 `json` descriptor。没有改 `fetch`、AbortSignal、正文、reader、身份头、服务端权限或生产守卫。来源详情/回执由 post-json `throwIfAborted` 和组件代际清理保护；候选账户依赖 `useTaskRead` 的 alive/代际守卫。未直接观测原 signal，不将组件清理推断写成 signal 实测。
+
+证据区分：同一 Playwright Request/Response 的原生 `requestfinished`；该 Response 正文 SHA-256；原生 JSON 消费所得解析值 SHA-256（与独立正文解析值比较）；真实 B 的 `/me` 身份；B 核验之后原值应用交付；持续 DOM 观察、无自动业务写入/无 B 查询 A 原回执。Node 单调时钟记录网络完成、观察到消费完成、B 核验、交付顺序；浏览器事件使用自己的时钟，不跨时钟相减。正文哈希不是 TLS/压缩线上字节哈希。该证据只称“切换前真实正文已消费、核验后迟到应用交付”，不能称取消后网络才到达或浏览器绕过取消。
+
+新增标签通过测试侧故障同时禁用 BroadcastChannel 与 localStorage；原生窗口/标签、真实 hidden/失焦、`bringToFront` 和 `isTrusted` 事件证明焦点/可见性回退，未派发合成事件。真实 `/me` 待返回期间检查旧 main 为 hidden/inert，核验完成后旧编辑器、证明、候选和确认提示必须消失。回执标签通过真实 `window.open` 的 sessionStorage 拷贝继承 A 元数据意图，不伪造存储。
+
+无域 B 使用只在该套件随机独占数据库中安装的合成 `source_no_scope` 角色；角色种子使用正常表与约束且零资源组关联，真实 UI 创建用户、改初始密码、启用 MFA。角色具备 domains 读写及 operation_accounts 只读：domains 写功能权是读取原回执接口的前置条件，删除它会先得功能 403，无法单独测资源/归属边界。真实 `/access/check` 四项 true 后检查域列表/同域候选为空，指定来源/他人回执 404。此种子不证明角色配置 UI 验收，不修改内置角色或生产默认权限。
+
+套件改用 headed Chromium 以取得真实标签生命周期；没有 Xvfb/DISPLAY 时明确失败。整体 Playwright/harness 预算从510/540秒增到630/660秒，仅覆盖新增真实用户改密/MFA和切换，单请求、断言与安全闸门时间不放宽；真实30秒TOTP counter与持久化限流保持。bootstrap高权限写预算为10次，consumer为10次，未重置账本或速率桶。
+
+本地基线完整 `make check` 通过（1418项DOM、100项Python、Go race/vet/build、类型/构建与依赖审计0）；候选结果、精确 head 全36 CI、来源与独立复审在关联 PR 逐项记录。本地真实浏览器因无Xvfb/DISPLAY阻塞；集成/生命周期因无Docker阻塞，均不计通过。#108工程结果保持开放记录，#16与产品验收边界不变。

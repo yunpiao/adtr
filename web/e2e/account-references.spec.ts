@@ -1,3 +1,12 @@
+import { holdConsumedSource } from "./domain-source-delivery-probe";
+import {
+  sourceFallbackPage,
+  sourceFallbackRefocus,
+} from "./domain-source-fallback";
+import {
+  requireSameNativeWindow,
+  useNativeTabLifecycle,
+} from "./native-tab-lifecycle";
 import { navigateTo } from "./navigation";
 import {
   test,
@@ -316,7 +325,7 @@ test("unconfigured bootstrap, explicit own-role reference, real LDAP consumption
   page,
   context,
 }, testInfo) => {
-  test.setTimeout(510_000);
+  test.setTimeout(630_000);
   let username = process.env.ADTR_E2E_USERNAME;
   const bootstrapPassword = process.env.ADTR_E2E_PASSWORD;
   if (!username || !bootstrapPassword || !process.env.ADTR_E2E_BASE_URL)
@@ -324,6 +333,9 @@ test("unconfigured bootstrap, explicit own-role reference, real LDAP consumption
       "A fresh synthetic bootstrap account and ADTR_E2E_BASE_URL are required",
     );
   let password = "Changed Governance Password 123";
+  const noScopeUsername = "source-no-scope";
+  const noScopeInitial = "Initial Source Scope Password 481";
+  const noScopePassword = "Changed Source Scope Password 592";
   const consumerUsername = "reference-consumer";
   const consumerInitial = "Initial Reference Consumer 123";
   const consumerPassword = "Changed Reference Consumer 456";
@@ -344,6 +356,8 @@ test("unconfigured bootstrap, explicit own-role reference, real LDAP consumption
     password,
     consumerInitial,
     consumerPassword,
+    noScopeInitial,
+    noScopePassword,
     domainUser,
     domainPassword,
     accountUser,
@@ -555,12 +569,64 @@ test("unconfigured bootstrap, explicit own-role reference, real LDAP consumption
 
   // Keep the production ten-action window intact, including the stale CAS.
   // Bootstrap: password/MFA (3), domain/group/assignment (3), account/grant (2),
-  // consumer creation (1) = 9. Consumer: password/MFA (3), metadata/stale source/
+  // consumer + no-scope user creation (2) = 10. Consumer: password/MFA (3), metadata/stale source/
   // committed reference/test/revoke/detach/custom (7) = 10. Create the consumer
   // after the one-member grant review to retain its current/future-member check.
   // Logout does not reset a bucket; the real second user has its own budget.
   const bootstrapActorId = actorId;
   const bootstrapActor = { username, password, auth };
+  // The role was seeded only in this disposable fixture, with function
+  // permissions and no resource-group association. User/MFA remain real flows.
+  await navigateTo(page, "访问管理");
+  await page.getByRole("button", { name: "用户管理", exact: true }).click();
+  await page.getByRole("button", { name: "新增用户", exact: true }).click();
+  await page.getByLabel("用户名", { exact: true }).fill(noScopeUsername);
+  await fillSecret(
+    page.getByLabel("初始密码", { exact: true }),
+    noScopeInitial,
+  );
+  await fillSecret(
+    page.getByLabel("确认初始密码", { exact: true }),
+    noScopeInitial,
+  );
+  await page.getByLabel("角色", { exact: true }).fill("source_no_scope");
+  await proof(page, password, auth);
+  const noScopeCreated = await submit(
+    page,
+    "/api/access/users/create",
+    "创建用户",
+  );
+  const noScopeId = noScopeCreated.value.ID as number;
+  expect(noScopeId).toBeGreaterThan(0);
+  const noScopeContext = await context
+    .browser()!
+    .newContext({ baseURL: process.env.ADTR_E2E_BASE_URL });
+  let noScopeAuth: Authenticator;
+  try {
+    const setup = await noScopeContext.newPage();
+    await setup.goto("/");
+    await login(setup, noScopeUsername, noScopeInitial);
+    await fillSecret(
+      setup.getByLabel("当前密码", { exact: true }),
+      noScopeInitial,
+    );
+    await fillSecret(
+      setup.getByLabel("新密码", { exact: true }),
+      noScopePassword,
+    );
+    await fillSecret(
+      setup.getByLabel("确认新密码", { exact: true }),
+      noScopePassword,
+    );
+    await setup.getByRole("button", { name: "更新密码", exact: true }).click();
+    await expect(
+      setup.getByRole("heading", { name: "账户概览", exact: true }),
+    ).toBeVisible();
+    noScopeAuth = await enrollMfa(setup, noScopePassword);
+    secrets.push(noScopeAuth.secret);
+  } finally {
+    await noScopeContext.close();
+  }
   await navigateTo(page, "访问管理");
   await page.getByRole("button", { name: "用户管理", exact: true }).click();
   await page.getByRole("button", { name: "新增用户", exact: true }).click();
@@ -866,7 +932,11 @@ test("unconfigured bootstrap, explicit own-role reference, real LDAP consumption
     const draft = await context.newPage();
     const detail = await context.newPage();
     const switching = await context.newPage();
+    await useNativeTabLifecycle(switching);
     const oldTabs = [page, draft, detail];
+    const fallbackTabs: Page[] = [];
+    const consumedReads: Awaited<ReturnType<typeof holdConsumedSource>>[] = [];
+    const consumedEvidence: unknown[] = [];
     const held: Awaited<ReturnType<typeof holdSourceRead>>[] = [];
     const witnesses: Awaited<ReturnType<typeof watchSourceIsolation>>[] = [];
     const listeners: { tab: Page; listener: (request: Request) => void }[] = [];
@@ -993,9 +1063,83 @@ test("unconfigured bootstrap, explicit own-role reference, real LDAP consumption
         .getByRole("button", { name: "重新读取凭据来源", exact: true })
         .click();
       await source.fetched();
+      // Additional tabs deliberately lack both notification channels. Their
+      // original response bodies finish in A; only the parsed application value
+      // is delayed. Existing native-cancellation tabs above remain unchanged.
+      const fallbackReceipt = await sourceFallbackPage(context, page);
+      fallbackTabs.push(fallbackReceipt);
+      const consumedReceipt = await holdConsumedSource(
+        fallbackReceipt,
+        `/api/domains/credential-source/mutation?${new URLSearchParams({ idempotencyKey: committedKey })}`,
+        actorId,
+      );
+      consumedReads.push(consumedReceipt);
+      await navigateTo(fallbackReceipt, "域连接");
+      await consumedReceipt.consumed((value) => {
+        safe(value);
+        expect(value).toMatchObject({
+          receipt: { operation: "reference", domainId, replayed: true },
+        });
+      });
+      const fallbackCandidates = await sourceFallbackPage(context);
+      fallbackTabs.push(fallbackCandidates);
+      await openSource(fallbackCandidates);
+      await fallbackCandidates
+        .getByLabel("新的凭据来源", { exact: true })
+        .selectOption("reference");
+      await fallbackCandidates
+        .getByRole("button", { name: `选择账户 ${label}`, exact: true })
+        .click();
+      await fillSecret(
+        fallbackCandidates.getByLabel("操作者当前密码", { exact: true }),
+        password,
+      );
+      await fillSecret(
+        fallbackCandidates.getByLabel("未使用的认证器验证码", { exact: true }),
+        totp(auth.secret),
+      );
+      const consumedCandidates = await holdConsumedSource(
+        fallbackCandidates,
+        `/api/operation-accounts?${new URLSearchParams({ filterDomain: domain, pageIdx: "1", pageSize: "20" })}`,
+        actorId,
+      );
+      consumedReads.push(consumedCandidates);
+      await fallbackCandidates
+        .getByRole("button", { name: "刷新同域账户", exact: true })
+        .click();
+      await consumedCandidates.consumed((value) => {
+        safe(value);
+        expect(value).toMatchObject({
+          List: expect.arrayContaining([
+            expect.objectContaining({ accountId, domainId, label }),
+          ]),
+        });
+      });
+      const fallbackSource = await sourceFallbackPage(context);
+      fallbackTabs.push(fallbackSource);
+      await openSource(fallbackSource);
+      const consumedSource = await holdConsumedSource(
+        fallbackSource,
+        `/api/domains/credential-source?${new URLSearchParams({ domainId })}`,
+        actorId,
+      );
+      consumedReads.push(consumedSource);
+      await fallbackSource
+        .getByRole("button", { name: "重新读取凭据来源", exact: true })
+        .click();
+      await consumedSource.consumed((value) => {
+        safe(value);
+        expect(value).toMatchObject({
+          domainId,
+          credentialSource: "operation_account",
+          reference: { accountId, label },
+        });
+      });
+      await requireSameNativeWindow([...fallbackTabs, switching]);
       await switching.goto("/");
+      await switching.bringToFront();
       await expect(switching.locator(".signed-in strong")).toHaveText(username);
-      for (const tab of oldTabs) {
+      for (const tab of [...oldTabs, ...fallbackTabs]) {
         const listener = (request: Request) => {
           const url = new URL(request.url());
           if (
@@ -1114,6 +1258,121 @@ test("unconfigured bootstrap, explicit own-role reference, real LDAP consumption
         "B never automatically queries A's persisted intent",
       ).toEqual([]);
       expect(sourcePosts).toBe(1);
+      for (const witness of witnesses) {
+        await witness.evaluate((value) => value.stop());
+        await witness.dispose();
+      }
+      witnesses.length = 0;
+      await navigateTo(switching, "退出登录");
+      await login(switching, noScopeUsername, noScopePassword);
+      await fillSecret(
+        switching.getByLabel("二次认证验证码", { exact: true }),
+        await freshCode(noScopeAuth),
+      );
+      await switching
+        .getByRole("button", { name: "登录", exact: true })
+        .click();
+      await expect(switching.locator(".signed-in strong")).toHaveText(
+        noScopeUsername,
+      );
+      expect((await readJSON(context, "/api/auth/me")).ID).toBe(noScopeId);
+      const noScopeSession = await readJSON(context, "/api/auth/me");
+      const functionCheck = await context.request.post("/api/access/check", {
+        headers: {
+          Origin: new URL(switching.url()).origin,
+          "X-CSRF-Token": noScopeSession.csrfToken,
+        },
+        data: {
+          paths: [
+            "GET /api/domains",
+            "GET /api/domains/credential-source",
+            "GET /api/domains/credential-source/mutation",
+            "GET /api/operation-accounts",
+          ],
+        },
+      });
+      expect(functionCheck.status()).toBe(200);
+      expect(await functionCheck.json()).toEqual({
+        results: [true, true, true, true],
+      });
+      const noScopeList = await readJSON(context, "/api/domains");
+      safe(noScopeList);
+      expect(noScopeList.List).toEqual([]);
+      const noScopeCandidates = await readJSON(
+        context,
+        `/api/operation-accounts?filterDomain=${encodeURIComponent(domain)}`,
+      );
+      safe(noScopeCandidates);
+      expect(noScopeCandidates.List).toEqual([]);
+      for (const path of [
+        `/api/domains/credential-source?domainId=${domainId}`,
+        `/api/domains/credential-source/mutation?idempotencyKey=${committedKey}`,
+      ]) {
+        const denied = await context.request.get(path);
+        expect(denied.status()).toBe(404);
+        expect(denied.headers()["cache-control"]).toBe("no-store");
+        expect(await denied.json()).toEqual({ error: "not_found" });
+      }
+      for (let index = 0; index < fallbackTabs.length; index++) {
+        const tab = fallbackTabs[index];
+        // Real hidden tabs still have A's view because both notice mechanisms
+        // failed. A trusted foreground event must invoke the production /me.
+        await expect(tab.locator(".signed-in strong")).toHaveText(username);
+        const lifecycle = await sourceFallbackRefocus(tab, noScopeId);
+        await expect(tab.locator(".signed-in strong")).toHaveText(
+          noScopeUsername,
+        );
+        const witness = await watchSourceIsolation(
+          tab,
+          noScopeUsername,
+          label,
+          accountId,
+          committedKey,
+        );
+        witnesses.push(witness);
+        consumedEvidence.push({
+          target: ["receipt", "candidates", "source"][index],
+          lifecycle,
+          delivery: await consumedReads[index].release(lifecycle),
+        });
+        await expect(
+          tab.getByLabel("新的凭据来源", { exact: true }),
+        ).toHaveCount(0);
+        await expect(
+          tab.getByLabel("操作者当前密码", { exact: true }),
+        ).toHaveCount(0);
+        await expect(tab.getByText(/原凭据来源操作已确认/)).toHaveCount(0);
+        safe(
+          await tab.evaluate(() => ({
+            url: location.href,
+            history: history.state,
+            session: { ...sessionStorage },
+            text: document.body.innerText,
+            inputs: Array.from(document.querySelectorAll("input")).map(
+              (input) => input.value,
+            ),
+          })),
+        );
+        expect(await tab.evaluate(() => ({ ...sessionStorage }))).toEqual(
+          index === 0 ? pending.session : {},
+        );
+        expect(await witness.evaluate((value) => value.read())).toEqual({
+          oldIdentity: false,
+          oldSource: false,
+        });
+      }
+      for (const witness of witnesses) {
+        expect(await witness.evaluate((value) => value.read())).toEqual({
+          oldIdentity: false,
+          oldSource: false,
+        });
+        await witness.evaluate((value) => value.stop());
+        await witness.dispose();
+      }
+      witnesses.length = 0;
+      expect(browserWrites).toEqual([]);
+      expect(foreignReceiptReads).toEqual([]);
+      expect(sourcePosts).toBe(1);
       const root = execFileSync("git", ["rev-parse", "--show-toplevel"], {
         encoding: "utf8",
       }).trim();
@@ -1128,6 +1387,15 @@ test("unconfigured bootstrap, explicit own-role reference, real LDAP consumption
             receiptOwnerDenied: true,
             sourcePosts,
             lateReads: outcomes,
+            consumedBeforeSwitch: consumedEvidence,
+            noScope: {
+              functionDomains: true,
+              functionOperationAccounts: true,
+              domainListEmpty: true,
+              candidateListEmpty: true,
+              sourceStatus: 404,
+              foreignReceiptStatus: 404,
+            },
             checkoutCommit: execFileSync("git", ["rev-parse", "HEAD"], {
               encoding: "utf8",
             }).trim(),
@@ -1141,6 +1409,12 @@ test("unconfigured bootstrap, explicit own-role reference, real LDAP consumption
             sourceSHA256: Object.fromEntries(
               [
                 "web/e2e/account-references.spec.ts",
+                "web/e2e/domain-source-delivery-probe.ts",
+                "web/e2e/domain-source-fallback.ts",
+                "web/e2e/native-tab-lifecycle.ts",
+                "scripts/test_auth_e2e.py",
+                "web/src/operation-account-api.ts",
+                "web/src/task-common.tsx",
                 "web/src/App.tsx",
                 "web/src/DomainCredentialSource.tsx",
                 "web/src/domain-source-intent.ts",
@@ -1152,11 +1426,6 @@ test("unconfigured bootstrap, explicit own-role reference, real LDAP consumption
           2,
         ),
       );
-      for (const witness of witnesses) {
-        await witness.evaluate((value) => value.stop());
-        await witness.dispose();
-      }
-      witnesses.length = 0;
       switched = false;
       await navigateTo(switching, "退出登录");
       await login(switching, username, password);
@@ -1184,13 +1453,15 @@ test("unconfigured bootstrap, explicit own-role reference, real LDAP consumption
           cleanupErrors.push(error);
         }
       };
+      for (const response of consumedReads)
+        await cleanup(() => response.cleanup());
       for (const response of held) await cleanup(() => response.cleanup());
       for (const witness of witnesses) {
         await cleanup(() => witness.evaluate((value) => value.stop()));
         await cleanup(() => witness.dispose());
       }
       for (const { tab, listener } of listeners) tab.off("request", listener);
-      for (const extra of [draft, detail, switching])
+      for (const extra of [draft, detail, switching, ...fallbackTabs])
         await cleanup(() => extra.close());
     }
     if (scenarioFailed || cleanupErrors.length)
