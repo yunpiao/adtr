@@ -185,6 +185,8 @@ jobs:
             command: python3 scripts/test_auth_e2e.py --suite resource
           - name: tasks
             command: python3 scripts/test_auth_e2e.py --suite tasks
+          - name: messages
+            command: python3 scripts/test_auth_e2e.py --suite messages
           - name: audit
             command: python3 scripts/test_auth_e2e.py --suite audit
           - name: system
@@ -291,6 +293,14 @@ jobs:
         with:
           name: tasks-soc-evidence-${{ github.run_id }}-${{ github.run_attempt }}
           path: web/test-results/**/tasks-soc-*
+          if-no-files-found: error
+          retention-days: 7
+      - name: Retain synthetic message workspace evidence
+        if: ${{ success() && matrix.name == 'messages' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: messages-soc-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: web/test-results/**/messages-soc-*
           if-no-files-found: error
           retention-days: 7
       - name: Retain synthetic audit workspace evidence
