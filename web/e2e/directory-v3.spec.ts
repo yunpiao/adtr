@@ -1538,11 +1538,52 @@ test("real dictionary-v3 UI → authenticated API → worker → paged synthetic
   // Native keyboard focus must reveal the rightmost action without page scroll.
   await grantScroll.press("Tab");
   await expect(revokeButton).toBeFocused();
-  await expect(revokeButton).toBeInViewport({ ratio: 1 });
+  const focusGeometry = await revokeButton.evaluate((element) => {
+    const chain: Element[] = [];
+    for (
+      let current: Element | null = element;
+      current;
+      current = current.parentElement
+    )
+      chain.push(current);
+    return {
+      focused: document.activeElement === element,
+      viewport: { width: innerWidth, height: innerHeight },
+      ancestorCount: chain.length - 1,
+      bounds: chain.slice(0, 32).map((current) => {
+        const rect = current.getBoundingClientRect();
+        const style = getComputedStyle(current);
+        return {
+          tag: current.tagName,
+          x: rect.x,
+          y: rect.y,
+          width: rect.width,
+          height: rect.height,
+          right: rect.right,
+          bottom: rect.bottom,
+          clientWidth: current.clientWidth,
+          clientHeight: current.clientHeight,
+          scrollWidth: current.scrollWidth,
+          scrollHeight: current.scrollHeight,
+          scrollLeft: current.scrollLeft,
+          scrollTop: current.scrollTop,
+          overflowX: style.overflowX,
+          overflowY: style.overflowY,
+          position: style.position,
+          outlineStyle: style.outlineStyle,
+        };
+      }),
+    };
+  });
+  await writeFile(
+    testInfo.outputPath("directory-v3-focused-action-geometry.json"),
+    JSON.stringify({ testedCommit, testedTree, focusGeometry }, null, 2),
+  );
   await capture(
     "directory-v3-mobile-governance-action.png",
-    "keyboard-reachable revoke action",
+    "native Tab-focused revoke action before visibility assertion",
   );
+  await expect(revokeButton).toBeInViewport({ ratio: 1 });
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.evaluate(() => scrollTo(0, 0));
   expect(
