@@ -5,8 +5,14 @@ import {
   type BrowserContext,
   type Locator,
   type Page,
+  type APIResponse,
+  type Request,
+  type Route,
 } from "@playwright/test";
-import { createHmac } from "node:crypto";
+import { createHmac, createHash } from "node:crypto";
+import { readFileSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { resolve } from "node:path";
 
 type Authenticator = { secret: string; lastCounter: number };
 
@@ -111,6 +117,197 @@ async function submit(page: Page, path: string, button: string, status = 200) {
   };
 }
 
+async function bounded<T>(
+  promise: Promise<T>,
+  timeout: number,
+  message: string,
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(message)), timeout);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// Hold one genuine authenticated read until a different user owns the shared
+// cookie. A browser cancellation is valid evidence of safe cancellation, not
+// proof that a payload was delivered. No body, actor header or status is forged.
+async function holdSourceRead(
+  page: Page,
+  path: (url: URL) => boolean,
+  actorId: number,
+  check: (value: unknown) => void,
+) {
+  let unblock!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    unblock = resolve;
+  });
+  let ready!: () => void, rejectReady!: (error: unknown) => void;
+  const fetched = new Promise<void>((resolve, reject) => {
+    ready = resolve;
+    rejectReady = reject;
+  });
+  void fetched.catch(() => {});
+  let finish!: () => void, end!: () => void;
+  const finished = new Promise<void>((resolve) => {
+    finish = resolve;
+  });
+  const terminal = new Promise<void>((resolve) => {
+    end = resolve;
+  });
+  let held: Request | undefined, actual: APIResponse | undefined;
+  let failure: unknown;
+  let failed = false,
+    releaseAttempted = false;
+  const transport: {
+    outcome: "pending" | "delivered" | "browser_cancelled" | "failed";
+  } = { outcome: "pending" };
+  const succeeded = (request: Request) => {
+    if (request !== held) return;
+    transport.outcome = "delivered";
+    end();
+  };
+  const rejected = (request: Request) => {
+    if (request !== held) return;
+    transport.outcome = /aborted|cancelled|canceled/i.test(
+      request.failure()?.errorText ?? "",
+    )
+      ? "browser_cancelled"
+      : "failed";
+    end();
+  };
+  page.on("requestfinished", succeeded);
+  page.on("requestfailed", rejected);
+  const handler = async (route: Route) => {
+    try {
+      held = route.request();
+      expect(held.method()).toBe("GET");
+      actual = await route.fetch({
+        maxRedirects: 0,
+        maxRetries: 0,
+        timeout: 15_000,
+      });
+      expect(actual.status()).toBe(200);
+      expect(actual.headers()["cache-control"]).toBe("no-store");
+      expect(actual.headers()["x-adtr-user-id"]).toBe(String(actorId));
+      check(await actual.json());
+      ready();
+      await bounded(gate, 120_000, "Source response was not released in time");
+      releaseAttempted = true;
+      try {
+        await route.fulfill({ response: actual });
+      } catch (error) {
+        if (
+          !/aborted|cancelled|canceled/i.test(held.failure()?.errorText ?? "")
+        )
+          throw error;
+      }
+    } catch (error) {
+      failed = true;
+      failure = error;
+      rejectReady(error);
+      await route.abort().catch(() => {});
+    } finally {
+      try {
+        await actual?.dispose();
+      } catch (error) {
+        failed = true;
+        failure ??= error;
+      }
+      finish();
+    }
+  };
+  await page.route(path, handler, { times: 1 });
+  return {
+    fetched: () =>
+      bounded(fetched, 20_000, "No genuine source response was captured"),
+    async release() {
+      unblock();
+      await bounded(finished, 20_000, "Source response handler did not finish");
+      if (failed) throw failure;
+      await bounded(terminal, 10_000, "Source request had no terminal event");
+      expect(releaseAttempted).toBe(true);
+      expect(["delivered", "browser_cancelled"]).toContain(transport.outcome);
+      await page.evaluate(
+        () => new Promise((resolve) => setTimeout(resolve, 0)),
+      );
+      return { outcome: transport.outcome };
+    },
+    async cleanup() {
+      unblock();
+      try {
+        await bounded(
+          page.unroute(path, handler),
+          5_000,
+          "Source unroute timed out",
+        );
+        if (held)
+          await bounded(
+            finished,
+            20_000,
+            "Source route cleanup did not finish",
+          );
+        if (failed) throw failure;
+      } finally {
+        page.off("requestfinished", succeeded);
+        page.off("requestfailed", rejected);
+      }
+    },
+  };
+}
+
+async function watchSourceIsolation(
+  page: Page,
+  nextUsername: string,
+  accountLabel: string,
+  accountId: string,
+  key: string,
+) {
+  return page.evaluateHandle(
+    ({ nextUsername, accountLabel, accountId, key }) => {
+      let oldIdentity = false,
+        oldSource = false;
+      const scan = () => {
+        const actor = document.querySelector(".signed-in strong")?.textContent;
+        oldIdentity ||= !!actor && actor !== nextUsername;
+        const text = document.body.textContent ?? "";
+        oldSource ||=
+          [accountLabel, accountId, key].some((value) =>
+            text.includes(value),
+          ) ||
+          !!document.querySelector(
+            'section[aria-label="凭据来源"], section[aria-label="核对凭据来源回执"], section[aria-label="同域操作账户"], input[name="actorPassword"], input[name="totpCode"]',
+          ) ||
+          Array.from(document.querySelectorAll("input")).some((input) =>
+            [accountLabel, accountId, key].includes(input.value),
+          );
+      };
+      const observer = new MutationObserver(scan);
+      observer.observe(document.body, {
+        subtree: true,
+        childList: true,
+        characterData: true,
+        attributes: true,
+      });
+      scan();
+      return {
+        read() {
+          scan();
+          return { oldIdentity, oldSource };
+        },
+        stop: () => observer.disconnect(),
+      };
+    },
+    { nextUsername, accountLabel, accountId, key },
+  );
+}
+
 // Requires the real migrated database, worker and isolated trusted TLS LDAP fixture.
 // Fault injection loses an actual committed response, never fabricates API outcomes.
 // Screenshots are captured only after checking that every write-only field is clear.
@@ -165,8 +362,8 @@ test("unconfigured bootstrap, explicit own-role reference, real LDAP consumption
       "secret-bearing public field",
     ).toBe(false);
   };
-  const safeBrowser = async () => {
-    const state = await page.evaluate(async () => ({
+  const safeBrowser = async (target = page) => {
+    const state = await target.evaluate(async () => ({
       url: location.href,
       history: history.state,
       local: { ...localStorage },
@@ -363,6 +560,7 @@ test("unconfigured bootstrap, explicit own-role reference, real LDAP consumption
   // after the one-member grant review to retain its current/future-member check.
   // Logout does not reset a bucket; the real second user has its own budget.
   const bootstrapActorId = actorId;
+  const bootstrapActor = { username, password, auth };
   await navigateTo(page, "访问管理");
   await page.getByRole("button", { name: "用户管理", exact: true }).click();
   await page.getByRole("button", { name: "新增用户", exact: true }).click();
@@ -422,21 +620,21 @@ test("unconfigured bootstrap, explicit own-role reference, real LDAP consumption
     roleName: "platform_admin",
     memberCount: 2,
   });
-  const openSource = async () => {
-    await navigateTo(page, "域连接");
-    const back = page.getByRole("button", {
+  const openSource = async (target = page) => {
+    await navigateTo(target, "域连接");
+    const back = target.getByRole("button", {
       name: "返回域连接列表",
       exact: true,
     });
     if (await back.isVisible()) await back.click();
-    await page
+    await target
       .getByRole("button", { name: `查看 ${domain}`, exact: true })
       .click();
-    await page
+    await target
       .getByRole("button", { name: "管理凭据来源", exact: true })
       .click();
     await expect(
-      page.getByLabel("新的凭据来源", { exact: true }),
+      target.getByLabel("新的凭据来源", { exact: true }),
     ).toBeVisible();
   };
   const sourceRead = async () => {
@@ -661,6 +859,346 @@ test("unconfigured bootstrap, explicit own-role reference, real LDAP consumption
   await expect(page.getByLabel("操作者当前密码", { exact: true })).toHaveCount(
     0,
   );
+  await test.step("isolate an unresolved source receipt, candidate draft and late reads across real account switching", async () => {
+    // Both existing accounts have this domain's explicit scope. The boundary
+    // under test is the original operator's receipt and browser draft, not a
+    // fabricated denial of B's independently authorized domain reads.
+    const draft = await context.newPage();
+    const detail = await context.newPage();
+    const switching = await context.newPage();
+    const oldTabs = [page, draft, detail];
+    const held: Awaited<ReturnType<typeof holdSourceRead>>[] = [];
+    const witnesses: Awaited<ReturnType<typeof watchSourceIsolation>>[] = [];
+    const listeners: { tab: Page; listener: (request: Request) => void }[] = [];
+    const browserWrites: string[] = [],
+      foreignReceiptReads: string[] = [];
+    const outcomes: { outcome: string }[] = [];
+    const cleanupErrors: unknown[] = [];
+    let switched = false;
+    let scenarioFailed = false,
+      scenarioFailure: unknown;
+    for (const extra of [draft, detail, switching]) {
+      extra.on("console", (message) => consoles.push(message.text()));
+      extra.on("pageerror", (error) => consoles.push(error.message));
+    }
+    try {
+      const receipt = await holdSourceRead(
+        page,
+        (url) => url.pathname === "/api/domains/credential-source/mutation",
+        actorId,
+        (value) => {
+          safe(value);
+          expect(value).toMatchObject({
+            receipt: {
+              operation: "reference",
+              domainId,
+              credentialSource: "operation_account",
+              replayed: true,
+            },
+          });
+        },
+      );
+      held.push(receipt);
+      // The real aborted receipt read retries through the normal read hook.
+      // Hold that result while A's unresolved intent remains in the editor.
+      await receipt.fetched();
+      await expect(
+        page.getByRole("heading", {
+          name: "核对未确认的凭据来源变更",
+          exact: true,
+        }),
+      ).toBeVisible();
+
+      await draft.goto("/");
+      await expect(draft.locator(".signed-in strong")).toHaveText(username);
+      await openSource(draft);
+      await draft
+        .getByLabel("新的凭据来源", { exact: true })
+        .selectOption("reference");
+      await draft
+        .getByRole("button", {
+          name: `选择账户 ${label}`,
+          exact: true,
+        })
+        .click();
+      await expect(
+        draft.getByRole("button", {
+          name: "保存凭据来源",
+          exact: true,
+        }),
+      ).toBeEnabled();
+      await fillSecret(
+        draft.getByLabel("操作者当前密码", { exact: true }),
+        password,
+      );
+      // This is only an unsubmitted proof draft. Do not consume another real
+      // counter or weaken the server's replay protection to test its clearing.
+      await fillSecret(
+        draft.getByLabel("未使用的认证器验证码", { exact: true }),
+        totp(auth.secret),
+      );
+      const candidates = await holdSourceRead(
+        draft,
+        (url) => url.pathname === "/api/operation-accounts",
+        actorId,
+        (value) => {
+          safe(value);
+          expect(value).toMatchObject({
+            List: expect.arrayContaining([
+              expect.objectContaining({ accountId, domainId, label }),
+            ]),
+          });
+        },
+      );
+      held.push(candidates);
+      await draft
+        .getByRole("button", { name: "刷新同域账户", exact: true })
+        .click();
+      await candidates.fetched();
+      expect(
+        await draft
+          .getByLabel("操作者当前密码", { exact: true })
+          .evaluate((input) => (input as HTMLInputElement).value.length > 0),
+      ).toBe(true);
+      await expect(
+        draft.getByRole("button", {
+          name: `选择账户 ${label}`,
+          exact: true,
+        }),
+      ).toHaveAttribute("aria-pressed", "true");
+
+      await detail.goto("/");
+      await expect(detail.locator(".signed-in strong")).toHaveText(username);
+      await openSource(detail);
+      const source = await holdSourceRead(
+        detail,
+        (url) => url.pathname === "/api/domains/credential-source",
+        actorId,
+        (value) => {
+          safe(value);
+          expect(value).toMatchObject({
+            domainId,
+            credentialSource: "operation_account",
+            reference: {
+              accountId,
+              label,
+              explicitlyGranted: true,
+              eligible: true,
+            },
+          });
+        },
+      );
+      held.push(source);
+      await detail
+        .getByRole("button", { name: "重新读取凭据来源", exact: true })
+        .click();
+      await source.fetched();
+      await switching.goto("/");
+      await expect(switching.locator(".signed-in strong")).toHaveText(username);
+      for (const tab of oldTabs) {
+        const listener = (request: Request) => {
+          const url = new URL(request.url());
+          if (
+            !["GET", "HEAD"].includes(request.method()) &&
+            url.pathname !== "/api/access/check"
+          )
+            browserWrites.push(`${request.method()} ${url.pathname}`);
+          if (
+            switched &&
+            url.pathname === "/api/domains/credential-source/mutation"
+          )
+            foreignReceiptReads.push(url.pathname);
+        };
+        tab.on("request", listener);
+        listeners.push({ tab, listener });
+      }
+      // Real logout/login changes the shared cookie and publishes the app's
+      // native cross-tab notification. No synthetic focus/session event is used.
+      await navigateTo(switching, "退出登录");
+      for (const tab of oldTabs) {
+        await expect(
+          tab.getByRole("heading", { name: "登录账户", exact: true }),
+        ).toBeVisible();
+        await safeBrowser(tab);
+        witnesses.push(
+          await watchSourceIsolation(
+            tab,
+            bootstrapActor.username,
+            label,
+            accountId,
+            committedKey,
+          ),
+        );
+      }
+      await login(switching, bootstrapActor.username, bootstrapActor.password);
+      await fillSecret(
+        switching.getByLabel("二次认证验证码", { exact: true }),
+        await freshCode(bootstrapActor.auth),
+      );
+      await switching
+        .getByRole("button", { name: "登录", exact: true })
+        .click();
+      await expect(switching.locator(".signed-in strong")).toHaveText(
+        bootstrapActor.username,
+      );
+      expect((await readJSON(context, "/api/auth/me")).ID).toBe(
+        bootstrapActorId,
+      );
+      switched = true;
+      for (const tab of oldTabs)
+        await expect(tab.locator(".signed-in strong")).toHaveText(
+          bootstrapActor.username,
+        );
+
+      const denied = await context.request.get(
+        `/api/domains/credential-source/mutation?idempotencyKey=${committedKey}`,
+      );
+      expect(denied.status()).toBe(404);
+      expect(denied.headers()["cache-control"]).toBe("no-store");
+      expect(await denied.json()).toEqual({ error: "not_found" });
+      const ownRead = await context.request.get(
+        `/api/domains/credential-source?domainId=${domainId}`,
+      );
+      expect(ownRead.status()).toBe(200);
+      expect(ownRead.headers()["x-adtr-user-id"]).toBe(
+        String(bootstrapActorId),
+      );
+      const ownSource = await ownRead.json();
+      safe(ownSource);
+      expect(ownSource).toMatchObject({
+        domainId,
+        revision: (BigInt(afterEdit.revision) + 1n).toString(),
+        connectionCredentialGeneration: (
+          BigInt(afterEdit.connectionCredentialGeneration) + 1n
+        ).toString(),
+        credentialSource: "operation_account",
+        reference: { accountId, explicitlyGranted: true, eligible: true },
+      });
+      for (const response of held) outcomes.push(await response.release());
+      for (const tab of oldTabs) {
+        await expect(
+          tab.getByLabel("新的凭据来源", { exact: true }),
+        ).toHaveCount(0);
+        await expect(
+          tab.getByRole("heading", {
+            name: "核对未确认的凭据来源变更",
+            exact: true,
+          }),
+        ).toHaveCount(0);
+        await expect(tab.getByText(/原凭据来源操作已确认/)).toHaveCount(0);
+        await safeBrowser(tab);
+      }
+      // A's metadata-only recovery intent stays owner-keyed for A's return. B
+      // neither claims it nor creates a copy under B's own identity.
+      expect((await safeBrowser()).session).toEqual(pending.session);
+      await navigateTo(draft, "域连接");
+      await expect(
+        draft.getByRole("button", { name: `查看 ${domain}`, exact: true }),
+      ).toBeVisible();
+      await safeBrowser(draft);
+      const switchScreenshot = await draft.screenshot({
+        path: testInfo.outputPath("source-account-switch.png"),
+        fullPage: true,
+      });
+      for (const witness of witnesses)
+        expect(await witness.evaluate((value) => value.read())).toEqual({
+          oldIdentity: false,
+          oldSource: false,
+        });
+      expect(
+        browserWrites,
+        "Old source tabs never submit under the new account",
+      ).toEqual([]);
+      expect(
+        foreignReceiptReads,
+        "B never automatically queries A's persisted intent",
+      ).toEqual([]);
+      expect(sourcePosts).toBe(1);
+      const root = execFileSync("git", ["rev-parse", "--show-toplevel"], {
+        encoding: "utf8",
+      }).trim();
+      const hashFile = (file: string) =>
+        createHash("sha256")
+          .update(readFileSync(resolve(root, file)))
+          .digest("hex");
+      writeFileSync(
+        testInfo.outputPath("source-account-switch-transport.json"),
+        JSON.stringify(
+          {
+            receiptOwnerDenied: true,
+            sourcePosts,
+            lateReads: outcomes,
+            checkoutCommit: execFileSync("git", ["rev-parse", "HEAD"], {
+              encoding: "utf8",
+            }).trim(),
+            eventHead: process.env.ADTR_EVENT_HEAD_SHA ?? null,
+            eventBase: process.env.ADTR_EVENT_BASE_SHA ?? null,
+            workflowRun: process.env.GITHUB_RUN_ID ?? null,
+            workflowAttempt: process.env.GITHUB_RUN_ATTEMPT ?? null,
+            screenshotSHA256: createHash("sha256")
+              .update(switchScreenshot)
+              .digest("hex"),
+            sourceSHA256: Object.fromEntries(
+              [
+                "web/e2e/account-references.spec.ts",
+                "web/src/App.tsx",
+                "web/src/DomainCredentialSource.tsx",
+                "web/src/domain-source-intent.ts",
+                "web/src/domain-source-api.ts",
+              ].map((file) => [file, hashFile(file)]),
+            ),
+          },
+          null,
+          2,
+        ),
+      );
+      for (const witness of witnesses) {
+        await witness.evaluate((value) => value.stop());
+        await witness.dispose();
+      }
+      witnesses.length = 0;
+      switched = false;
+      await navigateTo(switching, "退出登录");
+      await login(switching, username, password);
+      await fillSecret(
+        switching.getByLabel("二次认证验证码", { exact: true }),
+        await freshCode(auth),
+      );
+      await switching
+        .getByRole("button", { name: "登录", exact: true })
+        .click();
+      await expect(page.locator(".signed-in strong")).toHaveText(username);
+      expect((await readJSON(context, "/api/auth/me")).ID).toBe(actorId);
+    } catch (error) {
+      scenarioFailed = true;
+      scenarioFailure = error;
+    } finally {
+      const cleanup = async (operation: () => Promise<unknown>) => {
+        try {
+          await bounded(
+            operation(),
+            25_000,
+            "Source isolation cleanup timed out",
+          );
+        } catch (error) {
+          cleanupErrors.push(error);
+        }
+      };
+      for (const response of held) await cleanup(() => response.cleanup());
+      for (const witness of witnesses) {
+        await cleanup(() => witness.evaluate((value) => value.stop()));
+        await cleanup(() => witness.dispose());
+      }
+      for (const { tab, listener } of listeners) tab.off("request", listener);
+      for (const extra of [draft, detail, switching])
+        await cleanup(() => extra.close());
+    }
+    if (scenarioFailed || cleanupErrors.length)
+      throw new AggregateError(
+        [...(scenarioFailed ? [scenarioFailure] : []), ...cleanupErrors],
+        "Real source account-switch isolation failed",
+      );
+  });
   // Finish the genuine receipt read/abort before removing interception and
   // reloading; otherwise unroute can handle an in-flight route first.
   await expect(page).toHaveURL(/#domains\/credential-source$/);

@@ -275,6 +275,8 @@ jobs:
             web/test-results/**/source-unconfigured.png
             web/test-results/**/source-reference.png
             web/test-results/**/source-custom.png
+            web/test-results/**/source-account-switch.png
+            web/test-results/**/source-account-switch-transport.json
           if-no-files-found: error
           retention-days: 7
       - name: Retain synthetic operational journal evidence
@@ -303,12 +305,28 @@ jobs:
           path: web/test-results/**/messages-soc-*
           if-no-files-found: error
           retention-days: 7
+      - name: Retain synthetic domain workspace evidence
+        if: ${{ success() && matrix.name == 'domains' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: domains-soc-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: web/test-results/**/domains-soc-*
+          if-no-files-found: error
+          retention-days: 7
       - name: Retain synthetic audit workspace evidence
         if: ${{ success() && matrix.name == 'audit' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: audit-soc-evidence-${{ github.run_id }}-${{ github.run_attempt }}
           path: web/test-results/**/audit-soc-*
+          if-no-files-found: error
+          retention-days: 7
+      - name: Retain synthetic system workspace evidence
+        if: ${{ success() && matrix.name == 'system' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: system-soc-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: web/test-results/**/system-soc-*
           if-no-files-found: error
           retention-days: 7
       - name: Retain synthetic user asset evidence

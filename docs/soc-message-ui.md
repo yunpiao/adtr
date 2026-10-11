@@ -44,3 +44,13 @@ messages suite 在 runner choices、Worker集合、独立 CI matrix 显式登记
 保留E2E严格匹配、断言与超时，并局部隔离Field样式与定位说明span。独立源码/产物CSS顺序复核完成。
 修复候选完整make check通过1376项DOM、100项Python和其余全部门禁，最终CSS另经类型/生产构建通过。
 新增messages矩阵项调整到首位以提前反馈；原35项、并行度和verify保持，仍需全36精确新head运行。
+
+## main 依赖整合检查点（2026-10-11 06:42 UTC）
+
+PR104 已正常合并至 `7913321590acea3d61e696bd251bd30e75e04f64`，包含已合并的 PR102/103。
+UI 普通双亲整合该精确 main；唯一 CI 相邻证据步骤冲突已保留 message/domain/system 三者。
+独立整合复核确认除 App/CI 外所有继承文件与 main 逐字节相同，原消息实现与 fc7f28a 相同；
+App 保留同域 Back 队列/身份核验修复、消息接线保持最小。相对 main 仍仅17个消息文件。
+整合候选完整make check通过1418项DOM、100项Python、Go race/vet/build、类型/构建/audit0，
+全量格式与32项浏览器发现通过。新精确head的36 CI与真实四图再次运行；不会用旧stacked绿色替代。
+工程Issue105按实际证据更新，完整F40 #50继续开放，产品验收0/209不变。

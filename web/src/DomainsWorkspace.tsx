@@ -1,5 +1,7 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { ApiError, type Profile } from "./api";
+import { DomainStatus, DomainGuidance } from "./domain-soc";
+import "./domain-soc.css";
 import { accessRequest, queryString, type Permission } from "./access-api";
 import {
   ErrorNotice,
@@ -49,6 +51,26 @@ type Context = {
   sessionChanged: () => void;
   can: (operation: DomainOperation) => boolean;
 };
+type ListFilters = {
+  filterKeyword: string;
+  filterDomain: string;
+  filterStatus: string;
+  pageSize: string;
+  tmSort: string;
+};
+const initialFilters: ListFilters = {
+  filterKeyword: "",
+  filterDomain: "",
+  filterStatus: "",
+  pageSize: "20",
+  tmSort: "-1",
+};
+type ListMemory = {
+  filters: ListFilters;
+  applied: ListFilters;
+  page: number;
+  focus: string;
+};
 type View =
   | { type: "list" }
   | { type: "create" }
@@ -59,6 +81,7 @@ type View =
       domain?: string;
     };
 export default function DomainsWorkspace(props: {
+  sessionChecking?: boolean;
   profile: Profile;
   sessionChanged: () => void;
 }) {
@@ -70,12 +93,20 @@ export default function DomainsWorkspace(props: {
   );
 }
 function Workspace({
+  sessionChecking = false,
   profile,
   sessionChanged,
 }: {
   profile: Profile;
+  sessionChecking?: boolean;
   sessionChanged: () => void;
 }) {
+  const listMemory = useRef<ListMemory>({
+    filters: initialFilters,
+    applied: initialFilters,
+    page: 1,
+    focus: "",
+  });
   const [view, setView] = useState<View>({ type: "list" }),
     [version, setVersion] = useState(0),
     [notice, setNotice] = useState(""),
@@ -134,17 +165,28 @@ function Workspace({
       setNotice("");
     };
     window.addEventListener("popstate", back);
-    return () => window.removeEventListener("popstate", back);
+    window.addEventListener("hashchange", back);
+    return () => {
+      window.removeEventListener("popstate", back);
+      window.removeEventListener("hashchange", back);
+    };
   }, []);
   const pending = readDomainIntent(profile);
   const pendingSource = readSourceIntent(profile);
   return (
-    <div className="domain-workspace">
-      <h2>域连接</h2>
-      <p className="warning">
-        保存仅登记本地配置，不验证 AD
-        连通性，也不自动授予数据权限。平台管理员同样需要显式资源组授权。
-      </p>
+    <div className="domain-workspace domain-soc">
+      <header className="domain-page-heading">
+        <p className="domain-eyebrow">DIRECTORY CONNECTIONS</p>
+        <h2>域连接</h2>
+        <p>核对接入配置、跟踪连接诊断，并恢复未确认的操作</p>
+      </header>
+      <details className="domain-scope-help">
+        <summary>接入与权限说明</summary>
+        <p>
+          保存仅登记本地配置，不验证 AD
+          连通性，也不自动授予数据权限。平台管理员同样需要显式资源组授权。
+        </p>
+      </details>
       <ErrorNotice error={gate.error} />
       {notice && <p role="status">{notice}</p>}
       {gate.busy && <p role="status">正在确认域连接权限…</p>}
@@ -200,6 +242,8 @@ function Workspace({
           {view.type === "list" && (
             <DomainList
               key={`list-${version}`}
+              memory={listMemory.current}
+              sessionChecking={sessionChecking}
               context={context}
               open={open}
               blocked={!!pending}
@@ -336,6 +380,8 @@ function CreationRecovery({
   );
 }
 function DomainList({
+  sessionChecking,
+  memory,
   context,
   open,
   blocked,
@@ -343,17 +389,20 @@ function DomainList({
   context: Context;
   open: (v: View, m?: string) => void;
   blocked: boolean;
+  memory: ListMemory;
+  sessionChecking: boolean;
 }) {
-  const [filters, setFilters] = useState({
-      filterKeyword: "",
-      filterDomain: "",
-      filterStatus: "",
-      pageSize: "20",
-      tmSort: "-1",
-    }),
-    [applied, setApplied] = useState(filters),
-    [page, setPage] = useState(1),
+  const [filters, setFilters] = useState(memory.filters),
+    [applied, setApplied] = useState(memory.applied),
+    [page, setPage] = useState(memory.page),
     [error, setError] = useState("");
+  const root = useRef<HTMLElement>(null);
+  const restoreFocus = useRef(memory.focus);
+  useEffect(() => {
+    memory.filters = filters;
+    memory.applied = applied;
+    memory.page = page;
+  }, [filters, applied, page, memory]);
   const query = queryString({
     ...applied,
     pageIdx: page,
@@ -368,8 +417,24 @@ function DomainList({
     () => false,
     domainError,
   );
+  useEffect(() => {
+    if (sessionChecking || read.busy || !read.data || !restoreFocus.current)
+      return;
+    const buttons = root.current?.querySelectorAll<HTMLButtonElement>(
+      "button[data-domain-id]",
+    );
+    const target = Array.from(buttons ?? []).find(
+      (button) => button.dataset.domainId === restoreFocus.current,
+    );
+    (target ?? root.current?.querySelector<HTMLHeadingElement>("h3"))?.focus();
+    restoreFocus.current = "";
+  }, [sessionChecking, read.busy, read.data]);
   return (
-    <>
+    <section className="domain-list-panel" ref={root} aria-label="域接入队列">
+      <div className="domain-list-heading">
+        <h3 tabIndex={-1}>接入与诊断队列</h3>
+        <span>当前权限范围</span>
+      </div>
       <div className="actions">
         {context.can("GET /api/domain-selection") &&
           context.can("GET /api/domain-selection/resolve") &&
@@ -388,7 +453,7 @@ function DomainList({
         )}
       </div>
       <form
-        className="filters"
+        className="filters domain-filter-form"
         onSubmit={(e) => {
           e.preventDefault();
           if (
@@ -404,89 +469,114 @@ function DomainList({
           setPage(1);
         }}
       >
-        <Field label="域或域控关键词">
-          <input
-            value={filters.filterKeyword}
-            onChange={(e) =>
-              setFilters({ ...filters, filterKeyword: e.target.value })
-            }
-          />
-        </Field>
-        <Field label="域名筛选" help="完整域名，多个以逗号分隔">
-          <input
-            value={filters.filterDomain}
-            onChange={(e) =>
-              setFilters({ ...filters, filterDomain: e.target.value })
-            }
-          />
-        </Field>
-        <Field label="连接状态">
-          <select
-            value={filters.filterStatus}
-            onChange={(e) =>
-              setFilters({ ...filters, filterStatus: e.target.value })
-            }
+        <div className="domain-primary-filters">
+          {" "}
+          <Field label="域或域控关键词">
+            <input
+              value={filters.filterKeyword}
+              onChange={(e) =>
+                setFilters({ ...filters, filterKeyword: e.target.value })
+              }
+            />
+          </Field>
+          <Field label="连接状态">
+            <select
+              value={filters.filterStatus}
+              onChange={(e) =>
+                setFilters({ ...filters, filterStatus: e.target.value })
+              }
+            >
+              <option value="">全部状态</option>
+              {connectionStates.map((s) => (
+                <option key={s} value={s}>
+                  {connectionLabels[s]}
+                </option>
+              ))}
+            </select>
+          </Field>
+        </div>
+        <details className="domain-advanced-filters">
+          <summary>
+            更多筛选与分页设置 · 每页 {applied.pageSize} 条
+            {applied.filterDomain ? " · 已按域名筛选" : ""}
+          </summary>
+          <div className="domain-advanced-grid">
+            {" "}
+            <Field label="域名筛选" help="完整域名，多个以逗号分隔">
+              <input
+                value={filters.filterDomain}
+                onChange={(e) =>
+                  setFilters({ ...filters, filterDomain: e.target.value })
+                }
+              />
+            </Field>
+            <Field label="每页条数">
+              <select
+                value={filters.pageSize}
+                onChange={(e) =>
+                  setFilters({ ...filters, pageSize: e.target.value })
+                }
+              >
+                {[10, 20, 30, 40, 50].map((n) => (
+                  <option key={n}>{n}</option>
+                ))}
+              </select>
+            </Field>
+            <Field label="创建时间排序">
+              <select
+                value={filters.tmSort}
+                onChange={(e) =>
+                  setFilters({ ...filters, tmSort: e.target.value })
+                }
+              >
+                <option value="-1">最新优先</option>
+                <option value="1">最早优先</option>
+              </select>
+            </Field>
+          </div>
+        </details>
+        <div className="domain-filter-actions">
+          {" "}
+          <button>查询域连接</button>
+          <button
+            type="button"
+            className="secondary"
+            onClick={() => {
+              const reset = {
+                filterKeyword: "",
+                filterDomain: "",
+                filterStatus: "",
+                pageSize: "20",
+                tmSort: "-1",
+              };
+              setFilters(reset);
+              setApplied(reset);
+              setPage(1);
+              setError("");
+            }}
           >
-            <option value="">全部状态</option>
-            {connectionStates.map((s) => (
-              <option key={s} value={s}>
-                {connectionLabels[s]}
-              </option>
-            ))}
-          </select>
-        </Field>
-        <Field label="每页条数">
-          <select
-            value={filters.pageSize}
-            onChange={(e) =>
-              setFilters({ ...filters, pageSize: e.target.value })
-            }
-          >
-            {[10, 20, 30, 40, 50].map((n) => (
-              <option key={n}>{n}</option>
-            ))}
-          </select>
-        </Field>
-        <Field label="创建时间排序">
-          <select
-            value={filters.tmSort}
-            onChange={(e) => setFilters({ ...filters, tmSort: e.target.value })}
-          >
-            <option value="-1">最新优先</option>
-            <option value="1">最早优先</option>
-          </select>
-        </Field>
-        <button>查询域连接</button>
-        <button
-          type="button"
-          className="secondary"
-          onClick={() => {
-            const reset = {
-              filterKeyword: "",
-              filterDomain: "",
-              filterStatus: "",
-              pageSize: "20",
-              tmSort: "-1",
-            };
-            setFilters(reset);
-            setApplied(reset);
-            setPage(1);
-            setError("");
-          }}
-        >
-          重置筛选
-        </button>
+            重置筛选
+          </button>
+        </div>{" "}
       </form>
       <ErrorNotice error={error || read.error} />
       {read.busy && <p role="status">正在读取域连接…</p>}
-      {read.data && (
+      {read.data && !read.busy && (
         <>
+          <div className="domain-query-summary">
+            <strong>匹配 {read.data.page.total} 个域</strong>
+            <span>
+              当前第 {read.data.page.pageIdx} 页 · 本页 {read.data.List.length}{" "}
+              条
+            </span>
+            <span>按已保存配置与最近诊断展示</span>
+          </div>
           {read.data.List.length === 0 ? (
             <p role="status">
               当前筛选下没有获授权的域连接。新登记需要显式资源组分配。
             </p>
           ) : (
-            <div className="table-scroll">
+            <div className="table-scroll domain-table-scroll">
               <table>
                 <caption>获授权的域连接</caption>
                 <thead>
@@ -502,29 +592,37 @@ function DomainList({
                 <tbody>
                   {read.data.List.map((c) => (
                     <tr key={c.domainId}>
-                      <td>{c.domain}</td>
-                      <td>{c.dcHostName}</td>
-                      <td>{mode(c)}</td>
-                      <td>
-                        {connectionLabels[c.connectionState]}
+                      <td data-label="域名">
+                        <strong>{c.domain}</strong>
+                        <small>
+                          {sourceLabels[c.credentialSource ?? "custom"]}
+                        </small>
+                      </td>
+                      <td data-label="配置的域控">{c.dcHostName}</td>
+                      <td data-label="加密连接">{mode(c)}</td>
+                      <td data-label="状态">
+                        <DomainStatus connection={c} />
                         {c.lastDiagnostic && c.lastDiagnostic.code !== "ok" && (
                           <small>
                             {diagnosticMessages[c.lastDiagnostic.code]}
                           </small>
                         )}
                       </td>
-                      <td>
+                      <td data-label="上次检测（UTC）">
                         {c.lastDiagnostic?.observedAt ?? "尚无当前版本终态结果"}
                       </td>
-                      <td>
+                      <td data-label="操作">
                         {context.can("GET /api/domains/detail") && (
                           <button
                             className="secondary"
-                            onClick={() =>
-                              open({ type: "detail", id: c.domainId })
-                            }
+                            data-domain-id={c.domainId}
+                            aria-label={`查看 ${c.domain}`}
+                            onClick={() => {
+                              memory.focus = c.domainId;
+                              open({ type: "detail", id: c.domainId });
+                            }}
                           >
-                            查看 {c.domain}
+                            查看
                           </button>
                         )}
                       </td>
@@ -542,7 +640,7 @@ function DomainList({
           />
         </>
       )}
-    </>
+    </section>
   );
 }
 const mode = (c: Pick<Connection, "port">) =>
@@ -872,7 +970,14 @@ function DomainDetails({
             )
           ) : (
             <>
-              <h3>域连接详情：{c.domain}</h3>
+              <header className="domain-detail-heading">
+                <div>
+                  <p className="domain-eyebrow">CONNECTION DETAIL</p>
+                  <h3>域连接详情：{c.domain}</h3>
+                </div>
+                <DomainStatus connection={c} />
+              </header>
+              <DomainGuidance connection={c} />
               <dl>
                 {[
                   ["域 ID", c.domainId],
@@ -953,7 +1058,7 @@ function DomainDetails({
 }
 function DiagnosticSummary({ diagnostic }: { diagnostic: Diagnostic | null }) {
   return diagnostic ? (
-    <section aria-label="安全诊断">
+    <section className="domain-diagnostic" aria-label="安全诊断">
       <p>{diagnosticMessages[diagnostic.code]}</p>
       <p>
         检测时间（UTC）：{diagnostic.observedAt} · 总用时：
@@ -1170,7 +1275,11 @@ function TestObservation({
           )}
           {terminal(task.state) && (
             <>
-              <p>再次检测需要新的明确提交；请先修正凭据或证书错误。</p>
+              <p>
+                {task.state === "succeeded" && result?.diagnostic?.code === "ok"
+                  ? "再次检测需要新的明确提交；请先核对配置版本与上次检测时间。"
+                  : "再次检测需要新的明确提交；请先依据实际诊断核对配置、凭据与执行状态。"}
+              </p>
               {newTest && <button onClick={newTest}>开始新的手动检测</button>}
             </>
           )}
