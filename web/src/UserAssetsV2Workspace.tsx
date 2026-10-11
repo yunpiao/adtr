@@ -1,4 +1,11 @@
-import { useLayoutEffect, useRef, useState, type FormEvent } from "react";
+import {
+  useLayoutEffect,
+  useRef,
+  useState,
+  type FormEvent,
+  type ClipboardEvent,
+  type DragEvent,
+} from "react";
 import { ApiError, type Profile } from "./api";
 import { accessRequest, type Permission } from "./access-api";
 import { ErrorNotice, Field } from "./access-common";
@@ -9,6 +16,11 @@ import type { ResolvedSource } from "./domain-selection-api";
 import { directoryV2DisplayText as display } from "./directory-v2-json";
 import type { DirectoryV2Source } from "./directory-v2-api";
 import { sessionError, useTaskRead } from "./task-common";
+import {
+  validUserAssetsV2SAM,
+  validUserAssetsV2Filters,
+  type UserAssetsV2Filters,
+} from "./user-assets-v2-filters";
 import {
   retryUserAssetsV2Read,
   userAssetsV2API,
@@ -24,6 +36,18 @@ import {
 } from "./user-assets-v2-api";
 
 type Props = { profile: Profile; sessionChanged: () => void };
+const emptyFilters = {
+  sAMAccountName: "",
+  startTm: "",
+  endTm: "",
+  creatTm: "" as "" | "asc" | "desc",
+};
+const rawFilterLabels = {
+  sAMAccountName: "精确账户名（SAM）",
+  startTm: "创建时间开始（含）",
+  endTm: "创建时间结束（不含）",
+};
+type RawFilterKey = keyof typeof rawFilterLabels;
 const accessOperations = [
   ...userAssetsV2Operations,
   "GET /api/domain-selection",
@@ -294,6 +318,10 @@ function Assets({
   const [query, setQuery] = useState(initial);
   const queryRef = useRef(initial);
   const [draft, setDraft] = useState("");
+  const [filterDraft, setFilterDraft] = useState(emptyFilters);
+  const [filterTransferErrors, setFilterTransferErrors] = useState<
+    Partial<Record<RawFilterKey, string>>
+  >({});
   const [list, setList] = useState<UserAssetsV2List | null>(null);
   const [error, setError] = useState("");
   const [inputError, setInputError] = useState("");
@@ -458,16 +486,81 @@ function Assets({
   }, []);
   const submit = (event: FormEvent) => {
     event.preventDefault();
-    if (stale || (busy && draft === query.search)) return;
+    if (stale || transferError || (busy && !dirty)) return;
     if (!validUserAssetsV2Search(draft)) {
       setInputError(
         "搜索最多 50 个 UTF-16 单元，且不能包含无效字符；输入不会被截断。",
       );
       return;
     }
-    loadList({ ...queryRef.current, search: draft, pageIdx: 1 });
+    if (!validUserAssetsV2SAM(filterDraft.sAMAccountName)) {
+      setInputError(
+        "精确 SAM 最多 256 个 UTF-16 单元、1024 个 UTF-8 字节，且不能包含无效字符；输入不会被截断。",
+      );
+      return;
+    }
+    const filters: UserAssetsV2Filters = {
+      sAMAccountName: filterDraft.sAMAccountName || undefined,
+      startTm: filterDraft.startTm || undefined,
+      endTm: filterDraft.endTm || undefined,
+      creatTm: filterDraft.creatTm || undefined,
+    };
+    if (!validUserAssetsV2Filters(filters)) {
+      setInputError(
+        "创建时间须同时填写起止值，使用含 T 和 Z 或时区偏移的 RFC3339 时间（可含 1–9 位小数秒），年份及换算后 UTC 年份为 0001–9999，且开始必须早于结束；不填写则不限制时间。",
+      );
+      return;
+    }
+    loadList({ ...queryRef.current, ...filters, search: draft, pageIdx: 1 });
   };
-  const dirty = draft !== query.search;
+  const transferError = Object.values(filterTransferErrors).join(" ");
+  const dirty =
+    !!transferError ||
+    draft !== query.search ||
+    (Object.keys(emptyFilters) as (keyof typeof emptyFilters)[]).some(
+      (key) => filterDraft[key] !== (query[key] ?? ""),
+    );
+  const changeFilter = (key: keyof typeof emptyFilters, value: string) => {
+    setFilterDraft((current) => ({ ...current, [key]: value }));
+    setFilterTransferErrors((current) => {
+      const next = { ...current };
+      delete next[key as RawFilterKey];
+      return next;
+    });
+    setInputError("");
+    clearDetail();
+  };
+  // Native single-line inputs strip CR/LF before onChange. Refuse the transfer
+  // before insertion so a raw account can never silently become another query
+  // (or an empty predicate). Preserve the block until this field is edited.
+  const rejectControlTransfer = (
+    key: RawFilterKey,
+    raw: string,
+    event: { preventDefault: () => void },
+  ) => {
+    if (!/[\p{Cc}]/u.test(raw)) return;
+    event.preventDefault();
+    setFilterTransferErrors((current) => ({
+      ...current,
+      [key]: `${rawFilterLabels[key]}含控制字符，已拒绝粘贴或拖入，原输入未改变；请重新编辑该字段或清除用户筛选。`,
+    }));
+    clearDetail();
+  };
+  const rawInputGuards = (key: RawFilterKey) => ({
+    "aria-invalid": !!filterTransferErrors[key],
+    onPaste: (event: ClipboardEvent<HTMLInputElement>) =>
+      rejectControlTransfer(
+        key,
+        event.clipboardData.getData("text/plain"),
+        event,
+      ),
+    onDrop: (event: DragEvent<HTMLInputElement>) =>
+      rejectControlTransfer(
+        key,
+        event.dataTransfer.getData("text/plain"),
+        event,
+      ),
+  });
   return (
     <section className="asset-queue" aria-label="已选数据源用户资产">
       <div className="asset-queue-heading">
@@ -506,7 +599,7 @@ function Assets({
           <select
             aria-label="用户资产每页条数"
             value={query.pageSize}
-            disabled={busy || stale}
+            disabled={busy || stale || dirty}
             onChange={(event) =>
               loadList({
                 ...queryRef.current,
@@ -522,18 +615,89 @@ function Assets({
             ))}
           </select>
         </label>
-        <button disabled={stale || (busy && !dirty)}>搜索用户</button>
+        <button disabled={stale || !!transferError || (busy && !dirty)}>
+          搜索用户
+        </button>
         <button
           type="button"
           className="secondary"
           disabled={busy || stale}
           onClick={() => {
             setDraft("");
-            loadList({ ...queryRef.current, search: "", pageIdx: 1 });
+            setFilterDraft(emptyFilters);
+            setFilterTransferErrors({});
+            loadList({
+              ...queryRef.current,
+              search: "",
+              pageIdx: 1,
+              sAMAccountName: undefined,
+              startTm: undefined,
+              endTm: undefined,
+              creatTm: undefined,
+            });
           }}
         >
-          清除用户搜索
+          清除用户筛选
         </button>
+        <details
+          className="asset-data-help"
+          style={{ flexBasis: "100%", margin: 0, minWidth: 0 }}
+        >
+          <summary>精确账户与创建时间筛选</summary>
+          <p id="asset-exact-sam-help">
+            SAM 区分大小写，按原始 UTF-8 字节精确匹配，保留空白，不做 Unicode
+            规范化；空值不限制。最多 256 个 UTF-16 单元、1024 个 UTF-8 字节。
+          </p>
+          <Field label="精确账户名（SAM）">
+            <input
+              {...rawInputGuards("sAMAccountName")}
+              aria-describedby="asset-exact-sam-help"
+              value={filterDraft.sAMAccountName}
+              onChange={(event) =>
+                changeFilter("sAMAccountName", event.target.value)
+              }
+            />
+          </Field>
+          <p id="asset-created-range-help">
+            起止时间须成对填写，按 UTC
+            比较，包含开始、不含结束；只筛选目录创建时间（whenCreated），缺失时间不匹配。使用
+            RFC3339，例如 2026-10-01T00:00:00Z 或
+            2026-10-01T08:00:00+08:00，可含 1–9 位小数秒。
+          </p>
+          <Field label="创建时间开始（含）">
+            <input
+              {...rawInputGuards("startTm")}
+              aria-describedby="asset-created-range-help"
+              placeholder="2026-10-01T00:00:00Z"
+              value={filterDraft.startTm}
+              onChange={(event) => changeFilter("startTm", event.target.value)}
+            />
+          </Field>
+          <Field label="创建时间结束（不含）">
+            <input
+              {...rawInputGuards("endTm")}
+              aria-describedby="asset-created-range-help"
+              placeholder="2026-10-02T00:00:00Z"
+              value={filterDraft.endTm}
+              onChange={(event) => changeFilter("endTm", event.target.value)}
+            />
+          </Field>
+          <Field label="创建时间排序">
+            <select
+              aria-describedby="asset-created-sort-help"
+              value={filterDraft.creatTm}
+              onChange={(event) => changeFilter("creatTm", event.target.value)}
+            >
+              <option value="">默认 GUID 升序</option>
+              <option value="asc">创建时间升序</option>
+              <option value="desc">创建时间降序</option>
+            </select>
+          </Field>
+          <p id="asset-created-sort-help">
+            时间排序始终将未返回的时间放在最后，同一时间按 GUID
+            升序。所有筛选同时生效；点击“搜索用户”应用，保留当前观测。
+          </p>
+        </details>
       </form>
       <p
         className="asset-applied-search"
@@ -542,10 +706,29 @@ function Assets({
         已应用搜索：
         {query.search === "" ? "无文本筛选" : `“${display(query.search)}”`}
       </p>
-      {dirty && (
-        <p role="status">搜索已编辑，尚未应用；请提交搜索后查看详情或翻页。</p>
+      {(query.sAMAccountName || query.startTm || query.creatTm) && (
+        <p
+          className="asset-applied-search"
+          style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}
+        >
+          已应用筛选：SAM{" "}
+          {query.sAMAccountName ? `“${display(query.sAMAccountName)}”` : "不限"}
+          {" · 创建时间 "}
+          {query.startTm
+            ? `[${display(query.startTm)}, ${display(query.endTm!)})`
+            : "不限"}
+          {" · 排序 "}
+          {query.creatTm === "asc"
+            ? "创建时间升序"
+            : query.creatTm === "desc"
+              ? "创建时间降序"
+              : "GUID 升序"}
+        </p>
       )}
-      <ErrorNotice error={inputError || error} />
+      {dirty && (
+        <p role="status">筛选已编辑，尚未应用；请提交搜索后查看详情或翻页。</p>
+      )}
+      <ErrorNotice error={transferError || inputError || error} />
       {error && !stale && (
         <button
           className="secondary"

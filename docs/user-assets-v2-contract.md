@@ -45,7 +45,9 @@ grammar, and revisions are canonical decimal strings 1..9223372036854775807.
 Current source pins are validated in the same authorization transaction as the
 observation read. A caller's tenant, role, actor or row body is never accepted.
 
-The list also accepts `observationId`, `search`, `pageIdx`, `pageSize` only:
+The list also accepts `observationId`, `search`, `pageIdx`, `pageSize`, and the
+[bounded exact SAM/creation-time extension](user-assets-v2-filters-contract.md)
+(`sAMAccountName`, paired `startTm`/`endTm`, `creatTm=asc|desc`):
 
 - `observationId` may be omitted on initial page 1 or explicit refresh; it is
   required for page 2+, all subsequent UI reads after capturing a pin, and detail
@@ -60,13 +62,14 @@ The list also accepts `observationId`, `search`, `pageIdx`, `pageSize` only:
 - Search runs only in bounded Go memory over validated public raw values, never
   PostgreSQL text/JSONB, SQL, LDAP, regex, base64 storage or display escapes
 - GUID, description and time are not searched; a match cannot span field borders
-- `userStatus`, `domainName`, `startTm`, `endTm`, `updateTm`, `creatTm`, `userType`,
-  `sAMAccountName`, `scoreSort`, `overviewType` return 422
+- `userStatus`, `domainName`, `updateTm`, `userType`,
+  `scoreSort`, `overviewType` return 422
   `unsupported_user_asset_filter` after singleton/UTF-8 structure validation
 
 List order: current authority → source pins → newest eligible observation (or
 exact supplied pin) → complete body validation → user-only literal filter →
-GUID ascending → filtered total/page. Corruption outside the requested page or
+GUID ascending by default (or explicit creation-time order with GUID ties) →
+filtered total/page. Corruption outside the requested page or
 filter invalidates the full response. Cancellation never yields partial rows.
 A newer observation cannot silently replace a supplied pin. The latest empty
 observation cannot fall back to an older nonempty one.
@@ -134,7 +137,7 @@ request newest. A source switch resets query/page/pin/detail. Draft and applied
 search are separate, with stale controls disabled while they differ.
 
 Both parsers validate exact shape, source/selection/observation/GUID identity,
-page arithmetic/row length, increasing unique GUIDs, user-only objects, factual
+page arithmetic/row length, unique GUIDs and selected stable order, user-only objects, factual
 null semantics, actor header and streaming 8 MiB/UTF-8 bounds. Generation and
 abort protections reject delayed responses after source/query/navigation/session
 changes, including ignored abort and repeated same-parameter refreshes.
