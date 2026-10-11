@@ -541,7 +541,12 @@ test("dictionary3 real backend Worker TLS LDAP PostgreSQL API facts", async ({
     await readJSON(context, `/api/domains/detail?domainId=${domainId}`, actorId)
   ).connection;
 
-  const me = await readJSON(context, "/api/auth/me", actorId);
+  // Auth/me identifies the actor in its JSON body; unlike domain APIs it
+  // does not emit X-ADTR-User-ID. Keep an explicit identity assertion.
+  const me = await readJSON(context, "/api/auth/me");
+  expect(me.ID).toBe(actorId);
+  expect(typeof me.csrfToken).toBe("string");
+  expect(me.csrfToken.length).toBeGreaterThan(0);
   secrets.push(me.csrfToken);
   const headers = {
     Origin: new URL(page.url()).origin,

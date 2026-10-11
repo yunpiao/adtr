@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"github.com/jackc/pgx/v5"
 	"github.com/yunpiao/adtr/internal/directoryassets"
 	"github.com/yunpiao/adtr/internal/domains"
@@ -192,6 +193,38 @@ func TestSchema19IdentityGuardMatchesGoBoundaryProfile(t *testing.T) {
 		{"noncanonical base64", map[string]any{"primaryGroupIDBytes": "MDE=\n", "servicePrincipalNameBytes": nil}, false},
 		{"string spn", map[string]any{"primaryGroupIDBytes": nil, "servicePrincipalNameBytes": enc("HOST/a")}, false},
 	}
+	for _, n := range []int{128, 129} {
+		values := make([][]byte, n)
+		for i := range values {
+			values[i] = []byte(fmt.Sprintf("HOST/%d", i))
+		}
+		cases = append(cases, struct {
+			name     string
+			identity any
+			valid    bool
+		}{fmt.Sprintf("count-%d", n), directoryassets.RawIdentityV3{ServicePrincipalNameBytes: values}, n == 128})
+	}
+	for _, n := range []int{1024, 1025} {
+		cases = append(cases, struct {
+			name     string
+			identity any
+			valid    bool
+		}{fmt.Sprintf("ascii-units-%d", n), directoryassets.RawIdentityV3{ServicePrincipalNameBytes: [][]byte{[]byte(strings.Repeat("a", n))}}, n == 1024})
+	}
+	values := make([][]byte, 32)
+	for i := range values {
+		values[i] = []byte(fmt.Sprintf("%02d", i) + strings.Repeat("x", 1022))
+	}
+	cases = append(cases, struct {
+		name     string
+		identity any
+		valid    bool
+	}{"aggregate-32768", directoryassets.RawIdentityV3{ServicePrincipalNameBytes: values}, true})
+	cases = append(cases, struct {
+		name     string
+		identity any
+		valid    bool
+	}{"aggregate-32769", directoryassets.RawIdentityV3{ServicePrincipalNameBytes: append(append([][]byte{}, values...), []byte("y"))}, false})
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			body, err := json.Marshal(tc.identity)
