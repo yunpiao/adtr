@@ -22,10 +22,14 @@
 
 ## 检查与边界
 
-未修改基线完整 `make check` 通过：1311 前端测试、98 Python 测试、Go race/vet/build、TypeScript/前端构建、依赖审计 0 漏洞。最终候选完整 `make check` 通过：1343 前端测试（系统测试 56 项，新增 32 项）、98 Python 测试和上述全部检查，完整前端格式检查通过。精确提交 CI、真实截图和独立审查另在 PR 记录，未完成前不计通过。
+未修改基线完整 `make check` 通过：1311 前端测试、98 Python 测试、Go race/vet/build、TypeScript/前端构建、依赖审计 0 漏洞。最终候选完整 `make check` 通过：1344 前端测试（系统测试 57 项，新增 33 项）、98 Python 测试和上述全部检查，完整前端格式检查通过。精确提交 CI、真实截图和独立审查另在 PR 记录，未完成前不计通过。
 
 本地 `python3 scripts/test_auth_e2e.py --suite system` 实际尝试因没有 Docker 可执行文件失败，不能计为真实浏览器通过。远端 system 套件复用真实 browser→API→PostgreSQL→Linux 采样、阈值保存/冲突/拒绝链；通过拥有者提供的精确合成 Worker PID 执行 SIGSTOP→过期→SIGCONT→完整循环更新。这验证进程暂停/恢复，不是退出后重新启动。finally 保底恢复，不读取 Worker 凭据、不注入假陈旧记录。
 
 截图仅保留无证明字段的只读视图；1440×900 与 390×844 绑定运行 head/tree、事件 head/base、run/attempt、源码、API 二进制、实际前端资产和图像 SHA。截图与实际运行结果需独立复核后才能宣称通过；DOM 测试和原型不是运行链证据。
 
 未覆盖：容器 CPU/内存/磁盘配额、PG 数据卷、多节点/集群、缓存/外部引擎接入、日志保留/自动清理、许可升级、生产最小权限数据库、容量保留期、真实 AD/八版本 Windows 和全部源系统字段兼容。#14 保持开放，产品验收仍 0/209；没有部署。
+
+## 首轮真实浏览器失败与恢复
+
+PR102 head `192638e4e04d80ab0d329a2c5ce48581c256625e` 的 CI 38108933102 / system job114380304944 首轮在健康截图的列标题核验失败：依赖表 th 未声明 scope，锁定 Playwright 1.56.1 将其识别为 cell，columnheader 为0。修复为所有系统列标题明确 `scope="col"`，保留行标题 `scope="row"`；新增DOM回归直接校验属性，并保留原E2E精确列标题断言。独立复核确认根因与修复，完整make check再次通过1344前端/98Python及全部Go/type/build/audit0。首次失败未产出完整8图，真实链与截图必须由修复后的精确head重新验证。

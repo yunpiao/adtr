@@ -1113,3 +1113,44 @@ describe("system observation explanations", () => {
     expect(observationReason(code)).toMatch(/请|核对|检查|配置/);
   });
 });
+
+describe("system table accessibility", () => {
+  it("declares explicit column scopes for node, dependency and worker evidence headers", async () => {
+    override = (url) =>
+      url === "/api/system/health"
+        ? response({
+            ...health(),
+            worker: {
+              ...health().worker,
+              cycles: [
+                {
+                  workerId: "synthetic-worker",
+                  cycle: "queue",
+                  status: "success",
+                  evidence: "completed_cycle",
+                  lastActivityAt: now,
+                  lastSuccessAt: now,
+                  availability: "available",
+                },
+              ],
+            },
+          })
+        : undefined;
+    await start();
+    const assertColumns = (table: HTMLElement, count: number) => {
+      const columns = within(table).getAllByRole("columnheader");
+      expect(columns).toHaveLength(count);
+      for (const header of columns)
+        expect(header).toHaveAttribute("scope", "col");
+      for (const header of within(table).getAllByRole("rowheader"))
+        expect(header).toHaveAttribute("scope", "row");
+    };
+    assertColumns(screen.getByRole("table", { name: "已登记节点" }), 5);
+    click("平台依赖健康");
+    assertColumns(
+      await screen.findByRole("table", { name: "实际依赖检查" }),
+      6,
+    );
+    assertColumns(screen.getByRole("table", { name: "Worker 循环观测" }), 7);
+  });
+});

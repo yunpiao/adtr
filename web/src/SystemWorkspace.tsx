@@ -300,11 +300,11 @@ function Overview({ context }: { context: SystemContext }) {
                 <caption>已登记节点</caption>
                 <thead>
                   <tr>
-                    <th>实例</th>
-                    <th>主机名</th>
-                    <th>IP</th>
-                    <th>范围</th>
-                    <th>采样可用性</th>
+                    <th scope="col">实例</th>
+                    <th scope="col">主机名</th>
+                    <th scope="col">IP</th>
+                    <th scope="col">范围</th>
+                    <th scope="col">采样可用性</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -573,8 +573,8 @@ function HistoryView({
               <caption>实际历史采样</caption>
               <thead>
                 <tr>
-                  <th>采样时间（UTC）</th>
-                  <th>百分比（原始十进制字符串）</th>
+                  <th scope="col">采样时间（UTC）</th>
+                  <th scope="col">百分比（原始十进制字符串）</th>
                 </tr>
               </thead>
               <tbody>
@@ -1106,7 +1106,9 @@ function HealthTable({ health }: { health: SystemHealth }) {
                 "观测时间（UTC）",
                 "检查时间（UTC）",
               ].map((h) => (
-                <th key={h}>{h}</th>
+                <th scope="col" key={h}>
+                  {h}
+                </th>
               ))}
             </tr>
           </thead>
@@ -1161,7 +1163,9 @@ function HealthTable({ health }: { health: SystemHealth }) {
                   "最近成功（UTC）",
                   "可用性",
                 ].map((h) => (
-                  <th key={h}>{h}</th>
+                  <th scope="col" key={h}>
+                    {h}
+                  </th>
                 ))}
               </tr>
             </thead>
