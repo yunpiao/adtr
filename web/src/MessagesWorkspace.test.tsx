@@ -472,3 +472,13 @@ it("cancelled locate never initiates its following page", async () => {
     vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes("/page?")),
   ).toBe(false);
 });
+it("binds exact isolated labels independently of select option text", async () => {
+  await mount();
+  for (const label of ["任务结果", "阅读状态", "排序", "每页条数"]) {
+    const select = screen.getByLabelText(label);
+    const labelID = select.getAttribute("aria-labelledby");
+    expect(labelID).toBeTruthy();
+    expect(document.getElementById(labelID!)?.textContent).toBe(label);
+    expect(screen.getByRole("combobox", { name: label })).toBe(select);
+  }
+});

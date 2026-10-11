@@ -38,3 +38,9 @@ messages suite 在 runner choices、Worker集合、独立 CI matrix 显式登记
 独立实际diff复核发现并修复损坏page与counts矛盾、固定页内容改变、定位index不符的拒绝缺口；
 补充已确认筛选/排序/纳秒半开边界、非默认阅读计数、取消定位、原定位重试和迟到分页回归后复核通过。
 作者自审另行执行。桌面/移动像素复核、精确head36项CI及当前main兼容性仍待运行结果。
+
+首轮 UI CI `38111202021` 的 messages 用例在两次真实health任务和outbox/投影核对后，
+因原包裹select的标签包含选项文本而未通过精确标签定位。修复复用现有Field的独立aria-labelledby，
+保留E2E严格匹配、断言与超时，并局部隔离Field样式与定位说明span。独立源码/产物CSS顺序复核完成。
+修复候选完整make check通过1376项DOM、100项Python和其余全部门禁，最终CSS另经类型/生产构建通过。
+新增messages矩阵项调整到首位以提前反馈；原35项、并行度和verify保持，仍需全36精确新head运行。

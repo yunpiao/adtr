@@ -14,6 +14,7 @@ import {
   type MessageQuery,
 } from "./message-query";
 import "./message-soc.css";
+import { Field } from "./access-common";
 
 type Props = { profile: Profile; sessionChanged: () => void };
 type ReadIntent =
@@ -344,17 +345,15 @@ function MessageSession({ profile, sessionChanged }: Props) {
               <span>时间统一使用 UTC，结束时间不包含</span>
             </div>
             <div className="message-filter-grid">
-              <label>
-                关键词
+              <Field label="关键词">
                 <input
                   value={draft.keyword}
                   maxLength={4000}
                   onChange={(e) => edit("keyword", e.target.value)}
                   placeholder="标题字面匹配，区分大小写"
                 />
-              </label>
-              <label>
-                任务结果
+              </Field>
+              <Field label="任务结果">
                 <select
                   value={draft.subType}
                   onChange={(e) =>
@@ -368,9 +367,8 @@ function MessageSession({ profile, sessionChanged }: Props) {
                     </option>
                   ))}
                 </select>
-              </label>
-              <label>
-                阅读状态
+              </Field>
+              <Field label="阅读状态">
                 <select
                   value={draft.readFilter}
                   onChange={(e) =>
@@ -386,9 +384,8 @@ function MessageSession({ profile, sessionChanged }: Props) {
                     </option>
                   ))}
                 </select>
-              </label>
-              <label>
-                排序
+              </Field>
+              <Field label="排序">
                 <select
                   value={draft.sort}
                   onChange={(e) =>
@@ -398,27 +395,24 @@ function MessageSession({ profile, sessionChanged }: Props) {
                   <option value="desc">发生时间倒序</option>
                   <option value="asc">发生时间正序</option>
                 </select>
-              </label>
-              <label>
-                开始时间（UTC）
+              </Field>
+              <Field label="开始时间（UTC）">
                 <input
                   type="text"
                   value={draft.start}
                   onChange={(e) => edit("start", e.target.value)}
                   placeholder="2026-10-01T00:00:00Z"
                 />
-              </label>
-              <label>
-                结束时间（UTC）
+              </Field>
+              <Field label="结束时间（UTC）">
                 <input
                   type="text"
                   value={draft.end}
                   onChange={(e) => edit("end", e.target.value)}
                   placeholder="2026-10-08T00:00:00Z"
                 />
-              </label>
-              <label>
-                每页条数
+              </Field>
+              <Field label="每页条数">
                 <select
                   value={draft.limit}
                   onChange={(e) => edit("limit", Number(e.target.value))}
@@ -429,7 +423,7 @@ function MessageSession({ profile, sessionChanged }: Props) {
                     </option>
                   ))}
                 </select>
-              </label>
+              </Field>
               <div className="message-filter-action">
                 <button type="submit" disabled={!!busy}>
                   确认查询
@@ -511,15 +505,14 @@ function MessageSession({ profile, sessionChanged }: Props) {
                   void read({ kind: "locate", id: locateId });
                 }}
               >
-                <label>
-                  消息 ID 定位
+                <Field label="消息 ID 定位">
                   <input
                     value={locateId}
                     maxLength={128}
                     onChange={(e) => setLocateId(e.target.value)}
                     placeholder="粘贴完整消息 ID"
                   />
-                </label>
+                </Field>
                 <button disabled={!!busy || !gate[1] || !gate[2]}>定位</button>
                 <span>仅定位当前固定结果</span>
               </form>
