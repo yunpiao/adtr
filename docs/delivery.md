@@ -3,6 +3,31 @@
 总路线图：https://github.com/yunpiao/adtr/issues/1 。全部 209 项均在范围内。
 工程文档、代码、PR、最新 head CI、合并、产品验收分别记录；任一阶段不能代表后续阶段完成。
 
+## 当前组合状态（2026-10-11，核对至 main 6f7f44a）
+
+当前已合并基线 `6f7f44a4997f78b6a50eab1ba657ffcc15769c1a` 为schema18，
+[main-push CI 38154440236](https://github.com/yunpiao/adtr/actions/runs/38154440236)
+attempt1逐项36/36成功。全部209项产品验收仍为 **0/209**；机器台账为
+**19 implemented_verified_slice、31 in_progress、159 not_started**。19指具名工程切片
+状态的需求数，不是完整验收功能数。只有AD-F-157/158/159从not_started改为in_progress。
+
+- F12：PR81独立directory v2生产者、schema16、四类新增事实、API/UI已合并并实测；AD-F-034保持in_progress，完整字段/增量/删除语义/地址关系仍开放
+- F14：PR92真实SOC用户队列/固定详情、PR114精确SAM/创建时间范围排序已交付；AD-F-038/039保持in_progress，旧语义全量兼容/关系/业务导出未完成
+- F40：PR104/106/109/113/116形成真实health消息、固定查询/计数、单条/批量已读原操作恢复和取消余项；旧类型/appName、更多生产者及完整分组时间线仍缺
+- B2：PR103/110已补真实跨账户、无域B、双通知失败回退和真实正文消费后的迟到应用交付；保留原生取消证据，不把应用交付当取消后网络送达
+- SOC任务/审计/健康工作区分别由PR94/98/102交付；PR97是CI工程优化，不增加产品验收数量
+
+每个工程切片的精确head、PR CI、实际合并提交、main-push CI、Issue范围与剩余门禁见
+[本次逐项核对](delivery-reconciliation-20261011.md)。真实AD/八版本Windows、完整源兼容、
+容量/恢复和生产门禁仍独立开放；合成LDAP、保护预算、CI成功或工程Issue状态均不替代验收。
+本次没有部署、关闭Issue或勾选未验收项；基线成功不代替本次文档提交的精确CI。
+
+## 历史检查点阅读约定
+
+以下保留原有本地与发布检查点。“开发中”“尚无UI”“CI待完成”描述该节当时范围；
+后续已交付部分以上方当前组合状态和逐项核对为准。原失败、缺Docker/DSN及较窄测试边界
+继续保留，不追写为当时已通过。
+
 ## F40 真实 health 消息后端首片（2026-10-11 开发中）
 
 Refs [#101](https://github.com/yunpiao/adtr/issues/101)、[F40 #50](https://github.com/yunpiao/adtr/issues/50)，基线main `f9b8ed1`，迁移17。仅真实health终态投影、本人固定查询/阅读快照、实时权限与持久单条已读收据；纯messagecore不变。UI/完整时间线/批量进度/完整F40仍开放，产品验收0/209，无部署。
@@ -53,7 +78,7 @@ not_started改为in_progress；19 verified slices、28 in_progress、162 not_sta
 产品验收仍0/209。其余字段/筛选、风险/登录/关系/导出、源系统1:1、真实AD/八版本Windows、
 容量与生产门禁仍开放；不关闭Issue30，也不以本切片宣称完整F14或依赖功能已验收。
 
-## 当前合并与运行证据（2026-10-09）
+## 历史合并与运行证据（2026-10-09）
 
 [PR #81](https://github.com/yunpiao/adtr/pull/81) 的精确 head `d6b6063f5fa5407779f465789e652a3dc24ff7c2` 已在 [CI 37945689472](https://github.com/yunpiao/adtr/actions/runs/37945689472) completed/success，28/28 job 通过：22 个隔离真实浏览器/API/PostgreSQL套件、4 个认证集成分片、contracts 和最终 verify。新增 directory-v2、directory-v2-controls、directory-v2-readers 均通过，目录生产者使用真实 Worker 与隔离合成 TLS LDAP；未验证真实 AD/Windows。
 

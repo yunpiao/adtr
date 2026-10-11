@@ -153,9 +153,24 @@
         "remaining": [
           "真实AD与八版本Windows环境、完整源系统字段和行为兼容尚未验收；检测证据来自隔离合成LDAP",
           "域控/采集器/远端操作、生产密钥轮换与灾难恢复不属于该切片；崩溃后未获结束证明的opened使用继续阻断，无强制释放入口",
-          "通用跨标签与目录读取者隔离已有浏览器证据；B2特定凭据来源跨账户切换仍缺独立浏览器场景"
+          "B2已补真实跨账户、无域B及双通知失效回退；迟到应用交付有证据，取消后的原生网络送达未实测，仅是证据边界而非新增产品要求；已测原生取消与消费后应用迟到各自不借证"
         ],
-        "local_contract": "docs/domain-contract.md"
+        "local_contract": "docs/domain-contract.md",
+        "latest_delivery": {
+          "record": "docs/delivery-reconciliation-20261011.md",
+          "commit": "e55616de2e0f0966c60bbf774394c3936c42bb1d",
+          "pr": "https://github.com/yunpiao/adtr/pull/110",
+          "ci": "https://github.com/yunpiao/adtr/actions/runs/38136383831",
+          "merge_commit": "77a6e2140eaa69e82d2d3a6e306c95fcf8bcb1d7",
+          "main_ci": "https://github.com/yunpiao/adtr/actions/runs/38139103844",
+          "verified": [
+            "PR103真实域列表/详情SOC工作区、诊断证据、筛选/页码/焦点返回与桌面/390px界面已交付",
+            "PR103/110真实B2 A→无域B→A、原回执恢复/不重复提交、双通知失效后的原生标签生命周期及/me复核、hidden/inert隔离通过",
+            "三路真实正文消费后的迟到应用交付与原生browser_cancelled分别记录；原生fetch/Response身份和权限边界保持"
+          ],
+          "local_contract": "docs/domain-soc-workspace.md",
+          "supporting_pr": "https://github.com/yunpiao/adtr/pull/103"
+        }
       }
     },
     {
@@ -240,9 +255,22 @@
         "remaining": [
           "真实AD与八版本Windows环境、完整源系统字段和行为兼容尚未验收；检测证据来自隔离合成LDAP",
           "域控/采集器/远端操作、生产密钥轮换与灾难恢复不属于该切片；崩溃后未获结束证明的opened使用继续阻断，无强制释放入口",
-          "通用跨标签与目录读取者隔离已有浏览器证据；B2特定凭据来源跨账户切换仍缺独立浏览器场景"
+          "B2已补真实跨账户、无域B及双通知失效回退；迟到应用交付有证据，取消后的原生网络送达未实测，仅是证据边界而非新增产品要求；已测原生取消与消费后应用迟到各自不借证"
         ],
-        "local_contract": "docs/domain-contract.md"
+        "local_contract": "docs/domain-contract.md",
+        "latest_delivery": {
+          "record": "docs/delivery-reconciliation-20261011.md",
+          "commit": "e55616de2e0f0966c60bbf774394c3936c42bb1d",
+          "pr": "https://github.com/yunpiao/adtr/pull/110",
+          "ci": "https://github.com/yunpiao/adtr/actions/runs/38136383831",
+          "merge_commit": "77a6e2140eaa69e82d2d3a6e306c95fcf8bcb1d7",
+          "main_ci": "https://github.com/yunpiao/adtr/actions/runs/38139103844",
+          "verified": [
+            "PR103/110真实B2 A→无域B→A、原回执恢复/不重复提交、双通知失效后的原生标签生命周期及/me复核、hidden/inert隔离通过",
+            "三路真实正文消费后的迟到应用交付与原生browser_cancelled分别记录；原生fetch/Response身份和权限边界保持"
+          ],
+          "local_contract": "docs/domain-soc-workspace.md"
+        }
       }
     },
     {
@@ -328,9 +356,22 @@
         "remaining": [
           "真实AD与八版本Windows环境、完整源系统字段和行为兼容尚未验收；检测证据来自隔离合成LDAP",
           "域控/采集器/远端操作、生产密钥轮换与灾难恢复不属于该切片；崩溃后未获结束证明的opened使用继续阻断，无强制释放入口",
-          "通用跨标签与目录读取者隔离已有浏览器证据；B2特定凭据来源跨账户切换仍缺独立浏览器场景"
+          "B2已补真实跨账户、无域B及双通知失效回退；迟到应用交付有证据，取消后的原生网络送达未实测，仅是证据边界而非新增产品要求；已测原生取消与消费后应用迟到各自不借证"
         ],
-        "local_contract": "docs/domain-contract.md"
+        "local_contract": "docs/domain-contract.md",
+        "latest_delivery": {
+          "record": "docs/delivery-reconciliation-20261011.md",
+          "commit": "e55616de2e0f0966c60bbf774394c3936c42bb1d",
+          "pr": "https://github.com/yunpiao/adtr/pull/110",
+          "ci": "https://github.com/yunpiao/adtr/actions/runs/38136383831",
+          "merge_commit": "77a6e2140eaa69e82d2d3a6e306c95fcf8bcb1d7",
+          "main_ci": "https://github.com/yunpiao/adtr/actions/runs/38139103844",
+          "verified": [
+            "PR103/110真实B2 A→无域B→A、原回执恢复/不重复提交、双通知失效后的原生标签生命周期及/me复核、hidden/inert隔离通过",
+            "三路真实正文消费后的迟到应用交付与原生browser_cancelled分别记录；原生fetch/Response身份和权限边界保持"
+          ],
+          "local_contract": "docs/domain-soc-workspace.md"
+        }
       }
     },
     {
@@ -412,9 +453,22 @@
         "remaining": [
           "真实AD与八版本Windows环境、完整源系统字段和行为兼容尚未验收；检测证据来自隔离合成LDAP",
           "域控/采集器/远端操作、生产密钥轮换与灾难恢复不属于该切片；崩溃后未获结束证明的opened使用继续阻断，无强制释放入口",
-          "通用跨标签与目录读取者隔离已有浏览器证据；B2特定凭据来源跨账户切换仍缺独立浏览器场景"
+          "B2已补真实跨账户、无域B及双通知失效回退；迟到应用交付有证据，取消后的原生网络送达未实测，仅是证据边界而非新增产品要求；已测原生取消与消费后应用迟到各自不借证"
         ],
-        "local_contract": "docs/domain-contract.md"
+        "local_contract": "docs/domain-contract.md",
+        "latest_delivery": {
+          "record": "docs/delivery-reconciliation-20261011.md",
+          "commit": "e55616de2e0f0966c60bbf774394c3936c42bb1d",
+          "pr": "https://github.com/yunpiao/adtr/pull/110",
+          "ci": "https://github.com/yunpiao/adtr/actions/runs/38136383831",
+          "merge_commit": "77a6e2140eaa69e82d2d3a6e306c95fcf8bcb1d7",
+          "main_ci": "https://github.com/yunpiao/adtr/actions/runs/38139103844",
+          "verified": [
+            "PR103/110真实B2 A→无域B→A、原回执恢复/不重复提交、双通知失效后的原生标签生命周期及/me复核、hidden/inert隔离通过",
+            "三路真实正文消费后的迟到应用交付与原生browser_cancelled分别记录；原生fetch/Response身份和权限边界保持"
+          ],
+          "local_contract": "docs/domain-soc-workspace.md"
+        }
       }
     },
     {
@@ -500,9 +554,22 @@
         "remaining": [
           "真实AD与八版本Windows环境、完整源系统字段和行为兼容尚未验收；检测证据来自隔离合成LDAP",
           "域控/采集器/远端操作、生产密钥轮换与灾难恢复不属于该切片；崩溃后未获结束证明的opened使用继续阻断，无强制释放入口",
-          "通用跨标签与目录读取者隔离已有浏览器证据；B2特定凭据来源跨账户切换仍缺独立浏览器场景"
+          "B2已补真实跨账户、无域B及双通知失效回退；迟到应用交付有证据，取消后的原生网络送达未实测，仅是证据边界而非新增产品要求；已测原生取消与消费后应用迟到各自不借证"
         ],
-        "local_contract": "docs/domain-contract.md"
+        "local_contract": "docs/domain-contract.md",
+        "latest_delivery": {
+          "record": "docs/delivery-reconciliation-20261011.md",
+          "commit": "e55616de2e0f0966c60bbf774394c3936c42bb1d",
+          "pr": "https://github.com/yunpiao/adtr/pull/110",
+          "ci": "https://github.com/yunpiao/adtr/actions/runs/38136383831",
+          "merge_commit": "77a6e2140eaa69e82d2d3a6e306c95fcf8bcb1d7",
+          "main_ci": "https://github.com/yunpiao/adtr/actions/runs/38139103844",
+          "verified": [
+            "PR103/110真实B2 A→无域B→A、原回执恢复/不重复提交、双通知失效后的原生标签生命周期及/me复核、hidden/inert隔离通过",
+            "三路真实正文消费后的迟到应用交付与原生browser_cancelled分别记录；原生fetch/Response身份和权限边界保持"
+          ],
+          "local_contract": "docs/domain-soc-workspace.md"
+        }
       }
     },
     {
@@ -1148,9 +1215,22 @@
         "remaining": [
           "源系统账户所有权/radio字段含义与1:1兼容尚未冻结；当前登记成功不代表远端账户已验证",
           "安装、WinRM/SMB、远端账户创建/改密/删除、自动验证均未实现；连接检测授权不授权这些用途",
-          "生产密钥轮换/恢复、崩溃opened使用的恢复流程及B2特定来源跨账户浏览器场景仍开放"
+          "生产密钥轮换/恢复及崩溃opened使用的恢复流程仍开放；B2跨账户/通知回退/无域B已补证据，取消后原生网络送达未实测，仅是证据边界而非新增产品要求"
         ],
-        "local_contract": "docs/operation-accounts-contract.md"
+        "local_contract": "docs/operation-accounts-contract.md",
+        "latest_delivery": {
+          "record": "docs/delivery-reconciliation-20261011.md",
+          "commit": "e55616de2e0f0966c60bbf774394c3936c42bb1d",
+          "pr": "https://github.com/yunpiao/adtr/pull/110",
+          "ci": "https://github.com/yunpiao/adtr/actions/runs/38136383831",
+          "merge_commit": "77a6e2140eaa69e82d2d3a6e306c95fcf8bcb1d7",
+          "main_ci": "https://github.com/yunpiao/adtr/actions/runs/38139103844",
+          "verified": [
+            "PR103/110真实B2 A→无域B→A、原回执恢复/不重复提交、双通知失效后的原生标签生命周期及/me复核、hidden/inert隔离通过",
+            "三路真实正文消费后的迟到应用交付与原生browser_cancelled分别记录；原生fetch/Response身份和权限边界保持"
+          ],
+          "local_contract": "docs/domain-soc-workspace.md"
+        }
       }
     },
     {
@@ -1209,9 +1289,22 @@
         "remaining": [
           "源系统账户所有权/radio字段含义与1:1兼容尚未冻结；当前登记成功不代表远端账户已验证",
           "安装、WinRM/SMB、远端账户创建/改密/删除、自动验证均未实现；连接检测授权不授权这些用途",
-          "生产密钥轮换/恢复、崩溃opened使用的恢复流程及B2特定来源跨账户浏览器场景仍开放"
+          "生产密钥轮换/恢复及崩溃opened使用的恢复流程仍开放；B2跨账户/通知回退/无域B已补证据，取消后原生网络送达未实测，仅是证据边界而非新增产品要求"
         ],
-        "local_contract": "docs/operation-accounts-contract.md"
+        "local_contract": "docs/operation-accounts-contract.md",
+        "latest_delivery": {
+          "record": "docs/delivery-reconciliation-20261011.md",
+          "commit": "e55616de2e0f0966c60bbf774394c3936c42bb1d",
+          "pr": "https://github.com/yunpiao/adtr/pull/110",
+          "ci": "https://github.com/yunpiao/adtr/actions/runs/38136383831",
+          "merge_commit": "77a6e2140eaa69e82d2d3a6e306c95fcf8bcb1d7",
+          "main_ci": "https://github.com/yunpiao/adtr/actions/runs/38139103844",
+          "verified": [
+            "PR103/110真实B2 A→无域B→A、原回执恢复/不重复提交、双通知失效后的原生标签生命周期及/me复核、hidden/inert隔离通过",
+            "三路真实正文消费后的迟到应用交付与原生browser_cancelled分别记录；原生fetch/Response身份和权限边界保持"
+          ],
+          "local_contract": "docs/domain-soc-workspace.md"
+        }
       }
     },
     {
@@ -1270,9 +1363,22 @@
         "remaining": [
           "源系统账户所有权/radio字段含义与1:1兼容尚未冻结；当前登记成功不代表远端账户已验证",
           "安装、WinRM/SMB、远端账户创建/改密/删除、自动验证均未实现；连接检测授权不授权这些用途",
-          "生产密钥轮换/恢复、崩溃opened使用的恢复流程及B2特定来源跨账户浏览器场景仍开放"
+          "生产密钥轮换/恢复及崩溃opened使用的恢复流程仍开放；B2跨账户/通知回退/无域B已补证据，取消后原生网络送达未实测，仅是证据边界而非新增产品要求"
         ],
-        "local_contract": "docs/operation-accounts-contract.md"
+        "local_contract": "docs/operation-accounts-contract.md",
+        "latest_delivery": {
+          "record": "docs/delivery-reconciliation-20261011.md",
+          "commit": "e55616de2e0f0966c60bbf774394c3936c42bb1d",
+          "pr": "https://github.com/yunpiao/adtr/pull/110",
+          "ci": "https://github.com/yunpiao/adtr/actions/runs/38136383831",
+          "merge_commit": "77a6e2140eaa69e82d2d3a6e306c95fcf8bcb1d7",
+          "main_ci": "https://github.com/yunpiao/adtr/actions/runs/38139103844",
+          "verified": [
+            "PR103/110真实B2 A→无域B→A、原回执恢复/不重复提交、双通知失效后的原生标签生命周期及/me复核、hidden/inert隔离通过",
+            "三路真实正文消费后的迟到应用交付与原生browser_cancelled分别记录；原生fetch/Response身份和权限边界保持"
+          ],
+          "local_contract": "docs/domain-soc-workspace.md"
+        }
       }
     },
     {
@@ -1328,9 +1434,22 @@
         "remaining": [
           "源系统账户所有权/radio字段含义与1:1兼容尚未冻结；当前登记成功不代表远端账户已验证",
           "安装、WinRM/SMB、远端账户创建/改密/删除、自动验证均未实现；连接检测授权不授权这些用途",
-          "生产密钥轮换/恢复、崩溃opened使用的恢复流程及B2特定来源跨账户浏览器场景仍开放"
+          "生产密钥轮换/恢复及崩溃opened使用的恢复流程仍开放；B2跨账户/通知回退/无域B已补证据，取消后原生网络送达未实测，仅是证据边界而非新增产品要求"
         ],
-        "local_contract": "docs/operation-accounts-contract.md"
+        "local_contract": "docs/operation-accounts-contract.md",
+        "latest_delivery": {
+          "record": "docs/delivery-reconciliation-20261011.md",
+          "commit": "e55616de2e0f0966c60bbf774394c3936c42bb1d",
+          "pr": "https://github.com/yunpiao/adtr/pull/110",
+          "ci": "https://github.com/yunpiao/adtr/actions/runs/38136383831",
+          "merge_commit": "77a6e2140eaa69e82d2d3a6e306c95fcf8bcb1d7",
+          "main_ci": "https://github.com/yunpiao/adtr/actions/runs/38139103844",
+          "verified": [
+            "PR103/110真实B2 A→无域B→A、原回执恢复/不重复提交、双通知失效后的原生标签生命周期及/me复核、hidden/inert隔离通过",
+            "三路真实正文消费后的迟到应用交付与原生browser_cancelled分别记录；原生fetch/Response身份和权限边界保持"
+          ],
+          "local_contract": "docs/domain-soc-workspace.md"
+        }
       }
     },
     {
@@ -2129,10 +2248,10 @@
         ],
         "runtime_scope_note": "Issue-level supporting suites; specific implemented scope is stated above. Passing shared suites does not verify every source field or all acceptance gates.",
         "remaining": [
-          "AD-F-034维持in_progress：仅既定dictionary1字段的有界完整观测，不是AD时间点快照或全部资产字段的全量同步验收",
+          "AD-F-034维持in_progress：dictionary1/2单次有界完整观测已交付，完整资产字段/全量同步与AD时间点快照语义未验收",
           "AD-F-035/041仍not_started；成员/ACL/IP关联、增量和缺席删除语义未交付",
-          "真实AD/八版本Windows、源字段完整兼容和容量目标仍未验收；v2组件未注册生产者，不能计入本运行切片",
-          "默认关闭的ADTR_DIRECTORY_READ_ENABLED与独立用途授权仍须分别满足；CI使用隔离合成目标"
+          "真实AD/八版本Windows、源字段完整兼容、容量/恢复与生产门禁仍未验收；合成TLS LDAP不能代替真实AD",
+          "ADTR_DIRECTORY_READ_ENABLED与ADTR_DIRECTORY_READ_V2_ENABLED默认关闭；v2启用必须同时满足两开关、独立当前v2用途授权及密钥/CA/出口策略，不复制旧v1授权"
         ],
         "local_contract": "docs/directory-api-contract.md",
         "previous_evidence": {
@@ -2150,7 +2269,20 @@
             "Unpublished local integration; exact-head remote CI and full product acceptance remain open"
           ]
         },
-        "previous_evidence_note": "Preserved local historical checkpoint. Its unpublished/missing local DB/browser execution limits were superseded by the exact-head CI linked above; open product/compatibility gates remain current."
+        "previous_evidence_note": "Preserved local historical checkpoint. Its unpublished/missing local DB/browser execution limits were superseded by the exact-head CI linked above; open product/compatibility gates remain current.",
+        "latest_delivery": {
+          "record": "docs/delivery-reconciliation-20261011.md",
+          "commit": "d6b6063f5fa5407779f465789e652a3dc24ff7c2",
+          "pr": "https://github.com/yunpiao/adtr/pull/81",
+          "ci": "https://github.com/yunpiao/adtr/actions/runs/37945689472",
+          "merge_commit": "4faafb552a5c7887a62930f7563b22d3cbcdfbf9",
+          "main_ci": "https://github.com/yunpiao/adtr/actions/runs/37954766457",
+          "verified": [
+            "schema16已注册独立domain.directory_read.v2任务/用途授权、共享使用账本、实际Worker/TLS LDAP、版本化完整观测、受保护API/UI",
+            "dictionary2新增SID/mail/description/whenCreated事实字段；独立directory-v2、controls、readers真实链在精确head与实际main通过，v1保留"
+          ],
+          "local_contract": "docs/directory-v2-integration-status.md"
+        }
       }
     },
     {
@@ -2271,7 +2403,7 @@
       "evidence": {
         "local_contract": "docs/user-assets-v2-contract.md",
         "implementation_base": "26f1463e98d2064182ad3f89e8663af7a0d9ef24",
-        "implemented_scope": "只读已验证dictionary2不可变观测；当前域/凭据版本下的用户SAM/SID/mail/DN字面量搜索、稳定分页与观测/GUID固定详情；保留十个事实字段和null语义",
+        "implemented_scope": "只读已验证dictionary2不可变观测；当前域/凭据版本下的用户SAM/SID/mail/DN字面量搜索、稳定分页与观测/GUID固定详情；保留十个事实字段和null语义；已接PR92生产SOC工作区与PR114精确SAM/创建时间范围排序，详见latest_delivery",
         "tests": [
           "internal/domains/user_assets_v2_test.go",
           "internal/domains/user_assets_v2_integration_test.go",
@@ -2282,10 +2414,23 @@
           "web/e2e/user-assets-v2-readers.spec.ts"
         ],
         "remaining": [
-          "精确候选head完整CI、独立实际diff审查及当前main兼容性按PR证据分别记录；不能借用基线测试结果",
-          "其余原始筛选/字段/控件、关系与业务导出尚未实现；无风险/登录/成员数据推断",
-          "真实AD、八版本Windows、源系统1:1兼容、容量及生产验收仍开放；Issue30与产品验收不因本切片完成"
-        ]
+          "工程切片精确head/合并后CI与独立审查已记录；完整F14旧字段、枚举、筛选默认/运算符及源系统1:1兼容仍未冻结/验收",
+          "关系、风险/登录/成员数据及业务导出仍未交付；PR114创建时间/SAM为明确的新工程契约，不冒称旧系统或AD服务端语义",
+          "真实AD、八版本Windows、容量与生产验收仍开放；Issue30及product_accepted保持未完成"
+        ],
+        "latest_delivery": {
+          "record": "docs/delivery-reconciliation-20261011.md",
+          "commit": "e79dec473f54ea4a8cb06a87e605180fde98d5a8",
+          "pr": "https://github.com/yunpiao/adtr/pull/114",
+          "ci": "https://github.com/yunpiao/adtr/actions/runs/38147564340",
+          "merge_commit": "de878307379aba995545c6091eb4a0196fc6ba90",
+          "main_ci": "https://github.com/yunpiao/adtr/actions/runs/38150511380",
+          "verified": [
+            "PR92真实SOC用户资产列表、固定observationId+GUID详情、桌面/手机抽屉、返回/焦点及当前身份/权限边界",
+            "PR114精确SAM按原始字节区分大小写、成对RFC3339纳秒whenCreated半开范围、asc/desc与null最后；谓词在total/page前执行，切页/确认筛选固定观测，明确刷新才更新"
+          ],
+          "local_contract": "docs/user-assets-v2-filters-contract.md"
+        }
       }
     },
     {
@@ -2420,10 +2565,22 @@
           "web/e2e/user-assets-v2-readers.spec.ts"
         ],
         "remaining": [
-          "精确候选head完整CI、独立实际diff审查及当前main兼容性按PR证据分别记录；不能借用基线测试结果",
-          "其余原始筛选/字段/控件、关系与业务导出尚未实现；无风险/登录/成员数据推断",
-          "真实AD、八版本Windows、源系统1:1兼容、容量及生产验收仍开放；Issue30与产品验收不因本切片完成"
-        ]
+          "工程切片精确head/合并后CI与独立审查已记录；完整F14旧字段、枚举、筛选默认/运算符及源系统1:1兼容仍未冻结/验收",
+          "关系、风险/登录/成员数据及业务导出仍未交付；PR114创建时间/SAM为明确的新工程契约，不冒称旧系统或AD服务端语义",
+          "真实AD、八版本Windows、容量与生产验收仍开放；Issue30及product_accepted保持未完成"
+        ],
+        "latest_delivery": {
+          "record": "docs/delivery-reconciliation-20261011.md",
+          "commit": "8a0da79da17fea1807a5af2e11035e3110a07e58",
+          "pr": "https://github.com/yunpiao/adtr/pull/92",
+          "ci": "https://github.com/yunpiao/adtr/actions/runs/38060682440",
+          "merge_commit": "a8cc62aab884292e2747704968a7f9fe988c719a",
+          "main_ci": "https://github.com/yunpiao/adtr/actions/runs/38065832832",
+          "verified": [
+            "PR92真实SOC用户资产固定observationId+GUID详情、桌面520px/手机全宽抽屉、返回/焦点与会话隔离、真实null及恶意文本按字面显示"
+          ],
+          "local_contract": "docs/soc-production-ui.md"
+        }
       }
     },
     {
@@ -9297,7 +9454,20 @@
           "来源枚举/时间格式/第九列等兼容差异仍开放；已接入生产者不能代表未实现业务模块已产生日志",
           "10001行真实分批测试不等于100000行容量验收；真实AD/Windows联动和产品验收未完成"
         ],
-        "local_contract": "docs/audit-contract.md"
+        "local_contract": "docs/audit-contract.md",
+        "latest_delivery": {
+          "record": "docs/delivery-reconciliation-20261011.md",
+          "commit": "3c2a304fb18646df8ab09fc36454378bc82732a7",
+          "pr": "https://github.com/yunpiao/adtr/pull/98",
+          "ci": "https://github.com/yunpiao/adtr/actions/runs/38087480541",
+          "merge_commit": "f9b8ed1254c0ac0fd9183c0f0625995bec975218",
+          "main_ci": "https://github.com/yunpiao/adtr/actions/runs/38090139952",
+          "verified": [
+            "真实SOC审计筛选/匹配总数/分页及行内真实字段展开，移动滚动边界与焦点；原XLSX导出、隐藏恢复及密码/MFA边界保持",
+            "精确head与main实际API/Worker/PostgreSQL/浏览器/XLSX通过，桌面/390px四图及来源独立复核已记录"
+          ],
+          "local_contract": "docs/audit-contract.md"
+        }
       }
     },
     {
@@ -9489,9 +9659,33 @@
         "UI-0532",
         "UI-0533"
       ],
-      "status": "not_started",
+      "status": "in_progress",
       "product_accepted": false,
-      "evidence": null
+      "evidence": {
+        "record": "docs/delivery-reconciliation-20261011.md",
+        "commit": "48eb9a3ab9c2df400454f1fe060af68e4f53b47a",
+        "pr": "https://github.com/yunpiao/adtr/pull/116",
+        "ci": "https://github.com/yunpiao/adtr/actions/runs/38151288536",
+        "merge_commit": "6f7f44a4997f78b6a50eab1ba657ffcc15769c1a",
+        "main_ci": "https://github.com/yunpiao/adtr/actions/runs/38154440236",
+        "verified": [
+          "schema17真实health Worker→outbox/event→本人消息投影，当前tasks.readable/身份/epoch授权，固定10分钟查询/阅读快照、稳定分页与ID定位",
+          "PR106/109/116真实API/Worker/PostgreSQL/浏览器工作区、单条/批量恢复及桌面/390px图像证据已分别记录；完整分组时间线仍开放"
+        ],
+        "local_contract": "docs/message-bulk-workspace-contract.md",
+        "remaining": [
+          "来源仅本平台真实infrastructure.health终态；完整时间线/分组、旧appType/majorType/minjorType/appName及全部源字段映射、其他消息/通知生产者和外部渠道未交付或未冻结",
+          "查询/批量保护预算、61条浏览器夹具及真实PG故障恢复是具名工程证据；历史保留、长期增长/吞吐/P95、容量与恢复目标仍须独立验收",
+          "源系统完整兼容、真实AD/八版本Windows联动与生产门禁仍未验收；F40 #50及全部产品验收保持开放"
+        ],
+        "supporting_prs": [
+          "https://github.com/yunpiao/adtr/pull/104",
+          "https://github.com/yunpiao/adtr/pull/106",
+          "https://github.com/yunpiao/adtr/pull/109",
+          "https://github.com/yunpiao/adtr/pull/113"
+        ],
+        "runtime_scope_note": "messages CI先运行原HTTP/MFA health及单条链，再独立库运行messages-bulk；批量61任务内部SubmitTx不是HTTP/MFA提交覆盖。只证明上述health切片，不代表全部F40。"
+      }
     },
     {
       "id": "AD-F-158",
@@ -9529,9 +9723,34 @@
         "UI-0532",
         "UI-0533"
       ],
-      "status": "not_started",
+      "status": "in_progress",
       "product_accepted": false,
-      "evidence": null
+      "evidence": {
+        "record": "docs/delivery-reconciliation-20261011.md",
+        "commit": "48eb9a3ab9c2df400454f1fe060af68e4f53b47a",
+        "pr": "https://github.com/yunpiao/adtr/pull/116",
+        "ci": "https://github.com/yunpiao/adtr/actions/runs/38151288536",
+        "merge_commit": "6f7f44a4997f78b6a50eab1ba657ffcc15769c1a",
+        "main_ci": "https://github.com/yunpiao/adtr/actions/runs/38154440236",
+        "verified": [
+          "单条本人首次已读和原operationId持久回执；丢响应先GET核实，明确重放保持原标识，新会话可恢复、旧cookie/他人/撤权拒绝",
+          "schema18和PR113/116有界跨页选择或固定结果all、冻结目标、六项持久进度、取消仅余项、未知启动/取消恢复、权限epoch终态及Worker/数据库恢复",
+          "61条真实health消息浏览器链中，受控生产BulkOnce提交50项后取消余11项，后到62不进入目标；受控时序不冒称自主Worker调度，另有自动选2链和后端测试"
+        ],
+        "local_contract": "docs/message-bulk-workspace-contract.md",
+        "remaining": [
+          "来源仅本平台真实infrastructure.health终态；完整时间线/分组、旧appType/majorType/minjorType/appName及全部源字段映射、其他消息/通知生产者和外部渠道未交付或未冻结",
+          "查询/批量保护预算、61条浏览器夹具及真实PG故障恢复是具名工程证据；历史保留、长期增长/吞吐/P95、容量与恢复目标仍须独立验收",
+          "源系统完整兼容、真实AD/八版本Windows联动与生产门禁仍未验收；F40 #50及全部产品验收保持开放"
+        ],
+        "supporting_prs": [
+          "https://github.com/yunpiao/adtr/pull/104",
+          "https://github.com/yunpiao/adtr/pull/106",
+          "https://github.com/yunpiao/adtr/pull/109",
+          "https://github.com/yunpiao/adtr/pull/113"
+        ],
+        "runtime_scope_note": "messages CI先运行原HTTP/MFA health及单条链，再独立库运行messages-bulk；批量61任务内部SubmitTx不是HTTP/MFA提交覆盖。只证明上述health切片，不代表全部F40。"
+      }
     },
     {
       "id": "AD-F-159",
@@ -9549,9 +9768,33 @@
         "FLD-2609"
       ],
       "ui_records": [],
-      "status": "not_started",
+      "status": "in_progress",
       "product_accepted": false,
-      "evidence": null
+      "evidence": {
+        "record": "docs/delivery-reconciliation-20261011.md",
+        "commit": "48eb9a3ab9c2df400454f1fe060af68e4f53b47a",
+        "pr": "https://github.com/yunpiao/adtr/pull/116",
+        "ci": "https://github.com/yunpiao/adtr/actions/runs/38151288536",
+        "merge_commit": "6f7f44a4997f78b6a50eab1ba657ffcc15769c1a",
+        "main_ci": "https://github.com/yunpiao/adtr/actions/runs/38154440236",
+        "verified": [
+          "本人同一已确认查询的all/read/unread基础计数与阅读筛选后列表total分别保留；当前页条数不当总数",
+          "单条/批量已读不篡改旧固定快照成员、序号、阅读状态或counts；显式新查询才反映已提交状态，真实PG/API/浏览器有证据"
+        ],
+        "local_contract": "docs/message-bulk-workspace-contract.md",
+        "remaining": [
+          "来源仅本平台真实infrastructure.health终态；完整时间线/分组、旧appType/majorType/minjorType/appName及全部源字段映射、其他消息/通知生产者和外部渠道未交付或未冻结",
+          "查询/批量保护预算、61条浏览器夹具及真实PG故障恢复是具名工程证据；历史保留、长期增长/吞吐/P95、容量与恢复目标仍须独立验收",
+          "源系统完整兼容、真实AD/八版本Windows联动与生产门禁仍未验收；F40 #50及全部产品验收保持开放"
+        ],
+        "supporting_prs": [
+          "https://github.com/yunpiao/adtr/pull/104",
+          "https://github.com/yunpiao/adtr/pull/106",
+          "https://github.com/yunpiao/adtr/pull/109",
+          "https://github.com/yunpiao/adtr/pull/113"
+        ],
+        "runtime_scope_note": "messages CI先运行原HTTP/MFA health及单条链，再独立库运行messages-bulk；批量61任务内部SubmitTx不是HTTP/MFA提交覆盖。只证明上述health切片，不代表全部F40。"
+      }
     },
     {
       "id": "AD-F-160",
@@ -11658,9 +11901,8 @@
           "real browser to API to worker/PostgreSQL health execution"
         ],
         "remaining": [
-          "AD detection/synchronization/business executors and real Windows/domain acceptance",
-          "reference-system field/status compatibility and engine restart",
-          "capacity, retention and production acceptance"
+          "已注册健康、审计导出、域诊断、日志包、目录v1/v2等有界执行器；其他AD检测/同步/业务执行器及真实Windows/域验收仍开放",
+          "源系统字段/状态兼容、engineRestart、容量/保留期与生产验收仍开放；实际任务成功只按该执行器契约解释"
         ],
         "latest_regression": {
           "commit": "4f64d90880b28b3cf7a749a9ba1da57049736dd9",
@@ -11696,6 +11938,19 @@
             "保留PR72原证据；原笼统“所有同步/业务执行器未实现”更新为已接入的上述有界切片，其他检测/关联/AD变更执行器继续开放",
             "真实多AD/Windows、源任务状态/字段兼容与engineRestart、容量/保留期/生产验收仍未完成"
           ]
+        },
+        "latest_delivery": {
+          "record": "docs/delivery-reconciliation-20261011.md",
+          "commit": "96cf35f5f3911c8d5df8ba36b1a16e49f0b72b75",
+          "pr": "https://github.com/yunpiao/adtr/pull/94",
+          "ci": "https://github.com/yunpiao/adtr/actions/runs/38076290003",
+          "merge_commit": "ebf6ce321b8d8e99a31c3b3ea7251352389d902c",
+          "main_ci": "https://github.com/yunpiao/adtr/actions/runs/38081686522",
+          "verified": [
+            "真实任务紧凑队列、完整执行详情和持久化事件时间线；已有过滤/取消/恢复/归档/专用任务边界保持",
+            "返回、刷新、前后退重新鉴权并恢复账户绑定只读查询/选择，真实桌面/390px八图及独立审查已记录"
+          ],
+          "local_contract": "docs/soc-task-ui.md"
         }
       }
     },
@@ -12001,10 +12256,23 @@
         "runtime_scope_note": "Issue-level supporting suites; specific implemented scope is stated above. Passing shared suites does not verify every source field or all acceptance gates.",
         "remaining": [
           "范围仅local-api及它看到的内核/根文件系统，不代表容器配额、PG数据卷、多节点或整个平台集群",
-          "存储日志/自动清理、缓存/外部引擎、许可/升级未实现；旧文档schema7为历史引入版本，当前共享schema15",
+          "存储日志/自动清理、缓存/外部引擎、许可/升级未实现；旧schema7为历史引入版本，核对基线6f7f44a共享schema18",
           "源字段单位/别名/空值兼容、容量/保留期、生产最小权限DB与Windows/AD联动尚未验收"
         ],
-        "local_contract": "docs/system-health-contract.md"
+        "local_contract": "docs/system-health-contract.md",
+        "latest_delivery": {
+          "record": "docs/delivery-reconciliation-20261011.md",
+          "commit": "4e65d9924f0fd6e57e8b17e0e895f1dd5612e7a1",
+          "pr": "https://github.com/yunpiao/adtr/pull/102",
+          "ci": "https://github.com/yunpiao/adtr/actions/runs/38110796016",
+          "merge_commit": "48645c9d57f676dedec437b4640f1cf5f1092087",
+          "main_ci": "https://github.com/yunpiao/adtr/actions/runs/38113165795",
+          "verified": [
+            "真实系统健康SOC工作区、local-api采样/历史窗口/缺口/陈旧与未知原因、阈值CAS冲突清证明重读和只读边界",
+            "真实自有Worker SIGSTOP→陈旧→SIGCONT恢复与桌面/390px八图通过；暂停恢复不当作进程退出重启"
+          ],
+          "local_contract": "docs/soc-system-workspace.md"
+        }
       }
     },
     {
@@ -12117,10 +12385,23 @@
         "runtime_scope_note": "Issue-level supporting suites; specific implemented scope is stated above. Passing shared suites does not verify every source field or all acceptance gates.",
         "remaining": [
           "范围仅local-api及它看到的内核/根文件系统，不代表容器配额、PG数据卷、多节点或整个平台集群",
-          "存储日志/自动清理、缓存/外部引擎、许可/升级未实现；旧文档schema7为历史引入版本，当前共享schema15",
+          "存储日志/自动清理、缓存/外部引擎、许可/升级未实现；旧schema7为历史引入版本，核对基线6f7f44a共享schema18",
           "源字段单位/别名/空值兼容、容量/保留期、生产最小权限DB与Windows/AD联动尚未验收"
         ],
-        "local_contract": "docs/system-health-contract.md"
+        "local_contract": "docs/system-health-contract.md",
+        "latest_delivery": {
+          "record": "docs/delivery-reconciliation-20261011.md",
+          "commit": "4e65d9924f0fd6e57e8b17e0e895f1dd5612e7a1",
+          "pr": "https://github.com/yunpiao/adtr/pull/102",
+          "ci": "https://github.com/yunpiao/adtr/actions/runs/38110796016",
+          "merge_commit": "48645c9d57f676dedec437b4640f1cf5f1092087",
+          "main_ci": "https://github.com/yunpiao/adtr/actions/runs/38113165795",
+          "verified": [
+            "真实系统健康SOC工作区、local-api采样/历史窗口/缺口/陈旧与未知原因、阈值CAS冲突清证明重读和只读边界",
+            "真实自有Worker SIGSTOP→陈旧→SIGCONT恢复与桌面/390px八图通过；暂停恢复不当作进程退出重启"
+          ],
+          "local_contract": "docs/soc-system-workspace.md"
+        }
       }
     },
     {
@@ -12189,10 +12470,23 @@
         "runtime_scope_note": "Issue-level supporting suites; specific implemented scope is stated above. Passing shared suites does not verify every source field or all acceptance gates.",
         "remaining": [
           "范围仅local-api及它看到的内核/根文件系统，不代表容器配额、PG数据卷、多节点或整个平台集群",
-          "存储日志/自动清理、缓存/外部引擎、许可/升级未实现；旧文档schema7为历史引入版本，当前共享schema15",
+          "存储日志/自动清理、缓存/外部引擎、许可/升级未实现；旧schema7为历史引入版本，核对基线6f7f44a共享schema18",
           "源字段单位/别名/空值兼容、容量/保留期、生产最小权限DB与Windows/AD联动尚未验收"
         ],
-        "local_contract": "docs/system-health-contract.md"
+        "local_contract": "docs/system-health-contract.md",
+        "latest_delivery": {
+          "record": "docs/delivery-reconciliation-20261011.md",
+          "commit": "4e65d9924f0fd6e57e8b17e0e895f1dd5612e7a1",
+          "pr": "https://github.com/yunpiao/adtr/pull/102",
+          "ci": "https://github.com/yunpiao/adtr/actions/runs/38110796016",
+          "merge_commit": "48645c9d57f676dedec437b4640f1cf5f1092087",
+          "main_ci": "https://github.com/yunpiao/adtr/actions/runs/38113165795",
+          "verified": [
+            "真实系统健康SOC工作区、local-api采样/历史窗口/缺口/陈旧与未知原因、阈值CAS冲突清证明重读和只读边界",
+            "真实自有Worker SIGSTOP→陈旧→SIGCONT恢复与桌面/390px八图通过；暂停恢复不当作进程退出重启"
+          ],
+          "local_contract": "docs/soc-system-workspace.md"
+        }
       }
     },
     {
@@ -12229,10 +12523,23 @@
         "runtime_scope_note": "Issue-level supporting suites; specific implemented scope is stated above. Passing shared suites does not verify every source field or all acceptance gates.",
         "remaining": [
           "范围仅local-api及它看到的内核/根文件系统，不代表容器配额、PG数据卷、多节点或整个平台集群",
-          "存储日志/自动清理、缓存/外部引擎、许可/升级未实现；旧文档schema7为历史引入版本，当前共享schema15",
+          "存储日志/自动清理、缓存/外部引擎、许可/升级未实现；旧schema7为历史引入版本，核对基线6f7f44a共享schema18",
           "源字段单位/别名/空值兼容、容量/保留期、生产最小权限DB与Windows/AD联动尚未验收"
         ],
-        "local_contract": "docs/system-health-contract.md"
+        "local_contract": "docs/system-health-contract.md",
+        "latest_delivery": {
+          "record": "docs/delivery-reconciliation-20261011.md",
+          "commit": "4e65d9924f0fd6e57e8b17e0e895f1dd5612e7a1",
+          "pr": "https://github.com/yunpiao/adtr/pull/102",
+          "ci": "https://github.com/yunpiao/adtr/actions/runs/38110796016",
+          "merge_commit": "48645c9d57f676dedec437b4640f1cf5f1092087",
+          "main_ci": "https://github.com/yunpiao/adtr/actions/runs/38113165795",
+          "verified": [
+            "真实系统健康SOC工作区、local-api采样/历史窗口/缺口/陈旧与未知原因、阈值CAS冲突清证明重读和只读边界",
+            "真实自有Worker SIGSTOP→陈旧→SIGCONT恢复与桌面/390px八图通过；暂停恢复不当作进程退出重启"
+          ],
+          "local_contract": "docs/soc-system-workspace.md"
+        }
       }
     },
     {
@@ -12403,10 +12710,23 @@
         "runtime_scope_note": "Issue-level supporting suites; specific implemented scope is stated above. Passing shared suites does not verify every source field or all acceptance gates.",
         "remaining": [
           "范围仅local-api及它看到的内核/根文件系统，不代表容器配额、PG数据卷、多节点或整个平台集群",
-          "存储日志/自动清理、缓存/外部引擎、许可/升级未实现；旧文档schema7为历史引入版本，当前共享schema15",
+          "存储日志/自动清理、缓存/外部引擎、许可/升级未实现；旧schema7为历史引入版本，核对基线6f7f44a共享schema18",
           "源字段单位/别名/空值兼容、容量/保留期、生产最小权限DB与Windows/AD联动尚未验收"
         ],
-        "local_contract": "docs/system-health-contract.md"
+        "local_contract": "docs/system-health-contract.md",
+        "latest_delivery": {
+          "record": "docs/delivery-reconciliation-20261011.md",
+          "commit": "4e65d9924f0fd6e57e8b17e0e895f1dd5612e7a1",
+          "pr": "https://github.com/yunpiao/adtr/pull/102",
+          "ci": "https://github.com/yunpiao/adtr/actions/runs/38110796016",
+          "merge_commit": "48645c9d57f676dedec437b4640f1cf5f1092087",
+          "main_ci": "https://github.com/yunpiao/adtr/actions/runs/38113165795",
+          "verified": [
+            "真实系统健康SOC工作区、local-api采样/历史窗口/缺口/陈旧与未知原因、阈值CAS冲突清证明重读和只读边界",
+            "真实自有Worker SIGSTOP→陈旧→SIGCONT恢复与桌面/390px八图通过；暂停恢复不当作进程退出重启"
+          ],
+          "local_contract": "docs/soc-system-workspace.md"
+        }
       }
     },
     {

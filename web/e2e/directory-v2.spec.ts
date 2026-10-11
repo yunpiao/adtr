@@ -1,3 +1,5 @@
+import { recordSafeEvent } from "./safe-runtime-diagnostics";
+import { performance } from "node:perf_hooks";
 import { navigateTo } from "./navigation";
 import {
   test,
@@ -102,9 +104,12 @@ function totp(secret: string, now = Date.now()): string {
 async function freshCode(auth: Authenticator) {
   // Enrollment, privileged writes and MFA login consume real counters. Never
   // bypass replay protection or use browser clock changes as server evidence.
+  const waitStarted = performance.now();
+  recordSafeEvent("totp-wait", "", "start");
   const earliest = (auth.lastCounter + 1) * 30_000 + 1100;
   while (Date.now() < earliest)
     await new Promise((resolve) => setTimeout(resolve, earliest - Date.now()));
+  recordSafeEvent("totp-wait", "", "complete", performance.now() - waitStarted);
   const now = Date.now();
   auth.lastCounter = Math.floor(now / 30_000);
   return totp(auth.secret, now);
@@ -161,7 +166,27 @@ async function readJSON(
   path: string,
   actorId?: number,
 ) {
-  const response = await context.request.get(path);
+  const requestStarted = performance.now();
+  recordSafeEvent("read-json", path, "start");
+  let response;
+  try {
+    response = await context.request.get(path);
+  } catch (error) {
+    recordSafeEvent(
+      "read-json",
+      path,
+      "transport-error",
+      performance.now() - requestStarted,
+    );
+    throw error;
+  }
+  recordSafeEvent(
+    "read-json",
+    path,
+    "response",
+    performance.now() - requestStarted,
+    response.status(),
+  );
   expect(response.status(), `GET ${path}`).toBe(200);
   expect(response.headers()["cache-control"]).toBe("no-store");
   if (actorId !== undefined)
@@ -852,6 +877,7 @@ test("real dictionary-v2 UI → authenticated API → worker → paged synthetic
     replayed: false,
   });
   safe(directoryGrant.value);
+  recordSafeEvent("grant-v2-complete", "", "complete");
   expect(await readJSON(context, effectivePath, actorId)).toMatchObject({
     purpose: "domain.directory_read.v2",
     explicitlyGranted: true,

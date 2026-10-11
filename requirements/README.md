@@ -15,14 +15,18 @@ Statuses are deliberately distinct:
 - `accepted`: all feature acceptance gates have been verified, with no remaining
   items; this is not the same as a PR, merge or deploy status
 
-Current product acceptance remains 0/209: 19 verified slices, 28 in-progress
-requirements and 162 with no implementation evidence recorded. AD-F-038/039
-are now in progress for the narrow stored-v2 user search/detail slice; its
-[contract](../docs/user-assets-v2-contract.md) keeps broader fields, filters,
-relations, export and real AD acceptance open. This does not increase accepted
-requirements or borrow earlier CI as evidence for new code. AD-F-151/152
-previously changed to in_progress for the audit-only export history slice. Exact-head [PR #77 CI](https://github.com/yunpiao/adtr/actions/runs/37772558021)
-passed all 25 jobs at `4f64d90880b28b3cf7a749a9ba1da57049736dd9`.
+Current product acceptance remains **0/209**: **19 implemented_verified_slice**
+requirements, **31 in_progress**, and **159 not_started**. These are requirement
+status counts, not PR counts or 19 fully accepted features. Only AD-F-157/158/159
+change status in the [2026-10-11 reconciliation](../docs/delivery-reconciliation-20261011.md):
+real health-message runtime/UI, single/bulk read recovery and fixed-query counts
+now have implementation evidence, while full F40 compatibility remains open.
+AD-F-034 and AD-F-038/039 remain in_progress with corrected v2/runtime/filter
+scope; B2, task, audit and system evidence is refreshed without product acceptance.
+The reconciliation binds each relevant PR head, merge commit and actual Actions
+run separately. Baseline `6f7f44a4997f78b6a50eab1ba657ffcc15769c1a` passed all 36
+jobs in [main-push CI 38154440236](https://github.com/yunpiao/adtr/actions/runs/38154440236).
+That success is baseline evidence, never a pass for a future documentation commit.
 The catalog records narrow implemented scope and remaining gates; passing a shared
 suite does not verify every source field. Original evidence is retained in
 `previous_evidence` or supplemented by `latest_regression` where applicable.
