@@ -1228,6 +1228,146 @@ test("real dictionary-v2 UI → authenticated API → worker → paged synthetic
     }),
   ).toBeVisible();
   expect(syncPosts).toBe(2);
+  // The selected form still carries the pre-edit source pins. Lose delivery
+  // of a real rejected POST, then retry its unknown original once. All GETs
+  // and the conflict response are real; no receipt/task data is fabricated.
+  await page
+    .getByRole("button", { name: "结束此任务查看", exact: true })
+    .click();
+  await proof(page, password, auth);
+  let staleIntent: DirectoryV2Input | undefined;
+  let dropError: unknown;
+  const syncURL = (url: URL) => url.pathname === "/api/directory/v2/sync";
+  const dropConflict = async (route: Route) => {
+    let response;
+    try {
+      const sent = route.request().postDataJSON();
+      staleIntent = {
+        domainId: sent.domainId,
+        expectedRevision: sent.expectedRevision,
+        expectedCredentialGeneration: sent.expectedCredentialGeneration,
+        idempotencyKey: sent.idempotencyKey,
+      };
+      response = await route.fetch({
+        maxRedirects: 0,
+        maxRetries: 0,
+        timeout: 15_000,
+      });
+      expect(response.status()).toBe(409);
+      expect(response.headers()["cache-control"]).toBe("no-store");
+      expect(response.headers()["x-adtr-user-id"]).toBe(String(actorId));
+      expect(await response.json()).toEqual({ error: "revision_conflict" });
+    } catch (error) {
+      dropError = error;
+    } finally {
+      await route.abort("failed");
+      await response?.dispose();
+    }
+  };
+  await page.route(syncURL, dropConflict, { times: 1 });
+  try {
+    await page
+      .getByRole("button", { name: "提交目录同步", exact: true })
+      .click();
+    await expect(
+      page.getByRole("button", {
+        name: "使用原编号和版本重试同步",
+        exact: true,
+      }),
+    ).toBeVisible();
+  } finally {
+    await page.unroute(syncURL, dropConflict);
+  }
+  if (dropError) throw dropError;
+  expect(staleIntent).toMatchObject({
+    domainId,
+    expectedRevision: beforeConnection.revision,
+    expectedCredentialGeneration: beforeConnection.credentialRevision,
+  });
+  expect(staleIntent!.idempotencyKey).not.toBe(intent.idempotencyKey);
+  await expect(page.getByLabel("操作者当前密码", { exact: true })).toHaveValue(
+    "",
+  );
+  await expect(
+    page.getByLabel("未使用的认证器验证码", { exact: true }),
+  ).toHaveValue("");
+  expect(syncPosts).toBe(3);
+  await proof(page, password, auth);
+  const conflict = await submit(
+    page,
+    "/api/directory/v2/sync",
+    "使用原编号和版本重试同步",
+    409,
+  );
+  expect(conflict.value).toEqual({ error: "revision_conflict" });
+  const owner = `${actorId}:${encodeURIComponent(username)}`;
+  const storageKey = `adtr.directory-sync-intent.v2:${owner}`;
+  const receiptOnly = async () => {
+    await expect(page.getByText(/原配置或凭据版本已冲突/)).toBeVisible();
+    await expect(
+      page.getByRole("button", {
+        name: "使用原编号和版本重试同步",
+        exact: true,
+      }),
+    ).toHaveCount(0);
+    await expect(
+      page.getByRole("button", { name: "提交目录同步", exact: true }),
+    ).toHaveCount(0);
+    await expect(
+      page.getByLabel("操作者当前密码", { exact: true }),
+    ).toHaveCount(0);
+    await expect(
+      page.getByLabel("未使用的认证器验证码", { exact: true }),
+    ).toHaveCount(0);
+    const stored = await page.evaluate(
+      (key) => JSON.parse(sessionStorage.getItem(key) ?? "null"),
+      storageKey,
+    );
+    safe(stored);
+    expect(stored).toEqual({
+      owner,
+      intent: { ...staleIntent, receiptOnly: true },
+    });
+    expect(syncPosts).toBe(4);
+  };
+  await receiptOnly();
+  const missingReceipt = async () => {
+    const [response] = await Promise.all([
+      page.waitForResponse(
+        (candidate) =>
+          new URL(candidate.url()).pathname === "/api/directory/v2/receipt",
+      ),
+      page.getByRole("button", { name: "查询原同步回执", exact: true }).click(),
+    ]);
+    expect(response.status()).toBe(404);
+    expect(response.headers()["cache-control"]).toBe("no-store");
+    expect(response.headers()["x-adtr-user-id"]).toBe(String(actorId));
+    expect(Object.fromEntries(new URL(response.url()).searchParams)).toEqual({
+      domainId,
+      idempotencyKey: staleIntent!.idempotencyKey,
+    });
+    expect(await directoryV2ResponseJSON(response)).toEqual({
+      error: "not_found",
+    });
+    await receiptOnly();
+  };
+  await missingReceipt();
+  await navigateTo(page, "账户概览");
+  await page.goBack();
+  await receiptOnly();
+  await page.goForward();
+  await expect(
+    page.getByRole("heading", { name: "账户概览", exact: true }),
+  ).toBeVisible();
+  expect(syncPosts).toBe(4);
+  await page.goBack();
+  await receiptOnly();
+  await page.reload();
+  await receiptOnly();
+  await openDirectory(page);
+  await receiptOnly();
+  await missingReceipt();
+
   const storage = await page.evaluate(() => ({
     local: { ...localStorage },
     session: { ...sessionStorage },

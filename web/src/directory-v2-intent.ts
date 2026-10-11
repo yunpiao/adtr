@@ -7,6 +7,7 @@ import {
 } from "./directory-v2-api";
 export interface DirectoryV2Intent extends DirectoryV2Input {
   taskUUID?: string;
+  receiptOnly?: boolean;
 }
 const prefix = "adtr.directory-sync-intent.v2:";
 const memory = new Map<string, DirectoryV2Intent>();
@@ -14,7 +15,10 @@ const owner = (p: Profile) => `${p.ID}:${encodeURIComponent(p.username)}`;
 function project(v: unknown): DirectoryV2Intent | null {
   if (
     !validDirectoryV2Input(v) ||
-    (object(v) && v.taskUUID !== undefined && !validDomainID(v.taskUUID))
+    (object(v) && v.taskUUID !== undefined && !validDomainID(v.taskUUID)) ||
+    (object(v) &&
+      v.receiptOnly !== undefined &&
+      typeof v.receiptOnly !== "boolean")
   )
     return null;
   return {
@@ -22,6 +26,7 @@ function project(v: unknown): DirectoryV2Intent | null {
     expectedRevision: v.expectedRevision,
     expectedCredentialGeneration: v.expectedCredentialGeneration,
     idempotencyKey: v.idempotencyKey,
+    ...(object(v) && v.receiptOnly === true ? { receiptOnly: true } : {}),
     ...(object(v) && typeof v.taskUUID === "string"
       ? { taskUUID: v.taskUUID }
       : {}),

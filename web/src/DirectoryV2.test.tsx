@@ -941,6 +941,183 @@ describe("directory synchronization and recovery", () => {
       fetcher.mock.calls.findIndex(([url]) => url === "/api/directory/v2/sync"),
     );
   });
+  it("keeps a conflicted unknown original receipt-only across navigation and never offers stale revision retry", async () => {
+    const original = intent();
+    saveDirectoryV2Intent(profile, original);
+    override = (url) =>
+      url.split("?")[0] === "/api/directory/v2/receipt"
+        ? response({ error: "not_found" }, 404)
+        : url === "/api/directory/v2/sync"
+          ? response({ error: "revision_conflict" }, 409)
+          : undefined;
+    await mount();
+    await screen.findByRole("button", { name: "使用原编号和版本重试同步" });
+    proof();
+    click("使用原编号和版本重试同步");
+    await screen.findByText(/原配置或凭据版本已冲突/);
+    expect(readDirectoryV2Intent(profile)).toEqual({
+      ...original,
+      receiptOnly: true,
+    });
+    expect(
+      screen.queryByRole("button", { name: "使用原编号和版本重试同步" }),
+    ).toBeNull();
+    expect(
+      screen.queryByLabelText("操作者当前密码", { exact: true }),
+    ).toBeNull();
+    expect(calls("/api/directory/v2/sync")).toHaveLength(1);
+    expect(JSON.parse(calls("/api/directory/v2/sync")[0][1].body)).toEqual({
+      ...original,
+      actorPassword: "Synthetic actor password 482",
+      totpCode: "123456",
+    });
+    expect(calls("/api/directory/v2/sync")[0][1]).toMatchObject({
+      cache: "no-store",
+      credentials: "same-origin",
+      headers: { "X-CSRF-Token": profile.csrfToken },
+    });
+    override = (url) =>
+      url.split("?")[0] === "/api/directory/v2/receipt"
+        ? response({ error: "not_found" }, 404)
+        : url.split("?")[0] === "/api/domain-selection/resolve"
+          ? response({
+              selection: choice,
+              checkedAt: "2026-10-07T00:20:00Z",
+            })
+          : undefined;
+    await selectSource();
+    expect(readDirectoryV2Intent(profile)).toEqual({
+      ...original,
+      receiptOnly: true,
+    });
+    expect(
+      screen.queryByRole("button", { name: "使用原编号和版本重试同步" }),
+    ).toBeNull();
+    cleanup();
+    // A fresh module has no in-memory recovery map: this read proves persisted
+    // reload recovery keeps the receipt-only restriction and original pins.
+    vi.resetModules();
+    const fresh = await import("./directory-v2-intent");
+    expect(fresh.readDirectoryV2Intent(profile)).toEqual({
+      ...original,
+      receiptOnly: true,
+    });
+    await mount();
+    await screen.findByText(/原配置或凭据版本已冲突/);
+    click("查询原同步回执");
+    await screen.findByText(/原配置或凭据版本已冲突/);
+    expect(
+      screen.queryByRole("button", { name: "使用原编号和版本重试同步" }),
+    ).toBeNull();
+    expect(calls("/api/directory/v2/sync")).toHaveLength(1);
+    expect(readDirectoryV2Intent(profile)).toEqual({
+      ...original,
+      receiptOnly: true,
+    });
+    override = () => undefined;
+    click("查询原同步回执");
+    await screen.findByText(/服务器状态：已成功/);
+    expect(readDirectoryV2Intent(profile)).toEqual({
+      ...original,
+      receiptOnly: true,
+      taskUUID: task().taskUUID,
+    });
+    expect(calls("/api/directory/v2/sync")).toHaveLength(1);
+  });
+  it("keeps receipt-only recovery isolated across actors and rechecks a rotated session", async () => {
+    const stopped = intent({ receiptOnly: true });
+    saveDirectoryV2Intent(profile, stopped);
+    override = (url) =>
+      url.startsWith("/api/directory/v2/receipt?")
+        ? response({ error: "not_found" }, 404)
+        : undefined;
+    const view = await mount();
+    await screen.findByText(/原配置或凭据版本已冲突/);
+    const receiptCount = calls("/api/directory/v2/receipt").length;
+    const originalOverride = override;
+    override = (url) =>
+      url.split("?")[0] === "/api/domain-selection"
+        ? response(
+            {
+              List: [choice],
+              page: { pageIdx: 1, pageSize: 20, total: 1, totalPage: 1 },
+              exhausted: true,
+            },
+            200,
+            "2",
+          )
+        : originalOverride(url, {});
+    view.rerender(
+      <DirectoryV2Workspace profile={otherProfile} sessionChanged={vi.fn()} />,
+    );
+    await screen.findByRole("radio", { name: "选择数据源 synthetic.invalid" });
+    expect(screen.queryByRole("region", { name: "目录同步恢复" })).toBeNull();
+    expect(readDirectoryV2Intent(otherProfile)).toBeNull();
+    expect(calls("/api/directory/v2/receipt")).toHaveLength(receiptCount);
+    override = originalOverride;
+    view.rerender(
+      <DirectoryV2Workspace
+        profile={{ ...profile, csrfToken: "rotated-session" }}
+        sessionChanged={vi.fn()}
+      />,
+    );
+    await screen.findByText(/原配置或凭据版本已冲突/);
+    expect(calls("/api/directory/v2/receipt")).toHaveLength(receiptCount + 1);
+    expect(calls("/api/directory/v2/receipt").at(-1)![1]).toMatchObject({
+      cache: "no-store",
+      credentials: "same-origin",
+    });
+    expect(readDirectoryV2Intent(profile)).toEqual(stopped);
+    expect(calls("/api/directory/v2/sync")).toHaveLength(0);
+    expect(
+      screen.queryByLabelText("操作者当前密码", { exact: true }),
+    ).toBeNull();
+  });
+  it.each(["expired", "foreign"])(
+    "keeps receipt-only identity after a %s receipt response without displaying a task",
+    async (failure) => {
+      const stopped = intent({ receiptOnly: true });
+      saveDirectoryV2Intent(profile, stopped);
+      override = (url) =>
+        url.startsWith("/api/directory/v2/receipt?")
+          ? failure === "expired"
+            ? response({ error: "unauthenticated" }, 401)
+            : response({ task: task() }, 200, "2")
+          : undefined;
+      const changed = vi.fn();
+      render(
+        <DirectoryV2Workspace profile={profile} sessionChanged={changed} />,
+      );
+      await waitFor(() => expect(changed).toHaveBeenCalled());
+      expect(readDirectoryV2Intent(profile)).toEqual(stopped);
+      expect(screen.queryByRole("region", { name: "目录同步任务" })).toBeNull();
+      expect(
+        screen.queryByLabelText("操作者当前密码", { exact: true }),
+      ).toBeNull();
+      expect(calls("/api/directory/v2/sync")).toHaveLength(0);
+    },
+  );
+  it("validates the receipt-only marker and persists only nonsecret recovery fields", () => {
+    for (const receiptOnly of ["true", 1, null, {}])
+      expect(() =>
+        saveDirectoryV2Intent(profile, {
+          ...intent(),
+          receiptOnly,
+        } as DirectoryV2Intent),
+      ).toThrow("Invalid directory intent");
+    saveDirectoryV2Intent(profile, {
+      ...intent({ receiptOnly: true }),
+      actorPassword: "private-proof",
+      totpCode: "987654",
+      csrfToken: "private-csrf",
+    } as DirectoryV2Intent);
+    expect(readDirectoryV2Intent(profile)).toEqual(
+      intent({ receiptOnly: true }),
+    );
+    expect(JSON.stringify(Object.values(sessionStorage))).not.toMatch(
+      /private|987654|actorPassword|totpCode|csrfToken/u,
+    );
+  });
   it("uses a recovered receipt directly and never submits a replacement synchronization", async () => {
     saveDirectoryV2Intent(profile, intent());
     await mount();
