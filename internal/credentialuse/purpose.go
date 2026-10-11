@@ -8,6 +8,9 @@ const DirectoryPurpose = "domain.directory_read"
 // Neither a connection-test nor dictionary 1 grant grants this purpose.
 const DirectoryV2Purpose = "domain.directory_read.v2"
 const DirectoryV3Purpose = "domain.directory_read.v3"
+
+// DirectoryV3ConsumerEnabled reports code registration only. It conveys neither
+// the deployment gate state nor any credential-use grant or eligibility.
 const DirectoryV3ConsumerEnabled = true
 
 // DirectoryConsumerEnabled reports the compiled consumer capability. Deployment

@@ -16,8 +16,8 @@ from test_integration import IMAGE
 
 class LDAPFixture:
     def __init__(self, control_enabled=False, directory_enabled=False,
-                 directory_empty=False, directory_slow=False, *, directory_v2=False, user_assets_v2=False):
-        if any(not isinstance(value, bool) for value in (directory_enabled, directory_empty, directory_slow, directory_v2, user_assets_v2)):
+                 directory_empty=False, directory_slow=False, *, directory_v2=False, user_assets_v2=False, directory_v3=False):
+        if any(not isinstance(value, bool) for value in (directory_enabled, directory_empty, directory_slow, directory_v2, user_assets_v2, directory_v3)):
             raise TypeError("synthetic directory modes must be booleans")
         if directory_v2 and not directory_enabled:
             raise ValueError("synthetic dictionary 2 requires directory mode")
@@ -25,6 +25,9 @@ class LDAPFixture:
             raise ValueError("synthetic empty and slow modes require directory mode")
         if user_assets_v2 and (not directory_enabled or not directory_v2 or directory_empty or directory_slow):
             raise ValueError("synthetic user assets require nonempty fast directory-v2 mode")
+        if directory_v3 and (not directory_enabled or directory_v2 or user_assets_v2):
+            raise ValueError("synthetic dictionary 3 requires exclusive directory mode")
+        self.directory_v3 = directory_v3
         self.user_assets_v2 = user_assets_v2
         self.directory_enabled = directory_enabled
         self.directory_v2 = directory_v2
@@ -78,6 +81,8 @@ class LDAPFixture:
             command.extend(["-control-dir", "/control"])
         if self.directory_enabled:
             command.append("-directory-mode")
+        if self.directory_v3:
+            command.append("-directory-v3")
         if self.directory_v2:
             command.append("-directory-v2")
         if self.user_assets_v2:
@@ -111,7 +116,7 @@ class LDAPFixture:
                    ADTR_E2E_LDAP_USERNAME=username, ADTR_E2E_LDAP_PASSWORD=password)
         for suffix, enabled in (("MODE", self.directory_enabled),
                                 ("EMPTY", self.directory_empty), ("SLOW", self.directory_slow),
-                                ("V2", self.directory_v2), ("USER_ASSETS_V2", self.user_assets_v2)):
+                                ("V3", self.directory_v3), ("V2", self.directory_v2), ("USER_ASSETS_V2", self.user_assets_v2)):
             key = "ADTR_E2E_LDAP_DIRECTORY_" + suffix
             if enabled:
                 env[key] = "true"

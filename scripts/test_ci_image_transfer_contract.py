@@ -341,7 +341,7 @@ class WorkflowImageGateContract(unittest.TestCase):
                 with self.subTest(key=key, value=value):
                     self.assertNotEqual(subprocess.run(['bash', '-c', command], env=dict(valid, **{key: value})).returncode, 0)
 
-    def test_all_36_jobs_preserve_their_gates_and_bounded_parallelism(self):
+    def test_all_37_jobs_preserve_their_gates_and_bounded_parallelism(self):
         text = Path('.github/workflows/ci.yml').read_text()
         matches = list(re.finditer(r'^  ([a-z][a-z-]*):\n', text.split('jobs:\n', 1)[1], re.MULTILINE))
         jobs_text = text.split('jobs:\n', 1)[1]
@@ -349,10 +349,10 @@ class WorkflowImageGateContract(unittest.TestCase):
                 for i, match in enumerate(matches)}
         self.assertEqual(set(jobs), {'prepare-postgres', 'contracts', 'auth-integration', 'browser',
                                     'native-no-store', 'native-no-store-fixed', 'user-assets-fixed', 'verify'})
-        self.assertEqual(len(re.findall(r'^          - name:', jobs['browser'], re.MULTILINE)), 25)
+        self.assertEqual(len(re.findall(r'^          - name:', jobs['browser'], re.MULTILINE)), 26)
         self.assertIn('shard: [1, 2, 3, 4]', jobs['auth-integration'])
         self.assertIn('suite: [user-assets-v2, user-assets-v2-readers]', jobs['user-assets-fixed'])
-        self.assertEqual(1 + 1 + 4 + 25 + 1 + 1 + 2 + 1, 36)
+        self.assertEqual(1 + 1 + 4 + 26 + 1 + 1 + 2 + 1, 37)
         for name in ['auth-integration', 'browser', 'user-assets-fixed']:
             expected_parallelism = 4 if name == 'browser' else 2
             self.assertIn(f'max-parallel: {expected_parallelism}', jobs[name])

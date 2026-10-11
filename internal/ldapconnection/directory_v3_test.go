@@ -140,6 +140,9 @@ func TestDirectoryV3ReaderSecurePagingAndOwnedFacts(t *testing.T) {
 			if err != nil || public.ObjectSID == nil || *public.ObjectSID != "S-1-5-21" || public.Mail == nil || *public.Mail != " Mail\x00@Synthetic.Test\t" || !reflect.DeepEqual(public.Description, []string{"\x00\r\n\t🧪<script>\\\""}) || public.WhenCreated == nil || *public.WhenCreated != "0001-01-01T00:00:00Z" {
 				t.Fatal("v3 raw facts were lost or normalized")
 			}
+			if public.PrimaryGroupID == nil || *public.PrimaryGroupID != 513 || !reflect.DeepEqual(public.ServicePrincipalName, []string{"HOST/Z", "host/a\x00\n😀<script>"}) {
+				t.Fatal("v3 identity changed across TLS")
+			}
 			missing := result.Objects[1].Supplemental
 			if missing.ObjectSIDBytes != nil || missing.MailBytes != nil || missing.DescriptionBytes != nil || missing.WhenCreatedBytes != nil {
 				t.Fatal("omitted facts became present")

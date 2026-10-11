@@ -87,6 +87,9 @@ func decodeDirectoryObservationV3(raw []byte, digest string, count int) (out lda
 	if len(raw) == 0 || len(raw) > directoryObservationMaxBytes || count < 0 || count > directoryObservationV3MaxRows || len(digest) != 64 {
 		return out, bad()
 	}
+	if !preflightDirectoryObservationV3(raw, count) {
+		return out, bad()
+	}
 	sum := sha256.Sum256(raw)
 	if hex.EncodeToString(sum[:]) != digest {
 		return out, bad()
@@ -197,4 +200,74 @@ func clearDirectoryObservationV3Pieces(pieces []json.RawMessage) {
 		clear(piece)
 	}
 	clear(pieces)
+}
+
+// Inspect the canonical envelope and object spans without allocating. This runs
+// before any JSON decoder, so an oversized object cannot first allocate the
+// entire observation budget. The strict JSON codecs still validate all syntax.
+func preflightDirectoryObservationV3(raw []byte, count int) bool {
+	if !bytes.HasPrefix(raw, []byte(directoryObservationV3Prefix)) {
+		return false
+	}
+	pos := len(directoryObservationV3Prefix)
+	for i := 0; i < count; i++ {
+		if i > 0 {
+			if pos >= len(raw) || raw[pos] != ',' {
+				return false
+			}
+			pos++
+		}
+		n := directoryV3CompositeSpan(raw[pos:], directoryassets.MaxStoredObjectV3Bytes)
+		if n == 0 {
+			return false
+		}
+		pos += n
+	}
+	if !bytes.HasPrefix(raw[pos:], []byte(directoryObservationV3Source)) {
+		return false
+	}
+	pos += len(directoryObservationV3Source)
+	n := directoryV3CompositeSpan(raw[pos:], directoryObservationV3MaxSourceBytes)
+	return n > 0 && pos+n+1 == len(raw) && raw[pos+n] == '}'
+}
+func directoryV3CompositeSpan(raw []byte, limit int) int {
+	if len(raw) == 0 || raw[0] != '{' {
+		return 0
+	}
+	depth := 0
+	quoted := false
+	escaped := false
+	for i, c := range raw {
+		if i >= limit {
+			return 0
+		}
+		if quoted {
+			if escaped {
+				escaped = false
+			} else if c == '\\' {
+				escaped = true
+			} else if c == '"' {
+				quoted = false
+			}
+			continue
+		}
+		switch c {
+		case '"':
+			quoted = true
+		case '{', '[':
+			depth++
+			if depth > 64 {
+				return 0
+			}
+		case '}', ']':
+			depth--
+			if depth == 0 {
+				return i + 1
+			}
+			if depth < 0 {
+				return 0
+			}
+		}
+	}
+	return 0
 }
