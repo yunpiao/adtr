@@ -169,6 +169,9 @@ export default function App() {
     if (open) setMobileNavigationOpen(false);
   }, []);
   const sessionNotifications = useRef<SessionInvalidation | null>(null);
+  const domainHistoryVerify = useRef<(() => void) | null>(null);
+  const pageRef = useRef(page);
+  pageRef.current = page;
   const controller = useRef<AbortController | null>(null),
     sequence = useRef(0),
     locked = useRef(false),
@@ -264,12 +267,14 @@ export default function App() {
           setLoading(false);
         });
     };
+    domainHistoryVerify.current = verify;
     const focused = (event: Event) => {
       if (!(event.target instanceof Element)) verify();
     };
     window.addEventListener("focus", focused);
     document.addEventListener("visibilitychange", verify);
     return () => {
+      domainHistoryVerify.current = null;
       notifications.close();
       sessionNotifications.current = null;
       window.removeEventListener("focus", focused);
@@ -281,10 +286,22 @@ export default function App() {
   useEffect(() => {
     refresh();
     const back = () => {
-      setPage(pageFromHash());
-      setRevision((n) => n + 1);
+      const next = pageFromHash();
+      const keepDomainQueue =
+        next === "domains" &&
+        pageRef.current === "domains" &&
+        !!profileRef.current &&
+        !!domainHistoryVerify.current;
+      setPage(next);
       setNotice("");
-      refresh();
+      if (keepDomainQueue) {
+        // Hide/inert the mounted queue while rechecking identity. The existing
+        // verifier clears private views on identity changes and fences late reads.
+        domainHistoryVerify.current!();
+      } else {
+        setRevision((n) => n + 1);
+        refresh();
+      }
     };
     window.addEventListener("popstate", back);
     window.addEventListener("hashchange", back);
@@ -556,6 +573,7 @@ export default function App() {
                     )}
                     {active === "domains" && (
                       <DomainsWorkspace
+                        sessionChecking={checkingSession}
                         profile={profile}
                         sessionChanged={() => {
                           setPage("account");

@@ -1,6 +1,9 @@
 import { navigateTo } from "./navigation";
 import { test, expect, type BrowserContext, type Page } from "@playwright/test";
-import { createHmac } from "node:crypto";
+import { createHmac, createHash } from "node:crypto";
+import { readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { resolve } from "node:path";
 
 type Authenticator = { secret: string; lastCounter: number };
 
@@ -146,10 +149,12 @@ async function openGroup(page: Page, name: string) {
 
 // Actual browser, API, PostgreSQL, worker and synthetic TLS/LDAP fixture only.
 // One transport fault drops a real committed response. No response mocks, real AD targets or real credentials.
+// Only explicit read-only screenshots are retained; proof-bearing failure artifacts are disabled.
+test.use({ trace: "off", screenshot: "off", video: "off" });
 test("real domain enrollment, explicit grant, TLS diagnostics, rotation and local deletion", async ({
   page,
   context,
-}) => {
+}, testInfo) => {
   test.setTimeout(420_000);
   const username = process.env.ADTR_E2E_USERNAME,
     password = process.env.ADTR_E2E_PASSWORD,
@@ -544,6 +549,154 @@ test("real domain enrollment, explicit grant, TLS diagnostics, rotation and loca
     "1",
     "verified",
     result1.diagnostic.observedAt,
+  );
+  // Capture authenticated, read-only surfaces from the actual persisted connection.
+  const visuals: Array<{ file: string; sha256: string; viewport: unknown }> =
+    [];
+  const capture = async (file: string) => {
+    await expect(page.locator('input[type="password"]')).toHaveCount(0);
+    await expect(
+      page.getByLabel("未使用的认证器验证码", { exact: true }),
+    ).toHaveCount(0);
+    const bytes = await page.screenshot({
+      path: testInfo.outputPath(file),
+      fullPage: true,
+    });
+    visuals.push({
+      file,
+      sha256: createHash("sha256").update(bytes).digest("hex"),
+      viewport: page.viewportSize(),
+    });
+  };
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await capture("domains-soc-detail-desktop.png");
+  await page
+    .getByRole("button", { name: "返回域连接列表", exact: true })
+    .click();
+  await page.getByLabel("域或域控关键词", { exact: true }).fill(domain);
+  await page.getByRole("button", { name: "查询域连接", exact: true }).click();
+  const domainRow = page.getByRole("button", {
+    name: `查看 ${domain}`,
+    exact: true,
+  });
+  await expect(domainRow).toBeVisible();
+  await capture("domains-soc-queue-desktop.png");
+  await domainRow.click();
+  await expect(
+    page.getByRole("heading", { name: `域连接详情：${domain}`, exact: true }),
+  ).toBeVisible();
+  await page
+    .getByRole("button", { name: "返回域连接列表", exact: true })
+    .click();
+  await expect(domainRow).toBeFocused();
+  await expect(page.getByLabel("域或域控关键词", { exact: true })).toHaveValue(
+    domain,
+  );
+  // Back/Forward revalidate the real session without losing queue context.
+  await domainRow.click();
+  await expect(
+    page.getByRole("heading", { name: `域连接详情：${domain}`, exact: true }),
+  ).toBeVisible();
+  await page.goBack();
+  await expect(domainRow).toBeFocused();
+  await expect(page.getByLabel("域或域控关键词", { exact: true })).toHaveValue(
+    domain,
+  );
+  await page.goForward();
+  await expect(domainRow).toBeVisible();
+  await expect(page.getByLabel("域或域控关键词", { exact: true })).toHaveValue(
+    domain,
+  );
+  await page.setViewportSize({ width: 390, height: 844 });
+  await capture("domains-soc-queue-mobile.png");
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= window.innerWidth,
+    ),
+  ).toBe(true);
+  await domainRow.click();
+  await expect(
+    page.getByRole("heading", { name: `域连接详情：${domain}`, exact: true }),
+  ).toBeVisible();
+  await capture("domains-soc-detail-mobile.png");
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= window.innerWidth,
+    ),
+  ).toBe(true);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const root = execFileSync("git", ["rev-parse", "--show-toplevel"], {
+    encoding: "utf8",
+  }).trim();
+  const hashFile = (file: string) =>
+    createHash("sha256")
+      .update(readFileSync(resolve(root, file)))
+      .digest("hex");
+  const assets = readdirSync(resolve(root, "web/dist/assets"), {
+    withFileTypes: true,
+  });
+  expect(assets.length).toBeGreaterThan(0);
+  expect(assets.every((entry) => entry.isFile())).toBe(true);
+  const manifest = {
+    schema: 1,
+    suite: "domains",
+    chain:
+      "real browser → authenticated API → worker → synthetic TLS LDAP → PostgreSQL",
+    recordedAt: new Date().toISOString(),
+    checkoutCommit: execFileSync("git", ["rev-parse", "HEAD"], {
+      encoding: "utf8",
+    }).trim(),
+    dirty:
+      execFileSync("git", ["status", "--porcelain"], {
+        encoding: "utf8",
+      }).trim() !== "",
+    workflowCommit: process.env.GITHUB_SHA ?? null,
+    workflowRun: process.env.GITHUB_RUN_ID ?? null,
+    workflowAttempt: process.env.GITHUB_RUN_ATTEMPT ?? null,
+    eventHead: process.env.ADTR_EVENT_HEAD_SHA ?? null,
+    eventBase: process.env.ADTR_EVENT_BASE_SHA ?? null,
+    browser: context.browser()!.version(),
+    node: process.version,
+    sourceSHA256: Object.fromEntries(
+      [
+        "web/src/DomainsWorkspace.tsx",
+        "web/src/DomainCredentialSource.tsx",
+        "web/src/domain-soc.tsx",
+        "web/src/domain-soc.css",
+        "web/src/domain-api.ts",
+        "web/src/domain-source-api.ts",
+        "web/src/task-common.tsx",
+        "web/src/App.tsx",
+        "web/src/style.css",
+        "web/src/soc-shell.css",
+        "web/e2e/domains.spec.ts",
+        "web/package-lock.json",
+        ".github/workflows/ci.yml",
+      ].map((file) => [file, hashFile(file)]),
+    ),
+    artifactsSHA256: {
+      apiWorker: hashFile("bin/adtr"),
+      frontendEntry: hashFile("web/dist/index.html"),
+    },
+    frontendAssetsSHA256: Object.fromEntries(
+      assets.map((entry) => {
+        const file = `web/dist/assets/${entry.name}`;
+        return [file, hashFile(file)];
+      }),
+    ),
+    connection: {
+      domainId: id,
+      domain,
+      revision: "1",
+      credentialRevision: "1",
+      taskUUID: first.value.task.taskUUID,
+      diagnostic: result1.diagnostic,
+    },
+    visuals,
+  };
+  writeFileSync(
+    testInfo.outputPath("domains-soc-evidence.json"),
+    JSON.stringify(manifest, null, 2),
   );
   await page.getByRole("button", { name: "编辑域连接", exact: true }).click();
   await expect(page.getByLabel("AD 用户名", { exact: true })).toHaveCount(0);
