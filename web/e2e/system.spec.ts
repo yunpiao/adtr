@@ -1,13 +1,26 @@
 import { navigateTo } from "./navigation";
-import { test, expect, type BrowserContext, type Page } from "@playwright/test";
-import { createHmac } from "node:crypto";
-import { readFileSync, statfsSync } from "node:fs";
+import {
+  test,
+  expect,
+  type BrowserContext,
+  type Locator,
+  type Page,
+  type TestInfo,
+} from "@playwright/test";
+import { execFileSync } from "node:child_process";
+import { createHash, createHmac } from "node:crypto";
+import { readdirSync, readFileSync, statfsSync, writeFileSync } from "node:fs";
+import { resolve } from "node:path";
 import type {
   Current,
   History,
   StorageView,
   SystemHealth,
 } from "../src/system-api";
+
+// Only explicit, read-only system views may be retained. Login, MFA and
+// privileged-write proofs must never become automatic failure artifacts.
+test.use({ trace: "off", screenshot: "off", video: "off" });
 
 type Permission = {
   mark: string;
@@ -48,12 +61,20 @@ async function freshCode(authenticator: Authenticator): Promise<string> {
   return totp(authenticator.secret, now);
 }
 
+async function fillSecret(field: Locator, value: string) {
+  try {
+    await field.fill(value);
+  } catch {
+    throw new Error("Unable to enter synthetic authentication proof");
+  }
+}
+
 async function login(page: Page, username: string, password: string) {
   await expect(
     page.getByRole("heading", { name: "登录账户", exact: true }),
   ).toBeVisible();
   await page.getByLabel("用户名", { exact: true }).fill(username);
-  await page.getByLabel("密码", { exact: true }).fill(password);
+  await fillSecret(page.getByLabel("密码", { exact: true }), password);
   await page.getByRole("button", { name: "登录", exact: true }).click();
 }
 
@@ -65,9 +86,9 @@ async function changeInitialPassword(
   await expect(
     page.getByRole("heading", { name: "修改密码", exact: true }),
   ).toBeVisible();
-  await page.getByLabel("当前密码", { exact: true }).fill(initial);
-  await page.getByLabel("新密码", { exact: true }).fill(changed);
-  await page.getByLabel("确认新密码", { exact: true }).fill(changed);
+  await fillSecret(page.getByLabel("当前密码", { exact: true }), initial);
+  await fillSecret(page.getByLabel("新密码", { exact: true }), changed);
+  await fillSecret(page.getByLabel("确认新密码", { exact: true }), changed);
   await page.getByRole("button", { name: "更新密码", exact: true }).click();
   await expect(
     page.getByRole("heading", { name: "账户概览", exact: true }),
@@ -76,16 +97,17 @@ async function changeInitialPassword(
 
 async function enrollMfa(page: Page, password: string): Promise<Authenticator> {
   await navigateTo(page, "多因素认证");
-  await page.getByLabel("当前密码", { exact: true }).fill(password);
+  await fillSecret(page.getByLabel("当前密码", { exact: true }), password);
   await page.getByRole("button", { name: "开始设置", exact: true }).click();
   const secret = await page
     .getByLabel("设置密钥", { exact: true })
     .inputValue();
   expect(secret.length).toBeGreaterThan(10);
   const now = Date.now();
-  await page
-    .getByLabel("认证器验证码", { exact: true })
-    .fill(totp(secret, now));
+  await fillSecret(
+    page.getByLabel("认证器验证码", { exact: true }),
+    totp(secret, now),
+  );
   await page.getByRole("button", { name: "验证并启用", exact: true }).click();
   await expect(page.getByRole("status")).toContainText("多因素认证已启用");
   return { secret, lastCounter: Math.floor(now / 30_000) };
@@ -112,14 +134,190 @@ async function submitMutation(page: Page, path: string, button: string) {
   return result;
 }
 
+type SystemVisual = {
+  file: string;
+  state: "healthy" | "history" | "worker-stale" | "recovered";
+  sha256: string;
+  viewport: { width: number; height: number };
+  documentWidth: number;
+};
+
+async function captureSystemViews(
+  page: Page,
+  testInfo: TestInfo,
+  state: SystemVisual["state"],
+  visuals: SystemVisual[],
+  assertView: () => Promise<void>,
+) {
+  for (const [device, viewport] of [
+    ["desktop", { width: 1440, height: 900 }],
+    ["mobile", { width: 390, height: 844 }],
+  ] as const) {
+    await page.setViewportSize(viewport);
+    await assertView();
+    const heading = page.locator(".system-soc-heading");
+    const headingBounds = await heading.boundingBox();
+    expect(headingBounds).not.toBeNull();
+    for (const child of await heading.locator(":scope > *").all()) {
+      const bounds = await child.boundingBox();
+      expect(bounds).not.toBeNull();
+      expect(bounds!.y).toBeGreaterThanOrEqual(headingBounds!.y);
+      expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(
+        headingBounds!.y + headingBounds!.height,
+      );
+    }
+    await expect(page.locator('input[type="password"]')).toHaveCount(0);
+    for (const label of ["未使用的认证器验证码", "认证器验证码", "设置密钥"])
+      await expect(page.getByLabel(label, { exact: true })).toHaveCount(0);
+    await page.evaluate(() => window.scrollTo(0, 0));
+    const documentWidth = await page.evaluate(
+      () => document.documentElement.scrollWidth,
+    );
+    expect(
+      documentWidth,
+      `${device} ${state} document overflow`,
+    ).toBeLessThanOrEqual(viewport.width);
+    const file = `system-soc-${device}-${state}.png`;
+    const bytes = await page.screenshot({
+      path: testInfo.outputPath(file),
+      fullPage: true,
+    });
+    visuals.push({
+      file,
+      state,
+      sha256: createHash("sha256").update(bytes).digest("hex"),
+      viewport,
+      documentWidth,
+    });
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+}
+
+function healthEvidence(health: SystemHealth) {
+  // These allowlisted status fields describe only this isolated runtime.
+  // Never serialize authentication responses, headers, environment or proofs.
+  return {
+    result: health.result,
+    checkedAt: health.checkedAt,
+    dependencies: health.dependencies.map(
+      ({ id, status, reason, source, scope, observedAt, checkedAt }) => ({
+        id,
+        status,
+        reason,
+        source,
+        scope,
+        observedAt,
+        checkedAt,
+      }),
+    ),
+    worker: {
+      availability: health.worker.availability,
+      reason: health.worker.reason ?? null,
+      checkedAt: health.worker.checkedAt,
+      staleAfterSeconds: health.worker.staleAfterSeconds,
+      cycles: health.worker.cycles.map(
+        ({
+          workerId,
+          cycle,
+          status,
+          evidence,
+          lastActivityAt,
+          lastSuccessAt,
+          availability,
+          reason,
+        }) => ({
+          workerId,
+          cycle,
+          status,
+          evidence,
+          lastActivityAt,
+          lastSuccessAt,
+          availability,
+          reason: reason ?? null,
+        }),
+      ),
+    },
+  };
+}
+
+async function expectHealthWorkspace(page: Page, health: SystemHealth) {
+  const region = page.getByRole("region", {
+    name: "依赖诊断工作台",
+    exact: true,
+  });
+  await expect(region).toBeVisible();
+  await expect(
+    region.getByRole("heading", { name: "需要处理的异常", exact: true }),
+  ).toBeVisible();
+  const anomalies = health.dependencies.filter((dependency) =>
+    ["unhealthy", "unknown"].includes(dependency.status),
+  );
+  const findings = region.locator(".system-findings > li");
+  await expect(findings).toHaveCount(anomalies.length, { timeout: 10_000 });
+  for (const dependency of anomalies) {
+    const finding = findings.filter({ hasText: dependency.name });
+    await expect(finding).toBeVisible();
+    await expect(finding).toContainText("处理建议：");
+    await expect(finding).toContainText(dependency.reason);
+    await expect(finding).toContainText(dependency.source);
+  }
+  if (anomalies.length === 0)
+    await expect(region).toContainText("当前返回的依赖中没有异常或未知项。");
+  const unconfigured = health.dependencies.filter(
+    (dependency) => dependency.status === "not_configured",
+  );
+  expect(unconfigured.map(({ id }) => id).sort()).toEqual(["cache", "engine"]);
+  const capabilities = region.locator("details.system-unconfigured");
+  await expect(capabilities.locator("summary")).toHaveText("未配置能力（2）");
+  if (
+    !(await capabilities.evaluate((node) => (node as HTMLDetailsElement).open))
+  )
+    await capabilities.locator("summary").click();
+  await expect(capabilities.getByRole("listitem")).toHaveCount(2);
+  for (const dependency of unconfigured) {
+    const item = capabilities
+      .getByRole("listitem")
+      .filter({ hasText: dependency.name });
+    await expect(item).toBeVisible();
+    await expect(item).toContainText("未配置");
+    await expect(item.getByText("健康", { exact: true })).toHaveCount(0);
+    await expect(findings.filter({ hasText: dependency.name })).toHaveCount(0);
+  }
+  const table = page.getByRole("table", { name: "实际依赖检查", exact: true });
+  await expect(table.getByRole("columnheader")).toHaveText([
+    "依赖",
+    "类型",
+    "状态",
+    "检查依据",
+    "观测时间（UTC）",
+    "检查时间（UTC）",
+  ]);
+  const labels = {
+    healthy: "健康",
+    unhealthy: "不健康",
+    unknown: "未知",
+    not_configured: "未配置",
+  };
+  for (const dependency of health.dependencies) {
+    const row = table.getByRole("row").filter({
+      has: page.getByRole("rowheader").filter({ hasText: dependency.name }),
+    });
+    await expect(
+      row.getByRole("cell", { name: labels[dependency.status], exact: true }),
+    ).toBeVisible();
+  }
+}
+
 // Fresh synthetic database, real local Linux API and worker are required.
 // No route interception, fake measurements, test clock or SQL success fixture.
-// The owning harness passes its exact worker PID for the final shutdown check.
+// The owning harness passes its exact worker PID for the pause/resume check.
 test("real browser → Linux sampler → PostgreSQL history/settings and actual worker/permission boundaries", async ({
   page,
   context,
-}) => {
-  test.setTimeout(420_000);
+}, testInfo) => {
+  // Allow real TOTP counters plus pause/resume while leaving the owning
+  // harness's 480-second deadline time to run its cleanup.
+  test.setTimeout(450_000);
   const username = process.env.ADTR_E2E_USERNAME,
     password = process.env.ADTR_E2E_PASSWORD;
   const workerPID = Number(process.env.ADTR_E2E_WORKER_PID);
@@ -138,6 +336,22 @@ test("real browser → Linux sampler → PostgreSQL history/settings and actual 
   ).split("\0");
   expect(workerCommand[0]).toMatch(/(?:^|\/)adtr$/);
   expect(workerCommand).toEqual(expect.arrayContaining(["-mode", "worker"]));
+  const workerStart = () => {
+    const stat = readFileSync(`/proc/${workerPID}/stat`, "utf8");
+    // Field 22 is the process start tick. The command in parentheses may
+    // contain spaces, so split only after its final closing parenthesis.
+    return stat.slice(stat.lastIndexOf(")") + 2).split(" ")[19];
+  };
+  const workerStartTick = workerStart();
+  expect(workerStartTick).toMatch(/^\d+$/);
+  const signalWorker = (signal: "SIGSTOP" | "SIGCONT") => {
+    expect(workerStart()).toBe(workerStartTick);
+    expect(
+      readFileSync(`/proc/${workerPID}/cmdline`, "utf8").split("\0"),
+    ).toEqual(workerCommand);
+    process.kill(workerPID, signal);
+  };
+  const visuals: SystemVisual[] = [];
   const changed = "Synthetic System Password 123";
   await page.goto("/");
   await login(page, username, password);
@@ -254,6 +468,36 @@ test("real browser → Linux sampler → PostgreSQL history/settings and actual 
       (t, i) => t >= startTime && t < endTime && (!i || t >= timestamps[i - 1]),
     ),
   ).toBe(true);
+  const [visibleHistoryResponse] = await Promise.all([
+    page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return (
+        url.pathname === "/api/system/resources/history" &&
+        url.searchParams.get("graphType") === "ram_basic"
+      );
+    }),
+    page.getByLabel("历史指标", { exact: true }).selectOption("ram_basic"),
+  ]);
+  expect(visibleHistoryResponse.status()).toBe(200);
+  const visibleHistory = (await visibleHistoryResponse.json()) as History;
+  expect(visibleHistory.info[0].data.timestamp.length).toBeGreaterThan(0);
+  expect(visibleHistory.gaps.length).toBeGreaterThan(0);
+  const historyChart = page.getByRole("img", { name: /实际样本/ });
+  await expect(historyChart).toHaveAccessibleName(
+    new RegExp(`${visibleHistory.info[0].data.timestamp.length} 个实际样本`),
+  );
+  await captureSystemViews(page, testInfo, "history", visuals, async () => {
+    await expect(historyChart).toBeVisible();
+    await expect(page.getByLabel("历史指标", { exact: true })).toHaveValue(
+      "ram_basic",
+    );
+    await expect(page.getByLabel("历史时间范围", { exact: true })).toHaveValue(
+      "86400",
+    );
+    await expect(
+      page.getByText("仅绘制真实观测点", { exact: false }),
+    ).toBeVisible();
+  });
   const beforeSampling =
     Math.floor(Date.parse(history.availableSince!) / 1000) - 10;
   const empty: History = await readJSON(
@@ -301,10 +545,11 @@ test("real browser → Linux sampler → PostgreSQL history/settings and actual 
     .getByRole("button", { name: "调整阈值 runtime-root", exact: true })
     .click();
   await page.getByLabel("存储告警阈值（%）").fill("90");
-  await page.getByLabel("操作者当前密码", { exact: true }).fill(changed);
-  await page
-    .getByLabel("未使用的认证器验证码", { exact: true })
-    .fill(await freshCode(mfa));
+  await fillSecret(page.getByLabel("操作者当前密码", { exact: true }), changed);
+  await fillSecret(
+    page.getByLabel("未使用的认证器验证码", { exact: true }),
+    await freshCode(mfa),
+  );
   const [savedResponse] = await Promise.all([
     page.waitForResponse(
       (r) =>
@@ -351,6 +596,77 @@ test("real browser → Linux sampler → PostgreSQL history/settings and actual 
       Origin: new URL(page.url()).origin,
       "X-CSRF-Token": me.csrfToken,
     };
+  // Keep the real editor on revision 1, then persist a concurrent authorized
+  // update. The browser must clear its proofs and require a reread after CAS.
+  await page
+    .getByRole("button", { name: "调整阈值 runtime-root", exact: true })
+    .click();
+  await expect(page.getByText(/当前版本：\s*1/)).toBeVisible();
+  const concurrentSave = await context.request.post(
+    "/api/system/storage/settings",
+    {
+      headers,
+      data: {
+        instance: "local-api",
+        storageId: "runtime-root",
+        setType: "alarm",
+        percent: 89,
+        expectedRevision: 1,
+        actorPassword: changed,
+        totpCode: await freshCode(mfa),
+      },
+    },
+  );
+  expect(concurrentSave.status()).toBe(200);
+  expect(await concurrentSave.json()).toMatchObject({
+    result: 1,
+    setting: { alarmPercent: 89, revision: 2 },
+  });
+  await page.getByLabel("存储告警阈值（%）").fill("88");
+  await fillSecret(page.getByLabel("操作者当前密码", { exact: true }), changed);
+  await fillSecret(
+    page.getByLabel("未使用的认证器验证码", { exact: true }),
+    await freshCode(mfa),
+  );
+  const [browserConflict] = await Promise.all([
+    page.waitForResponse(
+      (response) =>
+        new URL(response.url()).pathname === "/api/system/storage/settings" &&
+        response.request().method() === "POST",
+    ),
+    page.getByRole("button", { name: "保存告警阈值", exact: true }).click(),
+  ]);
+  expect(browserConflict.status()).toBe(409);
+  expect(await browserConflict.json()).toEqual({ error: "revision_conflict" });
+  // A failing clear check must report a boolean, never the proof's value.
+  for (const label of ["操作者当前密码", "未使用的认证器验证码"])
+    await expect
+      .poll(
+        async () =>
+          (await page.getByLabel(label, { exact: true }).inputValue()) === "",
+      )
+      .toBe(true);
+  await expect(page.getByLabel("存储告警阈值（%）")).toBeDisabled();
+  await expect(
+    page.getByRole("button", { name: "保存告警阈值", exact: true }),
+  ).toBeDisabled();
+  await expect(page.getByText(/本次结果或版本尚未确认/)).toBeVisible();
+  await page
+    .getByRole("button", { name: "重新读取存储设置", exact: true })
+    .click();
+  const currentThreshold = rootStorage.getByRole("cell", {
+    name: "89% 版本 2",
+    exact: true,
+  });
+  await expect(currentThreshold).toBeVisible();
+  const afterConflict: StorageView = await readJSON(
+    context,
+    "/api/system/storage?instance=local-api&page=1&pageSize=20",
+  );
+  expect(afterConflict.storage[0]).toMatchObject({
+    alarmPercent: 89,
+    revision: 2,
+  });
   const input = {
     instance: "local-api",
     storageId: "runtime-root",
@@ -373,7 +689,7 @@ test("real browser → Linux sampler → PostgreSQL history/settings and actual 
         "/api/system/storage?instance=local-api&page=1&pageSize=20",
       )
     ).storage[0],
-  ).toMatchObject({ alarmPercent: 90, revision: 1 });
+  ).toMatchObject({ alarmPercent: 89, revision: 2 });
   for (const percent of [84, 91, 85.5])
     expect(
       (
@@ -410,6 +726,7 @@ test("real browser → Linux sampler → PostgreSQL history/settings and actual 
     )
     .toBe("available");
   const healthy: SystemHealth = await readJSON(context, "/api/system/health");
+  expect(healthy.result).toBe("healthy");
   for (const id of ["api", "postgresql", "sampler", "worker"])
     expect(healthy.dependencies.find((d) => d.id === id)?.status).toBe(
       "healthy",
@@ -427,6 +744,9 @@ test("real browser → Linux sampler → PostgreSQL history/settings and actual 
         c.lastActivityAt && c.lastSuccessAt && c.evidence === "completed_cycle",
     ),
   ).toBe(true);
+  await captureSystemViews(page, testInfo, "healthy", visuals, () =>
+    expectHealthWorkspace(page, healthy),
+  );
 
   // Persist system-only read authority through the actual role editor and use
   // a second browser with valid MFA to prove server denial of settings writes.
@@ -439,10 +759,11 @@ test("real browser → Linux sampler → PostgreSQL history/settings and actual 
   await page
     .getByRole("checkbox", { name: "系统健康：读取", exact: true })
     .check();
-  await page.getByLabel("操作者当前密码", { exact: true }).fill(changed);
-  await page
-    .getByLabel("未使用的认证器验证码", { exact: true })
-    .fill(await freshCode(mfa));
+  await fillSecret(page.getByLabel("操作者当前密码", { exact: true }), changed);
+  await fillSecret(
+    page.getByLabel("未使用的认证器验证码", { exact: true }),
+    await freshCode(mfa),
+  );
   const savedRole = await submitMutation(
     page,
     "/api/access/roles/save",
@@ -480,13 +801,17 @@ test("real browser → Linux sampler → PostgreSQL history/settings and actual 
     readerInitial = "Initial System Reader 123",
     readerChanged = "Changed System Reader 456";
   await page.getByLabel("用户名", { exact: true }).fill(readerName);
-  await page.getByLabel("初始密码", { exact: true }).fill(readerInitial);
-  await page.getByLabel("确认初始密码", { exact: true }).fill(readerInitial);
+  await fillSecret(page.getByLabel("初始密码", { exact: true }), readerInitial);
+  await fillSecret(
+    page.getByLabel("确认初始密码", { exact: true }),
+    readerInitial,
+  );
   await page.getByLabel("角色", { exact: true }).fill(savedRole.roleID);
-  await page.getByLabel("操作者当前密码", { exact: true }).fill(changed);
-  await page
-    .getByLabel("未使用的认证器验证码", { exact: true })
-    .fill(await freshCode(mfa));
+  await fillSecret(page.getByLabel("操作者当前密码", { exact: true }), changed);
+  await fillSecret(
+    page.getByLabel("未使用的认证器验证码", { exact: true }),
+    await freshCode(mfa),
+  );
   await submitMutation(page, "/api/access/users/create", "创建用户");
   const readerContext = await context.browser()!.newContext({
     baseURL: process.env.ADTR_E2E_BASE_URL ?? "http://127.0.0.1:18080",
@@ -536,7 +861,7 @@ test("real browser → Linux sampler → PostgreSQL history/settings and actual 
         headers: readerHeaders,
         data: {
           ...input,
-          expectedRevision: 1,
+          expectedRevision: 2,
           actorPassword: readerChanged,
           totpCode: await freshCode(readerMfa),
         },
@@ -551,7 +876,7 @@ test("real browser → Linux sampler → PostgreSQL history/settings and actual 
           "/api/system/storage?instance=local-api&page=1&pageSize=20",
         )
       ).storage[0],
-    ).toMatchObject({ alarmPercent: 90, revision: 1 });
+    ).toMatchObject({ alarmPercent: 89, revision: 2 });
     await navigateTo(reader, "退出登录");
     await expect(
       reader.getByRole("heading", { name: "登录账户", exact: true }),
@@ -562,12 +887,17 @@ test("real browser → Linux sampler → PostgreSQL history/settings and actual 
   } finally {
     await readerContext.close();
   }
-  // Only the exact synthetic child supplied by the owning harness is stopped.
-  // The product has no worker-stop endpoint, and no fake stale row is injected.
-  process.kill(workerPID, "SIGTERM");
   await navigateTo(page, "系统健康");
   await page.getByRole("button", { name: "平台依赖健康", exact: true }).click();
-  const expectedStoppedCycles = healthy.worker.cycles.map(
+  const beforePause: SystemHealth = await readJSON(
+    context,
+    "/api/system/health",
+  );
+  expect(beforePause.worker.availability).toBe("available");
+  expect(beforePause.worker.cycles.map((c) => [c.workerId, c.cycle])).toEqual(
+    healthy.worker.cycles.map((c) => [c.workerId, c.cycle]),
+  );
+  const expectedStoppedCycles = beforePause.worker.cycles.map(
     ({ workerId, cycle }) => ({
       workerId,
       cycle,
@@ -575,56 +905,160 @@ test("real browser → Linux sampler → PostgreSQL history/settings and actual 
       reason: "stale_worker_activity",
     }),
   );
-  await expect
-    .poll(
+  let workerPaused = false;
+  let stopped!: SystemHealth;
+  let recovered!: SystemHealth;
+  let pausedAt = "";
+  let resumedAt = "";
+  try {
+    // Pause only the exact owned synthetic process. The real clock and persisted
+    // activity continue unchanged; no stale row or success fixture is injected.
+    signalWorker("SIGSTOP");
+    workerPaused = true;
+    pausedAt = new Date().toISOString();
+    await expect
+      .poll(
+        async () => {
+          const { worker } = (await readJSON(
+            context,
+            "/api/system/health",
+          )) as SystemHealth;
+          // Each required cycle has an independent timestamp. Aggregate
+          // unavailability alone does not prove every cycle became stale.
+          return {
+            availability: worker.availability,
+            cycles: worker.cycles.map(
+              ({ workerId, cycle, availability, reason }) => ({
+                workerId,
+                cycle,
+                availability,
+                reason,
+              }),
+            ),
+          };
+        },
+        { timeout: 35_000, intervals: [2000] },
+      )
+      .toEqual({ availability: "unavailable", cycles: expectedStoppedCycles });
+    stopped = await readJSON(context, "/api/system/health");
+    expect(stopped.result).toBe("degraded");
+    expect(stopped.dependencies.find((d) => d.id === "worker")?.status).toBe(
+      "unhealthy",
+    );
+    for (const id of ["api", "postgresql", "sampler"])
+      expect(stopped.dependencies.find((d) => d.id === id)?.status).toBe(
+        "healthy",
+      );
+    expect(stopped.worker.cycles.map((c) => [c.workerId, c.cycle])).toEqual(
+      beforePause.worker.cycles.map((c) => [c.workerId, c.cycle]),
+    );
+    for (const cycle of stopped.worker.cycles) {
+      expect(cycle.availability).toBe("unavailable");
+      expect(cycle.reason).toBe("stale_worker_activity");
+      expect(cycle.lastActivityAt).not.toBeNull();
+      expect(
+        Date.parse(stopped.worker.checkedAt) -
+          Date.parse(cycle.lastActivityAt!),
+      ).toBeGreaterThan(stopped.worker.staleAfterSeconds * 1000);
+    }
+    await captureSystemViews(
+      page,
+      testInfo,
+      "worker-stale",
+      visuals,
       async () => {
-        const { worker } = (await readJSON(
-          context,
-          "/api/system/health",
-        )) as SystemHealth;
-        // Aggregate health fails when the first required cycle expires. Wait
-        // for every independently timestamped cycle, without dropping evidence.
-        return {
-          availability: worker.availability,
-          cycles: worker.cycles.map(
-            ({ workerId, cycle, availability, reason }) => ({
-              workerId,
-              cycle,
-              availability,
-              reason,
+        await expectHealthWorkspace(page, stopped);
+        const finding = page
+          .getByRole("region", { name: "依赖诊断工作台", exact: true })
+          .locator(".system-findings > li")
+          .filter({ hasText: "ADTR worker" });
+        await expect(finding).toContainText("不健康");
+        await expect(finding).toContainText("处理建议：");
+        await expect(finding).toContainText("Worker");
+        await expect(
+          page
+            .getByRole("table", { name: "Worker 循环观测", exact: true })
+            .getByRole("cell", {
+              name: "不可用 · stale_worker_activity",
+              exact: true,
             }),
-          ),
-        };
+        ).toHaveCount(stopped.worker.cycles.length);
       },
-      { timeout: 35_000, intervals: [2000] },
-    )
-    .toEqual({ availability: "unavailable", cycles: expectedStoppedCycles });
-  const stopped: SystemHealth = await readJSON(context, "/api/system/health");
-  expect(stopped.result).toBe("degraded");
-  expect(stopped.dependencies.find((d) => d.id === "worker")?.status).toBe(
-    "unhealthy",
-  );
-  expect(stopped.dependencies.find((d) => d.id === "api")?.status).toBe(
-    "healthy",
-  );
-  expect(stopped.dependencies.find((d) => d.id === "postgresql")?.status).toBe(
-    "healthy",
-  );
-  expect(
-    stopped.worker.cycles.every((c) => c.availability === "unavailable"),
-  ).toBe(true);
-  expect(stopped.worker.cycles.map((c) => [c.workerId, c.cycle])).toEqual(
-    healthy.worker.cycles.map((c) => [c.workerId, c.cycle]),
-  );
-  expect(
-    stopped.worker.cycles.every((c) => c.reason === "stale_worker_activity"),
-  ).toBe(true);
-  await expect(
-    page
-      .getByRole("table", { name: "实际依赖检查" })
-      .getByRole("row")
-      .filter({ hasText: "ADTR worker" }),
-  ).toContainText("不健康", { timeout: 10_000 });
+    );
+
+    signalWorker("SIGCONT");
+    workerPaused = false;
+    resumedAt = new Date().toISOString();
+    await expect
+      .poll(
+        async () => {
+          const next: SystemHealth = await readJSON(
+            context,
+            "/api/system/health",
+          );
+          if (
+            next.result !== "healthy" ||
+            next.worker.availability !== "available"
+          )
+            return false;
+          if (next.worker.cycles.length !== stopped.worker.cycles.length)
+            return false;
+          return stopped.worker.cycles.every((previous) => {
+            const cycle = next.worker.cycles.find(
+              (candidate) =>
+                candidate.workerId === previous.workerId &&
+                candidate.cycle === previous.cycle,
+            );
+            return (
+              cycle?.availability === "available" &&
+              cycle.status === "success" &&
+              cycle.evidence === "completed_cycle" &&
+              !!cycle.lastActivityAt &&
+              !!cycle.lastSuccessAt &&
+              Date.parse(cycle.lastActivityAt) >
+                Date.parse(previous.lastActivityAt!) &&
+              Date.parse(cycle.lastSuccessAt) >
+                Date.parse(previous.lastSuccessAt!)
+            );
+          });
+        },
+        { timeout: 35_000, intervals: [1000, 2000] },
+      )
+      .toBe(true);
+    recovered = await readJSON(context, "/api/system/health");
+    expect(recovered.result).toBe("healthy");
+    expect(recovered.worker.availability).toBe("available");
+    expect(recovered.worker.cycles.map((c) => [c.workerId, c.cycle])).toEqual(
+      stopped.worker.cycles.map((c) => [c.workerId, c.cycle]),
+    );
+    for (const cycle of recovered.worker.cycles) {
+      const previous = stopped.worker.cycles.find(
+        (item) =>
+          item.workerId === cycle.workerId && item.cycle === cycle.cycle,
+      )!;
+      expect(cycle.availability).toBe("available");
+      expect(cycle.status).toBe("success");
+      expect(cycle.evidence).toBe("completed_cycle");
+      expect(Date.parse(cycle.lastActivityAt!)).toBeGreaterThan(
+        Date.parse(previous.lastActivityAt!),
+      );
+      expect(Date.parse(cycle.lastSuccessAt!)).toBeGreaterThan(
+        Date.parse(previous.lastSuccessAt!),
+      );
+    }
+    await captureSystemViews(page, testInfo, "recovered", visuals, async () => {
+      await expectHealthWorkspace(page, recovered);
+      await expect(
+        page
+          .getByRole("table", { name: "Worker 循环观测", exact: true })
+          .getByRole("cell", { name: "可用", exact: true }),
+      ).toHaveCount(recovered.worker.cycles.length);
+    });
+  } finally {
+    // A failed assertion or screenshot must not leave the harness worker
+    // suspended. Recheck its start tick before signalling to reject PID reuse.
+    if (workerPaused) signalWorker("SIGCONT");
+  }
   const browserStorage = await page.evaluate(() =>
     JSON.stringify({
       local: { ...localStorage },
@@ -632,5 +1066,161 @@ test("real browser → Linux sampler → PostgreSQL history/settings and actual 
     }),
   );
   for (const secret of [changed, mfa.secret, me.csrfToken])
-    expect(browserStorage).not.toContain(secret);
+    expect(
+      browserStorage.includes(secret),
+      "Browser storage contains no authentication proof",
+    ).toBe(false);
+
+  // Bind only allowlisted, non-secret result summaries and deliberate safe
+  // screenshots to the exact checkout, sources and executable frontend bytes.
+  const root = execFileSync("git", ["rev-parse", "--show-toplevel"], {
+    encoding: "utf8",
+  }).trim();
+  const git = (...args: string[]) =>
+    execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
+  const hashFile = (file: string) =>
+    createHash("sha256")
+      .update(readFileSync(resolve(root, file)))
+      .digest("hex");
+  const checkoutCommit = git("rev-parse", "HEAD");
+  const baseCommit =
+    process.env.ADTR_EVENT_BASE_SHA ?? git("merge-base", "HEAD", "origin/main");
+  const sourceFiles = [
+    "web/e2e/system.spec.ts",
+    "web/e2e/navigation.ts",
+    "web/playwright.config.ts",
+    "web/src/SystemWorkspace.tsx",
+    "web/src/system-common.tsx",
+    "web/src/system-api.ts",
+    "web/src/system-soc.css",
+    "web/src/App.tsx",
+    "web/src/SocNavigation.tsx",
+    "web/src/style.css",
+    "web/src/soc-shell.css",
+    "web/package-lock.json",
+    "internal/auth/system_http.go",
+    "internal/auth/system_types.go",
+    "scripts/test_auth_e2e.py",
+    ".github/workflows/ci.yml",
+    ...readdirSync(resolve(root, "internal/systemhealth"))
+      .filter((file) => file.endsWith(".go"))
+      .map((file) => `internal/systemhealth/${file}`),
+  ].sort();
+  const frontendAssets = readdirSync(resolve(root, "web/dist/assets"), {
+    withFileTypes: true,
+  });
+  expect(frontendAssets.length).toBeGreaterThan(0);
+  expect(frontendAssets.every((entry) => entry.isFile())).toBe(true);
+  const apiWorkerSHA256 = hashFile("bin/adtr");
+  const runningWorkerSHA256 = createHash("sha256")
+    .update(readFileSync(`/proc/${workerPID}/exe`))
+    .digest("hex");
+  expect(runningWorkerSHA256).toBe(apiWorkerSHA256);
+  expect(visuals).toHaveLength(8);
+  for (const state of ["healthy", "history", "worker-stale", "recovered"])
+    expect(visuals.filter((visual) => visual.state === state)).toHaveLength(2);
+  const manifest = {
+    formatVersion: 1,
+    suite: "system",
+    chain: "real browser → API → Linux sampler / owned worker → PostgreSQL",
+    recordedAt: new Date().toISOString(),
+    checkoutCommit,
+    checkoutTree: git("rev-parse", "HEAD^{tree}"),
+    checkoutParents: git("show", "-s", "--format=%P", "HEAD")
+      .split(" ")
+      .filter(Boolean),
+    eventHeadCommit: process.env.ADTR_EVENT_HEAD_SHA ?? checkoutCommit,
+    eventBaseCommit: baseCommit,
+    dirty: git("status", "--porcelain") !== "",
+    workflowCommit: process.env.GITHUB_SHA ?? null,
+    workflowRun: process.env.GITHUB_RUN_ID ?? null,
+    workflowAttempt: process.env.GITHUB_RUN_ATTEMPT ?? null,
+    runtime: {
+      node: process.version,
+      browserVersion: context.browser()!.version(),
+      nativeStreamMode: process.env.ADTR_E2E_NATIVE_STREAM_MODE ?? null,
+      apiRevision: info.version.revision,
+      apiModified: info.version.modified,
+    },
+    sourceSHA256: Object.fromEntries(
+      sourceFiles.map((file) => [file, hashFile(file)]),
+    ),
+    artifactsSHA256: {
+      apiWorker: apiWorkerSHA256,
+      runningWorker: runningWorkerSHA256,
+      frontendEntry: hashFile("web/dist/index.html"),
+    },
+    frontendAssetsSHA256: Object.fromEntries(
+      frontendAssets
+        .map((entry) => {
+          const file = `web/dist/assets/${entry.name}`;
+          return [file, hashFile(file)];
+        })
+        .sort(([left], [right]) => left.localeCompare(right)),
+    ),
+    actualAPI: {
+      current: {
+        checkedAt: current!.checkedAt,
+        availability: current!.availability,
+        stale: current!.stale,
+        observedAt: sample.observedAt,
+        cpuPercent: sample.cpu.percent,
+        memoryPercent: sample.memory.percent,
+        storageIDs: sample.storage.map(({ id }) => id),
+      },
+      history: {
+        query: new URL(visibleHistoryResponse.url()).searchParams.toString(),
+        graphType: visibleHistory.graphType,
+        availableSince: visibleHistory.availableSince,
+        sampleIntervalSeconds: visibleHistory.sampleIntervalSeconds,
+        sampleCount: visibleHistory.info[0].data.timestamp.length,
+        gapCount: visibleHistory.gaps.length,
+        firstSample: visibleHistory.info[0].data.timestamp.at(0),
+        lastSample: visibleHistory.info[0].data.timestamp.at(-1),
+        statistics: visibleHistory.info[0].data.dataStatistics,
+        responseSHA256: createHash("sha256")
+          .update(JSON.stringify(visibleHistory))
+          .digest("hex"),
+      },
+      storage: {
+        initialRevision: initial.storage[0].revision,
+        savedRevision: persisted.storage[0].revision,
+        savedPercent: persisted.storage[0].alarmPercent,
+        concurrentRevision: afterConflict.storage[0].revision,
+        concurrentPercent: afterConflict.storage[0].alarmPercent,
+        browserConflictStatus: browserConflict.status(),
+        apiConflictStatus: conflict.status(),
+        browserRereadConfirmed: true,
+      },
+      healthy: healthEvidence(healthy),
+      beforePause: healthEvidence(beforePause),
+      stopped: healthEvidence(stopped),
+      recovered: healthEvidence(recovered),
+    },
+    workerInterruption: {
+      pauseSignal: "SIGSTOP",
+      resumeSignal: "SIGCONT",
+      pausedAt,
+      resumedAt,
+      sameProcessAndCycles: true,
+      allCyclesCompletedAfterResume: true,
+    },
+    checks: [
+      "1440×900 and 390×844 healthy, history, stale worker and recovered views",
+      "no document horizontal overflow in any captured view",
+      "anomaly cards include actual evidence and a handling suggestion",
+      "unconfigured capabilities remain separate and never show healthy status",
+      "Linux sampler and persisted history statistics match actual API results",
+      "owned worker activity becomes stale in real time and all cycles recover",
+      "browser CAS conflict clears proofs and requires rereading revision 2",
+      "system-only reader cannot change settings; logout removes API access",
+    ],
+    screenshots: visuals,
+  };
+  const manifestPath = testInfo.outputPath("system-soc-evidence.json");
+  writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + "\n");
+  await testInfo.attach("system-soc-evidence", {
+    path: manifestPath,
+    contentType: "application/json",
+  });
 });
