@@ -10,6 +10,7 @@ import (
 	"github.com/yunpiao/adtr/internal/auth"
 	"github.com/yunpiao/adtr/internal/credentialuse"
 	"github.com/yunpiao/adtr/internal/domains"
+	"github.com/yunpiao/adtr/internal/messages"
 	"github.com/yunpiao/adtr/internal/operationaccounts"
 	"github.com/yunpiao/adtr/internal/operationallogs"
 	"github.com/yunpiao/adtr/internal/schedules"
@@ -184,6 +185,13 @@ func migrateTo(ctx context.Context, config *pgx.ConnConfig, target int) error {
 			return errors.New("directory v2 schema migration failed")
 		}
 		version = 16
+	}
+
+	if version < 17 && target >= 17 {
+		if _, err := tx.Exec(ctx, messages.Schema); err != nil {
+			return errors.New("message schema migration failed")
+		}
+		version = 17
 	}
 
 	if _, err := tx.Exec(ctx, "UPDATE adtr.schema_version SET version=$1 WHERE singleton=true", version); err != nil {

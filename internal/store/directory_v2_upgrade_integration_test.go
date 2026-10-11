@@ -35,7 +35,7 @@ func newDirectoryV2UpgradeFixture(t *testing.T) *operationalUpgradeFixture {
 func (f *operationalUpgradeFixture) assertDirectoryV2Installed() {
 	f.t.Helper()
 	var valid bool
-	err := f.conn.QueryRow(f.ctx, `SELECT version=16
+	err := f.conn.QueryRow(f.ctx, `SELECT version=$1
  AND to_regclass('adtr.domain_directory_versioned_use_identity') IS NOT NULL
  AND to_regclass('adtr.domain_directory_observations_versioned_latest') IS NOT NULL
  AND to_regprocedure('adtr.domain_directory_observation_canonical_v2(jsonb)') IS NOT NULL
@@ -43,7 +43,7 @@ func (f *operationalUpgradeFixture) assertDirectoryV2Installed() {
  AND (SELECT count(*)=2 FROM information_schema.columns WHERE table_schema='adtr' AND table_name IN ('domain_directory_task_uses','domain_directory_observations') AND column_name='dictionary_version' AND data_type='integer' AND is_nullable='NO' AND column_default='1')
  AND (SELECT count(*)=3 FROM pg_constraint WHERE connamespace='adtr'::regnamespace AND conname IN ('operation_account_use_grants_purpose_check','operation_account_use_mutations_purpose_check','operation_account_use_audit_purpose_check') AND position('domain.directory_read.v2' in pg_get_constraintdef(oid))>0)
  AND (SELECT count(*)=3 FROM pg_trigger WHERE tgrelid='adtr.domain_directory_observations'::regclass AND NOT tgisinternal)
- FROM adtr.schema_version`).Scan(&valid)
+ FROM adtr.schema_version`, SchemaVersion).Scan(&valid)
 	if err != nil || !valid {
 		f.t.Fatal("schema16 missing atomic directory contracts", err)
 	}

@@ -293,7 +293,7 @@ func (s *Service) handleAccess(ctx context.Context, r *http.Request, path string
 			rt, known := accessRoutes[suffix]
 			results[i] = ok && prefix && known && method == rt.method && grantAllows(grants, rt)
 			if ok && !prefix {
-				results[i] = resourcePathAllowed(method, url, roleID, grants) || taskPathAllowed(method, url, grants) || auditPathAllowed(method, url, grants) || systemPathAllowed(method, url, u.tenant, grants) || schedulePathAllowed(method, url, grants) || archivePathAllowed(method, url, grants) || credentialUsePathAllowed(method, url, roleID, grants) || operationAccountPathAllowed(method, url, grants) || domainSelectionPathAllowed(method, url, grants) || domainAccessPathAllowed(method, url, roleID, grants) || operationalLogPathAllowed(method, url, u.tenant, grants) || directoryPathAllowed(method, url, grants) || directoryCredentialUsePathAllowed(method, url, roleID, grants) || directoryV2PathAllowed(method, url, grants) || directoryV2CredentialUsePathAllowed(method, url, roleID, grants) || userAssetsV2PathAllowed(method, url, grants)
+				results[i] = resourcePathAllowed(method, url, roleID, grants) || taskPathAllowed(method, url, grants) || auditPathAllowed(method, url, grants) || systemPathAllowed(method, url, u.tenant, grants) || schedulePathAllowed(method, url, grants) || archivePathAllowed(method, url, grants) || credentialUsePathAllowed(method, url, roleID, grants) || operationAccountPathAllowed(method, url, grants) || domainSelectionPathAllowed(method, url, grants) || domainAccessPathAllowed(method, url, roleID, grants) || operationalLogPathAllowed(method, url, u.tenant, grants) || directoryPathAllowed(method, url, grants) || directoryCredentialUsePathAllowed(method, url, roleID, grants) || directoryV2PathAllowed(method, url, grants) || directoryV2CredentialUsePathAllowed(method, url, roleID, grants) || userAssetsV2PathAllowed(method, url, grants) || messagePathAllowed(method, url, grants)
 			}
 		}
 		value = map[string]any{"results": results}
@@ -553,6 +553,15 @@ func permissionNodes(grants map[string]AccessAuth, onlyReadable bool) []AccessPe
 			}
 		}
 		if mark == "tasks" {
+			messageKeys := []string{}
+			for path := range messageRoutes {
+				messageKeys = append(messageKeys, path)
+			}
+			sort.Strings(messageKeys)
+			for _, path := range messageKeys {
+				method := messageRoutes[path]
+				paths = append(paths, AccessPath{method + " /messages" + path, method + " /api/messages" + path, "readable"})
+			}
 			taskKeys := []string{}
 			for path := range taskRoutes {
 				taskKeys = append(taskKeys, path)

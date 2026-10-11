@@ -34,6 +34,7 @@ import (
 	"github.com/yunpiao/adtr/internal/domainconfig"
 	"github.com/yunpiao/adtr/internal/domains"
 	"github.com/yunpiao/adtr/internal/ldapconnection"
+	"github.com/yunpiao/adtr/internal/schemaversion"
 	"github.com/yunpiao/adtr/internal/store"
 	"github.com/yunpiao/adtr/internal/tasks"
 )
@@ -54,8 +55,8 @@ func newDirectoryV2HTTPFixture(t *testing.T) *directoryV2HTTPFixture {
 	t.Helper()
 	base := newDirectoryHTTPFixture(t)
 	f := &directoryV2HTTPFixture{directoryHTTPFixture: base, fallback: base.handler}
-	if store.SchemaVersion != 16 || f.count(`SELECT version FROM adtr.schema_version WHERE singleton`) != 16 {
-		t.Fatal("v2 HTTP requires the actual production schema 16 migration")
+	if store.SchemaVersion != schemaversion.Current || f.count(`SELECT version FROM adtr.schema_version WHERE singleton`) != schemaversion.Current {
+		t.Fatal("v2 HTTP requires the exact current production schema migration")
 	}
 	if f.count(`SELECT count(*) FROM pg_trigger WHERE NOT tgisinternal AND tgenabled='O' AND tgname=ANY($1::text[])`, []string{"domain_directory_use_guard", "domain_directory_use_consistency", "domain_directory_task_reservation", "domain_directory_observation_guard", "domain_directory_observations_immutable", "domain_directory_observations_no_truncate"}) != 6 {
 		t.Fatal("v2 HTTP requires enabled production ledger and observation guards")

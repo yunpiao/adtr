@@ -21,6 +21,7 @@ import (
 	"github.com/yunpiao/adtr/internal/credentialuse"
 	"github.com/yunpiao/adtr/internal/domainconfig"
 	"github.com/yunpiao/adtr/internal/domains"
+	"github.com/yunpiao/adtr/internal/messages"
 	"github.com/yunpiao/adtr/internal/operationaccounts"
 	"github.com/yunpiao/adtr/internal/operationallogs"
 	app "github.com/yunpiao/adtr/internal/runtime"
@@ -72,6 +73,7 @@ func run() (runErr error) {
 	var archiveEngine *taskarchive.Engine
 	var healthStore *systemhealth.Store
 	var journal *operationallogs.Recorder
+	var messageStore *messages.Store
 	if *mode == "api" || *mode == "worker" {
 		domainRuntime, domainErr := domainconfig.Load(os.Getenv)
 		if domainErr != nil {
@@ -79,6 +81,10 @@ func run() (runErr error) {
 		}
 		domainStore = domains.New(domainRuntime)
 		operationAccountStore = operationaccounts.New(domainRuntime)
+		messageStore, err = messages.New(cfg.Database, store.SchemaVersion)
+		if err != nil {
+			return fmt.Errorf("message runtime configuration failed")
+		}
 		healthStore, err = systemhealth.NewStore(cfg.Database, store.SchemaVersion)
 		if err != nil {
 			return fmt.Errorf("system health configuration failed")
@@ -195,6 +201,9 @@ func run() (runErr error) {
 			operationalHandler := authentication.OperationalLogsHandler(taskEngine)
 			mux.Handle("/api/system/logs", operationalHandler)
 			mux.Handle("/api/system/logs/", operationalHandler)
+			messageHandler := authentication.MessagesHandler(messageStore)
+			mux.Handle("/api/messages", messageHandler)
+			mux.Handle("/api/messages/", messageHandler)
 			taskHandler := authentication.TasksHandler(taskEngine)
 			mux.Handle("/api/tasks", taskHandler)
 			mux.Handle("/api/tasks/", taskHandler)
@@ -263,6 +272,8 @@ func run() (runErr error) {
 			runAccountUseMaintenance(ctx, reconcileUses, func(error) { fmt.Fprintln(os.Stderr, "credential reservation reconciliation failed") })
 			close(maintenanceDone)
 		}()
+		messageDone := make(chan error, 1)
+		go func() { messageDone <- messageStore.Run(ctx); stop() }()
 		result := make(chan error, 1)
 		go func() { result <- worker.Run(ctx); stop() }()
 		serverErr := app.Serve(ctx, server)
@@ -270,6 +281,8 @@ func run() (runErr error) {
 		workerErr = <-result
 		<-schedulerDone
 		<-maintenanceDone
+		messageErr := <-messageDone
+		workerErr = errors.Join(workerErr, messageErr)
 		// Worker.Run has joined every executor and completed its acknowledgement
 		// drain. A final separate pass can now release terminal unopened uses.
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
