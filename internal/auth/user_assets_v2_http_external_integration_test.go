@@ -121,6 +121,27 @@ func TestUserAssetsV2MigratedHTTPValuesSearchDetailAndPinnedRefresh(t *testing.T
 		t.Fatal("factual raw/zero/year semantics", one)
 	}
 	pin := "&observationId=" + first.ID
+	for _, tc := range []struct {
+		extra string
+		total int
+	}{
+		{"&sAMAccountName=user-12", 1}, {"&sAMAccountName=USER-12", 0}, {"&sAMAccountName=user", 0},
+		{"&sAMAccountName=user-12&search=absent", 0},
+		{"&startTm=0001-01-01T00:00:00Z&endTm=0001-01-01T00:00:00.000000001Z&creatTm=desc", 1},
+		{"&startTm=0001-01-01T00:00:00.000000001Z&endTm=2026-01-01T00:00:00Z", 0},
+	} {
+		result := operationalDecode[domains.UserAssetsV2List](t, f.request("directory-http-reader", list+pin+tc.extra, nil, 200).Body.Bytes())
+		if result.Page.Total != tc.total || result.ObservationID != first.ID {
+			t.Fatal("HTTP exact/time predicate mismatch", tc, result.Page)
+		}
+		f.request("directory-http-no-scope", list+pin+tc.extra, nil, 404)
+	}
+	for _, order := range []string{"asc", "desc"} {
+		result := operationalDecode[domains.UserAssetsV2List](t, f.request("directory-http-reader", list+pin+"&creatTm="+order, nil, 200).Body.Bytes())
+		if result.List[0].WhenCreated == nil || result.List[0].GUID != one.GUID || result.List[1].WhenCreated != nil {
+			t.Fatal("year1/null sorting mismatch", order)
+		}
+	}
 	for _, term := range []string{"USER-12", "S-1-5-99", "needle+%_?*&", "CN=synthetic-12"} {
 		result := operationalDecode[domains.UserAssetsV2List](t, f.request("directory-http-reader", list+pin+"&search="+url.QueryEscape(term), nil, 200).Body.Bytes())
 		if result.Page.Total != 1 || len(result.List) != 1 || result.List[0].GUID != "00000000-0000-0000-0000-00000000000c" {
@@ -202,7 +223,7 @@ func TestUserAssetsV2MigratedHTTPLiveReaderRevocation(t *testing.T) {
 			list := userAssetsHTTPPath + "?" + userAssetsHTTPQuery("1")
 			f.request("directory-http-reader", list, nil, 200)
 			f.exec(c.sql, c.args...)
-			for _, path := range []string{list, userAssetsHTTPDetail("1", "missing-observation", "00000000-0000-0000-0000-000000000001")} {
+			for _, path := range []string{list, list + "&sAMAccountName=exact&startTm=0001-01-01T00:00:00Z&endTm=2026-01-01T00:00:00Z&creatTm=desc", userAssetsHTTPDetail("1", "missing-observation", "00000000-0000-0000-0000-000000000001")} {
 				w := f.request("directory-http-reader", path, nil, c.status)
 				f.error(w, c.code)
 				if w.Header().Get("X-ADTR-User-ID") != "" {

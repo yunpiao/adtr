@@ -41,15 +41,15 @@ func userAssetsV2Query(detail bool, q url.Values) (domains.UserAssetsV2Filter, d
 			if values[0] == "" {
 				return bad()
 			}
-		case "search", "pageIdx", "pageSize":
-			if detail || key != "search" && values[0] == "" {
+		case "search", "sAMAccountName", "pageIdx", "pageSize", "startTm", "endTm", "creatTm":
+			if detail || key != "search" && key != "sAMAccountName" && values[0] == "" {
 				return bad()
 			}
 		case "objectGUID":
 			if !detail || values[0] == "" {
 				return bad()
 			}
-		case "userStatus", "domainName", "startTm", "endTm", "updateTm", "creatTm", "userType", "sAMAccountName", "scoreSort", "overviewType":
+		case "userStatus", "domainName", "updateTm", "userType", "scoreSort", "overviewType":
 			if detail {
 				return bad()
 			}
@@ -63,6 +63,7 @@ func userAssetsV2Query(detail bool, q url.Values) (domains.UserAssetsV2Filter, d
 	}
 	f.DomainID, f.ExpectedRevision, f.ExpectedCredentialRevision = q.Get("domainId"), q.Get("expectedRevision"), q.Get("expectedCredentialRevision")
 	f.ObservationID, f.Search = q.Get("observationId"), q.Get("search")
+	f.SAMAccountName, f.StartTm, f.EndTm, f.CreatTm = q.Get("sAMAccountName"), q.Get("startTm"), q.Get("endTm"), q.Get("creatTm")
 	if detail {
 		in = domains.UserAssetV2Input{DomainID: f.DomainID, ExpectedRevision: f.ExpectedRevision, ExpectedCredentialRevision: f.ExpectedCredentialRevision, ObservationID: f.ObservationID, ObjectGUID: q.Get("objectGUID")}
 		if domains.ValidateUserAssetV2Input(in) != nil {

@@ -606,3 +606,92 @@ func TestUserAssetsV2WrongDomainAndV1ObservationNeverSatisfyPinnedIdentity(t *te
 	})
 	requireUserAssetsV2IntegrationError(t, err, 409, "directory_observation_unavailable")
 }
+
+func TestUserAssetsV2PublishedExactSAMCreatedRangeAndStablePinnedSort(t *testing.T) {
+	f := directoryV2RuntimeFixture(t)
+	grantDirectoryV2(f)
+	o := userAssetsV2Observation()
+	defer o.Discard()
+	for i := range o.Objects {
+		row := &o.Objects[i]
+		if row.Base.Kind == directoryassets.User && row.Base.GUID >= "00000003-4455-6677-8899-aabbccddeeff" && row.Base.GUID <= "0000001e-4455-6677-8899-aabbccddeeff" {
+			row.Supplemental.WhenCreatedBytes = []byte("20261011130000.0Z")
+		}
+	}
+	old := publishUserAssetsV2(f, o, "user-filter-source")
+	before := userAssetsV2Counts(f)
+	for _, tc := range []struct {
+		sam   string
+		total int
+	}{{"same-observed-sam", 2}, {"SAME-OBSERVED-SAM", 0}, {"same-observed", 0}, {"UniqueSAM", 1}, {"", 63}} {
+		q := userAssetsV2Filter(f, old.ID, "", 1, 10)
+		q.SAMAccountName = tc.sam
+		got, err := userAssetsV2List(f, f.store, q)
+		if err != nil || got.Page.Total != tc.total {
+			t.Fatal("persistent exact SAM mismatch", tc, got.Page, err)
+		}
+		if tc.sam == "same-observed-sam" {
+			q.Search = "no-such-user"
+			got, err = userAssetsV2List(f, f.store, q)
+			if err != nil || got.Page.Total != 0 {
+				t.Fatal("combined predicates did not intersect", err)
+			}
+		}
+	}
+	q := userAssetsV2Filter(f, old.ID, "", 1, 10)
+	q.StartTm = "2026-10-11T22:00:00+09:00"
+	q.EndTm = "2026-10-11T13:00:00.000000001Z"
+	q.CreatTm = "desc"
+	for page := 1; page <= 3; page++ {
+		q.PageIdx = page
+		got, err := userAssetsV2List(f, f.store, q)
+		if err != nil || got.Page.Total != 28 || got.Page.Pages != 3 || len(got.List) != min(10, 28-(page-1)*10) {
+			t.Fatal("persistent time filter before paging", got.Page, err)
+		}
+		for i, row := range got.List {
+			want := fmt.Sprintf("%08x-4455-6677-8899-aabbccddeeff", 3+(page-1)*10+i)
+			if row.GUID != want || row.WhenCreated == nil || *row.WhenCreated != "2026-10-11T13:00:00Z" {
+				t.Fatal("equal-time tie order/value", row)
+			}
+		}
+	}
+	q.PageIdx = 1
+	q.StartTm = "2026-10-11T12:59:59.999999999Z"
+	q.EndTm = "2026-10-11T13:00:00Z"
+	none, err := userAssetsV2List(f, f.store, q)
+	if err != nil || none.Page.Total != 0 {
+		t.Fatal("exclusive end included record", err)
+	}
+	q.StartTm = "0001-01-01T00:00:00Z"
+	q.EndTm = "0001-01-01T00:00:00.000000001Z"
+	yearOne, err := userAssetsV2List(f, f.store, q)
+	if err != nil || yearOne.Page.Total != 34 || yearOne.List[0].GUID != "00000002-4455-6677-8899-aabbccddeeff" {
+		t.Fatal("year1 treated missing/rounding", yearOne.Page, err)
+	}
+	q.StartTm, q.EndTm = "", ""
+	q.PageIdx = 7
+	last, err := userAssetsV2List(f, f.store, q)
+	if err != nil || len(last.List) != 3 || last.List[2].GUID != "00000001-4455-6677-8899-aabbccddeeff" || last.List[2].WhenCreated != nil {
+		t.Fatal("descending missing-last changed", last.Page, err)
+	}
+	if userAssetsV2Counts(f) != before {
+		t.Fatal("filter mutated source or task data")
+	}
+	empty := directoryV2RuntimeObservation()
+	defer empty.Discard()
+	directoryassets.ClearStoredObjectsV2(empty.Objects)
+	// The codec distinguishes an observed empty collection from a missing body.
+	empty.Objects = []directoryassets.StoredObjectV2{}
+	fresh := publishUserAssetsV2(f, empty, "new-filter-source")
+	q.PageIdx = 1
+	q.SAMAccountName = "same-observed-sam"
+	pinned, err := userAssetsV2List(f, f.store, q)
+	if err != nil || pinned.ObservationID != old.ID || pinned.Page.Total != 2 {
+		t.Fatal("filter replaced old observation", err)
+	}
+	q.ObservationID = ""
+	latest, err := userAssetsV2List(f, f.store, q)
+	if err != nil || latest.ObservationID != fresh.ID || latest.Page.Total != 0 {
+		t.Fatal("latest empty fell back", err)
+	}
+}

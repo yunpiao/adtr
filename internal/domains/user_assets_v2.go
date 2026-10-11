@@ -3,8 +3,10 @@ package domains
 import (
 	"context"
 	"encoding/json"
+	"regexp"
 	"sort"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/yunpiao/adtr/internal/directoryassets"
@@ -18,6 +20,7 @@ const UserAssetsV2MaxBytes = DirectoryV2PageMaxBytes
 type UserAssetsV2Filter struct {
 	DomainID, ExpectedRevision, ExpectedCredentialRevision string
 	ObservationID, Search                                  string
+	SAMAccountName, StartTm, EndTm, CreatTm                string
 	PageIdx, PageSize                                      int
 }
 
@@ -82,7 +85,58 @@ func ValidateUserAssetsV2Filter(f UserAssetsV2Filter) error {
 			return problem(400, "invalid_input")
 		}
 	}
-	return nil
+	if !utf8.ValidString(f.SAMAccountName) || len(f.SAMAccountName) > 1024 {
+		return problem(400, "invalid_input")
+	}
+	samUnits := 0
+	for _, r := range f.SAMAccountName {
+		samUnits++
+		if r > 0xffff {
+			samUnits++
+		}
+	}
+	if samUnits > 256 || f.CreatTm != "" && f.CreatTm != "asc" && f.CreatTm != "desc" {
+		return problem(400, "invalid_input")
+	}
+	_, _, err := userAssetsV2TimeRange(f)
+	return err
+}
+
+// Deliberately strict RFC3339 profile: Go's parser alone accepts comma fractions,
+// single-digit hours and some overflowing offsets. No precision is discarded.
+var userAssetsV2TimeGrammar = regexp.MustCompile(`^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,9})?(Z|[+-]([01][0-9]|2[0-3]):[0-5][0-9])$`)
+
+func userAssetsV2Time(raw string) (time.Time, error) {
+	if len(raw) > 35 || !userAssetsV2TimeGrammar.MatchString(raw) || raw[:4] == "0000" {
+		return time.Time{}, problem(400, "invalid_input")
+	}
+	t, err := time.Parse(time.RFC3339Nano, raw)
+	if err != nil {
+		return time.Time{}, problem(400, "invalid_input")
+	}
+	t = t.UTC()
+	if t.Year() < 1 || t.Year() > 9999 {
+		return time.Time{}, problem(400, "invalid_input")
+	}
+	return t, nil
+}
+
+func userAssetsV2TimeRange(f UserAssetsV2Filter) (time.Time, time.Time, error) {
+	if f.StartTm == "" && f.EndTm == "" {
+		return time.Time{}, time.Time{}, nil
+	}
+	start, err := userAssetsV2Time(f.StartTm)
+	if err != nil {
+		return time.Time{}, time.Time{}, err
+	}
+	end, err := userAssetsV2Time(f.EndTm)
+	if err != nil {
+		return time.Time{}, time.Time{}, err
+	}
+	if !start.Before(end) {
+		return time.Time{}, time.Time{}, problem(400, "invalid_input")
+	}
+	return start, end, nil
 }
 
 func ValidateUserAssetV2Input(in UserAssetV2Input) error {
@@ -132,6 +186,10 @@ func userAssetsV2Match(o directoryassets.PublicObjectV2, lowerSearch string) boo
 func userAssetsV2Page(ctx context.Context, selection UserAssetsV2Selection, id string, o ldapconnection.DirectoryV2Observation, f UserAssetsV2Filter) (UserAssetsV2List, error) {
 	rows := make([]directoryassets.PublicObjectV2, 0)
 	search := strings.ToLower(f.Search)
+	rangeStart, rangeEnd, err := userAssetsV2TimeRange(f)
+	if err != nil {
+		return UserAssetsV2List{}, err
+	}
 	for _, stored := range o.Objects {
 		if err := ctx.Err(); err != nil {
 			return UserAssetsV2List{}, err
@@ -143,11 +201,43 @@ func userAssetsV2Page(ctx context.Context, selection UserAssetsV2Selection, id s
 		if err != nil {
 			return UserAssetsV2List{}, problem(409, "directory_observation_unavailable")
 		}
-		if userAssetsV2Match(object, search) {
-			rows = append(rows, object)
+		if !userAssetsV2Match(object, search) || f.SAMAccountName != "" && (object.SAMAccountName == nil || *object.SAMAccountName != f.SAMAccountName) {
+			continue
 		}
+		if f.StartTm != "" {
+			if object.WhenCreated == nil {
+				continue
+			}
+			created, err := time.Parse(time.RFC3339, *object.WhenCreated)
+			if err != nil {
+				return UserAssetsV2List{}, problem(409, "directory_observation_unavailable")
+			}
+			if created.Before(rangeStart) || !created.Before(rangeEnd) {
+				continue
+			}
+		}
+		rows = append(rows, object)
 	}
-	sort.Slice(rows, func(i, j int) bool { return rows[i].GUID < rows[j].GUID })
+	sort.Slice(rows, func(i, j int) bool {
+		if f.CreatTm != "" {
+			a, b := rows[i].WhenCreated, rows[j].WhenCreated
+			if a == nil && b != nil {
+				return false
+			}
+			if a != nil && b == nil {
+				return true
+			}
+			// ProjectV2 guarantees fixed-width UTC whole seconds; text order is
+			// chronological, including year 0001 (which is not a missing value).
+			if a != nil && b != nil && *a != *b {
+				if f.CreatTm == "desc" {
+					return *a > *b
+				}
+				return *a < *b
+			}
+		}
+		return rows[i].GUID < rows[j].GUID
+	})
 	out := UserAssetsV2List{DictionaryVersion: 2, Selection: selection, Available: true, ObservationID: id, Source: &o.Source, List: []directoryassets.PublicObjectV2{}, Page: Page{Index: f.PageIdx, Size: f.PageSize, Total: len(rows)}}
 	if len(rows) > 0 {
 		out.Page.Pages = (len(rows) + f.PageSize - 1) / f.PageSize
