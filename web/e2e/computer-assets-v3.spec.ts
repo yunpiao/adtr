@@ -155,6 +155,57 @@ test("computer assets real Worker TLS LDAP PG API browser pinned facts", async (
     scroll: document.documentElement.scrollWidth,
   }));
   expect(geometry.scroll).toBeLessThanOrEqual(geometry.width + 1);
+  const mobileScroller = page.locator(".table-scroll").filter({
+    has: page.getByRole("table", { name: "计算机资产列表", exact: true }),
+  });
+  await mobileScroller.hover();
+  await page.mouse.wheel(1600, 0);
+  await expect
+    .poll(() => mobileScroller.evaluate((node) => node.scrollLeft))
+    .toBeGreaterThan(0);
+  const mobileExpand = page.getByRole("button", {
+    name: "展开事实",
+    exact: true,
+  });
+  const expandBox = await mobileExpand.boundingBox();
+  expect(expandBox).not.toBeNull();
+  expect(expandBox!.x).toBeGreaterThanOrEqual(0);
+  expect(expandBox!.x + expandBox!.width).toBeLessThanOrEqual(390);
+  await mobileExpand.click();
+  await mobileScroller.hover();
+  await page.mouse.wheel(-1600, 0);
+  await expect
+    .poll(() => mobileScroller.evaluate((node) => node.scrollLeft))
+    .toBe(0);
+  const mobileFacts = page.locator(
+    `[id="computer-facts-${expected[21].objectGUID}"]`,
+  );
+  await expect(
+    mobileFacts.getByText(expected[21].objectGUID, { exact: true }),
+  ).toBeVisible();
+  await expect(mobileFacts.getByText("515", { exact: true })).toBeVisible();
+  await expect(
+    mobileFacts.getByText("HOST/computer-22.synthetic.invalid", {
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(
+    mobileFacts.getByText("HTTP/fixture", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByText(`观测来源 · ${f.taskUUID}`, { exact: true }),
+  ).toBeVisible();
+  const expandedMobileGeometry = await page.evaluate(() => ({
+    width: innerWidth,
+    scroll: document.documentElement.scrollWidth,
+  }));
+  expect(expandedMobileGeometry.scroll).toBeLessThanOrEqual(
+    expandedMobileGeometry.width + 1,
+  );
+  await page.screenshot({
+    path: info.outputPath("computer-assets-v3-mobile-facts.png"),
+    fullPage: true,
+  });
   await page.setViewportSize({ width: 1440, height: 960 });
   await computerResponse(page, () =>
     page.getByRole("button", { name: "清除计算机筛选", exact: true }).click(),
@@ -191,8 +242,17 @@ test("computer assets real Worker TLS LDAP PG API browser pinned facts", async (
     page.getByRole("table", { name: "计算机资产列表", exact: true }),
   ).toHaveCount(0);
   f.safe({ first, second, third, ui: ui.value, newer });
+  // Check actual fixture credentials/MFA secrets/CSRF token in every message,
+  // including the browser advisory below; no console entry bypasses this guard.
+  f.safe(f.consoles);
+  const browserPasswordAdvisory =
+    "[DOM] Password forms should have (optionally hidden) username fields for accessibility: (More info: https://goo.gl/9p2vKq) %o";
   expect(
-    f.consoles.filter((x) => /password|totp|ciphertext|userinfo/i.test(x)),
+    f.consoles.filter(
+      (x) =>
+        x !== browserPasswordAdvisory &&
+        /password|totp|ciphertext|userinfo/i.test(x),
+    ),
   ).toEqual([]);
   await writeFile(
     info.outputPath("computer-assets-v3-evidence.json"),
@@ -204,6 +264,11 @@ test("computer assets real Worker TLS LDAP PG API browser pinned facts", async (
           desktop: {
             viewport: { width: 1440, height: 900 },
             state: "page1 expanded facts",
+          },
+          mobileFacts: {
+            viewport: { width: 390, height: 844 },
+            state:
+              "native horizontal wheel reached expand; pinned computer-22 facts",
           },
           mobile: {
             viewport: { width: 390, height: 844 },
@@ -223,6 +288,13 @@ test("computer assets real Worker TLS LDAP PG API browser pinned facts", async (
               ),
             )
             .digest("hex"),
+          mobileFacts: createHash("sha256")
+            .update(
+              await readFile(
+                info.outputPath("computer-assets-v3-mobile-facts.png"),
+              ),
+            )
+            .digest("hex"),
           mobile: createHash("sha256")
             .update(
               await readFile(info.outputPath("computer-assets-v3-mobile.png")),
@@ -231,6 +303,7 @@ test("computer assets real Worker TLS LDAP PG API browser pinned facts", async (
         },
         source: first.source,
         geometry,
+        expandedMobileGeometry,
         apiFacts: first.list,
         transport:
           "registered Worker → owned TLS LDAP → PostgreSQL → API → browser",
