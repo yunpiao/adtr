@@ -34,7 +34,7 @@ type messageFixture struct {
 
 func newMessageFixture(t *testing.T) *messageFixture {
 	f := newTaskFixture(t)
-	f.exec(messages.Schema)
+	f.exec(messages.Schema + messages.BulkSchema)
 	f.exec("UPDATE adtr.schema_version SET version=$1", schemaversion.Current)
 	e, err := tasks.New(f.s.database, tasks.ProductionRegistry(), taskAuthorizer(f.s.now), schemaversion.Current)
 	if err != nil {

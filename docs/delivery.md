@@ -246,3 +246,9 @@ AD-F-034继续in_progress；AD-F-035增量及AD-F-041地址关系未由此交付
 准备独立domain.directory_read.v2用途、精确版本固定字段、共享使用账本与类型依赖SQL片段。旧八字段payload、schema15接口与历史SQL保持，新消费者仍关闭，没有复制旧授权或安装迁移16。停止确认继续要求原执行器真实返回证据，不依赖仍有效的角色/授权/来源。
 
 最终make check通过Go race/vet/build、15项Python契约、559项前端测试、类型/构建与依赖审计0漏洞；全仓集成标签编译/vet通过。独立复核修复严格执行器测试桩的SQL参数期望，并防止文本/NULL来源版本被当作整数1，保留原安全断言。13组数据库测试无DSN明确失败于初始化，不算数据库通过。完整迁移、生产者、接口/界面与真实PG/浏览器/AD仍开放，验收0/209。详见[directory-v2-governance-contract.md](directory-v2-governance-contract.md)。
+
+## F40 health 消息批量已读后端（2026-10-11，工程 #112）
+
+Refs #50 / AD-F-158 / DTL-036。迁移18新增有界冻结目标、原接受回执、逐项首次时间收据及持久进度；每批复核live actor/tasks.readable/epoch，取消仅余项。固定结果all不扩展到实时全库；快照到期、新会话与Worker重启保持已接受操作。新HTTP和Worker已接线，UI后续切片；原纯模块与单条回执保持。详见 [批量运行时契约](message-bulk-runtime-contract.md)。
+
+本地完整make check通过1470前端/104 Python及Go race/vet/build，集成标签编译通过；实际PG调用缺DSN失败，不能算通过。已新增真实health跨页/并发/撤权/取消/原回执、非空17升级及PG连接终止/容器崩溃重启测试，独立设计与实际diff复核进行中，精确head CI待执行。#50及产品0/209保持开放，无生产部署。
