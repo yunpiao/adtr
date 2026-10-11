@@ -607,7 +607,8 @@ test("UserAssetsV3 real workspace, pins, identity facts and native reader invali
 
   // Production allows ten sensitive actions per actor per fifteen minutes.
   // Bootstrap: password/MFA start/enable (3), domain/group/assignment (3),
-  // producer creation (1), source edit (1), final scope withdrawal (1) = 9. The assignment revokes
+  // producer creation (1), source edit (1), connection-grant cleanup (1),
+  // final scope withdrawal (1) = 10. The assignment revokes
   // the bootstrap session; create the producer only after that UI re-login.
   // Producer: password/MFA (3), account/connection grant/binding (3),
   // v3 grant (1), first/second real sync (2), v3 revoke (1) = 10.
@@ -1793,9 +1794,14 @@ test("UserAssetsV3 real workspace, pins, identity facts and native reader invali
         } catch {
           throw new Error("Synthetic administrative proof request failed");
         }
-        expect(response.status(), `POST ${path}`).toBe(200);
         const value = await response.json();
         safe(value);
+        // Only the validated public error code accompanies a status failure.
+        const errorCode =
+          typeof value.error === "string" && /^[a-z_]{1,80}$/u.test(value.error)
+            ? value.error
+            : "none";
+        expect(response.status(), `POST ${path}: ${errorCode}`).toBe(200);
         return value;
       };
       fallback = await fallbackTab(context);
@@ -1862,6 +1868,33 @@ test("UserAssetsV3 real workspace, pins, identity facts and native reader invali
           { exact: true },
         ),
       ).toBeVisible();
+      // Preserve the governance invariant: the last administrator scope
+      // cannot be removed while any explicit use grant remains allowed.
+      // The v3 collection grant was already revoked; the setup connection-test
+      // grant is independent and requires its own genuine, version-pinned revoke.
+      stage = "revoke remaining connection-test grant";
+      const connectionRevoked = await adminPost("/api/credential-use/revoke", {
+        ...mutation,
+        purpose: "domain.connection_test",
+        expectedGrantRevision: connectionGrant.value.grantRevision,
+        idempotencyKey: "v3-workspace-connection-cleanup",
+      });
+      expect(connectionRevoked).toMatchObject({
+        result: "SUCCESS",
+        purpose: "domain.connection_test",
+        allowed: false,
+        replayed: false,
+      });
+      const remainingConnection = await readJSON(
+        administrator,
+        `/api/credential-use/effective?accountId=${accountId}`,
+        adminMe.ID,
+      );
+      expect(remainingConnection).toMatchObject({
+        purpose: "domain.connection_test",
+        explicitlyGranted: false,
+        eligible: false,
+      });
       stage = "revoke current scope";
       const withdrawn = await adminPost("/api/resources/groups/assign", {
         id: groupId,

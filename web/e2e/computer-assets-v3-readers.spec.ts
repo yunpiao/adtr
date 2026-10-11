@@ -1,10 +1,12 @@
 import { test, expect } from "@playwright/test";
-import { writeFile } from "node:fs/promises";
+import { writeFile, readFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { setupComputerFixture } from "./computer-assets-v3-fixture";
 import {
   openComputerList,
   computerResponse,
   expectedComputers,
+  computerEvidenceProvenance,
 } from "./computer-assets-v3-helpers";
 import {
   observeDirectoryV2Responses,
@@ -27,6 +29,7 @@ test("computer pinned readers reject genuinely delivered stale private facts", a
   await useNativeTabLifecycle(page);
   await observeDirectoryV2Responses(context);
   await context.addInitScript(installUserAssetAbortIsolation);
+  let revokedViewport: { width: number; height: number } | null = null;
   const f = await setupComputerFixture(page, context),
     expected = expectedComputers(),
     transport: any[] = [];
@@ -184,6 +187,7 @@ test("computer pinned readers reject genuinely delivered stale private facts", a
     await expect(
       peer.getByRole("table", { name: "计算机资产列表", exact: true }),
     ).toHaveCount(0);
+    revokedViewport = peer.viewportSize();
     await peer.screenshot({
       path: info.outputPath("computer-assets-v3-revoked.png"),
       fullPage: true,
@@ -198,6 +202,19 @@ test("computer pinned readers reject genuinely delivered stale private facts", a
     info.outputPath("computer-assets-v3-reader-evidence.json"),
     JSON.stringify(
       {
+        provenance: computerEvidenceProvenance(),
+        screenshot: {
+          file: "computer-assets-v3-revoked.png",
+          sha256: createHash("sha256")
+            .update(
+              await readFile(info.outputPath("computer-assets-v3-revoked.png")),
+            )
+            .digest("hex"),
+          sourceObservation: f.taskUUID,
+          state:
+            "logged out after native late-byte delivery; private table absent",
+          viewport: revokedViewport,
+        },
         browser: context.browser()?.version(),
         transport,
         sourceObservation: f.taskUUID,

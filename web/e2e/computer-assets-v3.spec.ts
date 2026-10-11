@@ -13,6 +13,7 @@ import {
   openComputerList,
   computerResponse,
   expectedComputers,
+  computerEvidenceProvenance,
 } from "./computer-assets-v3-helpers";
 test("computer assets real Worker TLS LDAP PG API browser pinned facts", async ({
   page,
@@ -197,8 +198,18 @@ test("computer assets real Worker TLS LDAP PG API browser pinned facts", async (
     info.outputPath("computer-assets-v3-evidence.json"),
     JSON.stringify(
       {
-        head: process.env.ADTR_EVENT_HEAD_SHA,
-        base: process.env.ADTR_EVENT_BASE_SHA,
+        provenance: computerEvidenceProvenance(),
+        screenshotBinding: {
+          observationId: f.taskUUID,
+          desktop: {
+            viewport: { width: 1440, height: 900 },
+            state: "page1 expanded facts",
+          },
+          mobile: {
+            viewport: { width: 390, height: 844 },
+            state: "pinned computer-22 search",
+          },
+        },
         dictionary: 3,
         computerCount: 23,
         observationId: f.taskUUID,
