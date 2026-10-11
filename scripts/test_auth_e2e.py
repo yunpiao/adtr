@@ -20,7 +20,7 @@ from test_integration import IMAGE
 from ldap_e2e_fixture import LDAPFixture
 from account_barrier_e2e_fixture import AccountBarrierFixture
 from e2e_owned_container import OWNER_LABEL, remove_owned_container
-from e2e_runtime_diagnostics import http_handler_panicked
+from e2e_runtime_diagnostics import http_handler_panicked, RuntimeDiagnostics
 from e2e_container_startup_diagnostics import report_container_startup_failure
 
 
@@ -70,6 +70,13 @@ def main():
     ldap_fixture = None
     account_barrier = None
     message_fixture = None
+    diagnostics = RuntimeDiagnostics()
+    diagnostic_dir = Path(".e2e-diagnostics")
+    diagnostic_dir.mkdir(parents=True, exist_ok=True)
+    for filename in ["runtime.json", "browser.json"]:
+        (diagnostic_dir / filename).unlink(missing_ok=True)
+    env["ADTR_E2E_SAFE_DIAGNOSTICS"] = str((diagnostic_dir / "browser.json").resolve())
+    diagnostics.phase("setup")
     logs = tempfile.TemporaryFile(mode="w+")
     try:
         creation_attempted = True
@@ -161,6 +168,7 @@ def main():
                     env.pop(key, None)
         # Credentials are only needed by explicit bootstrap; never pass them to the server.
         runtime_env = {k: v for k, v in env.items() if not k.startswith("ADTR_BOOTSTRAP_") and not k.startswith("ADTR_E2E_")}
+        diagnostics.phase("api-start")
         server = subprocess.Popen(["./bin/adtr", "-mode", "api"], env=runtime_env, stdout=logs, stderr=logs)
         for _ in range(100):
             if server.poll() is not None:
@@ -174,6 +182,7 @@ def main():
             time.sleep(0.1)
         else:
             raise RuntimeError("authentication API failed readiness")
+        diagnostics.phase("api-ready")
         if args.suite in {"tasks", "messages", "messages-bulk", "audit", "system", "maintenance", "domains", "account-references", "operational-logs", "account-reference-barrier"} | DIRECTORY_SUITES:
             with socket.socket() as listener:
                 listener.bind(("127.0.0.1", 0))
@@ -185,6 +194,7 @@ def main():
             # Execution authorization needs persisted actors, not browser secrets.
             for key in ["ADTR_AUTH_KEY", "ADTR_ORIGIN", "ADTR_WEB_DIR"]:
                 worker_env.pop(key, None)
+            diagnostics.phase("worker-start")
             worker = subprocess.Popen(["./bin/adtr", "-mode", "worker"], env=worker_env, stdout=logs, stderr=logs)
             for _ in range(100):
                 if worker.poll() is not None:
@@ -198,6 +208,7 @@ def main():
                 time.sleep(0.1)
             else:
                 raise RuntimeError("task worker failed readiness")
+            diagnostics.phase("worker-ready")
         if args.suite in {"system", "operational-logs", "messages-bulk"}:
             env["ADTR_E2E_WORKER_PID"] = str(worker.pid)
             if args.suite == "messages-bulk":
@@ -206,54 +217,73 @@ def main():
         # DOM snapshot. Suppress that separate artifact so proof fields cannot
         # enter an error-context prompt; explicit safe screenshots remain intact.
         env["PLAYWRIGHT_NO_COPY_PROMPT"] = "1"
+        diagnostics.phase("browser-start")
         subprocess.run(command, env=env, check=True, timeout=660 if args.suite == "account-references" else 930 if args.suite in EMPTY_DIRECTORY_SUITES | USER_ASSETS_V2_SUITES | {"user-assets-v3"} else 660 if args.suite in {"directory", "directory-v2", "directory-v3-backend"} else 600 if args.suite == "audit" else 540 if args.suite in {"maintenance", "domains", "operations", "credential-use", "account-references", "operational-logs", "account-reference-barrier"} else 480 if args.suite == "system" else 420)
+        diagnostics.phase("browser-pass")
         chain = "real browser -> API -> worker/PostgreSQL" if worker is not None else "real browser -> API -> PostgreSQL"
     finally:
-        shutdown_error = None
-        if account_barrier is not None:
-            try:
-                account_barrier.close()
-            except Exception as error:
-                shutdown_error = error
-        for label, process in [("worker", worker), ("API", server)]:
-            if process is None:
-                continue
-            if args.suite == "messages-bulk" and label == "worker" and process.poll() is None:
-                # A failed browser may leave our own child stopped. Resume before shutdown.
-                process.send_signal(signal.SIGCONT)
-            process.terminate()
-            try:
-                code = process.wait(timeout=30)
-                if code != 0:
-                    shutdown_error = RuntimeError(f"{label} did not exit successfully")
-            except subprocess.TimeoutExpired:
-                process.kill()
-                process.wait(timeout=10)
-                shutdown_error = RuntimeError(f"{label} did not stop gracefully")
-        if ldap_fixture is not None:
-            try:
-                ldap_fixture.close()
-            except Exception as error:
-                shutdown_error = error
         try:
-            panicked = http_handler_panicked(logs)
-        except (OSError, UnicodeError, ValueError):
-            shutdown_error = RuntimeError(
-                "browser acceptance runtime diagnostics could not be checked"
-            )
-        else:
-            if panicked:
+            diagnostics.snapshot(server, worker)
+        except Exception:
+            # Optional evidence must never prevent owned cleanup or mask the
+            # original browser failure. Never print diagnostic exception text.
+            diagnostics.report["collection_errors"].append("snapshot")
+        try:
+            shutdown_error = None
+            if account_barrier is not None:
+                try:
+                    account_barrier.close()
+                except Exception as error:
+                    shutdown_error = error
+            for label, process in [("worker", worker), ("API", server)]:
+                if process is None:
+                    continue
+                if args.suite == "messages-bulk" and label == "worker" and process.poll() is None:
+                    # A failed browser may leave our own child stopped. Resume before shutdown.
+                    process.send_signal(signal.SIGCONT)
+                process_record = diagnostics.report["processes"]["api" if label == "API" else "worker"]
+                process.terminate()
+                try:
+                    code = process.wait(timeout=30)
+                    process_record["after_cleanup"] = code
+                    if code != 0:
+                        shutdown_error = RuntimeError(f"{label} did not exit successfully")
+                except subprocess.TimeoutExpired:
+                    process_record["forced_kill"] = True
+                    process.kill()
+                    process_record["after_cleanup"] = process.wait(timeout=10)
+                    shutdown_error = RuntimeError(f"{label} did not stop gracefully")
+            if ldap_fixture is not None:
+                try:
+                    ldap_fixture.close()
+                except Exception as error:
+                    shutdown_error = error
+            try:
+                panicked = http_handler_panicked(logs)
+                diagnostics.report["http_panic"] = panicked
+            except (OSError, UnicodeError, ValueError):
                 shutdown_error = RuntimeError(
-                    "browser acceptance runtime observed an HTTP handler panic; raw diagnostics withheld"
+                    "browser acceptance runtime diagnostics could not be checked"
                 )
+            else:
+                if panicked:
+                    shutdown_error = RuntimeError(
+                        "browser acceptance runtime observed an HTTP handler panic; raw diagnostics withheld"
+                    )
+            finally:
+                logs.close()
+            if message_fixture is not None:
+                message_fixture.cleanup()
+            if creation_attempted:
+                remove_owned_container(name, owner)
+            if shutdown_error is not None:
+                raise shutdown_error
         finally:
-            logs.close()
-        if message_fixture is not None:
-            message_fixture.cleanup()
-        if creation_attempted:
-            remove_owned_container(name, owner)
-        if shutdown_error is not None:
-            raise shutdown_error
+            try:
+                diagnostics.phase("after-cleanup")
+                diagnostics.write(diagnostic_dir / "runtime.json")
+            except Exception:
+                print("Safe runtime diagnostics could not be retained", file=sys.stderr)
     if args.suite == "messages":
         # Additive sequential acceptance, fresh owned database; never recurse from bulk.
         subprocess.run([sys.executable, __file__, "--suite", "messages-bulk"], check=True)
