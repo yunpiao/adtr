@@ -68,7 +68,10 @@ func newFixture(t *testing.T) *fixture {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = db.Close(context.Background()) })
-	if _, err = db.Exec(ctx, `CREATE SCHEMA adtr; CREATE TABLE adtr.schema_version(singleton boolean PRIMARY KEY DEFAULT true CHECK(singleton),version integer NOT NULL);INSERT INTO adtr.schema_version VALUES(true,18);`+tasks.Schema+Schema+BulkSchema); err != nil {
+	// This is a deliberately isolated messages/tasks component fixture, not
+	// production migration evidence. Match the component runtime version while
+	// full schema upgrades remain covered by store migration and auth HTTP tests.
+	if _, err = db.Exec(ctx, fmt.Sprintf(`CREATE SCHEMA adtr; CREATE TABLE adtr.schema_version(singleton boolean PRIMARY KEY DEFAULT true CHECK(singleton),version integer NOT NULL);INSERT INTO adtr.schema_version VALUES(true,%d);`, schemaversion.Current)+tasks.Schema+Schema+BulkSchema); err != nil {
 		t.Fatal(err)
 	}
 	store, err := New(cfg, schemaversion.Current)

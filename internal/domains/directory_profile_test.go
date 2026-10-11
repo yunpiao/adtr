@@ -41,7 +41,7 @@ func TestDirectoryProfilesKeepLegacyPayloadGoldenAndExactIdentity(t *testing.T) 
 		if pins, err := directoryUseTaskPayloadForProfile(profile, task); err != nil || pins != directoryUseTestPins() {
 			t.Fatal("exact profile rejected", err)
 		}
-		for _, other := range []directoryTaskProfile{0, directoryTaskV1, directoryTaskV2, 3, 255} {
+		for _, other := range []directoryTaskProfile{0, directoryTaskV1, directoryTaskV2, 4, 255} {
 			if other == profile {
 				continue
 			}
@@ -106,7 +106,7 @@ func TestDirectoryV2PayloadRejectsDictionaryAndPinAmbiguity(t *testing.T) {
 
 func TestDirectoryProfileBoundariesFailBeforeSQL(t *testing.T) {
 	ctx, store := context.Background(), New(nil)
-	for _, profile := range []directoryTaskProfile{0, directoryTaskV1, directoryTaskV2, 3} {
+	for _, profile := range []directoryTaskProfile{0, directoryTaskV1, directoryTaskV2, 4} {
 		for _, task := range []tasks.Task{directoryUseTestTask(), directoryV2UseTestTask()} {
 			identity, ok := profile.identity()
 			if ok && identity.kind == task.Kind {
@@ -124,7 +124,7 @@ func TestDirectoryProfileBoundariesFailBeforeSQL(t *testing.T) {
 			t.Fatal("unissued witness accepted", err)
 		}
 	}
-	for _, profile := range []directoryTaskProfile{0, 3} {
+	for _, profile := range []directoryTaskProfile{0, 4} {
 		if _, _, err := lockDirectoryUseForProfileTx(ctx, nil, profile, "tenant", "task"); !errors.Is(err, errDirectoryUseEvidence) {
 			t.Fatal("unknown profile reached lock SQL")
 		}

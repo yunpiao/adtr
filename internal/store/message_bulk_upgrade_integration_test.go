@@ -115,7 +115,7 @@ func TestVersionSeventeenBulkUpgradePreservesMessageHistory(t *testing.T) {
 		}
 	}
 	var valid bool
-	err = f.conn.QueryRow(f.ctx, `SELECT version=18 AND to_regclass('adtr.message_bulk_active_queue') IS NOT NULL AND to_regclass('adtr.message_bulk_active_actor') IS NOT NULL AND NOT EXISTS(SELECT FROM adtr.message_bulk_operations) AND NOT EXISTS(SELECT FROM adtr.message_bulk_targets) AND NOT EXISTS(SELECT FROM adtr.message_bulk_receipts) AND (SELECT count(*)=1 AND min(after_id)=0 AND min(upper_id)=0 FROM adtr.message_bulk_cursor) FROM adtr.schema_version`).Scan(&valid)
+	err = f.conn.QueryRow(f.ctx, `SELECT version=$1 AND to_regclass('adtr.message_bulk_active_queue') IS NOT NULL AND to_regclass('adtr.message_bulk_active_actor') IS NOT NULL AND NOT EXISTS(SELECT FROM adtr.message_bulk_operations) AND NOT EXISTS(SELECT FROM adtr.message_bulk_targets) AND NOT EXISTS(SELECT FROM adtr.message_bulk_receipts) AND (SELECT count(*)=1 AND min(after_id)=0 AND min(upper_id)=0 FROM adtr.message_bulk_cursor) FROM adtr.schema_version`, SchemaVersion).Scan(&valid)
 	if err != nil || !valid {
 		t.Fatal("bulk schema missing or invented history", valid, err)
 	}
