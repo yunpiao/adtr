@@ -1,6 +1,9 @@
 import { navigateTo } from "./navigation";
 import { test, expect, type BrowserContext, type Page } from "@playwright/test";
-import { createHmac } from "node:crypto";
+import { createHmac, createHash } from "node:crypto";
+import { readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { resolve } from "node:path";
 
 type Authenticator = { secret: string; lastCounter: number };
 
@@ -146,10 +149,12 @@ async function openGroup(page: Page, name: string) {
 
 // Actual browser, API, PostgreSQL, worker and synthetic TLS/LDAP fixture only.
 // One transport fault drops a real committed response. No response mocks, real AD targets or real credentials.
+// Only explicit read-only screenshots are retained; proof-bearing failure artifacts are disabled.
+test.use({ trace: "off", screenshot: "off", video: "off" });
 test("real domain enrollment, explicit grant, TLS diagnostics, rotation and local deletion", async ({
   page,
   context,
-}) => {
+}, testInfo) => {
   test.setTimeout(420_000);
   const username = process.env.ADTR_E2E_USERNAME,
     password = process.env.ADTR_E2E_PASSWORD,
@@ -544,6 +549,241 @@ test("real domain enrollment, explicit grant, TLS diagnostics, rotation and loca
     "1",
     "verified",
     result1.diagnostic.observedAt,
+  );
+  // Capture authenticated, read-only surfaces from the actual persisted connection.
+  const visuals: Array<{
+    file: string;
+    sha256: string;
+    viewport: unknown;
+    fullPage: boolean;
+    scrollPosition: { x: number; y: number };
+  }> = [];
+  const capture = async (file: string, fullPage = true) => {
+    await expect(page.locator('input[type="password"]')).toHaveCount(0);
+    await expect(
+      page.getByLabel("未使用的认证器验证码", { exact: true }),
+    ).toHaveCount(0);
+    if (fullPage) {
+      await page.evaluate(() => window.scrollTo(0, 0));
+      await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0);
+    }
+    const scrollPosition = await page.evaluate(() => ({
+      x: window.scrollX,
+      y: window.scrollY,
+    }));
+    const bytes = await page.screenshot({
+      path: testInfo.outputPath(file),
+      fullPage,
+    });
+    visuals.push({
+      file,
+      sha256: createHash("sha256").update(bytes).digest("hex"),
+      viewport: page.viewportSize(),
+      fullPage,
+      scrollPosition,
+    });
+  };
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await capture("domains-soc-detail-desktop.png");
+  await page
+    .getByRole("button", { name: "返回域连接列表", exact: true })
+    .click();
+  await page.locator(".domain-advanced-filters summary").click();
+  await expect(page.getByLabel("每页条数", { exact: true })).toBeVisible();
+  await page.getByLabel("每页条数", { exact: true }).selectOption("10");
+  await page.getByLabel("域或域控关键词", { exact: true }).fill(domain);
+  await page.getByRole("button", { name: "查询域连接", exact: true }).click();
+  const domainRow = page.getByRole("button", {
+    name: `查看 ${domain}`,
+    exact: true,
+  });
+  await expect(domainRow).toBeVisible();
+  await page.locator(".domain-advanced-filters summary").click();
+  await expect(page.getByLabel("每页条数", { exact: true })).not.toBeVisible();
+  await capture("domains-soc-queue-desktop.png");
+  await domainRow.click();
+  await expect(
+    page.getByRole("heading", { name: `域连接详情：${domain}`, exact: true }),
+  ).toBeVisible();
+  await page
+    .getByRole("button", { name: "返回域连接列表", exact: true })
+    .click();
+  await expect(domainRow).toBeFocused();
+  await expect(page.getByLabel("域或域控关键词", { exact: true })).toHaveValue(
+    domain,
+  );
+  // Back/Forward revalidate the real session without losing queue context.
+  await domainRow.click();
+  await expect(
+    page.getByRole("heading", { name: `域连接详情：${domain}`, exact: true }),
+  ).toBeVisible();
+  await page.goBack();
+  await expect(domainRow).toBeFocused();
+  await expect(page.getByLabel("域或域控关键词", { exact: true })).toHaveValue(
+    domain,
+  );
+  await page.goForward();
+  await expect(domainRow).toBeVisible();
+  await expect(page.getByLabel("域或域控关键词", { exact: true })).toHaveValue(
+    domain,
+  );
+  await expect(page.locator(".domain-advanced-filters summary")).toContainText(
+    "每页 10 条",
+  );
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByRole("button", { name: "查询域连接", exact: true }).focus();
+  // Genuine keyboard traversal must reach the row action in the compact queue.
+  for (
+    let presses = 0;
+    presses < 8 &&
+    !(await domainRow.evaluate((node) => node === document.activeElement));
+    presses++
+  )
+    await page.keyboard.press("Tab");
+  await expect(domainRow).toBeFocused();
+  expect(
+    await domainRow.evaluate((node) => node.matches(":focus-visible")),
+  ).toBe(true);
+  const queueTitle = await page
+    .getByRole("heading", { name: "域连接", exact: true })
+    .boundingBox();
+  expect(queueTitle!.height).toBeLessThan(50);
+  expect(
+    await page
+      .locator(".domain-table-scroll")
+      .evaluate((node) => node.scrollWidth <= node.clientWidth),
+  ).toBe(true);
+  await capture("domains-soc-queue-mobile-focus.png", false);
+  await capture("domains-soc-queue-mobile.png");
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= window.innerWidth,
+    ),
+  ).toBe(true);
+  await domainRow.click();
+  await expect(
+    page.getByRole("heading", { name: `域连接详情：${domain}`, exact: true }),
+  ).toBeVisible();
+  const headingBox = await page.locator(".domain-detail-heading").boundingBox();
+  const guidanceBox = await page
+    .getByRole("region", { name: "诊断与下一步" })
+    .boundingBox();
+  expect(headingBox!.y + headingBox!.height).toBeLessThanOrEqual(
+    guidanceBox!.y,
+  );
+  const dangerContrast = await page
+    .getByRole("button", { name: "删除域连接", exact: true })
+    .evaluate((node) => {
+      const style = getComputedStyle(node);
+      const luminance = (value: string) => {
+        const components = value
+          .match(/[0-9.]+/g)!
+          .slice(0, 3)
+          .map(Number)
+          .map((v) => {
+            const n = v / 255;
+            return n <= 0.04045 ? n / 12.92 : ((n + 0.055) / 1.055) ** 2.4;
+          });
+        return (
+          components[0] * 0.2126 +
+          components[1] * 0.7152 +
+          components[2] * 0.0722
+        );
+      };
+      const foreground = luminance(style.color),
+        background = luminance(style.backgroundColor);
+      return (
+        (Math.max(foreground, background) + 0.05) /
+        (Math.min(foreground, background) + 0.05)
+      );
+    });
+  expect(dangerContrast).toBeGreaterThanOrEqual(4.5);
+  await expect(
+    page.getByText(
+      "再次检测需要新的明确提交；请先核对配置版本与上次检测时间。",
+      { exact: true },
+    ),
+  ).toBeVisible();
+  await capture("domains-soc-detail-mobile.png");
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= window.innerWidth,
+    ),
+  ).toBe(true);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const root = execFileSync("git", ["rev-parse", "--show-toplevel"], {
+    encoding: "utf8",
+  }).trim();
+  const hashFile = (file: string) =>
+    createHash("sha256")
+      .update(readFileSync(resolve(root, file)))
+      .digest("hex");
+  const assets = readdirSync(resolve(root, "web/dist/assets"), {
+    withFileTypes: true,
+  });
+  expect(assets.length).toBeGreaterThan(0);
+  expect(assets.every((entry) => entry.isFile())).toBe(true);
+  const manifest = {
+    schema: 1,
+    suite: "domains",
+    chain:
+      "real browser → authenticated API → worker → synthetic TLS LDAP → PostgreSQL",
+    recordedAt: new Date().toISOString(),
+    checkoutCommit: execFileSync("git", ["rev-parse", "HEAD"], {
+      encoding: "utf8",
+    }).trim(),
+    dirty:
+      execFileSync("git", ["status", "--porcelain"], {
+        encoding: "utf8",
+      }).trim() !== "",
+    workflowCommit: process.env.GITHUB_SHA ?? null,
+    workflowRun: process.env.GITHUB_RUN_ID ?? null,
+    workflowAttempt: process.env.GITHUB_RUN_ATTEMPT ?? null,
+    eventHead: process.env.ADTR_EVENT_HEAD_SHA ?? null,
+    eventBase: process.env.ADTR_EVENT_BASE_SHA ?? null,
+    browser: context.browser()!.version(),
+    node: process.version,
+    sourceSHA256: Object.fromEntries(
+      [
+        "web/src/DomainsWorkspace.tsx",
+        "web/src/DomainCredentialSource.tsx",
+        "web/src/domain-soc.tsx",
+        "web/src/domain-soc.css",
+        "web/src/domain-api.ts",
+        "web/src/domain-source-api.ts",
+        "web/src/task-common.tsx",
+        "web/src/App.tsx",
+        "web/src/style.css",
+        "web/src/soc-shell.css",
+        "web/e2e/domains.spec.ts",
+        "web/package-lock.json",
+        ".github/workflows/ci.yml",
+      ].map((file) => [file, hashFile(file)]),
+    ),
+    artifactsSHA256: {
+      apiWorker: hashFile("bin/adtr"),
+      frontendEntry: hashFile("web/dist/index.html"),
+    },
+    frontendAssetsSHA256: Object.fromEntries(
+      assets.map((entry) => {
+        const file = `web/dist/assets/${entry.name}`;
+        return [file, hashFile(file)];
+      }),
+    ),
+    connection: {
+      domainId: id,
+      domain,
+      revision: "1",
+      credentialRevision: "1",
+      taskUUID: first.value.task.taskUUID,
+      diagnostic: result1.diagnostic,
+    },
+    visuals,
+    mobileGeometry: { queueTitle, headingBox, guidanceBox, dangerContrast },
+  };
+  writeFileSync(
+    testInfo.outputPath("domains-soc-evidence.json"),
+    JSON.stringify(manifest, null, 2),
   );
   await page.getByRole("button", { name: "编辑域连接", exact: true }).click();
   await expect(page.getByLabel("AD 用户名", { exact: true })).toHaveCount(0);

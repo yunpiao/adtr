@@ -627,9 +627,8 @@ describe("domain workspace security flows", () => {
         ? response({ error: "unauthenticated" }, 401)
         : undefined;
     render(<DomainsWorkspace profile={profile} sessionChanged={lost} />);
-    click(
-      (await screen.findByRole("button", { name: "查看 synthetic.invalid" }))
-        .textContent!,
+    fireEvent.click(
+      await screen.findByRole("button", { name: "查看 synthetic.invalid" }),
     );
     await screen.findByRole("heading", {
       name: "域连接详情：synthetic.invalid",
@@ -653,6 +652,14 @@ describe("domain workspace security flows", () => {
     await revealNavigation("域连接");
     click("域连接");
     await screen.findByRole("table", { name: "获授权的域连接" });
+    fill("域或域控关键词", "synthetic");
+    click("查询域连接");
+    await waitFor(() =>
+      expect(calls("/api/domains").at(-1)![0]).toContain(
+        "filterKeyword=synthetic",
+      ),
+    );
+    await screen.findByRole("button", { name: "查看 synthetic.invalid" });
     click("新增域连接");
     fill("AD 密码", "temporary secret");
     const sessionReads = calls("/api/auth/me").length;
@@ -660,6 +667,10 @@ describe("domain workspace security flows", () => {
     await waitFor(() => expect(window.location.hash).toBe("#domains"));
     await screen.findByRole("table", { name: "获授权的域连接" });
     expect(calls("/api/auth/me").length).toBeGreaterThan(sessionReads);
+    expect(screen.getByLabelText("域或域控关键词")).toHaveValue("synthetic");
+    expect(calls("/api/domains").at(-1)![0]).toContain(
+      "filterKeyword=synthetic",
+    );
     expect(screen.queryByLabelText("AD 密码")).toBeNull();
     expect(window.location.href).not.toContain("temporary");
     act(() => window.history.forward());
@@ -843,4 +854,247 @@ describe("concurrent domain review invalidation", () => {
       expect(calls(`/api/domains/${action}`)).toHaveLength(0);
     },
   );
+});
+
+describe("domain SOC queue continuity", () => {
+  it("keeps applied filters, unsubmitted edits and row focus after details", async () => {
+    await start();
+    fill("域或域控关键词", "synthetic");
+    fill("每页条数", "10");
+    click("查询域连接");
+    await waitFor(() =>
+      expect(calls("/api/domains").at(-1)![0]).toContain(
+        "filterKeyword=synthetic",
+      ),
+    );
+    await screen.findByRole("button", { name: "查看 synthetic.invalid" });
+    fill("域或域控关键词", "unsubmitted draft");
+    click("查看 synthetic.invalid");
+    await screen.findByRole("heading", {
+      name: "域连接详情：synthetic.invalid",
+    });
+    click("返回域连接列表");
+    const row = await screen.findByRole("button", {
+      name: "查看 synthetic.invalid",
+    });
+    await waitFor(() => expect(row).toHaveFocus());
+    expect(screen.getByLabelText("域或域控关键词")).toHaveValue(
+      "unsubmitted draft",
+    );
+    expect(screen.getByLabelText("每页条数")).toHaveValue("10");
+    expect(calls("/api/domains").at(-1)![0]).toContain(
+      "filterKeyword=synthetic",
+    );
+    expect(calls("/api/domains").at(-1)![0]).not.toContain("unsubmitted");
+  });
+
+  it("restores the queue on browser Back and focuses its heading when a row is no longer authorized", async () => {
+    await detail();
+    override = (url) =>
+      url.split("?")[0] === "/api/domains" ? response(list([])) : undefined;
+    act(() => window.dispatchEvent(new PopStateEvent("popstate")));
+    await screen.findByText(/当前筛选下没有获授权的域连接/);
+    await waitFor(() =>
+      expect(
+        screen.getByRole("heading", { name: "接入与诊断队列" }),
+      ).toHaveFocus(),
+    );
+    expect(
+      screen.queryByRole("button", { name: "查看 synthetic.invalid" }),
+    ).toBeNull();
+  });
+
+  it("does not reuse queue filters across session identities", async () => {
+    const { rerender } = render(
+      <DomainsWorkspace profile={profile} sessionChanged={vi.fn()} />,
+    );
+    await screen.findByRole("table", { name: "获授权的域连接" });
+    fill("域或域控关键词", "private query");
+    click("查询域连接");
+    await waitFor(() =>
+      expect(calls("/api/domains").at(-1)![0]).toContain(
+        "filterKeyword=private",
+      ),
+    );
+    profile = {
+      ...profile,
+      ID: 2,
+      username: "another",
+      csrfToken: "new-session",
+    };
+    rerender(<DomainsWorkspace profile={profile} sessionChanged={vi.fn()} />);
+    await screen.findByRole("table", { name: "获授权的域连接" });
+    expect(screen.getByLabelText("域或域控关键词")).toHaveValue("");
+    expect(calls("/api/domains").at(-1)![0]).not.toContain("private");
+  });
+
+  it("explains diagnostic meaning and an actionable next step from actual evidence", async () => {
+    override = (url) =>
+      url.split("?")[0] === "/api/domains/detail"
+        ? response({
+            connection: connection({
+              connectionState: "error",
+              latestTaskUUID: taskID,
+              lastDiagnostic: diagnostic({
+                code: "tls_hostname",
+                stage: "tls",
+                dcHostName: "",
+              }),
+            }),
+          })
+        : undefined;
+    await detail();
+    const guide = screen.getByRole("region", { name: "诊断与下一步" });
+    expect(guide).toHaveTextContent("证书与配置的域控 DNS 名称不匹配");
+    expect(guide).toHaveTextContent("核对域控 DNS、证书有效期和部署 CA");
+    expect(guide).not.toHaveTextContent("最近一次检测已完成");
+  });
+});
+
+describe("domain history live identity boundary", () => {
+  it("hides the retained queue during verification and discards it when the current actor changes", async () => {
+    render(<App />);
+    await screen.findByRole("heading", { name: "账户概览" });
+    await revealNavigation("域连接");
+    click("域连接");
+    await screen.findByRole("table", { name: "获授权的域连接" });
+    fill("域或域控关键词", "actor-one-query");
+    click("查询域连接");
+    await screen.findByRole("button", { name: "查看 synthetic.invalid" });
+    click("查看 synthetic.invalid");
+    await screen.findByRole("heading", {
+      name: "域连接详情：synthetic.invalid",
+    });
+    const pending: Array<(response: Response) => void> = [];
+    override = (url) =>
+      url === "/api/auth/me"
+        ? new Promise((resolve) => pending.push(resolve))
+        : undefined;
+    act(() => window.history.back());
+    await waitFor(() => expect(window.location.hash).toBe("#domains"));
+    await waitFor(() => expect(pending.length).toBeGreaterThan(0));
+    expect(document.querySelector("main")).toHaveAttribute("hidden");
+    expect(document.querySelector("main")).toHaveAttribute("inert");
+    profile = {
+      ...profile,
+      ID: 2,
+      username: "another",
+      csrfToken: "actor-two-session",
+    };
+    override = () => undefined;
+    await act(async () => {
+      for (const resolve of pending) resolve(await response(profile));
+    });
+    await screen.findByRole("heading", { name: "账户概览" });
+    expect(screen.queryByDisplayValue("actor-one-query")).toBeNull();
+    await revealNavigation("域连接");
+    click("域连接");
+    await screen.findByRole("table", { name: "获授权的域连接" });
+    expect(screen.getByLabelText("域或域控关键词")).toHaveValue("");
+  });
+});
+
+it("defers restored row focus until live history verification releases the hidden workspace", async () => {
+  render(<App />);
+  await screen.findByRole("heading", { name: "账户概览" });
+  await revealNavigation("域连接");
+  click("域连接");
+  await screen.findByRole("button", { name: "查看 synthetic.invalid" });
+  click("查看 synthetic.invalid");
+  await screen.findByRole("heading", { name: "域连接详情：synthetic.invalid" });
+  const pending: Array<(response: Response) => void> = [];
+  override = (url) =>
+    url === "/api/auth/me"
+      ? new Promise((resolve) => pending.push(resolve))
+      : undefined;
+  act(() => window.history.back());
+  await waitFor(() => expect(window.location.hash).toBe("#domains"));
+  await waitFor(() => expect(pending.length).toBeGreaterThan(0));
+  // The queue finishes first, while the actual App gate is hidden/inert.
+  await waitFor(() =>
+    expect(document.querySelector("button[data-domain-id]")).not.toBeNull(),
+  );
+  expect(document.querySelector("main")).toHaveAttribute("hidden");
+  expect(document.querySelector("button[data-domain-id]")).not.toHaveFocus();
+  override = () => undefined;
+  await act(async () => {
+    for (const resolve of pending) resolve(await response(profile));
+  });
+  await waitFor(() =>
+    expect(
+      screen.getByRole("button", { name: "查看 synthetic.invalid" }),
+    ).toHaveFocus(),
+  );
+  expect(document.querySelector("main")).not.toHaveAttribute("hidden");
+});
+
+it("hash-only domain navigation clears sensitive forms while preserving queue filters", async () => {
+  await start();
+  fill("域或域控关键词", "synthetic");
+  click("查询域连接");
+  await screen.findByRole("button", { name: "查看 synthetic.invalid" });
+  click("新增域连接");
+  fill("AD 密码", "discard hash secret");
+  act(() => {
+    window.history.replaceState({}, "", "#domains/list");
+    window.dispatchEvent(new HashChangeEvent("hashchange"));
+  });
+  await screen.findByRole("table", { name: "获授权的域连接" });
+  expect(screen.queryByDisplayValue("discard hash secret")).toBeNull();
+  expect(screen.getByLabelText("域或域控关键词")).toHaveValue("synthetic");
+});
+
+it("returns to page two with row focus and resets to page one only on a new filter", async () => {
+  override = (url) => {
+    if (url.split("?")[0] !== "/api/domains") return undefined;
+    const pageIdx = Number(
+      new URL(url, "http://localhost").searchParams.get("pageIdx") ?? 1,
+    );
+    return response({
+      ...list(),
+      page: { pageIdx, pageSize: 20, total: 21, totalPage: 2 },
+      exhausted: pageIdx === 2,
+    });
+  };
+  await start();
+  click("下一页");
+  await waitFor(() =>
+    expect(calls("/api/domains").at(-1)![0]).toContain("pageIdx=2"),
+  );
+  await screen.findByRole("button", { name: "查看 synthetic.invalid" });
+  click("查看 synthetic.invalid");
+  await screen.findByRole("heading", { name: "域连接详情：synthetic.invalid" });
+  click("返回域连接列表");
+  await waitFor(() =>
+    expect(
+      screen.getByRole("button", { name: "查看 synthetic.invalid" }),
+    ).toHaveFocus(),
+  );
+  expect(calls("/api/domains").at(-1)![0]).toContain("pageIdx=2");
+  expect(screen.getByRole("button", { name: "下一页" })).toBeDisabled();
+  click("重置筛选");
+  await waitFor(() =>
+    expect(calls("/api/domains").at(-1)![0]).toContain("pageIdx=1"),
+  );
+  await screen.findByRole("button", { name: "查看 synthetic.invalid" });
+  expect(screen.getByRole("button", { name: "上一页" })).toBeDisabled();
+});
+
+it("does not instruct the operator to repair a credential failure after successful verified diagnostics", async () => {
+  const current = connection({
+    connectionState: "verified",
+    latestTaskUUID: taskID,
+    lastDiagnostic: diagnostic(),
+  });
+  override = (url) =>
+    url.split("?")[0] === "/api/domains/detail"
+      ? response({ connection: current })
+      : url.split("?")[0] === "/api/domains/test-result"
+        ? response({ task: task("succeeded"), diagnostic: diagnostic() })
+        : undefined;
+  await detail();
+  await screen.findByText(
+    "再次检测需要新的明确提交；请先核对配置版本与上次检测时间。",
+  );
+  expect(screen.queryByText(/请先修正凭据或证书错误/)).toBeNull();
 });
