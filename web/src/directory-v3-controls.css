@@ -1,0 +1,6 @@
+/* Fixed dictionary3 collection facts remain readable without changing v1/v2. */
+.directory-v3-observation td {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-width: 28rem;
+}

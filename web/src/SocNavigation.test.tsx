@@ -195,6 +195,7 @@ describe("SOC workspace navigation", () => {
       "凭据授权清理",
       "目录读取授权",
       "补充目录凭据授权",
+      "字典 3 目录凭据授权",
     ]) {
       expect(
         screen.queryByRole("button", {
@@ -204,6 +205,9 @@ describe("SOC workspace navigation", () => {
       ).toBeNull();
     }
     expect(screen.getByRole("button", { name: "用户资产" })).toBeEnabled();
+    expect(
+      screen.getByRole("button", { name: "字典 3 目录采集" }),
+    ).toBeEnabled();
   });
 
   it("preserves forced-password and busy gates without granting navigation", async () => {

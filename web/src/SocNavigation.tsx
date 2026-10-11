@@ -19,6 +19,8 @@ export type SocPage =
   | "credential-use"
   | "directory"
   | "directory-credential-use"
+  | "directory-v3"
+  | "directory-credential-use-v3"
   | "directory-v2"
   | "user-assets-v2"
   | "user-assets-v3"
@@ -46,6 +48,8 @@ export const SOC_NAVIGATION_GROUPS: ReadonlyArray<{
       "directory-credential-use",
       "directory-v2",
       "directory-credential-use-v2",
+      "directory-v3",
+      "directory-credential-use-v3",
     ],
   },
   {
@@ -74,6 +78,8 @@ export const SOC_WORKSPACE_LABELS: Record<SocPage, string> = {
   directory: "目录资产",
   "directory-credential-use": "目录读取授权",
   "directory-v2": "补充目录资产",
+  "directory-v3": "字典 3 目录采集",
+  "directory-credential-use-v3": "字典 3 目录凭据授权",
   "user-assets-v2": "用户资产",
   "user-assets-v3": "用户资产 · 字典 3",
   "directory-credential-use-v2": "补充目录凭据授权",
@@ -245,6 +251,7 @@ export default function SocNavigation({
       "credential-use",
       "directory-credential-use",
       "directory-credential-use-v2",
+      "directory-credential-use-v3",
     ].includes(page) || profile.role === "platform_admin";
   const isCurrent = (page: SocPage) =>
     active === page ||
