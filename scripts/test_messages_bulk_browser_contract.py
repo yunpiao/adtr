@@ -33,6 +33,8 @@ class BulkBrowserContract(unittest.TestCase):
             self.assertIn(required, fixture)
         for forbidden in ['INSERT INTO adtr.messages', 'INSERT INTO adtr.message_reads', 'UPDATE adtr.message_bulk', 'func(context.Context, pgx.Tx']:
             self.assertNotIn(forbidden, fixture)
+        self.assertLess(fixture.index('engine.CheckSchemaTx(ctx, tx)'), fixture.index('engine.SubmitTx('))
+        self.assertIn('return fixtureStageError("schema_gate")', fixture)
         self.assertNotIn('RunOne(', fixture)  # health executes in the actual owned worker process
 
     def test_browser_proves_persistence_and_original_intent(self):

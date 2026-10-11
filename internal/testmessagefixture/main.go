@@ -19,6 +19,10 @@ import (
 	"github.com/yunpiao/adtr/internal/tasks"
 )
 
+type fixtureStageError string
+
+func (e fixtureStageError) Error() string { return string(e) }
+
 func run() error {
 	if os.Getenv("ADTR_E2E_MESSAGE_FIXTURE") != "owned-isolated-health" || len(os.Args) != 2 {
 		return errors.New("fixture configuration")
@@ -65,10 +69,16 @@ func run() error {
 		if err != nil {
 			return err
 		}
+		// SubmitTx requires the caller to acquire the migration/schema barrier
+		// before it takes any identity/task locks, just like the HTTP handler.
+		if err = engine.CheckSchemaTx(ctx, tx); err != nil {
+			_ = tx.Rollback(ctx)
+			return fixtureStageError("schema_gate")
+		}
 		submission, err := engine.SubmitTx(ctx, tx, tasks.Principal{TenantID: "default", ActorID: actor}, tasks.SubmitInput{TaskName: "infrastructure.health", DomainID: "platform", PayloadVersion: 1, Payload: json.RawMessage(`{}`), IdempotencyKey: fmt.Sprintf("browser-bulk-health-%02d", i)})
 		if err != nil {
 			_ = tx.Rollback(ctx)
-			return err
+			return fixtureStageError("submit")
 		}
 		if err = tx.Commit(ctx); err != nil {
 			return err
@@ -79,7 +89,13 @@ func run() error {
 }
 func main() {
 	if err := run(); err != nil {
-		fmt.Fprintln(os.Stderr, "isolated message fixture failed")
+		// Never print raw connection/SQL errors or the DSN into CI output.
+		var stage fixtureStageError
+		if errors.As(err, &stage) {
+			fmt.Fprintln(os.Stderr, "isolated message fixture failed at", stage)
+		} else {
+			fmt.Fprintln(os.Stderr, "isolated message fixture failed")
+		}
 		os.Exit(1)
 	}
 }

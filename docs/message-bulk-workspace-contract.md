@@ -57,10 +57,14 @@
 
 完整 `make check` 通过：107 Python 契约、1508 前端测试、Go race/vet/build、类型/构建、依赖审计 0 漏洞。全仓 integration 标签编译/vet、隔离 fixture 配置 guard 单测通过；最终 E2E 标签重开与截图等待补丁后再次类型、6 项消息契约、构建与格式检查通过。38 项批量专用用例全部通过。
 
-独立最终代码复审绑定内容树 `b0fc6784259dc2828a50567148f1ad18c11105fb`，无剩余代码阻断。除最初三项修复外，补充严格状态字符串校验（拒绝数组强制转换伪装终态）、截图前等待真实 queued/61/0 UI、两次新标签只 GET 恢复并关闭、局部计数网格选择器特异性修复。此后仅本文检查记录变化。
+独立最终代码复审绑定内容树 `b0fc6784259dc2828a50567148f1ad18c11105fb`，无剩余代码阻断。除最初三项修复外，补充严格状态字符串校验（拒绝数组强制转换伪装终态）、截图前等待真实 queued/61/0 UI、两次新标签只 GET 恢复并关闭、局部计数网格选择器特异性修复。首次发布在此后仅补本文检查记录；后续修复单独记录如下。
 
 新增 messages-bulk 验证在原 messages 套件完成并清理后，串行创建独立临时库，输出目录不覆盖原截图，原 36 项门禁和最大并行保持。内部真实 SubmitTx/ProductionRegistry 生成 61 项健康任务，生产 Worker/outbox 产生消息；这段提交不是 HTTP/MFA 覆盖，原两条 HTTP 健康任务链完整保留。批量选 2 项自动完成；all61 实际接受后丢响应，原 ID 恢复；受控暂停自有 Worker 后调用生产 BulkOnce 处理 50，取消剩余 11，并在实际取消提交后丢响应通过 GET 核实。后到第 62 条不进入旧目标；实际改密码触发 epoch 终态，跨用户/新会话/只读 PG 首次时间与收据另有断言。
 
 受控单批推进证明事务和取消结果，不冒充完全无人干预 Worker 时序；自动后台执行已有后端独立测试，选 2 项同时覆盖实际 Worker。暂停前核验自有 PPID/命令行，专用 application_name 下无在途事务才保持停止，异常和 harness 结束均恢复 Worker。8 张 1440/390 viewport/full 截图及来源 manifest 等待实际 CI 产生与独立视觉复核。
 
 本地已实际尝试 `python3 scripts/test_auth_e2e.py --suite messages-bulk`，因环境缺少 Docker 在容器启动前失败，不能算 PostgreSQL/浏览器通过。精确 head CI、实际截图、当前 main 兼容性与合并后验证均以 PR 后续记录为准。#115 和 #50 保持 open，产品验收 0/209 不变。
+
+### 首轮真实 CI 的 fixture 修复
+
+首轮 run 38149421261 / head 3bf8807d 中，原 messages HTTP 健康任务与单条恢复链实际通过。新增 bulk fixture 在 seed 阶段失败；源码核验发现它未在 SubmitTx 前获取必需 schema/migration 共享屏障，而 SubmitTx 明确要求该屏障，故此调用路径不能成功。修复在同事务中显式 CheckSchemaTx，失败回滚；仅输出白名单阶段诊断，不记录连接字符串或 SQL 原错误。fixture 单测/vet 与六项消息 Python 契约通过，实际成功仍须新 head CI 验证。原失败保留为失败，不由后续结果改写。
