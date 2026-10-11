@@ -48,6 +48,7 @@ const full = (): MessageSnapshot => ({
 });
 beforeEach(() => {
   changed.mockReset();
+  localStorage.clear();
   query = () => json(sampleSnapshot());
   page = () => json(sampleSnapshot());
   locate = () => json({ resultId: "result-1", found: true, index: 0, page: 1 });
@@ -59,7 +60,7 @@ beforeEach(() => {
           menu: [{ mark: "tasks", auth: { readable: true, writeable: false } }],
         });
       if (url === "/api/access/check")
-        return json({ results: [true, true, true] });
+        return json({ results: [true, true, true, true, true] });
       if (url === "/api/messages/query") return query(init);
       if (url.startsWith("/api/messages/page?")) return page(url);
       if (url.startsWith("/api/messages/locate?")) return locate();
@@ -88,9 +89,7 @@ it("requires explicit confirmation even in StrictMode, shows true query counts a
   expect(
     screen.getByText("2026-10-10 23:59:59.123456789 UTC"),
   ).toBeInTheDocument();
-  expect(
-    screen.queryByRole("button", { name: /标记/ }),
-  ).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "标记为已读" })).toBeEnabled();
 });
 it("keeps draft separate and pages only the original result", async () => {
   query = () => json(full());
@@ -336,7 +335,7 @@ it("requires exact route checks and disables unauthorized locate", async () => {
   const delegate = vi.mocked(fetch).getMockImplementation()!;
   vi.mocked(fetch).mockImplementation((url, init) =>
     url === "/api/access/check"
-      ? json({ results: [true, true, false] })
+      ? json({ results: [true, true, false, true, true] })
       : delegate(url, init),
   );
   await mount();

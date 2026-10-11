@@ -40,9 +40,32 @@ class MessagesBrowserContract(unittest.TestCase):
                          '"/api/messages/query"', '"/api/messages/locate"',
                          '1440', '900', '390', '844', 'messages-soc-evidence.json']:
             self.assertIn(fragment, source)
-        for forbidden in ['.route(', '.fulfill(', 'INSERT INTO adtr.messages',
-                          "request.post('/api/messages/read'", 'page.waitForTimeout(']:
+        for forbidden in ['.fulfill(', 'INSERT INTO adtr.messages',
+                          'INSERT INTO adtr.message_reads', 'UPDATE adtr.messages',
+                          'page.waitForTimeout(']:
             self.assertNotIn(forbidden, source)
+
+    def test_read_recovery_uses_real_commit_and_original_intent(self):
+        source = Path('web/e2e/messages.spec.ts').read_text()
+        for fragment in ['route.fetch({ maxRetries: 0 })', 'route.abort("failed")',
+                         'persistedReadProof(container,', 'adtr.message_read_operations',
+                         'JOIN adtr.message_reads', 'sameFirstReadAt',
+                         '查询原操作结果', '重放原操作', '已确认单条已读',
+                         'expect(replayedResponse.request().postDataJSON()).toEqual(firstIntent)',
+                         'expect(await recoveredResponse.json()).toEqual(committedReceipt)',
+                         'expect(await replayConfirmed.json()).toEqual(committedReceipt)',
+                         'expect(await response.json()).toEqual(snapshot)',
+                         'expect(newCSRF).not.toBe(oldCSRF)',
+                         'expect(privateReceipt.status()).toBe(404)',
+                         'expect(privateSnapshot.status()).toBe(404)',
+                         'expect(privateReplay.status()).toBe(404)',
+                         'messages-soc-read-${state}-${viewport.width}-${fullPage ? "full" : "viewport"}.png',
+                         'web/src/message-read-intent.ts', 'web/src/message-read.tsx']:
+            self.assertIn(fragment, source)
+        self.assertEqual(len(re.findall(r'await page\.route\(\s*"\*\*/api/messages/read"', source)), 2)
+        self.assertEqual(source.count('route.fetch('), 1)
+        self.assertNotIn('route.fulfill', source)
+        self.assertNotIn('maxRetries: 1', source)
 
 
 if __name__ == '__main__':

@@ -345,3 +345,37 @@
     flex-direction: column;
   }
 }
+
+.message-workspace .message-read-panel {
+  padding: 18px;
+  margin: 18px 0;
+  border: 1px solid #dce5f4;
+  border-radius: 10px;
+  background: #fff;
+}
+.message-workspace .message-read-operation + .message-read-operation {
+  border-top: 1px solid #dce5f4;
+  margin-top: 16px;
+  padding-top: 16px;
+}
+.message-workspace .message-read-panel dl {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
+  gap: 10px;
+}
+.message-workspace .message-read-panel dd {
+  margin: 4px 0 0;
+  overflow-wrap: anywhere;
+}
+.message-workspace .message-read-panel dt {
+  color: #536580;
+  font-size: 12px;
+}
+.message-workspace .message-read-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.message-workspace .message-read-panel p {
+  overflow-wrap: anywhere;
+}

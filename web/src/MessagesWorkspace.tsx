@@ -15,6 +15,7 @@ import {
 } from "./message-query";
 import "./message-soc.css";
 import { Field } from "./access-common";
+import { useMessageRead } from "./message-read";
 
 type Props = { profile: Profile; sessionChanged: () => void };
 type ReadIntent =
@@ -137,6 +138,7 @@ function MessageSession({ profile, sessionChanged }: Props) {
   }, [profile.csrfToken, gateRevision]);
   const resetAuthority = () => {
     invalidate();
+    marking.suspend();
     setSnapshot(undefined);
     setApplied(undefined);
     setHighlight("");
@@ -167,6 +169,9 @@ function MessageSession({ profile, sessionChanged }: Props) {
     }
     if (!isQuery && intent) setRetry(intent);
   };
+  const marking = useMessageRead(profile, !!gate?.[3] && !!gate?.[4], (e) =>
+    handleError(e, false),
+  );
   const confirm = async () => {
     if (locked.current || !gate?.[0]) return;
     try {
@@ -304,7 +309,7 @@ function MessageSession({ profile, sessionChanged }: Props) {
         <span className="message-source">infrastructure.health</span>
       </header>
       <p className="message-boundary">
-        当前来源：平台范围健康任务。已读状态与数量保留查询时快照，本页只读。
+        当前来源：平台范围健康任务。单条已读只作用于本人；列表状态与数量保留查询时快照。
       </p>
       {error && (
         <div role="alert" className="error">
@@ -331,6 +336,7 @@ function MessageSession({ profile, sessionChanged }: Props) {
           </button>
         </div>
       )}
+      {marking.panel}
       {gate?.[0] && (
         <>
           <form
@@ -589,6 +595,23 @@ function MessageSession({ profile, sessionChanged }: Props) {
                               </dd>
                             </div>
                           </dl>
+                          {!row.read && (
+                            <button
+                              className="secondary"
+                              disabled={
+                                !!busy ||
+                                marking.blocked ||
+                                marking.isConfirmed(row.messageId)
+                              }
+                              onClick={() =>
+                                marking.mark(snapshot.resultId, row.messageId)
+                              }
+                            >
+                              {marking.isConfirmed(row.messageId)
+                                ? "本次已确认已读"
+                                : "标记为已读"}
+                            </button>
+                          )}
                         </div>
                       </article>
                     </li>
