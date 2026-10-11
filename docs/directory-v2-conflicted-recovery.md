@@ -43,7 +43,8 @@ not modify backend, schema, task registration, native guards, or product scope.
   actor changes the actual synthetic source; the stale form sends a real POST
   whose 409 delivery alone is dropped; receipt 404 and manual original retry
   409 come from the real API. Then verify proof cleanup, no replacement POST,
-  exact original receipt queries, no-store/current-actor headers, browser Back/Forward/Back,
+  exact original receipt queries, no-store error responses, authenticated current
+  actor checks, browser Back/Forward/Back,
   reload, and explicit current-source re-selection. There is no fabricated API
   response, database write, or altered clock. Account creation and connection
   grant use the existing authorized bootstrap actor; each actor uses exactly
@@ -75,3 +76,22 @@ recovered v2 sync requests. Both actors then stay within ten actions. No rate
 limit, authentication check, clock, native response guard, or expected response
 was weakened. This source correction still requires fresh exact-head CI; the
 failed run remains evidence and is not reclassified as passing.
+
+
+## Error-envelope assertion correction
+
+[Run 38173666375, directory-v2 job 114573301415](https://github.com/yunpiao/adtr/actions/runs/38173666375/job/114573301415)
+reached the expected real 409/no-store response after the quota correction,
+then failed because the new test expected `X-ADTR-User-ID` on an error.
+The existing directory server emits that header only for successful responses;
+error responses contain the bounded error envelope without it. The production
+client likewise validates actor headers on successful responses only.
+
+The two new 409/404 assertions now require the error header to be absent.
+Authenticated `/api/auth/me` reads before and after recovery verify the same
+producer ID; successful directory response actor-header guards, exact errors,
+no-store checks, native completion checks, and backend behavior are unchanged.
+A focused client regression covers headerless 409/404 while existing tests
+still reject every successful route with a missing or foreign actor header.
+This harness correction needs a new exact-head CI run; neither prior failed
+run is claimed as passing.

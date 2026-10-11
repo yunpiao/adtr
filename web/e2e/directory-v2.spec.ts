@@ -1236,6 +1236,7 @@ test("real dictionary-v2 UI → authenticated API → worker → paged synthetic
   await page
     .getByRole("button", { name: "结束此任务查看", exact: true })
     .click();
+  expect((await readJSON(context, "/api/auth/me")).ID).toBe(actorId);
   await proof(page, password, auth);
   let staleIntent: DirectoryV2Input | undefined;
   let dropError: unknown;
@@ -1257,7 +1258,8 @@ test("real dictionary-v2 UI → authenticated API → worker → paged synthetic
       });
       expect(response.status()).toBe(409);
       expect(response.headers()["cache-control"]).toBe("no-store");
-      expect(response.headers()["x-adtr-user-id"]).toBe(String(actorId));
+      // Error envelopes deliberately omit the success-only actor header.
+      expect(response.headers()["x-adtr-user-id"]).toBeUndefined();
       expect(await response.json()).toEqual({ error: "revision_conflict" });
     } catch (error) {
       dropError = error;
@@ -1343,7 +1345,8 @@ test("real dictionary-v2 UI → authenticated API → worker → paged synthetic
     ]);
     expect(response.status()).toBe(404);
     expect(response.headers()["cache-control"]).toBe("no-store");
-    expect(response.headers()["x-adtr-user-id"]).toBe(String(actorId));
+    // Error envelopes deliberately omit the success-only actor header.
+    expect(response.headers()["x-adtr-user-id"]).toBeUndefined();
     expect(Object.fromEntries(new URL(response.url()).searchParams)).toEqual({
       domainId,
       idempotencyKey: staleIntent!.idempotencyKey,
@@ -1369,6 +1372,7 @@ test("real dictionary-v2 UI → authenticated API → worker → paged synthetic
   await openDirectory(page);
   await receiptOnly();
   await missingReceipt();
+  expect((await readJSON(context, "/api/auth/me")).ID).toBe(actorId);
 
   const storage = await page.evaluate(() => ({
     local: { ...localStorage },

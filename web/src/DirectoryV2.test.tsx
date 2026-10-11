@@ -569,6 +569,32 @@ describe("strict directory contracts", () => {
         });
     },
   );
+  it("accepts headerless conflict and missing-receipt errors without requiring a success actor header", async () => {
+    override = (url) =>
+      url.split("?")[0] === "/api/directory/v2/sync"
+        ? response({ error: "revision_conflict" }, 409, null)
+        : response({ error: "not_found" }, 404, null);
+    await expect(
+      directoryV2API.sync(
+        intent(),
+        {
+          actorPassword: "Synthetic actor password 482",
+          totpCode: "123456",
+        },
+        profile.csrfToken,
+        profile.ID,
+        signal(),
+      ),
+    ).rejects.toMatchObject({ code: "revision_conflict", status: 409 });
+    await expect(
+      directoryV2API.receipt(intent(), profile.ID, signal()),
+    ).rejects.toMatchObject({ code: "not_found", status: 404 });
+    for (const [, init] of fetcher.mock.calls)
+      expect(init).toMatchObject({
+        cache: "no-store",
+        credentials: "same-origin",
+      });
+  });
   it("never displays an unknown server error as private diagnostic text", async () => {
     const privateText = "private LDAP/password detail";
     override = () => response({ error: privateText }, 403);
