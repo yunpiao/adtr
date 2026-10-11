@@ -1,4 +1,6 @@
-# F40 站内消息只读工作区
+# F40 站内消息固定查询工作区
+
+当前单条已读与未知提交恢复在后继 [#107](https://github.com/yunpiao/adtr/issues/107) 切片接入，见 [单条已读恢复契约](message-read-recovery.md)。下文“只读”描述 PR106 首片范围；查询时快照、分页与计数语义继续有效。
 
 Refs [#105](https://github.com/yunpiao/adtr/issues/105)、[F40 #50](https://github.com/yunpiao/adtr/issues/50)。依赖 [PR #104](https://github.com/yunpiao/adtr/pull/104) 的真实 health 消息运行时，开发基线 `1ee7d1f673ec55505b66e301ad16460956365652`。后端合并、UI 合并、实际浏览器证据及产品验收分别记录，不提前解除依赖。
 
