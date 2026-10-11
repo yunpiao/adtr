@@ -551,21 +551,36 @@ test("real domain enrollment, explicit grant, TLS diagnostics, rotation and loca
     result1.diagnostic.observedAt,
   );
   // Capture authenticated, read-only surfaces from the actual persisted connection.
-  const visuals: Array<{ file: string; sha256: string; viewport: unknown }> =
-    [];
-  const capture = async (file: string) => {
+  const visuals: Array<{
+    file: string;
+    sha256: string;
+    viewport: unknown;
+    fullPage: boolean;
+    scrollPosition: { x: number; y: number };
+  }> = [];
+  const capture = async (file: string, fullPage = true) => {
     await expect(page.locator('input[type="password"]')).toHaveCount(0);
     await expect(
       page.getByLabel("未使用的认证器验证码", { exact: true }),
     ).toHaveCount(0);
+    if (fullPage) {
+      await page.evaluate(() => window.scrollTo(0, 0));
+      await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0);
+    }
+    const scrollPosition = await page.evaluate(() => ({
+      x: window.scrollX,
+      y: window.scrollY,
+    }));
     const bytes = await page.screenshot({
       path: testInfo.outputPath(file),
-      fullPage: true,
+      fullPage,
     });
     visuals.push({
       file,
       sha256: createHash("sha256").update(bytes).digest("hex"),
       viewport: page.viewportSize(),
+      fullPage,
+      scrollPosition,
     });
   };
   await page.setViewportSize({ width: 1440, height: 900 });
@@ -638,6 +653,7 @@ test("real domain enrollment, explicit grant, TLS diagnostics, rotation and loca
       .locator(".domain-table-scroll")
       .evaluate((node) => node.scrollWidth <= node.clientWidth),
   ).toBe(true);
+  await capture("domains-soc-queue-mobile-focus.png", false);
   await capture("domains-soc-queue-mobile.png");
   expect(
     await page.evaluate(
