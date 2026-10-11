@@ -10,6 +10,7 @@ import {
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 import SystemWorkspace from "./SystemWorkspace";
+import { observationReason } from "./system-common";
 import { ApiError, type Profile } from "./api";
 import { labels, marks, type Permission } from "./access-api";
 import { PermissionEditor } from "./access-common";
@@ -875,5 +876,240 @@ describe("system health interface", () => {
       auth: { readable: true, writeable: false },
     });
     expect(screen.getByLabelText("系统健康：写入")).toBeEnabled();
+  });
+});
+
+describe("system SOC diagnostic workspace", () => {
+  async function openHealth() {
+    await start();
+    click("平台依赖健康");
+    return screen.findByRole("region", { name: "依赖诊断工作台" });
+  }
+  function workerHealth() {
+    const raw = health();
+    raw.dependencies.push({
+      id: "worker",
+      name: "ADTR worker",
+      type: "service",
+      status: "unhealthy",
+      reason: "stale_or_incomplete_worker_activity",
+      source: "worker_cycle_activity",
+      scope: "configured_dependency",
+      checkedAt: now,
+      observedAt: now,
+    });
+    return raw;
+  }
+  it("separates actionable anomalies from configured successes and unconfigured capabilities", async () => {
+    override = (url) =>
+      url === "/api/system/health" ? response(workerHealth()) : undefined;
+    const dashboard = await openHealth();
+    const cards = dashboard.querySelectorAll(".system-findings > li");
+    expect(cards).toHaveLength(1);
+    expect(cards[0]).toHaveTextContent("ADTR worker");
+    expect(cards[0]).toHaveTextContent("Worker 活动已过期或必需循环不完整");
+    expect(cards[0]).toHaveTextContent("处理建议：");
+    expect(cards[0]).toHaveTextContent("核对下方各循环的最近活动与成功时间");
+    expect(cards[0]).toHaveTextContent("worker_cycle_activity");
+    expect(cards[0]).toHaveTextContent(new Date(now).toISOString());
+    expect(cards[0]).not.toHaveTextContent("Cache");
+    const unconfigured = within(dashboard)
+      .getByText("未配置能力（1）")
+      .closest("details")!;
+    fireEvent.click(within(dashboard).getByText("未配置能力（1）"));
+    expect(unconfigured).toHaveTextContent("Cache · 未配置");
+    expect(unconfigured).toHaveTextContent("没有可用检查证据");
+  });
+  it("filters dependency rows without altering server status or making a new request", async () => {
+    override = (url) =>
+      url === "/api/system/health" ? response(workerHealth()) : undefined;
+    await openHealth();
+    const table = screen.getByRole("table", { name: "实际依赖检查" });
+    expect(within(table).getAllByRole("row")).toHaveLength(4);
+    fireEvent.click(screen.getByLabelText("只看异常或未知依赖"));
+    expect(within(table).getAllByRole("row")).toHaveLength(2);
+    expect(table).toHaveTextContent("ADTR worker");
+    expect(table).not.toHaveTextContent("Cache");
+    expect(calls("/health")).toHaveLength(1);
+    fireEvent.click(screen.getByLabelText("只看异常或未知依赖"));
+    expect(within(table).getAllByRole("row")).toHaveLength(4);
+  });
+  it("never calls an all-unconfigured filtered response healthy", async () => {
+    const raw = health();
+    raw.result = "healthy";
+    raw.dependencies = raw.dependencies.filter(
+      (d) => d.status === "not_configured",
+    );
+    override = (url) =>
+      url === "/api/system/health" ? response(raw) : undefined;
+    await openHealth();
+    expect(
+      screen.getByText(/当前检查范围没有已配置依赖，健康无法判定/),
+    ).toBeVisible();
+    expect(
+      screen.getByText(/当前检查范围没有已配置依赖，健康无法判定/),
+    ).toHaveClass("warning");
+    fireEvent.click(screen.getByLabelText("只看异常或未知依赖"));
+    expect(screen.getByText("筛选范围内没有异常或未知依赖。")).toBeVisible();
+  });
+  it("replaces stale anomaly evidence only after a confirmed recovery read", async () => {
+    let raw = workerHealth();
+    override = (url) =>
+      url === "/api/system/health" ? response(raw) : undefined;
+    const dashboard = await openHealth();
+    expect(dashboard.querySelectorAll(".system-findings > li")).toHaveLength(1);
+    raw = workerHealth();
+    raw.result = "healthy";
+    const worker = raw.dependencies.find((d) => d.id === "worker")!;
+    worker.status = "healthy";
+    worker.reason = "fresh_worker_cycles";
+    click("刷新平台依赖健康");
+    await waitFor(() =>
+      expect(
+        screen
+          .getByRole("region", { name: "依赖诊断工作台" })
+          .querySelectorAll(".system-findings > li"),
+      ).toHaveLength(0),
+    );
+    expect(screen.getByText(/当前返回的依赖中没有异常或未知项/)).toBeVisible();
+    expect(calls("/health")).toHaveLength(2);
+  });
+  it.each([403, 503])(
+    "clears anomaly evidence on HTTP %s and recovers via an explicit fresh read",
+    async (status) => {
+      override = (url) =>
+        url === "/api/system/health" ? response(workerHealth()) : undefined;
+      await openHealth();
+      override = (url) =>
+        url === "/api/system/health"
+          ? response(
+              { error: status === 403 ? "forbidden" : "database_unavailable" },
+              status,
+            )
+          : undefined;
+      click("刷新平台依赖健康");
+      await screen.findByRole("alert");
+      expect(
+        screen.queryByRole("region", { name: "依赖诊断工作台" }),
+      ).not.toBeInTheDocument();
+      override = (url) =>
+        url === "/api/system/health" ? response(workerHealth()) : undefined;
+      click("刷新平台依赖健康");
+      expect(
+        await screen.findByRole("region", { name: "依赖诊断工作台" }),
+      ).toHaveTextContent("ADTR worker");
+    },
+  );
+  it("keeps unknown evidence codes visible without inventing a root cause", async () => {
+    const raw = workerHealth();
+    raw.dependencies[2].id = "other";
+    raw.dependencies[2].reason = "new_backend_reason";
+    override = (url) =>
+      url === "/api/system/health" ? response(raw) : undefined;
+    const dashboard = await openHealth();
+    expect(dashboard).toHaveTextContent(
+      "服务器原因：new_backend_reason；具体根因需结合对应服务日志核查",
+    );
+    expect(dashboard).toHaveTextContent("当前接口没有提供更具体的修复证据");
+  });
+  it("distinguishes a gap before retained observations from an unexplained later gap", async () => {
+    override = (url) => {
+      if (!url.startsWith("/api/system/resources/history?")) return undefined;
+      const raw = history(new URLSearchParams(url.split("?")[1]));
+      raw.gaps.push({ startTime: seconds - 10, endTime: seconds });
+      return response(raw);
+    };
+    await start();
+    click("资源与历史");
+    const summary = await screen.findByText("查看 2 个实际缺测区间");
+    fireEvent.click(summary);
+    expect(screen.getByText(/早于此指标最早可用记录/)).toBeVisible();
+    expect(screen.getByText(/历史接口未提供根因/)).toBeVisible();
+    expect(screen.getByText(/历史接口未提供根因/)).toHaveTextContent(
+      "数据库写入记录定位",
+    );
+  });
+  it.each(["current", "storage", "worker", "cycle"])(
+    "rejects malformed optional %s reasons before rendering",
+    async (target) => {
+      override = (url) => {
+        if (
+          target === "current" &&
+          url.startsWith("/api/system/resources/current")
+        )
+          return response({ ...current(), reason: { unsafe: true } });
+        if (target === "storage" && url.startsWith("/api/system/storage?"))
+          return response({ ...storage(), reason: 123 });
+        if (
+          (target === "worker" || target === "cycle") &&
+          url === "/api/system/health"
+        ) {
+          const raw = health();
+          return response({
+            ...raw,
+            worker:
+              target === "worker"
+                ? { ...raw.worker, reason: [] }
+                : {
+                    ...raw.worker,
+                    cycles: [
+                      {
+                        workerId: "synthetic",
+                        cycle: "queue",
+                        status: "success",
+                        evidence: "completed_cycle",
+                        availability: "available",
+                        lastActivityAt: now,
+                        lastSuccessAt: now,
+                        reason: {},
+                      },
+                    ],
+                  },
+          });
+        }
+        return undefined;
+      };
+      const signal = new AbortController().signal;
+      await expect(
+        target === "current"
+          ? systemAPI.current(signal)
+          : target === "storage"
+            ? systemAPI.storage(1, 20, signal)
+            : systemAPI.health(signal),
+      ).rejects.toMatchObject({ code: "invalid_response" });
+    },
+  );
+});
+
+describe("system observation explanations", () => {
+  it.each(["__proto__", "constructor", "toString"])(
+    "treats prototype key %s as an unknown evidence code",
+    (code) => {
+      expect(observationReason(code)).toBe(
+        `服务器原因：${code}；具体根因需结合对应服务日志核查。`,
+      );
+    },
+  );
+  it.each([
+    ["no_samples", "尚无持久化采样"],
+    ["stale_sample", "最近采样已超过有效期"],
+    ["clock_skew", "观测时间晚于检查时间"],
+    ["no_worker_activity", "尚未观察到 Worker 活动"],
+    ["stale_worker_activity", "Worker 最近活动已超过有效期"],
+    ["stale_or_incomplete_worker_activity", "必需循环不完整"],
+    ["worker_cycle_failed", "Worker 循环报告失败"],
+    ["partial_resource_observation", "部分资源指标缺少可用采样"],
+    ["unavailable_resource_observation", "资源指标暂无可用观测"],
+    ["unsupported_platform", "当前平台不支持"],
+    ["not_configured", "尚无检查证据"],
+    ["read_failed", "来源读取失败"],
+    ["invalid_data", "格式无法验证"],
+    ["clock_reset", "时钟未向前推进"],
+    ["counter_reset", "计数器回退或计数字段数量变化"],
+    ["zero_delta", "计数在采样区间没有增长"],
+    ["first_observation", "CPU 需要两次计数"],
+  ])("explains the verified meaning of %s", (code, explanation) => {
+    expect(observationReason(code)).toContain(explanation);
+    expect(observationReason(code)).toMatch(/请|核对|检查|配置/);
   });
 });

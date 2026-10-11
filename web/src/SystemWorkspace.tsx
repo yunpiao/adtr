@@ -1,4 +1,5 @@
 import { useState } from "react";
+import "./system-soc.css";
 import { ApiError, type Profile } from "./api";
 import { accessRequest, type Permission } from "./access-api";
 import {
@@ -12,6 +13,7 @@ import {
 import {
   systemAPI,
   systemOperations,
+  type Dependency,
   type GraphType,
   type History,
   type HistoryInput,
@@ -25,6 +27,7 @@ import {
   availabilityLabel,
   byteText,
   percentText,
+  observationReason,
   useSystemMutation,
   useSystemRead,
   utc,
@@ -89,8 +92,14 @@ export default function SystemWorkspace({
       gate.data?.results[systemOperations.indexOf(operation)] === true,
   };
   return (
-    <div className="system-workspace">
-      <h2>系统健康</h2>
+    <div className="system-workspace system-soc">
+      <header className="system-soc-heading">
+        <div>
+          <span className="system-kicker">SYSTEM OPERATIONS</span>
+          <h2>系统健康</h2>
+        </div>
+        <span className="system-scope">local-api · 实际运行观测 · UTC</span>
+      </header>
       <p className="muted">
         查看 API 运行环境的实际采样、存储和依赖状态。缺失或过期数据会明确标记。
       </p>
@@ -129,7 +138,7 @@ export default function SystemWorkspace({
               当前账户没有此项读取权限，请选择已获授权的分类。
             </p>
           )}
-          <div key={`${tab}-${revision}`}>
+          <div className="system-soc-panel" key={`${tab}-${revision}`}>
             {tab === "overview" && context.can("GET /api/system/info") && (
               <Overview context={context} />
             )}
@@ -220,7 +229,9 @@ function MetricSnapshot({ snapshot }: { snapshot: Snapshot | null }) {
             <strong className="system-value">{row.value}</strong>
             <small className="block">
               {availabilityLabel(row.metric.availability)}
-              {row.metric.reason ? ` · ${row.metric.reason}` : ""}
+              {row.metric.reason
+                ? ` · ${observationReason(row.metric.reason)}`
+                : ""}
             </small>
             <small className="block">
               {row.metric.source} · {row.metric.scope}
@@ -263,7 +274,7 @@ function Overview({ context }: { context: SystemContext }) {
       <ReadStatus {...read} label="系统信息" />
       {info && (
         <>
-          <dl>
+          <dl className="system-facts">
             {[
               ["系统名称", info.basic.systemName],
               ["系统当前时间（UTC）", utc(info.systemCurrentTime)],
@@ -319,7 +330,7 @@ function Overview({ context }: { context: SystemContext }) {
           <p>
             授权许可、升级、清理、外部引擎与公司元数据按服务器能力展示；未配置项没有可执行操作。
           </p>
-          <dl>
+          <dl className="system-facts">
             {Object.entries(info.capabilities).map(([name, value]) => (
               <div key={name}>
                 <dt>{name}</dt>
@@ -543,6 +554,12 @@ function HistoryView({
               <li key={i}>
                 {utc(new Date(gap.startTime * 1000).toISOString())} 至{" "}
                 {utc(new Date(gap.endTime * 1000).toISOString())}
+                <p>
+                  {history.availableSince &&
+                  gap.endTime * 1000 <= Date.parse(history.availableSince)
+                    ? "早于此指标最早可用记录，当前数据库没有该时段历史。"
+                    : "该区间缺少此指标的可用记录；历史接口未提供根因。请对照采样状态、API 日志与数据库写入记录定位。"}
+                </p>
               </li>
             ))}
           </ul>
@@ -961,17 +978,121 @@ function Services({
     </>
   );
 }
+function dependencyAction(dependency: Dependency): string {
+  if (dependency.status === "not_configured")
+    return "服务器未登记此能力，没有可用检查证据。需要此能力时先确认支持范围与接入配置。";
+  if (dependency.id === "worker")
+    return "核对下方各循环的最近活动与成功时间；检查 Worker 进程、队列与数据库连接。恢复后刷新，确认完整循环重新有活动。";
+  if (dependency.id === "sampler")
+    return "打开资源与历史核对采样时间、各指标原因及缺测区间；检查 API 采样日志和数据库写入，恢复后等待下一轮实际采样。";
+  if (dependency.id === "postgresql")
+    return "检查数据库连接、PostgreSQL 协议与 schema 兼容性；恢复连接后重新读取依赖检查。";
+  return "根据检查依据核对服务日志与依赖连接，再刷新确认；当前接口没有提供更具体的修复证据。";
+}
 function HealthTable({ health }: { health: SystemHealth }) {
+  const [anomaliesOnly, setAnomaliesOnly] = useState(false);
+  const anomalies = health.dependencies.filter(
+    (d) => d.status === "unhealthy" || d.status === "unknown",
+  );
+  const unconfigured = health.dependencies.filter(
+    (d) => d.status === "not_configured",
+  );
+  const healthy = health.dependencies.filter((d) => d.status === "healthy");
+  const displayed = anomaliesOnly ? anomalies : health.dependencies;
   return (
     <>
+      <section className="system-diagnostics" aria-label="依赖诊断工作台">
+        <div className="system-status-strip">
+          <article>
+            <span>已配置且检查通过</span>
+            <strong>{healthy.length}</strong>
+          </article>
+          <article className={anomalies.length ? "system-attention" : ""}>
+            <span>异常或未知</span>
+            <strong>{anomalies.length}</strong>
+          </article>
+          <article>
+            <span>未配置能力</span>
+            <strong>{unconfigured.length}</strong>
+          </article>
+        </div>
+        <h3>需要处理的异常</h3>
+        {anomalies.length === 0 ? (
+          <p className="system-empty">
+            当前返回的依赖中没有异常或未知项。检查范围仅限服务器已登记依赖。
+          </p>
+        ) : (
+          <ul className="system-findings">
+            {anomalies.map((d) => (
+              <li key={d.id}>
+                <div className="system-finding-title">
+                  <strong>{d.name}</strong>
+                  <span className="system-badge" data-state={d.status}>
+                    {dependencyLabel[d.status]}
+                  </span>
+                </div>
+                <p>{observationReason(d.reason)}</p>
+                <p>
+                  <strong>处理建议：</strong>
+                  {dependencyAction(d)}
+                </p>
+                <small>
+                  依据：{d.reason || "服务器未提供原因"} · {d.source} ·{" "}
+                  {d.scope}
+                  <br />
+                  最近观测（UTC）：{utc(d.observedAt)} · 检查：
+                  {utc(d.checkedAt)}
+                </small>
+              </li>
+            ))}
+          </ul>
+        )}
+        {unconfigured.length > 0 && (
+          <details className="system-unconfigured">
+            <summary>未配置能力（{unconfigured.length}）</summary>
+            <ul>
+              {unconfigured.map((d) => (
+                <li key={d.id}>
+                  <strong>{d.name} · 未配置</strong>
+                  <p>{dependencyAction(d)}</p>
+                  <small>
+                    {d.source} · {d.scope}
+                  </small>
+                </li>
+              ))}
+            </ul>
+          </details>
+        )}
+      </section>
       <p
         role="status"
-        className={health.result === "healthy" ? "success" : "warning"}
+        className={
+          health.result === "healthy" &&
+          healthy.length > 0 &&
+          anomalies.length === 0
+            ? "success"
+            : "warning"
+        }
       >
         已配置依赖检查结果：
-        {health.result === "healthy" ? "健康" : "存在异常或未知状态"} ·
-        检查时间（UTC）：{utc(health.checkedAt)}
+        {healthy.length + anomalies.length === 0
+          ? "当前检查范围没有已配置依赖，健康无法判定"
+          : health.result === "healthy"
+            ? "健康"
+            : "存在异常或未知状态"}{" "}
+        · 检查时间（UTC）：{utc(health.checkedAt)}
       </p>
+      <label className="system-anomaly-filter">
+        <input
+          type="checkbox"
+          checked={anomaliesOnly}
+          onChange={(event) => setAnomaliesOnly(event.target.checked)}
+        />
+        只看异常或未知依赖
+      </label>
+      {anomaliesOnly && displayed.length === 0 && (
+        <p role="status">筛选范围内没有异常或未知依赖。</p>
+      )}
       <div className="table-scroll">
         <table>
           <caption>实际依赖检查</caption>
@@ -990,14 +1111,18 @@ function HealthTable({ health }: { health: SystemHealth }) {
             </tr>
           </thead>
           <tbody>
-            {health.dependencies.map((d) => (
+            {displayed.map((d) => (
               <tr key={d.id}>
                 <th scope="row">
                   {d.name}
                   <small className="block">{d.id}</small>
                 </th>
                 <td>{d.type}</td>
-                <td>{dependencyLabel[d.status]}</td>
+                <td>
+                  <span className="system-badge" data-state={d.status}>
+                    {dependencyLabel[d.status]}
+                  </span>
+                </td>
                 <td>
                   {d.reason}
                   <small className="block">
@@ -1015,7 +1140,9 @@ function HealthTable({ health }: { health: SystemHealth }) {
       <p>
         状态：{availabilityLabel(health.worker.availability)} · 过期界限：
         {health.worker.staleAfterSeconds} 秒
-        {health.worker.reason ? ` · ${health.worker.reason}` : ""}
+        {health.worker.reason
+          ? ` · ${observationReason(health.worker.reason)}`
+          : ""}
       </p>
       {health.worker.cycles.length === 0 ? (
         <p role="status">尚无 Worker 实际循环活动，状态未知。</p>

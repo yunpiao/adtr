@@ -187,6 +187,7 @@ export const validCurrent = (v: unknown): v is Current =>
   v.instance === "local-api" &&
   (v.snapshot === null || validSnapshot(v.snapshot)) &&
   available(v.availability) &&
+  (v.reason === undefined || typeof v.reason === "string") &&
   typeof v.stale === "boolean" &&
   nullableDate(v.availableSince) &&
   date(v.checkedAt);
@@ -206,6 +207,7 @@ export const validStorage = (v: unknown): v is StorageView =>
   integer(v.total, 0, 32) &&
   integer(v.page, 1) &&
   integer(v.pageSize, 1, 50) &&
+  (v.reason === undefined || typeof v.reason === "string") &&
   typeof v.stale === "boolean" &&
   available(v.availability) &&
   nullableDate(v.observedAt) &&
@@ -389,6 +391,7 @@ const validHealth = (v: unknown): v is SystemHealth =>
   ) &&
   object(v.worker) &&
   available(v.worker.availability) &&
+  (v.worker.reason === undefined || typeof v.worker.reason === "string") &&
   date(v.worker.checkedAt) &&
   integer(v.worker.staleAfterSeconds, 1) &&
   Array.isArray(v.worker.cycles) &&
@@ -400,6 +403,7 @@ const validHealth = (v: unknown): v is SystemHealth =>
       ["success", "failure", "progress"].includes(c.status as string) &&
       typeof c.evidence === "string" &&
       available(c.availability) &&
+      (c.reason === undefined || typeof c.reason === "string") &&
       nullableDate(c.lastActivityAt) &&
       nullableDate(c.lastSuccessAt),
   );
