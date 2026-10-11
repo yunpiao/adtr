@@ -59,7 +59,12 @@ describe("armed user-asset cancellation isolation", () => {
     expect(response.bodyUsed).toBe(false);
   });
 
-  it("keeps native arguments/promise/response and allows the bounded reader to consume late genuine bytes", async () => {
+  it.each([
+    "/api/user-assets/v2",
+    "/api/user-assets/v2/detail",
+    "/api/user-assets/v3",
+    "/api/user-assets/v3/detail",
+  ])("keeps original bounded-reader transport for %s", async (path) => {
     let resolve!: (response: Response) => void;
     const pending = new Promise<Response>((ready) => {
       resolve = ready;

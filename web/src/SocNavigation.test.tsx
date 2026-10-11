@@ -126,6 +126,15 @@ describe("SOC workspace navigation", () => {
     expect(socWorkspaceSection("domains")).toBe("采集与接入");
   });
 
+  it("keeps the user-assets section selected on the explicit v3 workspace", () => {
+    render(<Navigation active="user-assets-v3" />);
+    expect(screen.getByRole("button", { name: "用户资产" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    expect(socWorkspaceSection("user-assets-v3")).toBe("安全运营");
+  });
+
   it("retains every existing administrator workspace under a discoverable summary", async () => {
     render(<Navigation />);
     for (const entry of SOC_NAVIGATION_GROUPS) {

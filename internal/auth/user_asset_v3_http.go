@@ -13,15 +13,16 @@ import (
 	"time"
 )
 
-const userAssetV3Path = "/api/user-assets/v3/detail"
+const userAssetsV3Path = "/api/user-assets/v3"
+const userAssetV3Path = userAssetsV3Path + "/detail"
 
 func userAssetV3PathAllowed(method, path string, grants map[string]AccessAuth) bool {
-	return method == http.MethodGet && path == userAssetV3Path && grants["domains"].Readable && grants["directory_assets"].Readable
+	return method == http.MethodGet && (path == userAssetV3Path || path == userAssetsV3Path) && grants["domains"].Readable && grants["directory_assets"].Readable
 }
 func (s *Service) UserAssetV3Handler(store *domains.Store) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
-		if r.URL.Path != userAssetV3Path {
+		if r.URL.Path != userAssetV3Path && r.URL.Path != userAssetsV3Path {
 			write(w, 404, map[string]string{"error": "not_found"})
 			return
 		}
@@ -85,9 +86,9 @@ func (s *Service) UserAssetV3Handler(store *domains.Store) http.Handler {
 func (s *Service) writeUserAssetV3Error(w http.ResponseWriter, ctx context.Context, detail bool, err error) {
 	status, code := domainHTTPError(err)
 	if status != http.StatusServiceUnavailable {
-		action := "user_assets_v2_list"
+		action := "user_assets_v3_list"
 		if detail {
-			action = "user_assets_v2_detail"
+			action = "user_assets_v3_detail"
 		}
 		s.recordFailure(ctx, action)
 	}
@@ -129,7 +130,7 @@ func (s *Service) handleUserAssetV3(ctx context.Context, r *http.Request, store 
 	if detail {
 		value, err = store.UserAssetV3DetailTx(ctx, tx, actor.tenant, allowed, in)
 	} else {
-		return nil, fail(404, "not_found")
+		value, err = store.UserAssetsV3ListTx(ctx, tx, actor.tenant, allowed, f)
 	}
 	if err != nil {
 		return nil, err

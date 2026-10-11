@@ -24,10 +24,11 @@ from e2e_runtime_diagnostics import http_handler_panicked
 from e2e_container_startup_diagnostics import report_container_startup_failure
 
 
-REAL_TAB_LIFECYCLE_SUITES = {"account-references", "session-invalidation", "directory-readers", "directory-v2-readers", "user-assets-v2-readers"}
+REAL_TAB_LIFECYCLE_SUITES = {"account-references", "session-invalidation", "directory-readers", "directory-v2-readers", "user-assets-v2-readers", "user-assets-v3"}
 USER_ASSETS_V2_SUITES = {"user-assets-v2", "user-assets-v2-readers"}
 DIRECTORY_V2_SUITES = {"directory-v2", "directory-v2-controls", "directory-v2-readers"} | USER_ASSETS_V2_SUITES
-DIRECTORY_SUITES = {"directory-v3-backend", "directory", "directory-controls", "directory-readers"} | DIRECTORY_V2_SUITES
+DIRECTORY_V3_SUITES = {"directory-v3-backend", "user-assets-v3"}
+DIRECTORY_SUITES = DIRECTORY_V3_SUITES | {"directory", "directory-controls", "directory-readers"} | DIRECTORY_V2_SUITES
 EMPTY_DIRECTORY_SUITES = {"directory-controls", "directory-readers", "directory-v2-controls", "directory-v2-readers"}
 SLOW_DIRECTORY_SUITES = {"directory-controls", "directory-v2-controls"}
 
@@ -54,7 +55,7 @@ def browser_command(suite):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--suite", choices=["auth", "access", "resource", "tasks", "messages", "messages-bulk", "audit", "system", "maintenance", "domains", "operations", "profile", "credential-use", "account-references", "operational-logs", "session-invalidation", "account-reference-barrier", "directory", "directory-controls", "directory-readers", "directory-v2", "directory-v2-controls", "directory-v2-readers", "directory-v3-backend", "user-assets-v2", "user-assets-v2-readers"], default="auth")
+    parser.add_argument("--suite", choices=["auth", "access", "resource", "tasks", "messages", "messages-bulk", "audit", "system", "maintenance", "domains", "operations", "profile", "credential-use", "account-references", "operational-logs", "session-invalidation", "account-reference-barrier", "directory", "directory-controls", "directory-readers", "directory-v2", "directory-v2-controls", "directory-v2-readers", "directory-v3-backend", "user-assets-v3", "user-assets-v2", "user-assets-v2-readers"], default="auth")
     parser.add_argument("--expired", action="store_true")
     args = parser.parse_args()
     # Check display support before creating a disposable database or fixtures.
@@ -137,12 +138,12 @@ def main():
                                            directory_empty=args.suite in EMPTY_DIRECTORY_SUITES,
                                            directory_slow=args.suite in SLOW_DIRECTORY_SUITES,
                                            directory_v2=args.suite in DIRECTORY_V2_SUITES,
-                                           directory_v3=args.suite == "directory-v3-backend",
+                                           directory_v3=args.suite in DIRECTORY_V3_SUITES,
                                            user_assets_v2=args.suite in USER_ASSETS_V2_SUITES)
                 ldap_fixture.start(env)
                 if args.suite in DIRECTORY_SUITES:
                     env["ADTR_DIRECTORY_READ_ENABLED"] = "true"
-                if args.suite == "directory-v3-backend":
+                if args.suite in DIRECTORY_V3_SUITES:
                     env["ADTR_DIRECTORY_READ_V3_ENABLED"] = "true"
                     env["ADTR_E2E_DB_CONTAINER"] = name
                 if args.suite in DIRECTORY_V2_SUITES:
@@ -205,7 +206,7 @@ def main():
         # DOM snapshot. Suppress that separate artifact so proof fields cannot
         # enter an error-context prompt; explicit safe screenshots remain intact.
         env["PLAYWRIGHT_NO_COPY_PROMPT"] = "1"
-        subprocess.run(command, env=env, check=True, timeout=660 if args.suite == "account-references" else 930 if args.suite in EMPTY_DIRECTORY_SUITES | USER_ASSETS_V2_SUITES else 660 if args.suite in {"directory", "directory-v2", "directory-v3-backend"} else 600 if args.suite == "audit" else 540 if args.suite in {"maintenance", "domains", "operations", "credential-use", "account-references", "operational-logs", "account-reference-barrier"} else 480 if args.suite == "system" else 420)
+        subprocess.run(command, env=env, check=True, timeout=660 if args.suite == "account-references" else 930 if args.suite in EMPTY_DIRECTORY_SUITES | USER_ASSETS_V2_SUITES | {"user-assets-v3"} else 660 if args.suite in {"directory", "directory-v2", "directory-v3-backend"} else 600 if args.suite == "audit" else 540 if args.suite in {"maintenance", "domains", "operations", "credential-use", "account-references", "operational-logs", "account-reference-barrier"} else 480 if args.suite == "system" else 420)
         chain = "real browser -> API -> worker/PostgreSQL" if worker is not None else "real browser -> API -> PostgreSQL"
     finally:
         shutdown_error = None

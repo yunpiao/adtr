@@ -16,7 +16,7 @@ type UserAssetV3Detail struct {
 	Object            directoryassets.PublicObjectV3 `json:"object"`
 }
 
-func validateUserAssetV3Response(ctx context.Context, out UserAssetV3Detail) error {
+func validateUserAssetV3Response(ctx context.Context, out any) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
