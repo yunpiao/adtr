@@ -49,10 +49,12 @@ def verify_bulk_crash_recovery(compose, pause=time.sleep):
     compose("start", "worker")
     progress_sql = "SELECT state||':'||processed||':'||(target-processed) FROM adtr.message_bulk_operations WHERE operation_id='bulk-lifecycle-operation'"
     wait_value(progress_sql, "running:50:1")
-    # Observe the second batch actually inside the database before crashing it.
-    wait_value("SELECT EXISTS(SELECT FROM pg_stat_activity WHERE datname=current_database() AND wait_event='PgSleep' AND query LIKE 'INSERT INTO adtr.message_bulk_receipts%')", "t")
     committed = sql("SELECT md5(string_agg(ordinal||':'||first_read_at::text||':'||committed_at::text||':'||newly_read::text,',' ORDER BY ordinal)) FROM adtr.message_bulk_receipts WHERE operation_id='bulk-lifecycle-operation'")
     accepted = sql("SELECT accepted_at::text||':'||request_hash||':'||target FROM adtr.message_bulk_operations WHERE operation_id='bulk-lifecycle-operation'")
+    # Capture committed evidence BEFORE observing the next in-flight batch.
+    # Only accept a recently started sleep, leaving headroom before the fixed
+    # production 5-second statement deadline, then crash without extra SQL calls.
+    wait_value("SELECT EXISTS(SELECT FROM pg_stat_activity WHERE datname=current_database() AND wait_event='PgSleep' AND query LIKE 'INSERT INTO adtr.message_bulk_receipts%' AND query_start>clock_timestamp()-interval '2 seconds')", "t")
     compose("kill", "--signal", "SIGKILL", "db", "worker")
     compose("start", "db")
     for _ in range(80):

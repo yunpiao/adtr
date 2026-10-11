@@ -460,3 +460,54 @@ func TestBulkTwoWorkersSingleReadRaceAndImmutableHistory(t *testing.T) {
 		}
 	}
 }
+
+func TestBulkEmptyAndUnreadFilteredMembershipAndAutomaticRetry(t *testing.T) {
+	f := newFixture(t)
+	id := testIdentity()
+	now := time.Now().Add(time.Second)
+	empty := f.query(id, now, messagecore.ReadAll)
+	assertBulk(t, f.bulk(BulkRequest{ResultID: empty.ResultID, OperationID: "empty", Selection: "all"}, id, now), "completed", 0, 0, 0, 0)
+	for i := 0; i < 2; i++ {
+		f.runHealth(id, fmt.Sprintf("filter-%d", i))
+	}
+	f.project()
+	now = time.Now().Add(time.Second)
+	all := f.query(id, now, messagecore.ReadAll)
+	f.must(f.tx(func(tx pgx.Tx) error {
+		_, err := f.store.MarkReadTx(f.ctx, tx, id, all.ResultID, all.Items[0].ID, "known-before-filter", now)
+		return err
+	}))
+	unread := f.query(id, now, messagecore.ReadUnread)
+	if unread.Total != 1 || unread.Counts.All != 2 {
+		t.Fatal(unread)
+	}
+	f.bulk(BulkRequest{ResultID: unread.ResultID, OperationID: "retry-unread", Selection: "all"}, id, now)
+	_, err := f.db.Exec(f.ctx, `CREATE SEQUENCE adtr.synthetic_bulk_retry_count; CREATE FUNCTION adtr.synthetic_bulk_retry() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF nextval('adtr.synthetic_bulk_retry_count')=1 THEN RAISE EXCEPTION 'synthetic transient receipt failure'; END IF; RETURN NEW; END; $$; CREATE TRIGGER synthetic_bulk_retry BEFORE INSERT ON adtr.message_bulk_receipts FOR EACH ROW EXECUTE FUNCTION adtr.synthetic_bulk_retry();`)
+	f.must(err)
+	ctx, cancel := context.WithTimeout(f.ctx, 5*time.Second)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- f.store.RunBulk(ctx, bulkAllow) }()
+	deadline := time.Now().Add(4 * time.Second)
+	var op BulkOperation
+	for time.Now().Before(deadline) {
+		op = f.bulkGet(id, "retry-unread")
+		if op.State == "completed" {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	cancel()
+	f.must(<-done)
+	assertBulk(t, op, "completed", 1, 1, 1, 0)
+	var attempts int
+	f.must(f.db.QueryRow(f.ctx, `SELECT last_value FROM adtr.synthetic_bulk_retry_count`).Scan(&attempts))
+	if attempts != 2 {
+		t.Fatal("automatic loop did not retry real SQL failure", attempts)
+	}
+	var target string
+	f.must(f.db.QueryRow(f.ctx, `SELECT message_id FROM adtr.message_bulk_targets WHERE operation_id='retry-unread'`).Scan(&target))
+	if target != unread.Items[0].ID {
+		t.Fatal("all used base counts rather than filtered membership")
+	}
+}
