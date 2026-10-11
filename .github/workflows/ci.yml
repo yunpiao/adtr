@@ -260,6 +260,19 @@ jobs:
           ADTR_CI_POSTGRES_ARCHIVE_SHA: ${{ needs.prepare-postgres.outputs.archive_sha256 }}
           ADTR_CI_POSTGRES_PRODUCER_ATTEMPT: ${{ needs.prepare-postgres.outputs.producer_attempt }}
         run: ${{ matrix.command }}
+      - name: Validate safe failure diagnostics
+        id: safe-diagnostics
+        if: ${{ failure() }}
+        run: python3 scripts/e2e_runtime_diagnostics.py .e2e-diagnostics .e2e-validated
+      - name: Retain validated safe failure diagnostics
+        if: ${{ failure() && steps.safe-diagnostics.outcome == 'success' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: safe-runtime-${{ matrix.name }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .e2e-validated/diagnostics.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
       - name: Retain synthetic profile visual evidence
         if: ${{ success() && matrix.name == 'profile' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

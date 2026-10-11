@@ -6,3 +6,6 @@
 
 
 __pycache__/
+
+.e2e-diagnostics/
+.e2e-validated/
