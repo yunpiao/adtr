@@ -180,6 +180,9 @@ func (s *Store) validateSnapshot(snapshot Snapshot) error {
 	if !snapshot.CPU.ObservedAt.Equal(snapshot.ObservedAt) || !snapshot.Memory.ObservedAt.Equal(snapshot.ObservedAt) {
 		return bad()
 	}
+	if !validContainerMemory(snapshot.ContainerMemory, snapshot.ObservedAt) {
+		return bad()
+	}
 	seen := map[string]bool{}
 	for _, metric := range snapshot.Storage {
 		target, ok := s.byID[metric.ID]

@@ -146,6 +146,25 @@ func systemHealthValue(current systemhealth.Current, worker systemhealth.WorkerA
 			deps[3].ObservedAt = cycle.LastActivityAt
 		}
 	}
+	// Keep cgroup assessment separate from kernel-visible sampler availability.
+	if current.Snapshot == nil || current.Snapshot.ContainerMemory == nil {
+		deps = append(deps, systemDependency{ID: "container-memory", Name: "Runtime cgroup memory", Type: "service", Status: "unknown", Reason: "no_cgroup_observation", CheckedAt: now, Source: "persisted_observation", Scope: "runtime_cgroup"})
+	} else {
+		m := current.Snapshot.ContainerMemory
+		dep := systemDependency{ID: "container-memory", Name: "Runtime cgroup memory", Type: "service", Status: "unknown", Reason: m.Reason, CheckedAt: now, ObservedAt: &m.ObservedAt, Source: m.Source, Scope: m.Scope}
+		if current.Stale || current.Availability != systemhealth.Available {
+			dep.Reason = current.Reason
+		} else if m.Availability == systemhealth.Available && m.Percent != nil {
+			// This confirms measurement availability, not a memory pressure policy.
+			dep.Status = "healthy"
+			dep.Reason = "fresh_cgroup_observation"
+			if *m.Percent >= 100 {
+				dep.Status = "unhealthy"
+				dep.Reason = "visible_limit_reached"
+			}
+		}
+		deps = append(deps, dep)
+	}
 	result := systemHealth{Result: "healthy", CheckedAt: now, Dependencies: []systemDependency{}, Worker: worker}
 	for _, dep := range deps {
 		if filter != "all" && dep.Type != filter {

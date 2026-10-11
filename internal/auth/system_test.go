@@ -46,6 +46,7 @@ func TestSystemStrictQueryAndBoundaries(t *testing.T) {
 		{"/info", ""}, {"/nodes", ""}, {"/health", ""}, {"/services", ""}, {"/services", "type=port"},
 		{"/resources/current", "instance=local-api"}, {"/storage", "instance=local-api&page=100000&pageSize=50"},
 		{"/resources/history", "instance=local-api&startTime=0&endTime=86400&graphType=cpu_basic"},
+		{"/resources/history", "instance=local-api&startTime=0&endTime=86400&graphType=container_ram"},
 		{"/resources/history", "instance=local-api&startTime=10&endTime=20&graphType=disk_usage&storageId=runtime-root"},
 	} {
 		q, err := url.ParseQuery(tc.query)
@@ -68,6 +69,7 @@ func TestSystemStrictQueryAndBoundaries(t *testing.T) {
 		{"/resources/history", "instance=local-api&startTime=20&endTime=20&graphType=cpu_basic"},
 		{"/resources/history", "instance=local-api&startTime=01&endTime=20&graphType=cpu_basic"},
 		{"/resources/history", "instance=local-api&startTime=0&endTime=20&graphType=cpu_basic&storageId=runtime-root"},
+		{"/resources/history", "instance=local-api&startTime=0&endTime=20&graphType=container_ram&storageId=runtime-root"},
 		{"/resources/history", "instance=local-api&startTime=0&endTime=20&graphType=disk_usage"},
 		{"/resources/history", "instance=local-api&startTime=0&endTime=20&graphType=disk_usage&storageId=/"},
 		{"/resources/history", "instance=local-api&startTime=0&endTime=20&graphType=invalid"},
@@ -233,4 +235,38 @@ func TestSystemFreshSampleHealthRequiresActualMeasurements(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestContainerMemoryHealthUnknownStaleAndReachedLimit(t *testing.T) {
+	now := time.Now().UTC()
+	p := 75.0
+	m := systemhealth.ContainerMemoryMetric{Metadata: systemhealth.Metadata{ObservedAt: now, Availability: systemhealth.Available, Source: "cgroup_v2", Scope: "runtime_cgroup"}, Percent: &p, LimitState: "finite"}
+	current := systemhealth.Current{Availability: systemhealth.Available, Snapshot: &systemhealth.Snapshot{ContainerMemory: &m}, CheckedAt: now}
+	check := func(want string) {
+		t.Helper()
+		v := systemHealthValue(current, systemhealth.WorkerActivity{}, "all", now)
+		for _, dep := range v.Dependencies {
+			if dep.ID == "container-memory" {
+				if dep.Status != want {
+					t.Fatalf("cgroup state %+v", dep)
+				}
+				return
+			}
+		}
+		t.Fatal("missing cgroup dependency")
+	}
+	check("healthy")
+	p = 101
+	check("unhealthy")
+	p = 75
+	current.Stale = true
+	current.Reason = "stale_sample"
+	check("unknown")
+	current.Stale = false
+	m.Availability = systemhealth.Unavailable
+	m.Percent = nil
+	m.Reason = "unlimited"
+	check("unknown")
+	current.Snapshot.ContainerMemory = nil
+	check("unknown")
 }

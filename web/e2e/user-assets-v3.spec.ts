@@ -1761,6 +1761,9 @@ test("UserAssetsV3 real workspace, pins, identity facts and native reader invali
     const adminPage = await administrator.newPage();
     let fallback: Awaited<ReturnType<typeof fallbackTab>> | undefined;
     let held: Awaited<ReturnType<typeof holdAssetResponse>> | undefined;
+    let primaryFailure: unknown;
+    let failed = false;
+    let stage = "administrator login";
     try {
       await adminPage.goto("/");
       await loginMfa(
@@ -1808,12 +1811,15 @@ test("UserAssetsV3 real workspace, pins, identity facts and native reader invali
         .getByRole("button", { name: "查看用户 user-01", exact: true })
         .click();
       await held.fetched();
+      await held.diagnose("genuine detail captured");
+      stage = "background held detail and foreground source";
       await page.bringToFront();
       await requireSameNativeWindow([page, fallback.page]);
       await openAssets(page);
       await expect
         .poll(() => fallback!.lifecycle.evaluate((value) => value.read()))
         .toMatchObject({ visibility: "hidden", focused: false });
+      stage = "update current source revision";
       const changed = await adminPost("/api/domains/update", {
         domainId,
         expectedRevision: beforeConnection.revision,
@@ -1823,6 +1829,7 @@ test("UserAssetsV3 real workspace, pins, identity facts and native reader invali
       });
       expect(changed.result).toBe("SUCCESS");
       expect(changed.revision).not.toBe(beforeConnection.revision);
+      stage = "source conflict clears selected view";
       const stale = await assetAction(
         page,
         () =>
@@ -1840,6 +1847,7 @@ test("UserAssetsV3 real workspace, pins, identity facts and native reader invali
           .getByRole("status")
           .filter({ hasText: "切换版本或返回页面后需重新选择" }),
       ).toBeVisible();
+      stage = "select changed source without current observation";
       const unavailable = await selectAssets(page);
       expect(unavailable.query.has("observationId")).toBe(false);
       expect(unavailable.value).toMatchObject({
@@ -1854,6 +1862,7 @@ test("UserAssetsV3 real workspace, pins, identity facts and native reader invali
           { exact: true },
         ),
       ).toBeVisible();
+      stage = "revoke current scope";
       const withdrawn = await adminPost("/api/resources/groups/assign", {
         id: groupId,
         roleIds: [],
@@ -1867,6 +1876,8 @@ test("UserAssetsV3 real workspace, pins, identity facts and native reader invali
       );
       expect(currentDenied.status()).toBe(401);
       expect(await currentDenied.json()).toEqual({ error: "unauthenticated" });
+      await held.diagnose("API list401 observed");
+      stage = "native revalidation and private-view cleanup";
       await fallback.lifecycle.evaluate((value) => value.reset());
       const revalidated = fallback.page.waitForResponse(
         (response) =>
@@ -1898,6 +1909,19 @@ test("UserAssetsV3 real workspace, pins, identity facts and native reader invali
           { type: "visibilitychange", visible: true, trusted: true },
         ]),
       });
+      // A response event precedes React's private-view cleanup. Wait for
+      // the actual invalidated screen before delivering the old genuine bytes.
+      await expect(
+        fallback.page.getByRole("heading", { name: "登录账户", exact: true }),
+      ).toBeVisible();
+      await expect(
+        fallback.page.getByRole("table", { name: "用户资产列表", exact: true }),
+      ).toHaveCount(0);
+      await expect(
+        fallback.page.getByRole("region", { name: "用户详情", exact: true }),
+      ).toHaveCount(0);
+      await held.diagnose("native session401 observed");
+      stage = "release old genuine detail after invalidation";
       const outcome = await held.release();
       expect(outcome.application).toBe("complete-consumed");
       transport.push({
@@ -1917,14 +1941,42 @@ test("UserAssetsV3 real workspace, pins, identity facts and native reader invali
       await expect(
         fallback.page.getByRole("region", { name: "用户详情", exact: true }),
       ).toHaveCount(0);
+    } catch (error) {
+      failed = true;
+      primaryFailure = error;
+      // Static stage only: never print privileged request data or proof inputs.
+      console.log("V3 authority scenario failed at stage", stage);
     } finally {
-      if (held) await held.release();
+      const cleanupErrors: unknown[] = [];
+      const cleanup = async (action: () => Promise<unknown>) => {
+        try {
+          await action();
+        } catch (error) {
+          cleanupErrors.push(error);
+        }
+      };
+      if (held) await cleanup(() => held!.release());
       if (fallback) {
-        await fallback.lifecycle.evaluate((value) => value.stop());
-        await fallback.lifecycle.dispose();
-        await fallback.page.close();
+        await cleanup(() =>
+          fallback!.lifecycle.evaluate((value) => value.stop()),
+        );
+        await cleanup(() => fallback!.lifecycle.dispose());
+        await cleanup(() => fallback!.page.close());
       }
-      await administrator.close();
+      await cleanup(() => administrator.close());
+      // Keep the first assertion failure observable even when releasing a
+      // not-yet-invalidated held response also fails its strict abort proof.
+      if (failed)
+        throw new AggregateError(
+          [primaryFailure, ...cleanupErrors],
+          `V3 authority scenario failed at ${stage}`,
+          { cause: primaryFailure },
+        );
+      if (cleanupErrors.length)
+        throw new AggregateError(
+          cleanupErrors,
+          "V3 authority scenario cleanup failed",
+        );
     }
   });
   safe(consoles);

@@ -224,3 +224,16 @@
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+.system-soc .system-container-memory {
+  margin: 16px 0;
+  padding: 14px;
+  border: 1px solid #dfe5ed;
+  border-radius: 6px;
+  background: #f8fafd;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.system-soc .system-container-memory .system-finding-title {
+  flex-wrap: wrap;
+}
