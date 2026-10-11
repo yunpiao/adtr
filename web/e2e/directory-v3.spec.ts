@@ -1419,21 +1419,59 @@ test("real dictionary-v3 UI → authenticated API → worker → paged synthetic
   }
   const { identity: _privateCorrelation, ...browserRead } = afterReload.witness;
   const screenshots: unknown[] = [];
+  const testedCommit = (await run("git", ["rev-parse", "HEAD"])).stdout.trim();
+  const testedTree = (
+    await run("git", ["rev-parse", "HEAD^{tree}"])
+  ).stdout.trim();
   const capture = async (name: string, state: string) => {
     await expect(
       page.locator('input[type="password"], input[name="totpCode"]'),
     ).toHaveCount(0);
     safe(await page.locator("body").innerText());
-    expect(
-      await page.evaluate(
-        () => document.documentElement.scrollWidth <= innerWidth,
-      ),
-    ).toBe(true);
+    // Preserve clean synthetic pixels and numeric geometry before the strict
+    // width assertion, so a layout failure remains diagnosable without DOM text.
+    const geometry = await page.evaluate(() => {
+      const overflowing = [...document.querySelectorAll("body *")].filter(
+        (element) => {
+          const rect = element.getBoundingClientRect();
+          return rect.width > 0 && (rect.right > innerWidth || rect.left < 0);
+        },
+      );
+      return {
+        viewportWidth: innerWidth,
+        documentWidth: document.documentElement.scrollWidth,
+        overflowingCount: overflowing.length,
+        overflowing: overflowing.slice(0, 256).map((element) => {
+          const rect = element.getBoundingClientRect();
+          const style = getComputedStyle(element);
+          return {
+            tag: element.tagName,
+            x: rect.x,
+            y: rect.y,
+            width: rect.width,
+            height: rect.height,
+            right: rect.right,
+            left: rect.left,
+            clientWidth: element.clientWidth,
+            scrollWidth: element.scrollWidth,
+            overflowX: style.overflowX,
+            minWidth: style.minWidth,
+            whiteSpace: style.whiteSpace,
+            overflowWrap: style.overflowWrap,
+          };
+        }),
+      };
+    });
     const path = testInfo.outputPath(name);
     await page.screenshot({ path, fullPage: false });
     screenshots.push({
       filename: name,
       state,
+      testedCommit,
+      testedTree,
+      eventHead: process.env.ADTR_EVENT_HEAD_SHA ?? null,
+      eventBase: process.env.ADTR_EVENT_BASE_SHA ?? null,
+      geometry,
       viewport: page.viewportSize(),
       synthetic: true,
       dictionaryVersion: 3,
@@ -1446,6 +1484,11 @@ test("real dictionary-v3 UI → authenticated API → worker → paged synthetic
         .update(await readFile(path))
         .digest("hex"),
     });
+    await writeFile(
+      testInfo.outputPath("directory-v3-screenshot-bindings.json"),
+      JSON.stringify({ partial: true, screenshots }, null, 2),
+    );
+    expect(geometry.documentWidth <= geometry.viewportWidth).toBe(true);
   };
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.evaluate(() => scrollTo(0, 0));

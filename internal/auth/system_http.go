@@ -118,7 +118,7 @@ func parseSystemQuery(path string, q url.Values) (systemQuery, error) {
 			return out, fail(400, "invalid_input")
 		}
 		switch out.history.GraphType {
-		case "cpu_basic", "ram_basic":
+		case "cpu_basic", "ram_basic", "container_ram":
 			if out.history.StorageID != "" {
 				return out, fail(400, "invalid_input")
 			}

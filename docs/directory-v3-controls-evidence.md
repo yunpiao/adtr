@@ -87,3 +87,34 @@ assertion at 0.9928819537162781. The independently reviewed dependency fix
 `f8a576a479ec7b5991f066dbe5e8fa17025818fe` uses native centered scrolling at two
 existing test steps and retains ratio=1. It is normally integrated for the next
 candidate. No production CSS, API or display data was changed by these corrections.
+
+## Second remote runtime checkpoint and mobile diagnostic
+
+[CI38174461337](https://github.com/yunpiao/adtr/actions/runs/38174461337) identifies
+event head `21218238d3aad702f07fe0c10b1810921f8ff75e` and event base
+`f8a576a479ec7b5991f066dbe5e8fa17025818fe`, but checkout logs establish the actual
+tested merge `594dcc128bf6229676cfba663d0a777337c3d81d` (head2121823 into
+base3950997). These identities must not be conflated.
+
+- Controls job114575546223 passed (5.7 minutes), again establishing real cancel,
+  executor-return witness and zero dependencies.
+- Readers job114575546302 passed (10.5 minutes): actual read-only account,
+  native cross-tab interruption, genuine delayed response isolation and revoke.
+- Collection job114575546319 passed the earlier navigation, unknown grant/sync
+  receipt recovery and real Worker/TLS LDAP/PostgreSQL 30-object observation
+  checks, then failed its unchanged document-width assertion at the 390px
+  governance screenshot. Collection desktop/mobile/facts captures preceded that
+  failure. This run did not retain the suite's images, so no pixel acceptance or
+  exact overflow cause is claimed.
+- Both inherited user-assets-v3 engines failed final scope withdrawal with403;
+  dependency e60a507 adds precise connection-grant cleanup before withdrawal.
+  Its actual corrected acceptance remains a dependency gate.
+
+The next diagnostic keeps proof-absence and safe synthetic-content checks before
+capture, then persists clean screenshots, hash bindings, actual checkout commit
+and tree, separate event pins and numeric overflowing-element geometry before
+the original strict width assertion. Geometry is bounded to256 entries with a
+separate total count. Only this suite's existing narrow evidence pattern is
+retained on failure. No product layout change or assertion relaxation is included.
+Dependency e60a507 and actual main6beb495 are normally integrated; final exact
+candidate CI and pixel inspection are still required.
