@@ -19,7 +19,7 @@ type AccumulatorV3 struct {
 }
 
 func NewAccumulatorV3(l Limits) (*AccumulatorV3, error) {
-	if l.MaxRows < 1 || l.MaxRows > 100000 || l.MaxPages < 1 || l.MaxPages > 10000 || l.MaxPageEntries < 1 || l.MaxPageEntries > 1000 || l.MaxBytes < 1 || l.MaxBytes > 64<<20 || l.MaxCookieBytes < 1 || l.MaxCookieBytes > 65536 {
+	if l.MaxRows < 1 || l.MaxRows > 10000 || l.MaxPages < 1 || l.MaxPages > 100 || l.MaxPageEntries < 1 || l.MaxPageEntries > 1000 || l.MaxBytes < 1 || l.MaxBytes > 16<<20 || l.MaxCookieBytes < 1 || l.MaxCookieBytes > 65536 {
 		return nil, ErrLimits
 	}
 	return &AccumulatorV3{limits: l, ids: make(map[string]bool)}, nil
