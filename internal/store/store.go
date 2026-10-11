@@ -194,6 +194,12 @@ func migrateTo(ctx context.Context, config *pgx.ConnConfig, target int) error {
 		version = 17
 	}
 
+	if version < 18 && target >= 18 {
+		if _, err := tx.Exec(ctx, messages.BulkSchema); err != nil {
+			return errors.New("message bulk schema migration failed")
+		}
+		version = 18
+	}
 	if _, err := tx.Exec(ctx, "UPDATE adtr.schema_version SET version=$1 WHERE singleton=true", version); err != nil {
 		return errors.New("schema version update failed")
 	}

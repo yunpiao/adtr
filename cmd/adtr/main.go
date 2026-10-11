@@ -274,6 +274,8 @@ func run() (runErr error) {
 		}()
 		messageDone := make(chan error, 1)
 		go func() { messageDone <- messageStore.Run(ctx); stop() }()
+		bulkDone := make(chan error, 1)
+		go func() { bulkDone <- messageStore.RunBulk(ctx, auth.NewTaskAuthorizer()); stop() }()
 		result := make(chan error, 1)
 		go func() { result <- worker.Run(ctx); stop() }()
 		serverErr := app.Serve(ctx, server)
@@ -282,7 +284,7 @@ func run() (runErr error) {
 		<-schedulerDone
 		<-maintenanceDone
 		messageErr := <-messageDone
-		workerErr = errors.Join(workerErr, messageErr)
+		workerErr = errors.Join(workerErr, messageErr, <-bulkDone)
 		// Worker.Run has joined every executor and completed its acknowledgement
 		// drain. A final separate pass can now release terminal unopened uses.
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)

@@ -10,6 +10,7 @@ import uuid
 
 
 from ci_postgres_image import postgres_compose_files
+from message_bulk_lifecycle import verify_bulk_crash_recovery
 
 
 SERVICES = [("api", "8080"), ("worker", "8081")]
@@ -77,6 +78,7 @@ def run_lifecycle(compose_files=()):
                 time.sleep(0.5)
         else:
             raise AssertionError("database recovery did not restore readiness")
+        verify_bulk_crash_recovery(compose)
         # A restart must recover the SAME containers. Running `up` here could
         # replace a broken container and turn a restart failure into a false pass.
         before = container_ids(compose)
