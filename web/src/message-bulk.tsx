@@ -257,19 +257,29 @@ export function useMessageBulk(
     const reload = () => restore();
     // Safe read-only recovery, including reload and another tab's original intent.
     // Never automatically repeat start or cancel writes.
-    let cursor = 0;
-    const timer = window.setInterval(() => {
+    // Keep the last operation ID, not an index into a shrinking candidate list.
+    // Terminal/removal changes must not skip the next unread operation.
+    let cursor = "";
+    const poll = () => {
       if (locked.current) return;
-      const candidates = state.current.filter(
-        (o) =>
-          o.phase !== "missing" &&
-          (o.phase === "unknown" || !o.value || !bulkTerminal(o.value.state)),
-      );
-      const next = candidates.length
-        ? candidates[cursor++ % candidates.length]
-        : undefined;
-      if (next) void runner.current(next, "lookup");
-    }, 2000);
+      const candidates = state.current
+        .filter(
+          (o) =>
+            o.phase !== "missing" &&
+            (o.phase === "unknown" || !o.value || !bulkTerminal(o.value.state)),
+        )
+        .sort((a, b) => (a.input.operationId < b.input.operationId ? -1 : 1));
+      const next =
+        candidates.find((o) => o.input.operationId > cursor) ?? candidates[0];
+      if (next) {
+        cursor = next.input.operationId;
+        void runner.current(next, "lookup");
+      }
+    };
+    // Start restoring as soon as authority is verified; subsequent reads retain
+    // the two-second cadence and the same single in-flight request lock.
+    poll();
+    const timer = window.setInterval(poll, 2000);
     window.addEventListener("storage", reload);
     window.addEventListener("focus", reload);
     return () => {
