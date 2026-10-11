@@ -9,6 +9,7 @@ export function installUserAssetAbortIsolation() {
     "/api/user-assets/v2",
     "/api/user-assets/v2/detail",
     "/api/user-assets/v3",
+    "/api/computer-assets/v3",
     "/api/user-assets/v3/detail",
   ]);
   type Witness = {

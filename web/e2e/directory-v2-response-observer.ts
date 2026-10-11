@@ -60,6 +60,7 @@ export function installDirectoryV2ResponseObserver() {
     "/api/user-assets/v2",
     "/api/user-assets/v2/detail",
     "/api/user-assets/v3",
+    "/api/computer-assets/v3",
     "/api/user-assets/v3/detail",
     "/api/directory/v2/observation",
     "/api/directory/v2/receipt",
@@ -452,6 +453,7 @@ const directoryPath = (url: URL) =>
     "/api/user-assets/v2",
     "/api/user-assets/v2/detail",
     "/api/user-assets/v3",
+    "/api/computer-assets/v3",
     "/api/user-assets/v3/detail",
   ].includes(url.pathname) ||
   /^\/api\/directory\/v2\/(?:observation|receipt|task|sync|cancel)$/u.test(

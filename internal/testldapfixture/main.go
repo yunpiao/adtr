@@ -26,6 +26,7 @@ type configuration struct {
 	directoryV2                              bool
 	directoryV3                              bool
 	userAssetsV2                             bool
+	computerAssetsV3                         bool
 	directoryEmpty, directorySlow            bool
 	username, password                       []byte
 }
@@ -40,6 +41,7 @@ func readConfiguration(args []string, getenv func(string) string) (configuration
 	flags.BoolVar(&cfg.directoryMode, "directory-mode", false, "enable the fixed synthetic directory dictionary for integration tests")
 	flags.BoolVar(&cfg.directoryV2, "directory-v2", false, "select the fixed eight-attribute dictionary; requires directory mode")
 	flags.BoolVar(&cfg.directoryV3, "directory-v3", false, "select the fixed ten-attribute dictionary; requires directory mode")
+	flags.BoolVar(&cfg.computerAssetsV3, "computer-assets-v3", false, "select isolated computer rows; requires dictionary3 nonempty fast mode")
 	flags.BoolVar(&cfg.userAssetsV2, "user-assets-v2", false, "select isolated user-asset rows; requires dictionary 2 and nonempty fast mode")
 	flags.BoolVar(&cfg.directoryEmpty, "directory-empty", false, "return zero synthetic objects; requires directory mode")
 	flags.BoolVar(&cfg.directorySlow, "directory-slow", false, "return five synthetic pages with a fixed two-second delay each; requires directory mode")
@@ -49,7 +51,8 @@ func readConfiguration(args []string, getenv func(string) string) (configuration
 		!validListenAddress(cfg.startTLSAddress, "389") || !validListenAddress(cfg.ldapsAddress, "636") ||
 		((cfg.directoryV2 || cfg.directoryV3 || cfg.directoryEmpty || cfg.directorySlow) && !cfg.directoryMode) ||
 		(cfg.directoryV3 && (cfg.directoryV2 || cfg.userAssetsV2)) ||
-		(cfg.userAssetsV2 && (!cfg.directoryMode || !cfg.directoryV2 || cfg.directoryEmpty || cfg.directorySlow)) {
+		(cfg.userAssetsV2 && (!cfg.directoryMode || !cfg.directoryV2 || cfg.directoryEmpty || cfg.directorySlow)) ||
+		(cfg.computerAssetsV3 && (!cfg.directoryMode || !cfg.directoryV3 || cfg.directoryEmpty || cfg.directorySlow || cfg.userAssetsV2)) {
 		return configuration{}, errors.New("invalid synthetic LDAP fixture configuration")
 	}
 	cfg.username = []byte(getenv("ADTR_LDAP_FIXTURE_USERNAME"))
@@ -108,16 +111,17 @@ func run(ctx context.Context, args []string, getenv func(string) string, output 
 	}
 	defer ldaps.Close()
 	fixture := server{
-		tlsConfig:      &tls.Config{MinVersion: tls.VersionTLS12, Certificates: []tls.Certificate{certificate}},
-		username:       cfg.username,
-		password:       cfg.password,
-		control:        control,
-		directoryMode:  cfg.directoryMode,
-		directoryV2:    cfg.directoryV2,
-		directoryV3:    cfg.directoryV3,
-		userAssetsV2:   cfg.userAssetsV2,
-		directoryEmpty: cfg.directoryEmpty,
-		directorySlow:  cfg.directorySlow,
+		tlsConfig:        &tls.Config{MinVersion: tls.VersionTLS12, Certificates: []tls.Certificate{certificate}},
+		username:         cfg.username,
+		password:         cfg.password,
+		control:          control,
+		directoryMode:    cfg.directoryMode,
+		directoryV2:      cfg.directoryV2,
+		directoryV3:      cfg.directoryV3,
+		userAssetsV2:     cfg.userAssetsV2,
+		computerAssetsV3: cfg.computerAssetsV3,
+		directoryEmpty:   cfg.directoryEmpty,
+		directorySlow:    cfg.directorySlow,
 	}
 	if _, err := fmt.Fprintln(output, "synthetic LDAP fixture ready"); err != nil {
 		return errors.New("synthetic LDAP fixture readiness output unavailable")

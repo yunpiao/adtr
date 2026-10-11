@@ -113,7 +113,7 @@ describe("SOC workspace navigation", () => {
       within(nav)
         .getAllByRole("button")
         .map((button) => button.textContent),
-    ).toEqual(["用户资产", "后台任务", "操作审计", "站内消息"]);
+    ).toEqual(["用户资产", "计算机资产", "后台任务", "操作审计", "站内消息"]);
     for (const entry of SOC_NAVIGATION_GROUPS)
       expect(group(entry.label)).not.toHaveAttribute("open");
     expect(screen.getByRole("button", { name: "用户资产" })).toHaveAttribute(
