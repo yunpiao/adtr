@@ -3,6 +3,12 @@
 总路线图：https://github.com/yunpiao/adtr/issues/1 。全部 209 项均在范围内。
 工程文档、代码、PR、最新 head CI、合并、产品验收分别记录；任一阶段不能代表后续阶段完成。
 
+## F40 真实 health 消息后端首片（2026-10-11 开发中）
+
+Refs [#101](https://github.com/yunpiao/adtr/issues/101)、[F40 #50](https://github.com/yunpiao/adtr/issues/50)，基线main `f9b8ed1`，迁移17。仅真实health终态投影、本人固定查询/阅读快照、实时权限与持久单条已读收据；纯messagecore不变。UI/完整时间线/批量进度/完整F40仍开放，产品验收0/209，无部署。
+
+未修改基线的messagecore/auth/store/cmd单元通过；初版及审查修复后的最终候选完整make check均已通过1311项DOM、98项Python、Go race/vet/build、类型检查及依赖审计0。新增认证/存储集成测试已通过integration-tag编译，但真实PostgreSQL实际尝试因ADTR_TEST_DATABASE_URL缺失失败，本地无docker/psql；不计为集成通过。独立实际diff复核发现并修复纳秒SQL边界与持续新增扫描公平性问题，补充回归后未见剩余阻断项；真实链门禁及精确head CI继续逐项核验。[运行时契约](message-runtime-contract.md)说明来源、安全预算、恢复与未完成范围。
+
 ## SOC 生产任务工作区（2026-10-10 开发切片）
 
 Refs [#93](https://github.com/yunpiao/adtr/issues/93)、[F48 #12](https://github.com/yunpiao/adtr/issues/12)、AD-F-189、设计 #87。基于 main `a8cc62a` 和已合并 PR89/PR92，制作真实任务紧凑队列、完整执行详情和持久化事件时间线。只使用现有任务读取字段；后端和全部既有写入/证明/幂等/专用任务边界保持。

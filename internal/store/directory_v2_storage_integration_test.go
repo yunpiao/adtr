@@ -24,7 +24,7 @@ func TestDirectoryV2ProductionStorageGuardLosslessAndCanonical(t *testing.T) {
 	if err := Migrate(f.ctx, f.config); err != nil {
 		t.Fatal(err)
 	}
-	f.schemaVersion = 16
+	f.schemaVersion = SchemaVersion
 	grant := f.grantDirectoryV2("first")
 	engine, opened := f.controlledLedgerEngine(domains.New(nil).DirectoryV2Kind(), "domain_directory_task_uses")
 	task := f.submitDirectoryV2(engine, "first", grant)
