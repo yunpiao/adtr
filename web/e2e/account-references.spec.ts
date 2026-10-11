@@ -1,4 +1,7 @@
-import { holdConsumedSource } from "./domain-source-delivery-probe";
+import {
+  holdConsumedSource,
+  sourceProbeDeadline,
+} from "./domain-source-delivery-probe";
 import {
   sourceFallbackPage,
   sourceFallbackRefocus,
@@ -1463,10 +1466,41 @@ test("unconfigured bootstrap, explicit own-role reference, real LDAP consumption
           2,
         ),
       );
-      mark("restore_A");
+      mark("restore_A_focus");
+      // The last fallback tab is now foreground. Restore native visibility
+      // before driving the switching page's ordinary, actionable controls.
+      const restoreSession = switching.waitForResponse(
+        (response) =>
+          new URL(response.url()).pathname === "/api/auth/me" &&
+          response.request().method() === "GET" &&
+          response.status() === 200,
+        { timeout: 20_000 },
+      );
+      void restoreSession.catch(() => {});
+      await sourceProbeDeadline(switching.bringToFront());
+      await expect
+        .poll(() =>
+          switching.evaluate(() => ({
+            visible: document.visibilityState,
+            focused: document.hasFocus(),
+          })),
+        )
+        .toEqual({ visible: "visible", focused: true });
+      expect(
+        (await sourceProbeDeadline((await restoreSession).json())).ID,
+      ).toBe(noScopeId);
+      await expect(
+        switching.getByRole("status").filter({ hasText: "正在核验当前会话" }),
+      ).toHaveCount(0);
+      await expect(switching.locator(".signed-in strong")).toHaveText(
+        noScopeUsername,
+      );
+      mark("restore_A_logout");
       switched = false;
       await navigateTo(switching, "退出登录");
+      mark("restore_A_login");
       await login(switching, username, password);
+      mark("restore_A_MFA");
       await fillSecret(
         switching.getByLabel("二次认证验证码", { exact: true }),
         await freshCode(auth),

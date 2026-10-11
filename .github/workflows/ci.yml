@@ -163,6 +163,8 @@ jobs:
       max-parallel: 4
       matrix:
         include:
+          - name: account-references
+            command: python3 scripts/test_auth_e2e.py --suite account-references
           - name: messages
             command: python3 scripts/test_auth_e2e.py --suite messages
           - name: user-assets-v2
@@ -201,8 +203,6 @@ jobs:
             command: python3 scripts/test_auth_e2e.py --suite profile
           - name: credential-use
             command: python3 scripts/test_auth_e2e.py --suite credential-use
-          - name: account-references
-            command: python3 scripts/test_auth_e2e.py --suite account-references
           - name: operational-logs
             command: python3 scripts/test_auth_e2e.py --suite operational-logs
           - name: session-invalidation
