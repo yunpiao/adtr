@@ -4,6 +4,7 @@ import base64
 import os
 from pathlib import Path
 import secrets
+import signal
 import shutil
 import socket
 import subprocess
@@ -33,6 +34,8 @@ SLOW_DIRECTORY_SUITES = {"directory-controls", "directory-v2-controls"}
 
 def browser_command(suite):
     command = ["npm", "run", "test:e2e", "--prefix", "web", "--", f"e2e/{suite}.spec.ts"]
+    if suite == "messages-bulk":
+        command.extend(["--output", "test-results/messages-bulk"])
     if suite in REAL_TAB_LIFECYCLE_SUITES:
         # These regressions require genuine background/foreground tab changes.
         # Headless shell keeps tabs visible even after focus emulation is off.
@@ -51,7 +54,7 @@ def browser_command(suite):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--suite", choices=["auth", "access", "resource", "tasks", "messages", "audit", "system", "maintenance", "domains", "operations", "profile", "credential-use", "account-references", "operational-logs", "session-invalidation", "account-reference-barrier", "directory", "directory-controls", "directory-readers", "directory-v2", "directory-v2-controls", "directory-v2-readers", "user-assets-v2", "user-assets-v2-readers"], default="auth")
+    parser.add_argument("--suite", choices=["auth", "access", "resource", "tasks", "messages", "messages-bulk", "audit", "system", "maintenance", "domains", "operations", "profile", "credential-use", "account-references", "operational-logs", "session-invalidation", "account-reference-barrier", "directory", "directory-controls", "directory-readers", "directory-v2", "directory-v2-controls", "directory-v2-readers", "user-assets-v2", "user-assets-v2-readers"], default="auth")
     parser.add_argument("--expired", action="store_true")
     args = parser.parse_args()
     # Check display support before creating a disposable database or fixtures.
@@ -65,6 +68,7 @@ def main():
     worker = None
     ldap_fixture = None
     account_barrier = None
+    message_fixture = None
     logs = tempfile.TemporaryFile(mode="w+")
     try:
         creation_attempted = True
@@ -111,6 +115,13 @@ def main():
         if args.suite == "messages":
             # Read-only provenance checks wait for the real health projection; no message fixtures.
             env["ADTR_E2E_DB_CONTAINER"] = name
+        if args.suite == "messages-bulk":
+            message_fixture = tempfile.TemporaryDirectory(prefix="adtr-message-fixture-")
+            fixture_binary = str(Path(message_fixture.name) / "message-fixture")
+            subprocess.run(["go", "build", "-tags=integration", "-o", fixture_binary,
+                            "./internal/testmessagefixture"], check=True, capture_output=True, timeout=120)
+            env.update(ADTR_E2E_DB_CONTAINER=name, ADTR_E2E_MESSAGE_FIXTURE="owned-isolated-health",
+                       ADTR_E2E_MESSAGE_FIXTURE_BINARY=fixture_binary)
         if args.expired:
             subprocess.run(["docker", "exec", name, "psql", "-U", "postgres", "-d", "adtr_e2e", "-v", "ON_ERROR_STOP=1", "-c",
                             "UPDATE adtr.users SET must_change=false,password_updated_at=now()-interval '91 days' WHERE username='e2e-admin'"],
@@ -158,11 +169,14 @@ def main():
             time.sleep(0.1)
         else:
             raise RuntimeError("authentication API failed readiness")
-        if args.suite in {"tasks", "messages", "audit", "system", "maintenance", "domains", "account-references", "operational-logs", "account-reference-barrier"} | DIRECTORY_SUITES:
+        if args.suite in {"tasks", "messages", "messages-bulk", "audit", "system", "maintenance", "domains", "account-references", "operational-logs", "account-reference-barrier"} | DIRECTORY_SUITES:
             with socket.socket() as listener:
                 listener.bind(("127.0.0.1", 0))
                 worker_port = listener.getsockname()[1]
             worker_env = dict(runtime_env, ADTR_LISTEN_ADDR=f"127.0.0.1:{worker_port}")
+            if args.suite == "messages-bulk":
+                # Identify only our worker connections for quiescent SIGSTOP tests.
+                worker_env["ADTR_DATABASE_URL"] += "&application_name=adtr-message-bulk-worker"
             # Execution authorization needs persisted actors, not browser secrets.
             for key in ["ADTR_AUTH_KEY", "ADTR_ORIGIN", "ADTR_WEB_DIR"]:
                 worker_env.pop(key, None)
@@ -179,8 +193,10 @@ def main():
                 time.sleep(0.1)
             else:
                 raise RuntimeError("task worker failed readiness")
-        if args.suite in {"system", "operational-logs"}:
+        if args.suite in {"system", "operational-logs", "messages-bulk"}:
             env["ADTR_E2E_WORKER_PID"] = str(worker.pid)
+            if args.suite == "messages-bulk":
+                env["ADTR_E2E_HARNESS_PID"] = str(os.getpid())
         # Trace/screenshot settings do not disable Playwright's automatic failure
         # DOM snapshot. Suppress that separate artifact so proof fields cannot
         # enter an error-context prompt; explicit safe screenshots remain intact.
@@ -197,6 +213,9 @@ def main():
         for label, process in [("worker", worker), ("API", server)]:
             if process is None:
                 continue
+            if args.suite == "messages-bulk" and label == "worker" and process.poll() is None:
+                # A failed browser may leave our own child stopped. Resume before shutdown.
+                process.send_signal(signal.SIGCONT)
             process.terminate()
             try:
                 code = process.wait(timeout=30)
@@ -224,10 +243,15 @@ def main():
                 )
         finally:
             logs.close()
+        if message_fixture is not None:
+            message_fixture.cleanup()
         if creation_attempted:
             remove_owned_container(name, owner)
         if shutdown_error is not None:
             raise shutdown_error
+    if args.suite == "messages":
+        # Additive sequential acceptance, fresh owned database; never recurse from bulk.
+        subprocess.run([sys.executable, __file__, "--suite", "messages-bulk"], check=True)
     print(f"{args.suite} (expired={args.expired}): {chain} acceptance PASS")
 
 

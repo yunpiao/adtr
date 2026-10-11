@@ -379,3 +379,60 @@
 .message-workspace .message-read-panel p {
   overflow-wrap: anywhere;
 }
+
+.message-workspace .message-bulk-select {
+  padding: 18px;
+  margin: 16px 0;
+  border: 1px solid #c8d9f3;
+  border-radius: 10px;
+  background: #f5f8fe;
+}
+.message-workspace .message-bulk-preview {
+  margin-top: 14px;
+  padding: 14px;
+  border: 1px solid #a9bedc;
+  border-radius: 8px;
+  background: #fff;
+  overflow-wrap: anywhere;
+}
+.message-workspace .message-bulk-preview ul {
+  max-height: 180px;
+  overflow: auto;
+}
+.message-workspace .message-read-panel dl.message-bulk-counts {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  padding: 12px;
+  background: #f5f8fe;
+  border-radius: 8px;
+}
+.message-workspace .message-bulk-counts > div {
+  display: block;
+  min-width: 0;
+  padding: 8px 0;
+  border-bottom: 0;
+}
+.message-workspace .message-bulk-counts dt {
+  min-height: 2.8em;
+  overflow-wrap: anywhere;
+}
+.message-workspace .message-bulk-counts dd {
+  white-space: nowrap;
+  overflow-wrap: normal;
+  font-size: 22px;
+  font-weight: 700;
+  color: #244c87;
+}
+.message-workspace .message-row-number input {
+  display: block;
+  width: 18px;
+  height: 18px;
+  margin: 0 0 10px;
+}
+@media (max-width: 520px) {
+  .message-workspace .message-read-panel dl.message-bulk-counts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .message-workspace .message-bulk-select {
+    padding: 12px;
+  }
+}

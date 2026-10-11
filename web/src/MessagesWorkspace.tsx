@@ -16,6 +16,7 @@ import {
 import "./message-soc.css";
 import { Field } from "./access-common";
 import { useMessageRead } from "./message-read";
+import { useMessageBulk } from "./message-bulk";
 
 type Props = { profile: Profile; sessionChanged: () => void };
 type ReadIntent =
@@ -139,6 +140,7 @@ function MessageSession({ profile, sessionChanged }: Props) {
   const resetAuthority = () => {
     invalidate();
     marking.suspend();
+    bulk.suspend();
     setSnapshot(undefined);
     setApplied(undefined);
     setHighlight("");
@@ -171,6 +173,12 @@ function MessageSession({ profile, sessionChanged }: Props) {
   };
   const marking = useMessageRead(profile, !!gate?.[3] && !!gate?.[4], (e) =>
     handleError(e, false),
+  );
+  const bulk = useMessageBulk(
+    profile,
+    !!gate?.[5] && !!gate?.[6] && !!gate?.[7],
+    snapshot,
+    (e) => handleError(e, false),
   );
   const confirm = async () => {
     if (locked.current || !gate?.[0]) return;
@@ -337,6 +345,7 @@ function MessageSession({ profile, sessionChanged }: Props) {
         </div>
       )}
       {marking.panel}
+      {bulk.panel}
       {gate?.[0] && (
         <>
           <form
@@ -504,6 +513,7 @@ function MessageSession({ profile, sessionChanged }: Props) {
                   计数遵循类型、标题和时间筛选；列表总数另含阅读状态筛选。分页不会刷新计数。
                 </p>
               </div>
+              {bulk.controls}
               <form
                 className="message-locate"
                 onSubmit={(e) => {
@@ -546,6 +556,15 @@ function MessageSession({ profile, sessionChanged }: Props) {
                         aria-label={`消息 ${row.messageId}`}
                       >
                         <div className="message-row-number">
+                          {gate[5] && gate[6] && gate[7] && (
+                            <input
+                              type="checkbox"
+                              aria-label={`选择消息 ${row.messageId}`}
+                              checked={bulk.selected(row.messageId)}
+                              disabled={!!busy || bulk.selectionDisabled}
+                              onChange={() => bulk.toggle(row.messageId)}
+                            />
+                          )}
                           {String(snapshot.offset + index + 1).padStart(2, "0")}
                         </div>
                         <div className="message-row-content">

@@ -71,7 +71,7 @@ const requests = (path: string) =>
 beforeEach(() => {
   localStorage.clear();
   changed.mockReset();
-  grants = [true, true, true, true, true];
+  grants = [true, true, true, true, true, true, true, true];
   post = (i) => json(receipt(i));
   lookup = () => json(receipt());
   query = () => json(sampleSnapshot());
