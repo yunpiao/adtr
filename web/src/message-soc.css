@@ -405,7 +405,19 @@
   background: #f5f8fe;
   border-radius: 8px;
 }
+.message-workspace .message-bulk-counts > div {
+  display: block;
+  min-width: 0;
+  padding: 8px 0;
+  border-bottom: 0;
+}
+.message-workspace .message-bulk-counts dt {
+  min-height: 2.8em;
+  overflow-wrap: anywhere;
+}
 .message-workspace .message-bulk-counts dd {
+  white-space: nowrap;
+  overflow-wrap: normal;
   font-size: 22px;
   font-weight: 700;
   color: #244c87;

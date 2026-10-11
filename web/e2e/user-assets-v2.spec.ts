@@ -1270,7 +1270,7 @@ test("UserAssetsV2 real worker TLS LDAP PostgreSQL search and pinned detail", as
     }
   });
   const cleared = await assetAction(page, () =>
-    page.getByRole("button", { name: "清除用户搜索", exact: true }).click(),
+    page.getByRole("button", { name: "清除用户筛选", exact: true }).click(),
   );
   expect(cleared.query.get("observationId")).toBe(taskUUID);
   expect(cleared.value.list).toEqual(expected.slice(0, 10));
@@ -1289,6 +1289,163 @@ test("UserAssetsV2 real worker TLS LDAP PostgreSQL search and pinned detail", as
       totalPage: Math.ceil(12 / size),
     });
   }
+  await test.step("exact SAM and nanosecond creation filters retain the genuine observation and stable time order", async () => {
+    await page.getByText("精确账户与创建时间筛选", { exact: true }).click();
+    const sam = page.getByLabel("精确账户名（SAM）", { exact: true });
+    const start = page.getByLabel("创建时间开始（含）", { exact: true });
+    const end = page.getByLabel("创建时间结束（不含）", { exact: true });
+    const order = page.getByLabel("创建时间排序", { exact: true });
+    const apply = () =>
+      assetAction(page, () =>
+        page.getByRole("button", { name: "搜索用户", exact: true }).click(),
+      );
+    await test.step("native clipboard and drop guards refuse sanitizing raw filters and send no transformed query", async () => {
+      let reads = 0;
+      const recordRead = (request: Request) => {
+        if (new URL(request.url()).pathname === "/api/user-assets/v2") reads++;
+      };
+      page.on("request", recordRead);
+      try {
+        for (const kind of ["paste", "drop"] as const) {
+          for (const [field, raw] of [
+            [sam, "user-\n11"],
+            [sam, "\r\n"],
+            [sam, "\u0000\u0085"],
+            [start, "0001-01-01T00:00:00Z\n"],
+            [end, "0001-01-01T00:00:01Z\r"],
+          ] as const) {
+            const prior =
+              raw === "\r\n"
+                ? ""
+                : field === sam
+                  ? "user-11"
+                  : "0001-01-01T00:00:00Z";
+            await field.fill(prior);
+            const prevented = await field.evaluate(
+              (element, transfer) => {
+                const data = new DataTransfer();
+                data.setData("text/plain", transfer.raw);
+                const event =
+                  transfer.kind === "paste"
+                    ? new ClipboardEvent("paste", {
+                        clipboardData: data,
+                        bubbles: true,
+                        cancelable: true,
+                      })
+                    : new DragEvent("drop", {
+                        dataTransfer: data,
+                        bubbles: true,
+                        cancelable: true,
+                      });
+                element.dispatchEvent(event);
+                return event.defaultPrevented;
+              },
+              { kind, raw },
+            );
+            expect(prevented).toBe(true);
+            await expect(field).toHaveValue(prior);
+            await expect(field).toHaveAttribute("aria-invalid", "true");
+            await expect(page.getByRole("alert")).toContainText("含控制字符");
+            await expect(
+              page.getByRole("button", { name: "搜索用户", exact: true }),
+            ).toBeDisabled();
+            await page
+              .locator("form.asset-search-toolbar")
+              .evaluate((form) => (form as HTMLFormElement).requestSubmit());
+            expect(reads).toBe(0);
+            // A real edit of this field acknowledges the rejected transfer.
+            await field.fill("x");
+            await field.fill("");
+            await expect(field).toHaveAttribute("aria-invalid", "false");
+            await expect(
+              page.getByRole("button", { name: "搜索用户", exact: true }),
+            ).toBeEnabled();
+          }
+        }
+      } finally {
+        page.off("request", recordRead);
+      }
+    });
+    for (const value of ["user-1", "USER-11", " user-11", "user-11 "]) {
+      await sam.fill(value);
+      const noMatch = await apply();
+      expect(noMatch.query.get("sAMAccountName")).toBe(value);
+      expect(noMatch.query.get("observationId")).toBe(taskUUID);
+      expect(noMatch.value.list).toEqual([]);
+      expect(noMatch.value.page.total).toBe(0);
+    }
+    await sam.fill("user-11");
+    await start.fill("2026-10-01T10:03:04+08:00");
+    await end.fill("2026-10-01T02:03:04.000000001Z");
+    await order.selectOption("desc");
+    const exact = await searchAssets(page, "row-11@example.test");
+    expect(exact.query.get("observationId")).toBe(taskUUID);
+    expect(exact.query.get("sAMAccountName")).toBe("user-11");
+    expect(exact.query.get("startTm")).toBe("2026-10-01T10:03:04+08:00");
+    expect(exact.query.get("endTm")).toBe("2026-10-01T02:03:04.000000001Z");
+    expect(exact.query.get("creatTm")).toBe("desc");
+    expect(exact.value.list).toEqual([expected[10]]);
+    expect(exact.value.page).toEqual({
+      pageIdx: 1,
+      pageSize: 10,
+      total: 1,
+      totalPage: 1,
+    });
+    await expect(table.locator("tbody tr")).toHaveCount(1);
+    await page.screenshot({
+      path: testInfo.outputPath("user-assets-v2-exact-sam-created-range.png"),
+      fullPage: true,
+    });
+    const conjunction = await searchAssets(page, "row-10@example.test");
+    expect(conjunction.value.list).toEqual([]);
+    expect(conjunction.value.page.total).toBe(0);
+
+    await page.getByLabel("用户资产关键词", { exact: true }).fill("");
+    await sam.fill("");
+    await start.fill("0001-01-01T08:00:00+08:00");
+    await end.fill("0001-01-01T00:00:00.000000001Z");
+    const ancient = await apply();
+    expect(ancient.query.has("sAMAccountName")).toBe(false);
+    expect(ancient.value.list).toEqual([expected[0]]);
+    expect(ancient.value.page.total).toBe(1);
+    await end.fill("2026-10-01T02:03:04Z");
+    const excludedEnd = await apply();
+    expect(excludedEnd.value.list).toEqual([expected[0]]);
+    await start.fill("2026-10-01T02:03:04.000000001Z");
+    await end.fill("2026-10-01T02:03:05Z");
+    const excludedStart = await apply();
+    expect(excludedStart.value.list).toEqual([]);
+    expect(excludedStart.value.page.total).toBe(0);
+
+    await start.fill("");
+    await end.fill("");
+    const descending = await apply();
+    expect(descending.value.list).toEqual(expected.slice(1, 11));
+    expect(descending.value.page.total).toBe(12);
+    const descendingLast = await assetAction(page, () =>
+      page.getByRole("button", { name: "用户资产下一页", exact: true }).click(),
+    );
+    expect(descendingLast.query.get("creatTm")).toBe("desc");
+    expect(descendingLast.query.get("observationId")).toBe(taskUUID);
+    expect(descendingLast.value.list).toEqual([expected[0], expected[11]]);
+    await order.selectOption("asc");
+    const ascending = await apply();
+    expect(ascending.value.page.pageIdx).toBe(1);
+    expect(ascending.value.list).toEqual(expected.slice(0, 10));
+    const ascendingLast = await assetAction(page, () =>
+      page.getByRole("button", { name: "用户资产下一页", exact: true }).click(),
+    );
+    expect(ascendingLast.value.list).toEqual(expected.slice(10));
+    expect(ascendingLast.query.get("observationId")).toBe(taskUUID);
+    const reset = await assetAction(page, () =>
+      page.getByRole("button", { name: "清除用户筛选", exact: true }).click(),
+    );
+    expect(reset.value.list).toEqual(expected.slice(0, 10));
+    expect(reset.query.get("observationId")).toBe(taskUUID);
+    for (const key of ["sAMAccountName", "startTm", "endTm", "creatTm"])
+      expect(reset.query.has(key)).toBe(false);
+    await page.getByText("精确账户与创建时间筛选", { exact: true }).click();
+  });
   const common = {
     domainId,
     expectedRevision: selection.revision,
@@ -1320,6 +1477,13 @@ test("UserAssetsV2 real worker TLS LDAP PostgreSQL search and pinned detail", as
     "pageSize=-1",
     "search=" + encodeURIComponent("😀".repeat(26)),
     "search=a&search=b",
+    "sAMAccountName=" + encodeURIComponent("😀".repeat(129)),
+    "sAMAccountName=user-11&sAMAccountName=user-11",
+    "creatTm=ASC",
+    "creatTm=asc&creatTm=asc",
+    "startTm=2026-10-01T00%3A00%3A00Z",
+    "startTm=&endTm=",
+    "startTm=2026-10-01T00%3A00%3A00Z&endTm=2026-10-01T00%3A00%3A00Z",
     "unknown=1",
   ]) {
     const invalid = await context.request.get(
@@ -1420,7 +1584,7 @@ test("UserAssetsV2 real worker TLS LDAP PostgreSQL search and pinned detail", as
     await producerPage.close();
   }
   const pinned = await assetAction(page, () =>
-    page.getByRole("button", { name: "清除用户搜索", exact: true }).click(),
+    page.getByRole("button", { name: "清除用户筛选", exact: true }).click(),
   );
   expect(pinned.value.observationId).toBe(taskUUID);
   const pinnedDetail = await assetAction(
@@ -1433,11 +1597,34 @@ test("UserAssetsV2 real worker TLS LDAP PostgreSQL search and pinned detail", as
   );
   expect(pinnedDetail.value.observationId).toBe(taskUUID);
   await page.getByRole("button", { name: "关闭用户详情", exact: true }).click();
+  await page.getByText("精确账户与创建时间筛选", { exact: true }).click();
+  await page.getByLabel("精确账户名（SAM）", { exact: true }).fill("user-01");
+  await page
+    .getByLabel("创建时间开始（含）", { exact: true })
+    .fill("0001-01-01T00:00:00Z");
+  await page
+    .getByLabel("创建时间结束（不含）", { exact: true })
+    .fill("0001-01-01T00:00:00.000000001Z");
+  await page.getByLabel("创建时间排序", { exact: true }).selectOption("asc");
+  const filteredOldPin = await assetAction(page, () =>
+    page.getByRole("button", { name: "搜索用户", exact: true }).click(),
+  );
+  expect(filteredOldPin.query.get("observationId")).toBe(taskUUID);
+  expect(filteredOldPin.value.observationId).toBe(taskUUID);
+  expect(filteredOldPin.value.list).toEqual([expected[0]]);
+  await page.getByText("精确账户与创建时间筛选", { exact: true }).click();
   const refreshed = await assetAction(page, () =>
     page.getByRole("button", { name: "刷新用户资产观测", exact: true }).click(),
   );
   expect(refreshed.query.has("observationId")).toBe(false);
   expect(refreshed.value.observationId).toBe(newerId);
+  expect(refreshed.value.list).toEqual([expected[0]]);
+  for (const key of ["sAMAccountName", "startTm", "endTm", "creatTm"])
+    expect(refreshed.query.get(key)).toBe(filteredOldPin.query.get(key));
+  const resetNewPin = await assetAction(page, () =>
+    page.getByRole("button", { name: "清除用户筛选", exact: true }).click(),
+  );
+  expect(resetNewPin.query.get("observationId")).toBe(newerId);
   await expect(panel).toHaveCount(0);
   await expect(table.locator("tbody tr")).toHaveCount(10);
   await page.screenshot({

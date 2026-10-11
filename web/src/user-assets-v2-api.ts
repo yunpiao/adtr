@@ -9,6 +9,11 @@ import {
 } from "./directory-v2-api";
 import { readDirectoryV2JSON } from "./directory-v2-json";
 import { integer, object } from "./task-api";
+import {
+  userAssetsV2Time,
+  validUserAssetsV2Filters,
+  type UserAssetsV2Filters,
+} from "./user-assets-v2-filters";
 
 export const userAssetsV2Operations = [
   "GET /api/user-assets/v2",
@@ -25,7 +30,7 @@ interface SourceRequest {
   expectedRevision: string;
   expectedCredentialRevision: string;
 }
-export interface UserAssetsV2Query extends SourceRequest {
+export interface UserAssetsV2Query extends SourceRequest, UserAssetsV2Filters {
   observationId?: string;
   search: string;
   pageIdx: number;
@@ -73,6 +78,7 @@ const validRequest = (q: SourceRequest) =>
 const validListQuery = (q: UserAssetsV2Query) =>
   validRequest(q) &&
   validUserAssetsV2Search(q.search) &&
+  validUserAssetsV2Filters(q) &&
   integer(q.pageIdx, 1, 10000) &&
   userAssetsV2PageSizes.some((size) => size === q.pageSize) &&
   (q.observationId === undefined || validDomainID(q.observationId)) &&
@@ -87,6 +93,26 @@ const validSelection = (value: unknown, q: SourceRequest) =>
   value.credentialRevision === q.expectedCredentialRevision;
 const validUser = (value: unknown): value is UserAssetV2Object =>
   validDirectoryV2Object(value) && value.kind === "user";
+
+function compareUsers(
+  a: UserAssetV2Object,
+  b: UserAssetV2Object,
+  direction: UserAssetsV2Query["creatTm"],
+) {
+  if (direction && a.whenCreated !== b.whenCreated) {
+    if (a.whenCreated === null) return 1;
+    if (b.whenCreated === null) return -1;
+    const first = userAssetsV2Time(a.whenCreated)!;
+    const second = userAssetsV2Time(b.whenCreated)!;
+    if (first !== second)
+      return (first < second ? -1 : 1) * (direction === "asc" ? 1 : -1);
+  }
+  return a.objectGUID < b.objectGUID
+    ? -1
+    : a.objectGUID === b.objectGUID
+      ? 0
+      : 1;
+}
 
 export function parseUserAssetsV2List(
   value: unknown,
@@ -135,13 +161,24 @@ export function parseUserAssetsV2List(
   ) {
     return invalid();
   }
-  if (
-    value.list.some(
-      (row, index, rows) =>
-        index > 0 && rows[index - 1].objectGUID >= row.objectGUID,
+  const start = userAssetsV2Time(q.startTm),
+    end = userAssetsV2Time(q.endTm);
+  const seen = new Set<string>();
+  for (const [index, row] of value.list.entries()) {
+    const created = userAssetsV2Time(row.whenCreated);
+    if (
+      seen.has(row.objectGUID) ||
+      (q.sAMAccountName !== undefined &&
+        q.sAMAccountName !== "" &&
+        row.samAccountName !== q.sAMAccountName) ||
+      (start !== undefined &&
+        end !== undefined &&
+        (created === undefined || created < start || created >= end)) ||
+      (index > 0 && compareUsers(value.list[index - 1], row, q.creatTm) >= 0)
     )
-  )
-    return invalid();
+      return invalid();
+    seen.add(row.objectGUID);
+  }
   return value as unknown as UserAssetsV2List;
 }
 export function parseUserAssetV2Detail(
@@ -225,6 +262,11 @@ export const userAssetsV2API = {
         {
           ...sourceParams(q),
           ...{ search: q.search, pageIdx: q.pageIdx, pageSize: q.pageSize },
+          ...(q.sAMAccountName ? { sAMAccountName: q.sAMAccountName } : {}),
+          ...(q.startTm === undefined
+            ? {}
+            : { startTm: q.startTm, endTm: q.endTm }),
+          ...(q.creatTm === undefined ? {} : { creatTm: q.creatTm }),
           ...(q.observationId === undefined
             ? {}
             : { observationId: q.observationId }),

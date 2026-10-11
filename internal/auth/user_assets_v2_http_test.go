@@ -81,7 +81,7 @@ func TestUserAssetsV2QueryStrictBoundedLiteralContract(t *testing.T) {
 			}
 		}
 	}
-	for _, key := range []string{"userStatus", "domainName", "startTm", "endTm", "updateTm", "creatTm", "userType", "sAMAccountName", "scoreSort", "overviewType"} {
+	for _, key := range []string{"userStatus", "domainName", "updateTm", "userType", "scoreSort", "overviewType"} {
 		if status, code := parse(userAssetsV2ValidQuery+"&"+key+"=x", false); status != 422 || code != "unsupported_user_asset_filter" {
 			t.Fatal("deferred filter not explicit", key, status, code)
 		}
@@ -156,6 +156,53 @@ func TestUserAssetsV2RejectsGetBodies(t *testing.T) {
 			if w.Code != 400 {
 				t.Fatal("GET body accepted", path, length, w.Code)
 			}
+		}
+	}
+}
+
+func TestUserAssetsV2QueryExactSAMAndCreatedContract(t *testing.T) {
+	base, _ := url.ParseQuery(userAssetsV2ValidQuery)
+	for _, sam := range []string{"", " Alpha ", "é", "e\u0301", "\x00😀.*%_", strings.Repeat("a", 256), strings.Repeat("😀", 128)} {
+		q, _ := url.ParseQuery(base.Encode())
+		q.Set("sAMAccountName", sam)
+		q.Set("startTm", "2026-10-11T22:00:00.123456789+09:00")
+		q.Set("endTm", "2026-10-11T13:00:00.123456790Z")
+		q.Set("creatTm", "desc")
+		f, _, err := userAssetsV2Query(false, q)
+		if err != nil || f.SAMAccountName != sam || f.StartTm != q.Get("startTm") || f.EndTm != q.Get("endTm") || f.CreatTm != "desc" {
+			t.Fatal("raw exact/time contract changed", f, err)
+		}
+	}
+	for _, extra := range []string{
+		"sAMAccountName=" + url.QueryEscape(strings.Repeat("😀", 129)), "sAMAccountName=%FF", "sAMAccountName=x&sAMAccountName=x",
+		"startTm=2026-01-01T00:00:00Z", "endTm=2026-01-01T00:00:00Z", "startTm=&endTm=", "creatTm=", "creatTm=1", "creatTm=-1", "creatTm=0", "creatTm=ASC", "creatTm=asc&creatTm=desc",
+		"startTm=2026-01-01T00:00:00Z&endTm=2026-01-01T00:00:00Z", "startTm=2026-01-01T00:00:00.1234567890Z&endTm=2027-01-01T00:00:00Z",
+		"startTm=2026-01-01T00:00:00Z&startTm=2026-01-01T00:00:00Z&endTm=2027-01-01T00:00:00Z",
+	} {
+		q, err := url.ParseQuery(userAssetsV2ValidQuery + "&" + extra)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, _, err = userAssetsV2Query(false, q)
+		status, code := domainHTTPError(err)
+		if status != 400 || code != "invalid_input" {
+			t.Fatal("invalid new filter accepted", extra, status, code)
+		}
+	}
+	for _, key := range []string{"sAMAccountName", "startTm", "endTm", "creatTm"} {
+		q, _ := url.ParseQuery(base.Encode())
+		q.Set("observationId", "obs-a")
+		q.Set("objectGUID", userAssetV2GUID)
+		q.Set(key, "x")
+		if _, _, err := userAssetsV2Query(true, q); err == nil {
+			t.Fatal("detail accepted list predicate", key)
+		}
+	}
+	for _, order := range []string{"asc", "desc"} {
+		q, _ := url.ParseQuery(base.Encode())
+		q.Set("creatTm", order)
+		if _, _, err := userAssetsV2Query(false, q); err != nil {
+			t.Fatal("sort requires unnecessary range", err)
 		}
 	}
 }

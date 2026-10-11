@@ -19,6 +19,7 @@ import {
   directoryV2DisplayText,
 } from "./directory-v2-json";
 import { parseDirectoryV2Observation } from "./directory-v2-api";
+import { userAssetsV2Time } from "./user-assets-v2-filters";
 import {
   parseUserAssetV2Detail,
   parseUserAssetsV2List,
@@ -198,6 +199,14 @@ function queryFrom(url: string): UserAssetsV2Query {
     search: p.get("search")!,
     pageIdx: Number(p.get("pageIdx")),
     pageSize: Number(p.get("pageSize")),
+    ...(p.has("sAMAccountName")
+      ? { sAMAccountName: p.get("sAMAccountName")! }
+      : {}),
+    ...(p.has("startTm") ? { startTm: p.get("startTm")! } : {}),
+    ...(p.has("endTm") ? { endTm: p.get("endTm")! } : {}),
+    ...(p.has("creatTm")
+      ? { creatTm: p.get("creatTm")! as "asc" | "desc" }
+      : {}),
     ...(p.has("observationId")
       ? { observationId: p.get("observationId")! }
       : {}),
@@ -239,9 +248,22 @@ beforeEach(() => {
     if (path === "/api/user-assets/v2") {
       const query = queryFrom(url);
       const all = Array.from({ length: 12 }, (_, i) => row(i + 1));
-      const filtered = query.search
+      let filtered = query.search
         ? all.filter((r) => r.samAccountName!.includes(query.search))
         : all;
+      if (query.sAMAccountName)
+        filtered = filtered.filter(
+          (r) => r.samAccountName === query.sAMAccountName,
+        );
+      if (query.startTm && query.endTm)
+        filtered = filtered.filter((r) => {
+          const created = userAssetsV2Time(r.whenCreated);
+          return (
+            created !== undefined &&
+            created >= userAssetsV2Time(query.startTm)! &&
+            created < userAssetsV2Time(query.endTm)!
+          );
+        });
       return response(
         list(
           query,
@@ -456,6 +478,136 @@ describe("UserAssetsV2 strict parser and transport", () => {
     for (const value of ["x".repeat(51), "😀".repeat(26), "\ud800", "\udfff"])
       expect(validUserAssetsV2Search(value)).toBe(false);
   });
+  it("requires exact case-sensitive raw SAM with no trimming or normalization and preserves null without a predicate", () => {
+    for (const sam of [
+      " Mixed+%&_*? ",
+      "e\u0301",
+      "😀",
+      "İ",
+      "x".repeat(256),
+    ]) {
+      const query = { ...q, sAMAccountName: sam };
+      const object = { ...row(), samAccountName: sam };
+      expect(parseUserAssetsV2List(list(query, [object]), query).list).toEqual([
+        object,
+      ]);
+      for (const mismatch of [
+        null,
+        `${sam} `,
+        sam === "e\u0301" ? "é" : `${sam}X`,
+      ])
+        expect(() =>
+          parseUserAssetsV2List(
+            list(query, [{ ...row(), samAccountName: mismatch }]),
+            query,
+          ),
+        ).toThrow("invalid_response");
+    }
+    expect(() =>
+      parseUserAssetsV2List(list(q, [{ ...row(), samAccountName: "User" }]), {
+        ...q,
+        sAMAccountName: "user",
+      }),
+    ).toThrow("invalid_response");
+    for (const sam of [undefined, ""])
+      expect(
+        parseUserAssetsV2List(list(q, [{ ...row(), samAccountName: null }]), {
+          ...q,
+          sAMAccountName: sam,
+        }).list[0].samAccountName,
+      ).toBeNull();
+  });
+  it("enforces paired nanosecond half-open range and excludes missing creation times", () => {
+    const query = {
+      ...q,
+      startTm: "0001-01-01T08:00:00+08:00",
+      endTm: "0001-01-01T00:00:00.000000001Z",
+    };
+    expect(parseUserAssetsV2List(list(query), query).list).toEqual([row()]);
+    for (const created of [null, "0001-01-01T00:00:01Z"])
+      expect(() =>
+        parseUserAssetsV2List(
+          list(query, [{ ...row(), whenCreated: created }]),
+          query,
+        ),
+      ).toThrow("invalid_response");
+    expect(() =>
+      parseUserAssetsV2List(list(), {
+        ...q,
+        startTm: "0001-01-01T00:00:00.000000001Z",
+        endTm: "0001-01-01T00:00:01Z",
+      }),
+    ).toThrow("invalid_response");
+    const end = {
+      ...q,
+      startTm: "2026-10-01T00:00:00Z",
+      endTm: "2026-10-01T00:00:01Z",
+    };
+    expect(() =>
+      parseUserAssetsV2List(
+        list(end, [{ ...row(), whenCreated: end.endTm }]),
+        end,
+      ),
+    ).toThrow("invalid_response");
+  });
+  it.each(["asc", "desc"] as const)(
+    "validates %s time ordering, null-last and ascending GUID ties, independently of GUID uniqueness",
+    (creatTm) => {
+      const query = { ...q, creatTm };
+      const oldest = { ...row(5), whenCreated: "0001-01-01T00:00:00Z" };
+      const first = { ...row(2), whenCreated: "2026-10-01T00:00:00Z" };
+      const tied = { ...row(3), whenCreated: first.whenCreated };
+      const missing = { ...row(1), whenCreated: null };
+      const missingLast = { ...row(4), whenCreated: null };
+      const rows =
+        creatTm === "asc"
+          ? [oldest, first, tied, missing, missingLast]
+          : [first, tied, oldest, missing, missingLast];
+      expect(parseUserAssetsV2List(list(query, rows), query).list).toEqual(
+        rows,
+      );
+      for (const bad of [
+        [missing, ...rows.filter((r) => r !== missing)],
+        [tied, first],
+        [missingLast, missing],
+        [first, { ...oldest, objectGUID: first.objectGUID }],
+      ])
+        expect(() => parseUserAssetsV2List(list(query, bad), query)).toThrow(
+          "invalid_response",
+        );
+      expect(() =>
+        parseUserAssetsV2List(list(query, [...rows].reverse()), query),
+      ).toThrow("invalid_response");
+      const nonAdjacentDuplicate =
+        creatTm === "asc"
+          ? [oldest, first, { ...tied, objectGUID: oldest.objectGUID }]
+          : [first, tied, { ...oldest, objectGUID: first.objectGUID }];
+      expect(() =>
+        parseUserAssetsV2List(list(query, nonAdjacentDuplicate), query),
+      ).toThrow("invalid_response");
+    },
+  );
+  it("sends all optional filters once with original Unicode and offset spelling; empty SAM is omitted", async () => {
+    const query = {
+      ...q,
+      sAMAccountName: " +&%_?*'\\()\u0000\u202e😀 ",
+      startTm: "0001-01-01T08:00:00+08:00",
+      endTm: "0001-01-01T00:00:00.000000001Z",
+      creatTm: "desc" as const,
+      observationId: "observation-one",
+    };
+    override = () => response(list(query, []));
+    await userAssetsV2API.list(query, 1, signal());
+    expect(params()).toMatchObject({ ...query, pageIdx: "1", pageSize: "10" });
+    const sent = new URL(calls().at(-1)![0], "https://local.invalid")
+      .searchParams;
+    for (const key of ["sAMAccountName", "startTm", "endTm", "creatTm"])
+      expect(sent.getAll(key)).toHaveLength(1);
+    override = () => response(list());
+    await userAssetsV2API.list({ ...q, sAMAccountName: "" }, 1, signal());
+    for (const key of ["sAMAccountName", "startTm", "endTm", "creatTm"])
+      expect(params()).not.toHaveProperty(key);
+  });
   it.each([
     { pageSize: -1 },
     { pageSize: 25 },
@@ -469,6 +621,17 @@ describe("UserAssetsV2 strict parser and transport", () => {
     { expectedCredentialRevision: "0" },
     { search: "😀".repeat(26) },
     { search: "\ud800" },
+    { sAMAccountName: "x".repeat(257) },
+    { sAMAccountName: "😀".repeat(129) },
+    { sAMAccountName: "\ud800" },
+    { startTm: "0001-01-01T00:00:00Z" },
+    { endTm: "0001-01-01T00:00:00Z" },
+    { startTm: "", endTm: "" },
+    { startTm: "2026-10-01T08:00:00+08:00", endTm: "2026-10-01T00:00:00Z" },
+    {
+      startTm: "2026-10-01T00:00:00.000000002Z",
+      endTm: "2026-10-01T00:00:00.000000001Z",
+    },
   ])("rejects invalid request before fetching (%#)", async (change) => {
     await expect(
       userAssetsV2API.list({ ...q, ...change }, 1, signal()),
@@ -677,7 +840,7 @@ describe("UserAssetsV2 private workspace", () => {
       pageIdx: "1",
       search: "observed-12",
     });
-    click("清除用户搜索");
+    click("清除用户筛选");
     await screen.findByText("observed-1");
     for (const size of [20, 30, 40, 50, 10]) {
       fill("用户资产每页条数", String(size));
@@ -718,6 +881,292 @@ describe("UserAssetsV2 private workspace", () => {
     expect(screen.getByText(/已应用搜索/).textContent).toBe(
       "已应用搜索：“ \\u0000\\u202e ”",
     );
+  });
+  it("applies draft SAM/time/sort together with search, pins reads and clears every filter explicitly", async () => {
+    await start();
+    fireEvent.click(screen.getByText("精确账户与创建时间筛选"));
+    expect(screen.getByLabelText("精确账户名（SAM）")).toBeVisible();
+    const before = calls().length;
+    fill("用户资产关键词", "observed-");
+    fill("精确账户名（SAM）", "observed-12");
+    fill("创建时间开始（含）", "0001-01-01T08:00:00+08:00");
+    fill("创建时间结束（不含）", "0001-01-01T00:00:00.000000001Z");
+    fill("创建时间排序", "desc");
+    expect(calls()).toHaveLength(before);
+    expect(
+      screen.getByRole("button", { name: "用户资产下一页" }),
+    ).toBeDisabled();
+    expect(screen.getByLabelText("用户资产每页条数")).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: "查看用户 observed-1" }),
+    ).toBeDisabled();
+    expect(screen.queryByText(/已应用筛选/)).toBeNull();
+    click("搜索用户");
+    await screen.findByText("observed-12");
+    expect(params()).toMatchObject({
+      observationId: "observation-one",
+      pageIdx: "1",
+      search: "observed-",
+      sAMAccountName: "observed-12",
+      startTm: "0001-01-01T08:00:00+08:00",
+      endTm: "0001-01-01T00:00:00.000000001Z",
+      creatTm: "desc",
+    });
+    expect(screen.getByText(/已应用筛选/)).toHaveTextContent("创建时间降序");
+    expect(screen.getByText(/已应用筛选/)).toHaveTextContent(
+      "[0001-01-01T08:00:00+08:00, 0001-01-01T00:00:00.000000001Z)",
+    );
+    click("查看用户 observed-12");
+    await screen.findByText("Factual description");
+    expect(params("/api/user-assets/v2/detail")).toMatchObject({
+      observationId: "observation-one",
+      objectGUID: row(12).objectGUID,
+    });
+    for (const key of ["sAMAccountName", "startTm", "endTm", "creatTm"])
+      expect(params("/api/user-assets/v2/detail")).not.toHaveProperty(key);
+    click("关闭用户详情");
+    fill("用户资产每页条数", "20");
+    await screen.findByText("observed-12");
+    expect(params()).toMatchObject({
+      pageSize: "20",
+      sAMAccountName: "observed-12",
+      creatTm: "desc",
+      observationId: "observation-one",
+    });
+    click("清除用户筛选");
+    await screen.findByText("observed-1");
+    expect(params()).toMatchObject({
+      search: "",
+      pageIdx: "1",
+      pageSize: "20",
+      observationId: "observation-one",
+    });
+    for (const key of ["sAMAccountName", "startTm", "endTm", "creatTm"])
+      expect(params()).not.toHaveProperty(key);
+    for (const label of [
+      "精确账户名（SAM）",
+      "创建时间开始（含）",
+      "创建时间结束（不含）",
+      "创建时间排序",
+    ])
+      expect(screen.getByLabelText(label)).toHaveValue("");
+  });
+  it("rejects invalid filter drafts without truncation or a request and displays raw SAM safely", async () => {
+    await start();
+    fireEvent.click(screen.getByText("精确账户与创建时间筛选"));
+    const before = calls().length;
+    expect(screen.getByLabelText("精确账户名（SAM）")).not.toHaveAttribute(
+      "maxlength",
+    );
+    fill("精确账户名（SAM）", "😀".repeat(129));
+    click("搜索用户");
+    expect(screen.getByRole("alert")).toHaveTextContent("输入不会被截断");
+    expect(screen.getByLabelText("精确账户名（SAM）")).toHaveValue(
+      "😀".repeat(129),
+    );
+    expect(calls()).toHaveLength(before);
+    fill("精确账户名（SAM）", "");
+    for (const [start, end] of [
+      ["2026-10-01T00:00:00Z", ""],
+      ["", "2026-10-01T00:00:00Z"],
+      ["2026-10-01T08:00:00+08:00", "2026-10-01T00:00:00Z"],
+      ["2026-02-29T00:00:00Z", "2026-03-01T00:00:00Z"],
+      ["0001-01-01T00:00:00.000000002Z", "0001-01-01T00:00:00.000000001Z"],
+    ]) {
+      fill("创建时间开始（含）", start);
+      fill("创建时间结束（不含）", end);
+      click("搜索用户");
+      expect(screen.getByRole("alert")).toHaveTextContent("开始必须早于结束");
+      expect(calls()).toHaveLength(before);
+    }
+    fill("创建时间开始（含）", "");
+    fill("创建时间结束（不含）", "");
+    const raw = " <img src=x>\u0000\u202e e\u0301 ";
+    fill("精确账户名（SAM）", raw);
+    click("搜索用户");
+    await screen.findByText("此观测在当前筛选下没有匹配用户。");
+    expect(params().sAMAccountName).toBe(raw);
+    const applied = screen.getByText(/已应用筛选/);
+    expect(applied.textContent).toContain(directoryV2DisplayText(raw));
+    expect(applied.querySelector("img,script,a")).toBeNull();
+  });
+  it("time sort and range stay pinned on pagination, retry and explicit refresh, with drafts kept separate", async () => {
+    await start();
+    fireEvent.click(screen.getByText("精确账户与创建时间筛选"));
+    fill("创建时间开始（含）", "0001-01-01T00:00:00Z");
+    fill("创建时间结束（不含）", "0001-01-01T00:00:00.000000001Z");
+    fill("创建时间排序", "asc");
+    click("搜索用户");
+    await screen.findByText("observed-1");
+    let count = 0;
+    override = (url) =>
+      url.startsWith("/api/user-assets/v2?") && count++ === 0
+        ? response({ error: "schema_unavailable" }, 503)
+        : undefined;
+    click("用户资产下一页");
+    await screen.findByRole("alert");
+    const failed = params();
+    expect(failed).toMatchObject({
+      pageIdx: "2",
+      creatTm: "asc",
+      startTm: "0001-01-01T00:00:00Z",
+      endTm: "0001-01-01T00:00:00.000000001Z",
+      observationId: "observation-one",
+    });
+    click("重试用户资产读取");
+    await screen.findByText("observed-12");
+    expect(params()).toEqual(failed);
+    fill("精确账户名（SAM）", "observed-3");
+    click("刷新用户资产观测");
+    await screen.findByText("observed-1");
+    expect(params()).toMatchObject({
+      creatTm: "asc",
+      startTm: failed.startTm,
+      endTm: failed.endTm,
+      pageIdx: "1",
+    });
+    expect(params()).not.toHaveProperty("observationId");
+    expect(params()).not.toHaveProperty("sAMAccountName");
+    expect(screen.getByLabelText("精确账户名（SAM）")).toHaveValue(
+      "observed-3",
+    );
+    expect(
+      screen.getByRole("button", { name: "查看用户 observed-1" }),
+    ).toBeDisabled();
+    click("搜索用户");
+    await screen.findByText("observed-3");
+    expect(params()).toMatchObject({
+      sAMAccountName: "observed-3",
+      observationId: "observation-one",
+    });
+  });
+  it.each(["paste", "drop"] as const)(
+    "rejects control-containing %s before native normalization and blocks submission until that field is edited",
+    async (kind) => {
+      await start();
+      fireEvent.click(screen.getByText("精确账户与创建时间筛选"));
+      const button = screen.getByRole("button", { name: "搜索用户" });
+      for (const [label, raw] of [
+        ["精确账户名（SAM）", "observed-\n12"],
+        ["精确账户名（SAM）", "\r\n"],
+        ["精确账户名（SAM）", "\u0000\u0085"],
+        ["创建时间开始（含）", "0001-01-01T00:00:00Z\r"],
+        ["创建时间结束（不含）", "0001-01-01T00:00:01Z\n"],
+      ]) {
+        const field = screen.getByLabelText(label);
+        const before = calls().length;
+        const transfer = { getData: () => raw };
+        const accepted =
+          kind === "paste"
+            ? fireEvent.paste(field, { clipboardData: transfer })
+            : fireEvent.drop(field, { dataTransfer: transfer });
+        expect(accepted).toBe(false);
+        expect(field).toHaveValue("");
+        expect(field).toHaveAttribute("aria-invalid", "true");
+        expect(screen.getByRole("alert")).toHaveTextContent(
+          `${label}含控制字符`,
+        );
+        expect(button).toBeDisabled();
+        expect(
+          screen.getByRole("button", { name: "用户资产下一页" }),
+        ).toBeDisabled();
+        expect(screen.getByLabelText("用户资产每页条数")).toBeDisabled();
+        expect(
+          screen.getByRole("button", { name: "查看用户 observed-1" }),
+        ).toBeDisabled();
+        fireEvent.submit(button.closest("form")!);
+        expect(calls()).toHaveLength(before);
+        fill("用户资产关键词", "observed");
+        fill("创建时间排序", "asc");
+        expect(screen.getByRole("alert")).toHaveTextContent(
+          `${label}含控制字符`,
+        );
+        fireEvent.submit(button.closest("form")!);
+        expect(calls()).toHaveLength(before);
+        fill(label, "x");
+        expect(field).toHaveAttribute("aria-invalid", "false");
+        expect(screen.queryByRole("alert")).toBeNull();
+        fill(label, "");
+      }
+    },
+  );
+  it("keeps control-transfer errors per field and preserves prior draft until explicit correction or clear-all", async () => {
+    await start();
+    fireEvent.click(screen.getByText("精确账户与创建时间筛选"));
+    fill("精确账户名（SAM）", "observed-2");
+    fill("创建时间开始（含）", "0001-01-01T00:00:00Z");
+    const sam = screen.getByLabelText("精确账户名（SAM）");
+    const startField = screen.getByLabelText("创建时间开始（含）");
+    fireEvent.paste(sam, { clipboardData: { getData: () => "\n" } });
+    fireEvent.drop(startField, { dataTransfer: { getData: () => "\r" } });
+    expect(sam).toHaveValue("observed-2");
+    expect(startField).toHaveValue("0001-01-01T00:00:00Z");
+    click("刷新用户资产观测");
+    await screen.findByText("observed-1");
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "精确账户名（SAM）含控制字符",
+    );
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "创建时间开始（含）含控制字符",
+    );
+    fill("精确账户名（SAM）", "observed-3");
+    expect(screen.getByRole("alert")).not.toHaveTextContent(
+      "精确账户名（SAM）含控制字符",
+    );
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "创建时间开始（含）含控制字符",
+    );
+    expect(screen.getByRole("button", { name: "搜索用户" })).toBeDisabled();
+    click("清除用户筛选");
+    await screen.findByText("observed-1");
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(sam).toHaveValue("");
+    expect(startField).toHaveValue("");
+    expect(screen.getByRole("button", { name: "搜索用户" })).toBeEnabled();
+  });
+  it("new filter drafts supersede delayed results and source switches reset applied and draft filters", async () => {
+    await start();
+    fireEvent.click(screen.getByText("精确账户与创建时间筛选"));
+    const held = deferred();
+    override = (url) =>
+      url.startsWith("/api/user-assets/v2?") &&
+      queryFrom(url).sAMAccountName === "observed-2"
+        ? held.promise
+        : undefined;
+    fill("精确账户名（SAM）", "observed-2");
+    click("搜索用户");
+    expect(screen.getByRole("button", { name: "搜索用户" })).toBeDisabled();
+    fill("精确账户名（SAM）", "observed-12");
+    fill("创建时间排序", "desc");
+    click("搜索用户");
+    await screen.findByText("observed-12");
+    await held.resolve(list({ ...q, sAMAccountName: "observed-2" }, [row(2)]));
+    expect(screen.queryByText("observed-2")).toBeNull();
+    expect(screen.getByText("observed-12")).toBeVisible();
+    fill("创建时间开始（含）", "0001-01-01T00:00:00Z");
+    click("更换数据源");
+    await select("other.invalid");
+    await screen.findByText("observed-1");
+    expect(params()).toMatchObject({
+      domainId: otherChoice.domainId,
+      search: "",
+      pageIdx: "1",
+    });
+    for (const key of [
+      "sAMAccountName",
+      "startTm",
+      "endTm",
+      "creatTm",
+      "observationId",
+    ])
+      expect(params()).not.toHaveProperty(key);
+    for (const label of [
+      "精确账户名（SAM）",
+      "创建时间开始（含）",
+      "创建时间结束（不含）",
+      "创建时间排序",
+    ])
+      expect(screen.getByLabelText(label)).toHaveValue("");
   });
   it.each(["absent", "empty"])(
     "distinguishes %s evidence without invented counts",

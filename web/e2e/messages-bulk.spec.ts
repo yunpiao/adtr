@@ -372,6 +372,27 @@ test("real internally submitted health bulk: cross-page freeze, lost response, c
           () => document.documentElement.scrollWidth <= innerWidth,
         ),
       ).toBe(true);
+      const counters = panel(allInput.operationId).locator(
+        ".message-bulk-counts > div",
+      );
+      await expect(counters).toHaveCount(6);
+      for (const counter of await counters.all()) {
+        expect(
+          await counter.evaluate((cell) => {
+            const value = cell.querySelector("dd")!;
+            const range = document.createRange();
+            range.selectNodeContents(value);
+            const lines = [...range.getClientRects()];
+            const bounds = cell.getBoundingClientRect();
+            return (
+              getComputedStyle(value).whiteSpace === "nowrap" &&
+              lines.length === 1 &&
+              lines[0].left >= bounds.left &&
+              lines[0].right <= bounds.right
+            );
+          }),
+        ).toBe(true);
+      }
       for (const fullPage of [false, true]) {
         if (fullPage) {
           await page.evaluate(() => window.scrollTo(0, 0));
