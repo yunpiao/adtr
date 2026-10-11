@@ -23,7 +23,7 @@ from e2e_runtime_diagnostics import http_handler_panicked
 from e2e_container_startup_diagnostics import report_container_startup_failure
 
 
-REAL_TAB_LIFECYCLE_SUITES = {"session-invalidation", "directory-readers", "directory-v2-readers", "user-assets-v2-readers"}
+REAL_TAB_LIFECYCLE_SUITES = {"account-references", "session-invalidation", "directory-readers", "directory-v2-readers", "user-assets-v2-readers"}
 USER_ASSETS_V2_SUITES = {"user-assets-v2", "user-assets-v2-readers"}
 DIRECTORY_V2_SUITES = {"directory-v2", "directory-v2-controls", "directory-v2-readers"} | USER_ASSETS_V2_SUITES
 DIRECTORY_SUITES = {"directory", "directory-controls", "directory-readers"} | DIRECTORY_V2_SUITES
@@ -98,6 +98,12 @@ def main():
             raise RuntimeError("build the real frontend before running acceptance")
         for mode in ["migrate", "bootstrap"]:
             subprocess.run(["./bin/adtr", "-mode", mode], env=env, check=True, timeout=60)
+        if args.suite == "account-references":
+            # Isolated synthetic role: real function permission with no resource
+            # groups. The browser creates its user and authenticates normally.
+            subprocess.run(["docker", "exec", name, "psql", "-U", "postgres", "-d", "adtr_e2e", "-v", "ON_ERROR_STOP=1", "-c",
+                            "BEGIN; INSERT INTO adtr.access_roles(tenant_id,id,name) VALUES('default','source_no_scope_role_001','Source no domain scope'); INSERT INTO adtr.access_permissions(tenant_id,role_id,mark,readable,writeable) VALUES('default','source_no_scope_role_001','domains',true,true),('default','source_no_scope_role_001','operation_accounts',true,false); COMMIT;"],
+                           check=True, capture_output=True, timeout=30)
         if args.suite == "resource":
             subprocess.run(["docker", "exec", name, "psql", "-U", "postgres", "-d", "adtr_e2e", "-v", "ON_ERROR_STOP=1", "-c",
                             "INSERT INTO adtr.resource_domains(tenant_id,id,name,active) VALUES('default','synthetic-domain-a','Synthetic Domain A',true)"],
@@ -179,7 +185,7 @@ def main():
         # DOM snapshot. Suppress that separate artifact so proof fields cannot
         # enter an error-context prompt; explicit safe screenshots remain intact.
         env["PLAYWRIGHT_NO_COPY_PROMPT"] = "1"
-        subprocess.run(command, env=env, check=True, timeout=930 if args.suite in EMPTY_DIRECTORY_SUITES | USER_ASSETS_V2_SUITES else 660 if args.suite in {"directory", "directory-v2"} else 600 if args.suite == "audit" else 540 if args.suite in {"maintenance", "domains", "operations", "credential-use", "account-references", "operational-logs", "account-reference-barrier"} else 480 if args.suite == "system" else 420)
+        subprocess.run(command, env=env, check=True, timeout=660 if args.suite == "account-references" else 930 if args.suite in EMPTY_DIRECTORY_SUITES | USER_ASSETS_V2_SUITES else 660 if args.suite in {"directory", "directory-v2"} else 600 if args.suite == "audit" else 540 if args.suite in {"maintenance", "domains", "operations", "credential-use", "account-references", "operational-logs", "account-reference-barrier"} else 480 if args.suite == "system" else 420)
         chain = "real browser -> API -> worker/PostgreSQL" if worker is not None else "real browser -> API -> PostgreSQL"
     finally:
         shutdown_error = None
