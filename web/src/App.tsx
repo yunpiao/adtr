@@ -21,6 +21,7 @@ import ResourcesWorkspace from "./ResourcesWorkspace";
 import TaskWorkspace, { forgetTaskSession } from "./TaskWorkspace";
 import { forgetMaintenanceSession } from "./maintenance-intent";
 import AuditWorkspace from "./AuditWorkspace";
+import MessagesWorkspace from "./MessagesWorkspace";
 import { forgetAuditSession } from "./audit-intent";
 import SystemWorkspace from "./SystemWorkspace";
 import OperationalLogsWorkspace from "./OperationalLogsWorkspace";
@@ -60,6 +61,7 @@ function pageFromHash(): Page {
   const exact = (
     [
       "profile",
+      "messages",
       "credential-use",
       "directory",
       "directory-credential-use",
@@ -372,6 +374,7 @@ export default function App() {
       page === "resources" ||
       page === "tasks" ||
       page === "audit" ||
+      page === "messages" ||
       page === "system" ||
       page === "operational-logs" ||
       page === "domains" ||
@@ -555,6 +558,15 @@ export default function App() {
                     )}
                     {active === "tasks" && (
                       <TaskWorkspace
+                        profile={profile}
+                        sessionChanged={() => {
+                          setPage("account");
+                          refresh();
+                        }}
+                      />
+                    )}
+                    {active === "messages" && (
+                      <MessagesWorkspace
                         profile={profile}
                         sessionChanged={() => {
                           setPage("account");

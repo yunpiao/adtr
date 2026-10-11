@@ -163,6 +163,8 @@ jobs:
       max-parallel: 4
       matrix:
         include:
+          - name: messages
+            command: python3 scripts/test_auth_e2e.py --suite messages
           - name: user-assets-v2
             command: python3 scripts/test_auth_e2e.py --suite user-assets-v2
           - name: user-assets-v2-readers
@@ -293,6 +295,14 @@ jobs:
         with:
           name: tasks-soc-evidence-${{ github.run_id }}-${{ github.run_attempt }}
           path: web/test-results/**/tasks-soc-*
+          if-no-files-found: error
+          retention-days: 7
+      - name: Retain synthetic message workspace evidence
+        if: ${{ success() && matrix.name == 'messages' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: messages-soc-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: web/test-results/**/messages-soc-*
           if-no-files-found: error
           retention-days: 7
       - name: Retain synthetic domain workspace evidence

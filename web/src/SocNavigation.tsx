@@ -11,6 +11,7 @@ export type SocPage =
   | "resources"
   | "tasks"
   | "audit"
+  | "messages"
   | "system"
   | "operational-logs"
   | "domains"
@@ -63,6 +64,7 @@ export const SOC_WORKSPACE_LABELS: Record<SocPage, string> = {
   resources: "资源与租户",
   tasks: "后台任务",
   audit: "操作审计",
+  messages: "站内消息",
   system: "系统健康",
   "operational-logs": "运行日志与诊断包",
   domains: "域连接",
@@ -312,6 +314,7 @@ export default function SocNavigation({
             {button("user-assets-v2", "assets")}
             {button("tasks", "tasks")}
             {button("audit", "audit")}
+            {button("messages", "audit")}
           </div>
           <div className="soc-management-navigation">
             {SOC_NAVIGATION_GROUPS.map((group) => (

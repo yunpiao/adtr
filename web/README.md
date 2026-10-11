@@ -217,3 +217,14 @@ TOTP、审计或浏览器到实际 API 的端到端效果；这些须由后端�
 ## SOC navigation and user-assets presentation
 
 Issue #91 adapts the PR89 visual direction to the existing real APIs: grouped desktop/mobile navigation, compact resolved-source summary, user list/cards and fixed-observation detail drawer. All previous authentication, permission and data-source boundaries remain. Scope and current evidence: [SOC production UI](../docs/soc-production-ui.md). Prototype examples are not imported into production.
+
+## 站内消息只读工作区（F40）
+
+Refs #105 / #50，依赖 PR104 的真实 health 消息运行时。安全运营中的「站内消息」按明确确认
+创建固定结果，默认全部/倒序/20；支持 UTC 时间与标题/终态/查询时阅读状态筛选、固定分页、
+消息 ID 定位及查询时计数。没有已读写操作、自动 POST 重试或轮询。未知查询可能占用快照；
+GET 重试保留原结果；失效或撤权清除旧结果。详见 [UI 契约](../docs/soc-message-ui.md)。
+
+`python3 scripts/test_auth_e2e.py --suite messages` 使用全新隔离数据库、真实 API/Worker 和两条
+真实 health 终态，校验 outbox → 投影 → 浏览器及固定结果，生成桌面/390px截图与来源manifest。
+需要 Docker、实际构建与 Chromium；类型检查或发现不等于真实通过，DOM夹具不代表真实消息。
