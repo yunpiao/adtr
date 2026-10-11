@@ -57,3 +57,33 @@ current-main integration, final-base/source review and coordinated normal merge
 are pending. Postmerge content/parents and main-push CI are separate checks.
 No deployment, real AD/Windows acceptance, gate/grant/credential change or Issue
 closure is claimed. Product acceptance remains 0/209.
+
+## First remote runtime checkpoint and bounded corrections
+
+[CI38171279774](https://github.com/yunpiao/adtr/actions/runs/38171279774), head
+`24aca1bbb013e20897bcc770d53560d19afd56aa`, executed the real version3 controls
+suite successfully (job114564568550): actual empty TLS LDAP observation,
+cancellation during paged I/O, retained/cleared proof, original executor-return
+witness and zero dependencies. The existing version3 backend suite also passed.
+This is partial runtime evidence, not an all-42-job pass.
+
+The collection suite reached provisioning and then exposed an incorrect added
+Back URL expectation: existing operation-account navigation retains
+`#operation-accounts/detail` while the workspace remounts its authorized list.
+The correction captures that exact original URL and separately requires the
+current authorized list, no proof fields and no mutation replay on both Back
+entries; Forward assertions remain unchanged.
+
+The reader suite timed out before opening its first collection view: the separate
+test navigation catalogue omitted the two new labels, so its helper did not open
+the initially collapsed collection group after fresh reader login. The production
+navigation already included the entries. The additive catalogue correction is
+covered by three fresh collapsed-group DOM regressions for admin/reader collection
+and administrator governance. No timeout, permission, native lifecycle guard or
+visibility assertion was relaxed; actual reader/browser acceptance remains pending.
+
+The inherited user-assets-v3 job failed its already-diagnosed SPN viewport-ratio
+assertion at 0.9928819537162781. The independently reviewed dependency fix
+`f8a576a479ec7b5991f066dbe5e8fa17025818fe` uses native centered scrolling at two
+existing test steps and retains ratio=1. It is normally integrated for the next
+candidate. No production CSS, API or display data was changed by these corrections.

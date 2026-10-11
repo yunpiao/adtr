@@ -1,3 +1,5 @@
+import { revealNavigation } from "./test-navigation";
+import { navigationGroupFor } from "../test-helpers/navigation";
 import {
   act,
   fireEvent,
@@ -134,6 +136,30 @@ describe("SOC workspace navigation", () => {
     );
     expect(socWorkspaceSection("user-assets-v3")).toBe("安全运营");
   });
+
+  it.each([
+    { label: "字典 3 目录采集", page: "directory-v3", role: "platform_admin" },
+    { label: "字典 3 目录采集", page: "directory-v3", role: "viewer" },
+    {
+      label: "字典 3 目录凭据授权",
+      page: "directory-credential-use-v3",
+      role: "platform_admin",
+    },
+  ])(
+    "opens initially collapsed v3 collection navigation for $role / $label",
+    async ({ label, page, role }) => {
+      render(<Navigation actor={{ ...profile, role }} active="account" />);
+      expect(group("采集与接入")).not.toHaveAttribute("open");
+      expect(navigationGroupFor(label)).toMatchObject({
+        id: "collection",
+        label: "采集与接入",
+      });
+      await revealNavigation(label);
+      expect(group("采集与接入")).toHaveAttribute("open", "");
+      await userEvent.click(screen.getByRole("button", { name: label }));
+      expect(navigate).toHaveBeenCalledWith(page);
+    },
+  );
 
   it("retains every existing administrator workspace under a discoverable summary", async () => {
     render(<Navigation />);

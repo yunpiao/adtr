@@ -970,6 +970,8 @@ test("real dictionary-v3 UI → authenticated API → worker → paged synthetic
     })
     .click();
   // A real Back navigation discards a proof draft; it must not authorize a write.
+  const priorAccountURL = page.url();
+  expect(new URL(priorAccountURL).hash).toBe("#operation-accounts/detail");
   let governancePosts = 0;
   context.on("request", (request) => {
     if (
@@ -994,7 +996,12 @@ test("real dictionary-v3 UI → authenticated API → worker → paged synthetic
   );
   await navigateTo(page, "字典 3 目录采集");
   await page.goBack();
-  await expect(page).toHaveURL(/#operation-accounts$/u);
+  await expect(page).toHaveURL(priorAccountURL);
+  // The existing workspace returns to its authorized list on history entry;
+  // the detail hash is retained, but no private detail/proof draft is restored.
+  await expect(
+    page.getByRole("table", { name: "获授权的操作账户", exact: true }),
+  ).toBeVisible();
   await expect(
     page.locator('input[name="actorPassword"], input[name="totpCode"]'),
   ).toHaveCount(0);
@@ -1015,7 +1022,12 @@ test("real dictionary-v3 UI → authenticated API → worker → paged synthetic
   ).toHaveCount(0);
   expect(governancePosts).toBe(0);
   await page.goBack();
-  await expect(page).toHaveURL(/#operation-accounts$/u);
+  await expect(page).toHaveURL(priorAccountURL);
+  // The existing workspace returns to its authorized list on history entry;
+  // the detail hash is retained, but no private detail/proof draft is restored.
+  await expect(
+    page.getByRole("table", { name: "获授权的操作账户", exact: true }),
+  ).toBeVisible();
   await expect(
     page.locator('input[name="actorPassword"], input[name="totpCode"]'),
   ).toHaveCount(0);
