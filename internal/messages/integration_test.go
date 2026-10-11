@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"github.com/jackc/pgx/v5"
 	"github.com/yunpiao/adtr/internal/messagecore"
+	"github.com/yunpiao/adtr/internal/schemaversion"
 	"github.com/yunpiao/adtr/internal/tasks"
 	"os"
 	"strings"
@@ -67,10 +68,10 @@ func newFixture(t *testing.T) *fixture {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = db.Close(context.Background()) })
-	if _, err = db.Exec(ctx, `CREATE SCHEMA adtr; CREATE TABLE adtr.schema_version(singleton boolean PRIMARY KEY DEFAULT true CHECK(singleton),version integer NOT NULL);INSERT INTO adtr.schema_version VALUES(true,17);`+tasks.Schema+Schema); err != nil {
+	if _, err = db.Exec(ctx, `CREATE SCHEMA adtr; CREATE TABLE adtr.schema_version(singleton boolean PRIMARY KEY DEFAULT true CHECK(singleton),version integer NOT NULL);INSERT INTO adtr.schema_version VALUES(true,18);`+tasks.Schema+Schema+BulkSchema); err != nil {
 		t.Fatal(err)
 	}
-	store, err := New(cfg, 17)
+	store, err := New(cfg, schemaversion.Current)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,7 +83,7 @@ func newFixture(t *testing.T) *fixture {
 		}
 		return "1", nil
 	}
-	engine, err := tasks.New(cfg, tasks.ProductionRegistry(), authorize, 17)
+	engine, err := tasks.New(cfg, tasks.ProductionRegistry(), authorize, schemaversion.Current)
 	if err != nil {
 		t.Fatal(err)
 	}

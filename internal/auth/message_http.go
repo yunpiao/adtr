@@ -20,7 +20,7 @@ import (
 )
 
 // Personal read state is protected by read authority, never task mutation proof.
-var messageRoutes = map[string]string{"/query": "POST", "/page": "GET", "/locate": "GET", "/read": "POST", "/read-operation": "GET"}
+var messageRoutes = map[string]string{"/query": "POST", "/page": "GET", "/locate": "GET", "/read": "POST", "/read-operation": "GET", "/bulk-read": "POST", "/bulk-read-operation": "GET", "/bulk-read-cancel": "POST"}
 
 func messagePathAllowed(method, path string, grants map[string]AccessAuth) bool {
 	suffix, ok := strings.CutPrefix(path, "/api/messages")
@@ -28,6 +28,8 @@ func messagePathAllowed(method, path string, grants map[string]AccessAuth) bool 
 }
 
 type messageInput struct {
+	Selection   string                 `json:"selection"`
+	MessageIDs  []string               `json:"messageIds,omitempty"`
 	Types       []string               `json:"types"`
 	SubTypes    []messageSubType       `json:"subTypes"`
 	Keyword     string                 `json:"keyword"`
@@ -68,6 +70,12 @@ func decodeMessageInput(w http.ResponseWriter, r *http.Request, path string) (me
 		return bad()
 	}
 	allowed := "resultId messageId operationId"
+	if path == "/bulk-read" {
+		allowed = "resultId operationId selection messageIds"
+	}
+	if path == "/bulk-read-cancel" {
+		allowed = "operationId"
+	}
 	if path == "/query" {
 		allowed = "types subTypes keyword start end readFilter sort offset limit"
 	}
@@ -93,6 +101,12 @@ func decodeMessageInput(w http.ResponseWriter, r *http.Request, path string) (me
 		}
 	}
 	required := []string{"resultId", "messageId", "operationId"}
+	if path == "/bulk-read" {
+		required = []string{"resultId", "operationId", "selection"}
+	}
+	if path == "/bulk-read-cancel" {
+		required = []string{"operationId"}
+	}
 	if path == "/query" {
 		required = []string{"readFilter", "sort", "offset", "limit"}
 	}
@@ -105,6 +119,25 @@ func decodeMessageInput(w http.ResponseWriter, r *http.Request, path string) (me
 	d.DisallowUnknownFields()
 	if d.Decode(&in) != nil || d.Decode(&struct{}{}) != io.EOF || resourceUniqueJSON(json.NewDecoder(bytes.NewReader(raw))) != nil {
 		return bad()
+	}
+	if path == "/bulk-read-cancel" && !messageIdentifier(in.OperationID) {
+		return bad()
+	}
+	if path == "/bulk-read" {
+		if !messageIdentifier(in.ResultID) || !messageIdentifier(in.OperationID) || (in.Selection != "selected" && in.Selection != "all") {
+			return bad()
+		}
+		_, hasIDs := fields["messageIds"]
+		if in.Selection == "all" && hasIDs || in.Selection == "selected" && (!hasIDs || len(in.MessageIDs) == 0 || len(in.MessageIDs) > messages.MaxCandidates) {
+			return bad()
+		}
+		seen := map[string]bool{}
+		for _, id := range in.MessageIDs {
+			if !messageIdentifier(id) || seen[id] {
+				return bad()
+			}
+			seen[id] = true
+		}
 	}
 	if path == "/read" {
 		if !messageIdentifier(in.ResultID) || !messageIdentifier(in.MessageID) || !messageIdentifier(in.OperationID) {
@@ -138,7 +171,7 @@ func parseMessageURL(r *http.Request, path string) (messageInput, error) {
 	if path == "/locate" {
 		keys = "resultId messageId limit"
 	}
-	if path == "/read-operation" {
+	if path == "/read-operation" || path == "/bulk-read-operation" {
 		keys = "operationId"
 	}
 	if len(q) != len(strings.Fields(keys)) {
@@ -258,6 +291,12 @@ func (s *Service) handleMessage(ctx context.Context, r *http.Request, store *mes
 	now := s.now().UTC()
 	var value any
 	switch path {
+	case "/bulk-read":
+		value, err = store.SubmitBulkTx(ctx, tx, id, messages.BulkRequest{ResultID: in.ResultID, OperationID: in.OperationID, Selection: in.Selection, MessageIDs: in.MessageIDs}, now)
+	case "/bulk-read-operation":
+		value, err = store.BulkOperationTx(ctx, tx, id, in.OperationID)
+	case "/bulk-read-cancel":
+		value, err = store.CancelBulkTx(ctx, tx, id, in.OperationID, now)
 	case "/query":
 		value, err = store.QueryTx(ctx, tx, id, in.query(), now)
 	case "/page":
