@@ -38,6 +38,8 @@ import DirectoryV3CredentialUseWorkspace from "./DirectoryV3CredentialUseWorkspa
 import DirectoryV2Workspace from "./DirectoryV2Workspace";
 import UserAssetsV2Workspace from "./UserAssetsV2Workspace";
 import UserAssetsV3Workspace from "./UserAssetsV3Workspace";
+import ComputerAssetsV3Workspace from "./ComputerAssetsV3Workspace";
+import GroupAssetsV3Workspace from "./GroupAssetsV3Workspace";
 import DirectoryV2CredentialUseWorkspace from "./DirectoryV2CredentialUseWorkspace";
 import {
   listenForSessionInvalidation,
@@ -73,6 +75,8 @@ function pageFromHash(): Page {
       "directory-credential-use-v3",
       "user-assets-v2",
       "user-assets-v3",
+      "computer-assets-v3",
+      "group-assets-v3",
       "directory-credential-use-v2",
     ] as const
   ).find((name) => hash === `#${name}`);
@@ -393,6 +397,8 @@ export default function App() {
       page === "directory-credential-use-v3" ||
       page === "user-assets-v2" ||
       page === "user-assets-v3" ||
+      page === "computer-assets-v3" ||
+      page === "group-assets-v3" ||
       page === "directory-credential-use-v2" ||
       page === "profile"
     )
@@ -631,6 +637,24 @@ export default function App() {
                     )}
                     {active === "user-assets-v2" && (
                       <UserAssetsV2Workspace
+                        profile={profile}
+                        sessionChanged={() => {
+                          setPage("account");
+                          refresh();
+                        }}
+                      />
+                    )}
+                    {active === "computer-assets-v3" && (
+                      <ComputerAssetsV3Workspace
+                        profile={profile}
+                        sessionChanged={() => {
+                          setPage("account");
+                          refresh();
+                        }}
+                      />
+                    )}
+                    {active === "group-assets-v3" && (
+                      <GroupAssetsV3Workspace
                         profile={profile}
                         sessionChanged={() => {
                           setPage("account");

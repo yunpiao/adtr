@@ -2718,9 +2718,30 @@
         "UI-0451",
         "UI-0452"
       ],
-      "status": "not_started",
+      "status": "in_progress",
       "product_accepted": false,
-      "evidence": null
+      "evidence": {
+        "local_contract": "docs/group-assets-v3-contract.md",
+        "engineering_issue": "https://github.com/yunpiao/adtr/issues/135",
+        "implementation_base": "8d559dd1c1bb888a49c2e1f044d64e78feff42f1",
+        "implemented_scope": "实现中的dictionary3只读原始组列表与SOC行内事实；完整观测校验后取group，SAM/SID/DN逐字段Go简单小写字面搜索，上限20 UTF-16单元及80 UTF-8字节的新工程约定；固定观测分页、创建时间排序与筛选前组数。未补造组分类、名称或应用字段。",
+        "tests": [
+          "internal/domains/group_assets_v3_test.go",
+          "internal/domains/group_assets_v3_integration_test.go",
+          "internal/auth/group_assets_v3_http_test.go",
+          "internal/auth/group_assets_v3_http_external_integration_test.go",
+          "internal/testldapfixture/group_assets_v3_test.go",
+          "web/src/GroupAssetsV3.test.tsx",
+          "web/e2e/group-assets-v3.spec.ts",
+          "web/e2e/group-assets-v3-readers.spec.ts"
+        ],
+        "local_validation": "docs/group-assets-v3-validation.md",
+        "remaining": [
+          "独立源码/联合复审与本地2069 DOM/136 Python及Go完整check已通过；精确远端head全CI、真实Worker/TLS LDAP/PG/API/browser逐值链与双引擎reader/截图、最终main兼容/合并后验证待核。128/132仍未合main依赖；本地PG/浏览器因缺DSN/Docker失败，不计通过",
+          "组groupMold/groupScope/groupType、显示名称/应用归属/敏感分类、完整旧字段与源系统1:1兼容没有采集依据或未冻结；不把原始kind=group当组业务分类",
+          "成员/关系/导出、真实AD与八版本Windows、大容量及生产验收开放；Issue30与工程Issue135保持open，product_accepted=false"
+        ]
+      }
     },
     {
       "id": "AD-F-043",

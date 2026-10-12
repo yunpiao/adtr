@@ -16,8 +16,11 @@ Statuses are deliberately distinct:
   items; this is not the same as a PR, merge or deploy status
 
 Current product acceptance remains **0/209**: **19 implemented_verified_slice**
-requirements, **31 in_progress**, and **159 not_started**. These are requirement
-status counts, not PR counts or 19 fully accepted features. Only AD-F-157/158/159
+requirements, **32 in_progress**, and **158 not_started**. These are requirement
+status counts, not PR counts or 19 fully accepted features. AD-F-042 is now
+in_progress for [the bounded raw-group workspace](../docs/group-assets-v3-contract.md);
+its classification fields, source compatibility and real acceptance remain open.
+Only AD-F-157/158/159
 change status in the [2026-10-11 reconciliation](../docs/delivery-reconciliation-20261011.md):
 real health-message runtime/UI, single/bulk read recovery and fixed-query counts
 now have implementation evidence, while full F40 compatibility remains open.

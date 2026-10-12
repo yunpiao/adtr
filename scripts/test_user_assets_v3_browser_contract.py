@@ -28,8 +28,8 @@ class UserAssetsV3BrowserContract(unittest.TestCase):
     def test_original_and_fixed_engines_remain_required(self):
         workflow = Path('.github/workflows/ci.yml').read_text()
         self.assertEqual(workflow.count('command: python3 scripts/test_auth_e2e.py --suite user-assets-v3\n'), 1)
-        self.assertIn("matrix.name == 'user-assets-v3') && 'stable-body'", workflow)
-        self.assertIn('suite: [user-assets-v2, user-assets-v2-readers, user-assets-v3]', workflow)
+        self.assertIn("matrix.name == 'user-assets-v3' || matrix.name == 'computer-assets-v3' || matrix.name == 'computer-assets-v3-readers' || matrix.name == 'group-assets-v3' || matrix.name == 'group-assets-v3-readers') && 'stable-body'", workflow)
+        self.assertIn('suite: [user-assets-v2, user-assets-v2-readers, user-assets-v3, computer-assets-v3, computer-assets-v3-readers, group-assets-v3, group-assets-v3-readers]', workflow)
         self.assertIn('path: web/test-results/**/user-assets-v3-*\n', workflow)
         self.assertIn('            web/test-results/**/user-assets-v3-*\n', workflow)
         self.assertIn('if-no-files-found: error', workflow)

@@ -28,6 +28,8 @@ type server struct {
 	directoryV3        bool
 	directoryV2        bool
 	userAssetsV2       bool
+	computerAssetsV3   bool
+	groupAssetsV3      bool
 	directoryEmpty     bool
 	directorySlow      bool
 }
@@ -119,7 +121,7 @@ func (s *server) handle(ctx context.Context, raw net.Conn, ldaps bool) {
 	conn := raw
 	secure, bound := false, false
 	rootRead := false
-	directory := directorySession{v2: s.directoryV2, v3: s.directoryV3, userAssetsV2: s.userAssetsV2, empty: s.directoryEmpty, slow: s.directorySlow}
+	directory := directorySession{v2: s.directoryV2, v3: s.directoryV3, userAssetsV2: s.userAssetsV2, computerAssetsV3: s.computerAssetsV3, groupAssetsV3: s.groupAssetsV3, empty: s.directoryEmpty, slow: s.directorySlow}
 	defer directory.reset()
 	upgrade := func() bool {
 		tlsConn := tls.Server(raw, s.tlsConfig)
