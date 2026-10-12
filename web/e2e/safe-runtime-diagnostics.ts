@@ -2,6 +2,12 @@ import { writeFileSync } from "node:fs";
 import { performance } from "node:perf_hooks";
 
 const routes = new Set([
+  "/api/domain-selection",
+  "/api/domain-selection/resolve",
+  "/api/access/menu",
+  "/api/access/check",
+  "/api/user-assets/v2",
+  "/api/user-assets/v3",
   "/api/resources/tenant",
   "/api/auth/me",
   "/api/domains/detail",
@@ -36,9 +42,17 @@ export function recordSafeEvent(
   elapsed = 0,
   status: number | null = null,
 ) {
-  const file = process.env.ADTR_E2E_SAFE_DIAGNOSTICS;
-  if (!file) return;
-  const record = JSON.stringify({
+  if (
+    !["read-json", "totp-wait", "grant-v2-complete"].includes(phase) ||
+    !["start", "response", "transport-error", "complete"].includes(outcome) ||
+    !Number.isFinite(elapsed) ||
+    !(
+      status === null ||
+      (Number.isInteger(status) && status >= 100 && status <= 599)
+    )
+  )
+    return;
+  appendSafeEvent({
     phase,
     method: phase === "read-json" ? "GET" : "none",
     route: safeRoute(path),
@@ -47,10 +61,17 @@ export function recordSafeEvent(
     outcome,
     status,
   });
+}
+
+// Only callers in this module and the strictly validated request recorder use this.
+export function appendSafeEvent(event: object) {
+  const file = process.env.ADTR_E2E_SAFE_DIAGNOSTICS;
+  if (!file) return;
+  const record = JSON.stringify(event);
   records.push(record);
   bytes += Buffer.byteLength(record) + 1;
   // Leave room for the fixed envelope and bounded dropped counter.
-  while (records.length > 256 || bytes > 65_472) {
+  while (records.length > 256 || bytes > 61_440) {
     bytes -= Buffer.byteLength(records.shift()!) + 1;
     dropped = Math.min(1_000_000, dropped + 1);
   }

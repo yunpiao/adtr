@@ -29,7 +29,8 @@ MAX_EVENTS = 256
 MAX_MS = 86400000
 PHASES = {"setup", "api-start", "api-ready", "worker-start", "worker-ready",
           "browser-start", "browser-pass", "before-cleanup", "after-cleanup"}
-ROUTES = {"unknown", "/api/resources/tenant", "/api/auth/me", "/api/domains/detail",
+ROUTES = {"/api/domain-selection", "/api/domain-selection/resolve", "/api/access/menu", "/api/access/check",
+          "/api/user-assets/v2", "/api/user-assets/v3", "unknown", "/api/resources/tenant", "/api/auth/me", "/api/domains/detail",
           "/api/directory-credential-use/effective", "/api/directory-credential-use/v2/effective",
           "/api/credential-use/effective", "/api/tasks", "/api/tasks/detail",
           "/api/directory/v2/task", "/api/directory/v2/receipt",
@@ -42,6 +43,8 @@ def integer(value, low, high):
 
 
 def validate_event(event):
+    if type(event) is dict and "origin" in event:
+        return validate_request_event(event)
     if type(event) is not dict or set(event) != {"phase", "method", "route", "elapsed_ms", "at_ms", "outcome", "status"}:
         raise ValueError("invalid safe browser event")
     if (event["phase"] not in BROWSER_PHASES or event["method"] not in {"GET", "none"}
@@ -49,6 +52,67 @@ def validate_event(event):
             or not integer(event["elapsed_ms"], 0, MAX_MS) or not integer(event["at_ms"], 0, MAX_MS)
             or not (event["status"] is None or integer(event["status"], 100, 599))):
         raise ValueError("invalid safe browser event")
+
+
+REQUEST_PHASES = {"directory-get", "fixture-get", "page-request"}
+STEP_PHASES = {"test-start", "test-finish", "administrator-login", "version-switch", "source-select"}
+ERROR_CLASSES = {"none", "econnreset", "socket_hang_up", "response_aborted", "context_disposed", "target_closed", "connection_refused", "timeout", "unknown_error", "non_error", "page_request_failed"}
+
+
+def validate_snapshot(value):
+    if type(value) is not dict or set(value) != {"view", "picker", "source", "alert", "permission_denied", "page_closed", "unavailable"}:
+        raise ValueError("invalid safe snapshot")
+    if (value["view"] not in {"v2", "v3", "login", "other", "unavailable"}
+            or value["picker"] not in {"visible", "hidden", "absent", "unavailable"}
+            or value["source"] not in {"loading", "empty", "radio-present", "absent", "unavailable"}
+            or any(type(value[key]) is not bool for key in ["alert", "permission_denied", "page_closed", "unavailable"])):
+        raise ValueError("invalid safe snapshot")
+    if value["unavailable"]:
+        valid = all(value[key] == "unavailable" for key in ["view", "picker", "source"]) and not value["alert"] and not value["permission_denied"]
+    else:
+        valid = all(value[key] != "unavailable" for key in ["view", "picker", "source"]) and not value["page_closed"]
+    if not valid:
+        raise ValueError("invalid safe snapshot relation")
+
+
+def validate_request_event(event):
+    if set(event) != {"origin", "phase", "operation", "attempt", "method", "route", "outcome", "status", "error_class", "at_ms", "elapsed_ms", "snapshot"}:
+        raise ValueError("invalid safe request event")
+    if (event["origin"] not in {"api-request", "page-request", "step"}
+            or event["phase"] not in REQUEST_PHASES | STEP_PHASES
+            or not integer(event["operation"], 1, 1000000) or not integer(event["attempt"], 0, 2)
+            or event["method"] not in {"GET", "POST", "other", "none"} or event["route"] not in ROUTES
+            or event["outcome"] not in {"start", "response", "finished", "transport-error", "complete", "failed"}
+            or event["error_class"] not in ERROR_CLASSES
+            or not (event["status"] is None or integer(event["status"], 100, 599))
+            or not integer(event["at_ms"], 0, MAX_MS) or not integer(event["elapsed_ms"], 0, MAX_MS)):
+        raise ValueError("invalid safe request fields")
+    if event["origin"] == "step":
+        if (event["phase"] not in STEP_PHASES or event["method"] != "none" or event["route"] != "unknown"
+                or event["attempt"] != 0 or event["status"] is not None or event["error_class"] != "none"
+                or event["outcome"] not in {"start", "complete", "failed"}):
+            raise ValueError("invalid safe step relation")
+        validate_snapshot(event["snapshot"])
+        return
+    if event["snapshot"] is not None or event["method"] == "none":
+        raise ValueError("invalid safe request relation")
+    if event["origin"] == "api-request":
+        if (event["phase"] not in {"directory-get", "fixture-get"} or event["method"] != "GET"
+                or not integer(event["attempt"], 1, 2 if event["phase"] == "fixture-get" else 1)
+                or event["outcome"] not in {"start", "response", "transport-error"}):
+            raise ValueError("invalid safe API request relation")
+    elif event["phase"] != "page-request" or event["attempt"] != 0 or event["outcome"] not in {"start", "response", "finished", "transport-error"}:
+        raise ValueError("invalid safe page request relation")
+    if event["outcome"] == "start":
+        valid = event["status"] is None and event["error_class"] == "none"
+    elif event["outcome"] in {"response", "finished"}:
+        valid = event["status"] is not None and event["error_class"] == "none"
+    elif event["origin"] == "api-request":
+        valid = event["status"] is None and event["error_class"] not in {"none", "page_request_failed"}
+    else:
+        valid = event["error_class"] == "page_request_failed"
+    if not valid:
+        raise ValueError("invalid safe outcome relation")
 
 
 def validate_report(report):

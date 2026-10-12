@@ -1,3 +1,8 @@
+import {
+  checkpoint,
+  diagnosticStep,
+  observeSafePageRequests,
+} from "./safe-request-diagnostics";
 import { navigateTo } from "./navigation";
 import {
   test,
@@ -370,9 +375,11 @@ async function selectAssets(page: Page) {
   await expect(
     page.getByRole("link", { name: "字典 3 · 主组 RID / SPN", exact: true }),
   ).toHaveAttribute("aria-current", "page");
-  await page
-    .getByRole("radio", { name: "选择数据源 synthetic.invalid", exact: true })
-    .check();
+  await diagnosticStep(page, "source-select", () =>
+    page
+      .getByRole("radio", { name: "选择数据源 synthetic.invalid", exact: true })
+      .check(),
+  );
   return assetAction(page, () =>
     page
       .getByRole("button", { name: "核对并打开连接详情", exact: true })
@@ -474,9 +481,24 @@ async function fallbackTab(context: BrowserContext) {
 // and metadata/actual fact evidence below may become artifacts.
 test.use({ trace: "off", screenshot: "off", video: "off" });
 test.beforeAll(() => requireFixture());
-test.beforeEach(async ({ context }) => {
+const stopDiagnostics = new WeakMap<Page, () => void>();
+test.beforeEach(async ({ context, page }) => {
+  stopDiagnostics.set(page, observeSafePageRequests(page));
+  await checkpoint(page, "test-start", "start");
   await observeDirectoryV2Responses(context);
   await context.addInitScript(installUserAssetAbortIsolation);
+});
+test.afterEach(async ({ page }, info) => {
+  try {
+    await checkpoint(
+      page,
+      "test-finish",
+      info.status === info.expectedStatus ? "complete" : "failed",
+    );
+  } finally {
+    stopDiagnostics.get(page)?.();
+    stopDiagnostics.delete(page);
+  }
 });
 test("UserAssetsV3 real workspace, pins, identity facts and native reader invalidation", async ({
   page,
@@ -520,8 +542,10 @@ test("UserAssetsV3 real workspace, pins, identity facts and native reader invali
   page.on("console", (message) => consoles.push(message.text()));
   page.on("pageerror", (error) => consoles.push(error.message));
 
-  await page.goto("/");
-  await login(page, username, initialPassword);
+  await diagnosticStep(page, "administrator-login", async () => {
+    await page.goto("/");
+    await login(page, username, initialPassword);
+  });
   await expect(
     page.getByRole("heading", { name: "修改密码", exact: true }),
   ).toBeVisible();
@@ -594,16 +618,18 @@ test("UserAssetsV3 real workspace, pins, identity facts and native reader invali
   expect(
     (await submit(page, "/api/resources/groups/assign", "保存角色关联")).value,
   ).toMatchObject({ result: "SUCCESS", sessionRevoked: true });
-  await login(page, username, password);
-  await fillSecret(
-    page.getByLabel("二次认证验证码", { exact: true }),
-    await freshCode(auth),
-  );
-  await page.getByRole("button", { name: "登录", exact: true }).click();
-  await expect(
-    page.getByRole("heading", { name: "账户概览", exact: true }),
-  ).toBeVisible();
-  let actorId = (await readJSON(context, "/api/auth/me")).ID as number;
+  let actorId = await diagnosticStep(page, "administrator-login", async () => {
+    await login(page, username, password);
+    await fillSecret(
+      page.getByLabel("二次认证验证码", { exact: true }),
+      await freshCode(auth),
+    );
+    await page.getByRole("button", { name: "登录", exact: true }).click();
+    await expect(
+      page.getByRole("heading", { name: "账户概览", exact: true }),
+    ).toBeVisible();
+    return (await readJSON(context, "/api/auth/me")).ID as number;
+  });
 
   // Production allows ten sensitive actions per actor per fifteen minutes.
   // Bootstrap: password/MFA start/enable (3), domain/group/assignment (3),
@@ -1516,10 +1542,12 @@ test("UserAssetsV3 real workspace, pins, identity facts and native reader invali
     await page.getByRole("button", { name: "搜索用户", exact: true }).click();
     try {
       await held.fetched();
-      await page
-        .getByRole("link", { name: "字典 2 · 基础身份", exact: true })
-        .click();
-      await expect(page).toHaveURL(/#user-assets-v2$/u);
+      await diagnosticStep(page, "version-switch", async () => {
+        await page
+          .getByRole("link", { name: "字典 2 · 基础身份", exact: true })
+          .click();
+        await expect(page).toHaveURL(/#user-assets-v2$/u);
+      });
       const outcome = await held.release();
       expect(outcome.application).toBe("complete-consumed");
       transport.push({ scenario: "version-switch", ...outcome });
@@ -1528,9 +1556,14 @@ test("UserAssetsV3 real workspace, pins, identity facts and native reader invali
     } finally {
       await held.release();
     }
-    await page
-      .getByRole("radio", { name: "选择数据源 synthetic.invalid", exact: true })
-      .check();
+    await diagnosticStep(page, "source-select", () =>
+      page
+        .getByRole("radio", {
+          name: "选择数据源 synthetic.invalid",
+          exact: true,
+        })
+        .check(),
+    );
     const [v2Response] = await Promise.all([
       page.waitForResponse(
         (response) =>

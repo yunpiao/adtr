@@ -1,3 +1,4 @@
+import { diagnosticGET } from "./safe-request-diagnostics";
 import { navigateTo } from "./navigation";
 import {
   test,
@@ -151,7 +152,7 @@ async function readJSON(
   path: string,
   actorId?: number,
 ) {
-  const response = await context.request.get(path);
+  const response = await diagnosticGET(() => context.request.get(path), path);
   expect(response.status(), `GET ${path}`).toBe(200);
   expect(response.headers()["cache-control"]).toBe("no-store");
   if (actorId !== undefined)
