@@ -354,7 +354,7 @@ class WorkflowImageGateContract(unittest.TestCase):
         self.assertIn('suite: [user-assets-v2, user-assets-v2-readers, user-assets-v3, computer-assets-v3, computer-assets-v3-readers, group-assets-v3, group-assets-v3-readers]', jobs['user-assets-fixed'])
         self.assertEqual(1 + 1 + 4 + 34 + 1 + 1 + 7 + 1, 50)
         for name in ['auth-integration', 'browser', 'user-assets-fixed']:
-            expected_parallelism = 4 if name == 'browser' else 2
+            expected_parallelism = 8 if name == 'browser' else 2
             self.assertIn(f'max-parallel: {expected_parallelism}', jobs[name])
             self.assertIn('fail-fast: false', jobs[name])
         for name in ['contracts', 'auth-integration', 'browser', 'user-assets-fixed']:

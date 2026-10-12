@@ -19,8 +19,8 @@ configuration and any merge queue settings remain repository-owner controls.
 ## Parallel real-browser acceptance
 
 F39 adds an isolated audit/API/Worker/PostgreSQL browser suite. Browser suites run
-in a matrix with at most four concurrent jobs and fail-fast disabled, so every
-suite reports its outcome. The four-slot bound is a measured-rollout canary;
+in a matrix with at most eight concurrent jobs and fail-fast disabled, so every
+suite reports its outcome. The eight-slot bound is a new validation candidate;
 authentication and fixed-engine matrices retain their two-slot bounds. Each job retains the 20-minute budget and uses its
 own fresh database. The audit browser subprocess has a 600-second budget for
 its additional real TOTP windows; prior suites retain 420 seconds.
@@ -43,7 +43,7 @@ The normal `python3 scripts/test_integration.py` and `make integration` entry po
 run all non-auth packages and all four auth shards, even if an earlier group fails.
 
 F52 adds a separate system browser matrix case with the same 20-minute job
-budget and two-job concurrency bound. The harness passes only the PID of its
+budget and browser-matrix concurrency bound. The harness passes only the PID of its
 own synthetic worker; the test stops that process and verifies stale worker
 status while authenticated API/PostgreSQL checks continue. No product process
 control endpoint or monitoring timer fabricates this evidence.
@@ -58,11 +58,14 @@ F03 adds the operations browser suite with a storage-only domain key and probes 
 
 ## Same-run image preparation
 
-The original 34 jobs remain; required `prepare-postgres` makes 35. The 31
+The current group-assets baseline has 50 jobs, including required `prepare-postgres`. Its 46
 PostgreSQL consumers load the same-run immutable artifact after strict source,
 digest, checkout and archive checks, then use the verified image ID without
-pulling. `verify` additionally requires preparation success. The browser matrix now has a bounded four-slot canary; auth/fixed matrices
+pulling. `verify` additionally requires preparation success. The browser matrix now has a bounded eight-slot candidate; auth/fixed matrices
 remain at two. A separate two-job workflow runs only on explicit
 `ci/image-transfer-probe/**` branch pushes; it does not replace any full-CI gate.
 Trust boundaries, parameters, evidence limits and measurement sequence are in
 [ci-image-sharing.md](ci-image-sharing.md).
+
+The current strict scope, resource budget, parameter tradeoffs and separate measurement
+requirements are in [ci-eight-slot-validation.md](ci-eight-slot-validation.md).

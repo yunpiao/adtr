@@ -1,0 +1,889 @@
+{
+  "schema": 1,
+  "source": "GitHub Actions run/jobs API snapshots collected 2026-10-12T04:48Z",
+  "assumptions": [
+    "unchanged measured execution durations",
+    "declared matrix order",
+    "unlimited account runners",
+    "zero added dispatch delay",
+    "no new contention"
+  ],
+  "runs": [
+    {
+      "id": 38197305276,
+      "number": 175,
+      "url": "https://github.com/yunpiao/adtr/actions/runs/38197305276",
+      "headSha": "bf3ef84f53da7fcd9ba7dc2c2d3fd6b116f221cb",
+      "attempt": 1,
+      "startedAt": "2026-10-12T02:49:28Z",
+      "workflowSha256": "d825f027064e01fbf25c718edf66deb5cc9bb4c305a851510ff4c24374940dab",
+      "browserOrder": [
+        "account-references",
+        "messages",
+        "user-assets-v2",
+        "user-assets-v2-readers",
+        "user-assets-v3",
+        "computer-assets-v3",
+        "computer-assets-v3-readers",
+        "directory-v3-backend",
+        "directory-v3",
+        "directory-v3-controls",
+        "directory-v3-readers",
+        "directory-v2",
+        "directory-v2-controls",
+        "directory-v2-readers",
+        "directory-readers",
+        "authentication",
+        "expired-password",
+        "access",
+        "resources",
+        "tasks",
+        "audit",
+        "system",
+        "maintenance",
+        "domains",
+        "operations",
+        "profile",
+        "credential-use",
+        "operational-logs",
+        "session-invalidation",
+        "account-reference-barrier",
+        "directory",
+        "directory-controls"
+      ],
+      "fixedOrder": [
+        "user-assets-v2",
+        "user-assets-v2-readers",
+        "user-assets-v3",
+        "computer-assets-v3",
+        "computer-assets-v3-readers"
+      ],
+      "jobs": [
+        {
+          "id": 114642734981,
+          "name": "native-no-store",
+          "started_at": "2026-10-12T02:49:31Z",
+          "completed_at": "2026-10-12T02:50:23Z",
+          "conclusion": "success",
+          "html_url": "https://github.com/yunpiao/adtr/actions/runs/38197305276/job/114642734981"
+        },
+        {
+          "id": 114642735094,
+          "name": "prepare-postgres",
+          "started_at": "2026-10-12T02:49:31Z",
+          "completed_at": "2026-10-12T02:49:51Z",
+          "conclusion": "success",
+          "html_url": "https://github.com/yunpiao/adtr/actions/runs/38197305276/job/114642735094"
+        },
+        {
+          "id": 114642735121,
+          "name": "native-no-store-fixed",
+          "started_at": "2026-10-12T02:49:31Z",
+          "completed_at": "2026-10-12T02:50:11Z",
+          "conclusion": "success",
+          "html_url": "https://github.com/yunpiao/adtr/actions/runs/38197305276/job/114642735121"
+        },
+        {
+          "id": 114642808796,
+          "name": "contracts",
+          "started_at": "2026-10-12T02:49:53Z",
+          "completed_at": "2026-10-12T02:58:19Z",
+          "conclusion": "success",
+          "html_url": "https://github.com/yunpiao/adtr/actions/runs/38197305276/job/114642808796"
+        },
+        {
+          "id": 114642808805,
+          "name": "user-assets-fixed (user-assets-v3)",
+          "started_at": "2026-10-12T02:58:09Z",
+          "completed_at": "2026-10-12T03:07:38Z",
+          "conclusion": "success",
+          "html_url": "https://github.com/yunpiao/adtr/actions/runs/38197305276/job/114642808805"
+        },
+        {
+          "id": 114642808808,
+          "name": "auth-integration (1)",
+          "started_at": "2026-10-12T02:49:53Z",
+          "completed_at": "2026-10-12T02:58:57Z",
+          "conclusion": "success",
+          "html_url": "https://github.com/yunpiao/adtr/actions/runs/38197305276/job/114642808808"
+        },
+        {
+          "id": 114642808811,
+          "name": "auth-integration (4)",
+          "started_at": "2026-10-12T03:00:30Z",
+          "completed_at": "2026-10-12T03:07:43Z",
+          "conclusion": "success",
+          "html_url": "https://github.com/yunpiao/adtr/actions/runs/38197305276/job/114642808811"
+        },
+        {
+          "id": 114642808817,
+          "name": "user-assets-fixed (computer-assets-v3)",
+          "started_at": "2026-10-12T03:01:38Z",
+          "completed_at": "2026-10-12T03:09:07Z",
+          "conclusion": "success",
+          "html_url": "https://github.com/yunpiao/adtr/actions/runs/38197305276/job/114642808817"
+        },
+        {
+          "id": 114642808871,
+          "name": "user-assets-fixed (user-assets-v2)",
+          "started_at": "2026-10-12T02:49:53Z",
+          "completed_at": "2026-10-12T02:58:07Z",
+          "conclusion": "success",
+          "html_url": "https://github.com/yunpiao/adtr/actions/runs/38197305276/job/114642808871"
+        },
+        {
+          "id": 114642808872,
+          "name": "user-assets-fixed (user-assets-v2-readers)",
+          "started_at": "2026-10-12T02:49:52Z",
+          "completed_at": "2026-10-12T03:01:36Z",
+          "conclusion": "success",
+          "html_url": "https://github.com/yunpiao/adtr/actions/runs/38197305276/job/114642808872"
+        },
+        {
+          "id": 114642808893,
+          "name": "user-assets-fixed (computer-assets-v3-readers)",
+          "started_at": "2026-10-12T03:07:40Z",
+          "completed_at": "2026-10-12T03:15:08Z",
+          "conclusion": "success",
+          "html_url": "https://github.com/yunpiao/adtr/actions/runs/38197305276/job/114642808893"
+        },
+        {
+          "id": 114642808936,
+          "name": "auth-integration (3)",
+          "started_at": "2026-10-12T02:58:59Z",
+          "completed_at": "2026-10-12T03:07:30Z",
+          "conclusion": "success",
+          "html_url": "https://github.com/yunpiao/adtr/actions/runs/38197305276/job/114642808936"
+        },
+        {
+          "id": 114642808956,
+          "name": "auth-integration (2)",
+          "started_at": "2026-10-12T02:49:53Z",
+          "completed_at": "2026-10-12T03:00:28Z",
+          "conclusion": "success",
+          "html_url": "https://github.com/yunpiao/adtr/actions/runs/38197305276/job/114642808956"
+        },
+        {
+          "id": 114642809219,
+          "name": "browser (messages, python3 scripts/test_auth_e2e.py --suite messages)",
+          "started_at": "2026-10-12T02:49:53Z",
+          "completed_at": "2026-10-12T02:55:14Z",
+          "conclusion": "success",
+          "html_url": "https://github.com/yunpiao/adtr/actions/runs/38197305276/job/114642809219"
+        },
+        {
+          "id": 114642809266,
+          "name": "browser (account-references, python3 scripts/test_auth_e2e.py --suite account-references)",
+          "started_at": "2026-10-12T02:49:53Z",
+          "completed_at": "2026-10-12T02:59:06Z",
+          "conclusion": "success",
+          "html_url": "https://github.com/yunpiao/adtr/actions/runs/38197305276/job/114642809266"
+        },
+        {
+          "id": 114642809296,
+          "name": "browser (user-assets-v2-readers, python3 scripts/test_auth_e2e.py --suite user-assets-v2-readers)",
+          "started_at": "2026-10-12T02:49:53Z",
+          "completed_at": "2026-10-12T03:01:38Z",
+          "conclusion": "success",
+          "html_url": "https://github.com/yunpiao/adtr/actions/runs/38197305276/job/114642809296"
+        },
+        {
+          "id": 114642809304,
+          "name": "browser (user-assets-v3, python3 scripts/test_auth_e2e.py --suite user-assets-v3)",
+          "started_at": "2026-10-12T02:55:16Z",
+          "completed_at": "2026-10-12T03:04:37Z",
+          "conclusion": "success",
+          "html_url": "https://github.com/yunpiao/adtr/actions/runs/38197305276/job/114642809304"
+        },
+        {
+          "id": 114642809338,
+          "name": "browser (user-assets-v2, python3 scripts/test_auth_e2e.py --suite user-assets-v2)",
+          "started_at": "2026-10-12T02:49:53Z",
+          "completed_at": "2026-10-12T02:58:38Z",
+          "conclusion": "success",
+          "html_url": "https://github.com/yunpiao/adtr/actions/runs/38197305276/job/114642809338"
+        },
+        {
+          "id": 114642809344,
+          "name": "browser (computer-assets-v3-readers, python3 scripts/test_auth_e2e.py --suite computer-assets-v3-...",
+          "started_at": "2026-10-12T02:59:08Z",
+          "completed_at": "2026-10-12T03:06:39Z",
+          "conclusion": "success",
+          "html_url": "https://github.com/yunpiao/adtr/actions/runs/38197305276/job/114642809344"
+        },
+        {
+          "id": 114642809380,
+          "name": "browser (directory-v3-backend, python3 scripts/test_auth_e2e.py --suite directory-v3-backend)",
+          "started_at": "2026-10-12T03:01:40Z",
+          "completed_at": "2026-10-12T03:09:06Z",
+          "conclusion": "success",
+          "html_url": "https://github.com/yunpiao/adtr/actions/runs/38197305276/job/114642809380"
+        },
+        {
+          "id": 114642809382,
+          "name": "browser (directory-v3-readers, python3 scripts/test_auth_e2e.py --suite directory-v3-readers)",
+          "started_at": "2026-10-12T03:06:40Z",
+          "completed_at": "2026-10-12T03:18:36Z",
+          "conclusion": "success",
+          "html_url": "https://github.com/yunpiao/adtr/actions/runs/38197305276/job/114642809382"
+        },
+        {
+          "id": 114642809408,
+          "name": "browser (directory-v2-controls, python3 scripts/test_auth_e2e.py --suite directory-v2-controls)",
+          "started_at": "2026-10-12T03:12:38Z",
+          "completed_at": "2026-10-12T03:20:11Z",
+          "conclusion": "success",
+          "html_url": "https://github.com/yunpiao/adtr/actions/runs/38197305276/job/114642809408"
+        },
+        {
+          "id": 114642809417,
+          "name": "browser (directory-v3, python3 scripts/test_auth_e2e.py --suite directory-v3)",
+          "started_at": "2026-10-12T03:04:38Z",
+          "completed_at": "2026-10-12T03:12:36Z",
+          "conclusion": "success",
+          "html_url": "https://github.com/yunpiao/adtr/actions/runs/38197305276/job/114642809417"
+        },
+        {
+          "id": 114642809422,
+          "name": "browser (directory-v3-controls, python3 scripts/test_auth_e2e.py --suite directory-v3-controls)",
+          "started_at": "2026-10-12T03:05:39Z",
+          "completed_at": "2026-10-12T03:13:10Z",
+          "conclusion": "success",
+          "html_url": "https://github.com/yunpiao/adtr/actions/runs/38197305276/job/114642809422"
+        },
+        {
+          "id": 114642809429,
+          "name": "browser (directory-v2, python3 scripts/test_auth_e2e.py --suite directory-v2)",
+          "started_at": "2026-10-12T03:09:08Z",
+          "completed_at": "2026-10-12T03:18:08Z",
+          "conclusion": "success",
+          "html_url": "https://github.com/yunpiao/adtr/actions/runs/38197305276/job/114642809429"
+        },
+        {
+          "id": 114642809452,
+          "name": "browser (directory-v2-readers, python3 scripts/test_auth_e2e.py --suite directory-v2-readers)",
+          "started_at": "2026-10-12T03:13:12Z",
+          "completed_at": "2026-10-12T03:25:07Z",
+          "conclusion": "success",
+          "html_url": "https://github.com/yunpiao/adtr/actions/runs/38197305276/job/114642809452"
+        },
+        {
+          "id": 114642809690,
+          "name": "browser (computer-assets-v3, python3 scripts/test_auth_e2e.py --suite computer-assets-v3)",
+          "started_at": "2026-10-12T02:58:40Z",
+          "completed_at": "2026-10-12T03:05:37Z",
+          "conclusion": "success",
+          "html_url": "https://github.com/yunpiao/adtr/actions/runs/38197305276/job/114642809690"
+        },
+        {
+          "id": 114642810349,
+          "name": "browser (directory-readers, python3 scripts/test_auth_e2e.py --suite directory-readers)",
+          "started_at": "2026-10-12T03:18:10Z",
+          "completed_at": "2026-10-12T03:29:14Z",
+          "conclusion": "success",
+          "html_url": "https://github.com/yunpiao/adtr/actions/runs/38197305276/job/114642810349"
+        },
+        {
+          "id": 114642810515,
+          "name": "browser (expired-password, python3 scripts/test_auth_e2e.py --expired)",
+          "started_at": "2026-10-12T03:20:13Z",
+          "completed_at": "2026-10-12T03:22:04Z",
+          "conclusion": "success",
+          "html_url": "https://github.com/yunpiao/adtr/actions/runs/38197305276/job/114642810515"
+        },
+        {
+          "id": 114642810562,
+          "name": "browser (authentication, python3 scripts/test_auth_e2e.py)",
+          "started_at": "2026-10-12T03:18:38Z",
+          "completed_at": "2026-10-12T03:21:06Z",
+          "conclusion": "success",
+          "html_url": "https://github.com/yunpiao/adtr/actions/runs/38197305276/job/114642810562"
+        },
+        {
+          "id": 114642810621,
+          "name": "browser (resources, python3 scripts/test_auth_e2e.py --suite resource)",
+          "started_at": "2026-10-12T03:22:06Z",
+          "completed_at": "2026-10-12T03:27:04Z",
+          "conclusion": "success",
+          "html_url": "https://github.com/yunpiao/adtr/actions/runs/38197305276/job/114642810621"
+        },
+        {
+          "id": 114642810623,
+          "name": "browser (tasks, python3 scripts/test_auth_e2e.py --suite tasks)",
+          "started_at": "2026-10-12T03:24:05Z",
+          "completed_at": "2026-10-12T03:28:05Z",
+          "conclusion": "success",
+          "html_url": "https://github.com/yunpiao/adtr/actions/runs/38197305276/job/114642810623"
+        },
+        {
+          "id": 114642810648,
+          "name": "browser (access, python3 scripts/test_auth_e2e.py --suite access)",
+          "started_at": "2026-10-12T03:21:08Z",
+          "completed_at": "2026-10-12T03:24:04Z",
+          "conclusion": "success",
+          "html_url": "https://github.com/yunpiao/adtr/actions/runs/38197305276/job/114642810648"
+        },
+        {
+          "id": 114642810666,
+          "name": "browser (audit, python3 scripts/test_auth_e2e.py --suite audit)",
+          "started_at": "2026-10-12T03:25:08Z",
+          "completed_at": "2026-10-12T03:31:36Z",
+          "conclusion": "success",
+          "html_url": "https://github.com/yunpiao/adtr/actions/runs/38197305276/job/114642810666"
+        },
+        {
+          "id": 114642810696,
+          "name": "browser (maintenance, python3 scripts/test_auth_e2e.py --suite maintenance)",
+          "started_at": "2026-10-12T03:28:07Z",
+          "completed_at": "2026-10-12T03:34:35Z",
+          "conclusion": "success",
+          "html_url": "https://github.com/yunpiao/adtr/actions/runs/38197305276/job/114642810696"
+        },
+        {
+          "id": 114642810763,
+          "name": "browser (system, python3 scripts/test_auth_e2e.py --suite system)",
+          "started_at": "2026-10-12T03:27:06Z",
+          "completed_at": "2026-10-12T03:31:58Z",
+          "conclusion": "success",
+          "html_url": "https://github.com/yunpiao/adtr/actions/runs/38197305276/job/114642810763"
+        },
+        {
+          "id": 114642810966,
+          "name": "browser (domains, python3 scripts/test_auth_e2e.py --suite domains)",
+          "started_at": "2026-10-12T03:29:15Z",
+          "completed_at": "2026-10-12T03:34:37Z",
+          "conclusion": "success",
+          "html_url": "https://github.com/yunpiao/adtr/actions/runs/38197305276/job/114642810966"
+        },
+        {
+          "id": 114642811165,
+          "name": "browser (operations, python3 scripts/test_auth_e2e.py --suite operations)",
+          "started_at": "2026-10-12T03:31:37Z",
+          "completed_at": "2026-10-12T03:39:05Z",
+          "conclusion": "success",
+          "html_url": "https://github.com/yunpiao/adtr/actions/runs/38197305276/job/114642811165"
+        },
+        {
+          "id": 114642811355,
+          "name": "browser (profile, python3 scripts/test_auth_e2e.py --suite profile)",
+          "started_at": "2026-10-12T03:31:59Z",
+          "completed_at": "2026-10-12T03:33:37Z",
+          "conclusion": "success",
+          "html_url": "https://github.com/yunpiao/adtr/actions/runs/38197305276/job/114642811355"
+        },
+        {
+          "id": 114642811465,
+          "name": "browser (credential-use, python3 scripts/test_auth_e2e.py --suite credential-use)",
+          "started_at": "2026-10-12T03:33:39Z",
+          "completed_at": "2026-10-12T03:39:35Z",
+          "conclusion": "success",
+          "html_url": "https://github.com/yunpiao/adtr/actions/runs/38197305276/job/114642811465"
+        },
+        {
+          "id": 114642811466,
+          "name": "browser (account-reference-barrier, python3 scripts/test_auth_e2e.py --suite account-reference-ba...",
+          "started_at": "2026-10-12T03:36:11Z",
+          "completed_at": "2026-10-12T03:43:07Z",
+          "conclusion": "success",
+          "html_url": "https://github.com/yunpiao/adtr/actions/runs/38197305276/job/114642811466"
+        },
+        {
+          "id": 114642811471,
+          "name": "browser (operational-logs, python3 scripts/test_auth_e2e.py --suite operational-logs)",
+          "started_at": "2026-10-12T03:34:37Z",
+          "completed_at": "2026-10-12T03:38:36Z",
+          "conclusion": "success",
+          "html_url": "https://github.com/yunpiao/adtr/actions/runs/38197305276/job/114642811471"
+        },
+        {
+          "id": 114642811489,
+          "name": "browser (directory, python3 scripts/test_auth_e2e.py --suite directory)",
+          "started_at": "2026-10-12T03:38:38Z",
+          "completed_at": "2026-10-12T03:46:07Z",
+          "conclusion": "success",
+          "html_url": "https://github.com/yunpiao/adtr/actions/runs/38197305276/job/114642811489"
+        },
+        {
+          "id": 114642811498,
+          "name": "browser (session-invalidation, python3 scripts/test_auth_e2e.py --suite session-invalidation)",
+          "started_at": "2026-10-12T03:34:38Z",
+          "completed_at": "2026-10-12T03:36:09Z",
+          "conclusion": "success",
+          "html_url": "https://github.com/yunpiao/adtr/actions/runs/38197305276/job/114642811498"
+        },
+        {
+          "id": 114642811694,
+          "name": "browser (directory-controls, python3 scripts/test_auth_e2e.py --suite directory-controls)",
+          "started_at": "2026-10-12T03:39:07Z",
+          "completed_at": "2026-10-12T03:46:42Z",
+          "conclusion": "success",
+          "html_url": "https://github.com/yunpiao/adtr/actions/runs/38197305276/job/114642811694"
+        },
+        {
+          "id": 114654463490,
+          "name": "verify",
+          "started_at": "2026-10-12T03:46:44Z",
+          "completed_at": "2026-10-12T03:46:47Z",
+          "conclusion": "success",
+          "html_url": "https://github.com/yunpiao/adtr/actions/runs/38197305276/job/114654463490"
+        }
+      ]
+    },
+    {
+      "id": 38200302860,
+      "number": 177,
+      "url": "https://github.com/yunpiao/adtr/actions/runs/38200302860",
+      "headSha": "a42645f39ecde4342f4359f4b9b790fbe3ce7dc8",
+      "attempt": 1,
+      "startedAt": "2026-10-12T03:34:46Z",
+      "workflowSha256": "48044d5bc6e3d6e091a3a06c7da6519dba9c535b737a3b26f54834cdfbcf117a",
+      "browserOrder": [
+        "account-references",
+        "messages",
+        "user-assets-v2",
+        "user-assets-v2-readers",
+        "user-assets-v3",
+        "computer-assets-v3",
+        "computer-assets-v3-readers",
+        "group-assets-v3",
+        "group-assets-v3-readers",
+        "directory-v3-backend",
+        "directory-v3",
+        "directory-v3-controls",
+        "directory-v3-readers",
+        "directory-v2",
+        "directory-v2-controls",
+        "directory-v2-readers",
+        "directory-readers",
+        "authentication",
+        "expired-password",
+        "access",
+        "resources",
+        "tasks",
+        "audit",
+        "system",
+        "maintenance",
+        "domains",
+        "operations",
+        "profile",
+        "credential-use",
+        "operational-logs",
+        "session-invalidation",
+        "account-reference-barrier",
+        "directory",
+        "directory-controls"
+      ],
+      "fixedOrder": [
+        "user-assets-v2",
+        "user-assets-v2-readers",
+        "user-assets-v3",
+        "computer-assets-v3",
+        "computer-assets-v3-readers",
+        "group-assets-v3",
+        "group-assets-v3-readers"
+      ],
+      "jobs": [
+        {
+          "id": 114652006392,
+          "name": "prepare-postgres",
+          "started_at": "2026-10-12T03:34:48Z",
+          "completed_at": "2026-10-12T03:35:06Z",
+          "conclusion": "success",
+          "html_url": "https://github.com/yunpiao/adtr/actions/runs/38200302860/job/114652006392"
+        },
+        {
+          "id": 114652006499,
+          "name": "native-no-store",
+          "started_at": "2026-10-12T03:34:48Z",
+          "completed_at": "2026-10-12T03:35:33Z",
+          "conclusion": "success",
+          "html_url": "https://github.com/yunpiao/adtr/actions/runs/38200302860/job/114652006499"
+        },
+        {
+          "id": 114652006516,
+          "name": "native-no-store-fixed",
+          "started_at": "2026-10-12T03:34:48Z",
+          "completed_at": "2026-10-12T03:35:32Z",
+          "conclusion": "success",
+          "html_url": "https://github.com/yunpiao/adtr/actions/runs/38200302860/job/114652006516"
+        },
+        {
+          "id": 114652075174,
+          "name": "contracts",
+          "started_at": "2026-10-12T03:35:08Z",
+          "completed_at": "2026-10-12T03:44:55Z",
+          "conclusion": "success",
+          "html_url": "https://github.com/yunpiao/adtr/actions/runs/38200302860/job/114652075174"
+        },
+        {
+          "id": 114652075182,
+          "name": "auth-integration (2)",
+          "started_at": "2026-10-12T03:35:09Z",
+          "completed_at": "2026-10-12T03:45:44Z",
+          "conclusion": "success",
+          "html_url": "https://github.com/yunpiao/adtr/actions/runs/38200302860/job/114652075182"
+        },
+        {
+          "id": 114652075212,
+          "name": "auth-integration (3)",
+          "started_at": "2026-10-12T03:44:35Z",
+          "completed_at": "2026-10-12T03:54:36Z",
+          "conclusion": "success",
+          "html_url": "https://github.com/yunpiao/adtr/actions/runs/38200302860/job/114652075212"
+        },
+        {
+          "id": 114652075213,
+          "name": "user-assets-fixed (user-assets-v2-readers)",
+          "started_at": "2026-10-12T03:35:08Z",
+          "completed_at": "2026-10-12T03:47:08Z",
+          "conclusion": "success",
+          "html_url": "https://github.com/yunpiao/adtr/actions/runs/38200302860/job/114652075213"
+        },
+        {
+          "id": 114652075230,
+          "name": "user-assets-fixed (user-assets-v2)",
+          "started_at": "2026-10-12T03:35:08Z",
+          "completed_at": "2026-10-12T03:43:37Z",
+          "conclusion": "success",
+          "html_url": "https://github.com/yunpiao/adtr/actions/runs/38200302860/job/114652075230"
+        },
+        {
+          "id": 114652075234,
+          "name": "auth-integration (1)",
+          "started_at": "2026-10-12T03:35:08Z",
+          "completed_at": "2026-10-12T03:44:33Z",
+          "conclusion": "success",
+          "html_url": "https://github.com/yunpiao/adtr/actions/runs/38200302860/job/114652075234"
+        },
+        {
+          "id": 114652075240,
+          "name": "user-assets-fixed (group-assets-v3)",
+          "started_at": "2026-10-12T03:54:39Z",
+          "completed_at": "2026-10-12T04:02:08Z",
+          "conclusion": "success",
+          "html_url": "https://github.com/yunpiao/adtr/actions/runs/38200302860/job/114652075240"
+        },
+        {
+          "id": 114652075256,
+          "name": "user-assets-fixed (computer-assets-v3)",
+          "started_at": "2026-10-12T03:47:09Z",
+          "completed_at": "2026-10-12T03:54:37Z",
+          "conclusion": "success",
+          "html_url": "https://github.com/yunpiao/adtr/actions/runs/38200302860/job/114652075256"
+        },
+        {
+          "id": 114652075264,
+          "name": "auth-integration (4)",
+          "started_at": "2026-10-12T03:45:45Z",
+          "completed_at": "2026-10-12T03:54:54Z",
+          "conclusion": "success",
+          "html_url": "https://github.com/yunpiao/adtr/actions/runs/38200302860/job/114652075264"
+        },
+        {
+          "id": 114652075267,
+          "name": "user-assets-fixed (group-assets-v3-readers)",
+          "started_at": "2026-10-12T04:00:38Z",
+          "completed_at": "2026-10-12T04:08:06Z",
+          "conclusion": "success",
+          "html_url": "https://github.com/yunpiao/adtr/actions/runs/38200302860/job/114652075267"
+        },
+        {
+          "id": 114652075280,
+          "name": "user-assets-fixed (computer-assets-v3-readers)",
+          "started_at": "2026-10-12T03:53:08Z",
+          "completed_at": "2026-10-12T04:00:37Z",
+          "conclusion": "success",
+          "html_url": "https://github.com/yunpiao/adtr/actions/runs/38200302860/job/114652075280"
+        },
+        {
+          "id": 114652075298,
+          "name": "user-assets-fixed (user-assets-v3)",
+          "started_at": "2026-10-12T03:43:38Z",
+          "completed_at": "2026-10-12T03:53:06Z",
+          "conclusion": "success",
+          "html_url": "https://github.com/yunpiao/adtr/actions/runs/38200302860/job/114652075298"
+        },
+        {
+          "id": 114652075620,
+          "name": "browser (computer-assets-v3-readers, python3 scripts/test_auth_e2e.py --suite computer-assets-v3-...",
+          "started_at": "2026-10-12T03:44:37Z",
+          "completed_at": "2026-10-12T03:52:06Z",
+          "conclusion": "success",
+          "html_url": "https://github.com/yunpiao/adtr/actions/runs/38200302860/job/114652075620"
+        },
+        {
+          "id": 114652075621,
+          "name": "browser (user-assets-v2-readers, python3 scripts/test_auth_e2e.py --suite user-assets-v2-readers)",
+          "started_at": "2026-10-12T03:35:08Z",
+          "completed_at": "2026-10-12T03:47:07Z",
+          "conclusion": "success",
+          "html_url": "https://github.com/yunpiao/adtr/actions/runs/38200302860/job/114652075621"
+        },
+        {
+          "id": 114652075622,
+          "name": "browser (account-references, python3 scripts/test_auth_e2e.py --suite account-references)",
+          "started_at": "2026-10-12T03:35:08Z",
+          "completed_at": "2026-10-12T03:44:35Z",
+          "conclusion": "success",
+          "html_url": "https://github.com/yunpiao/adtr/actions/runs/38200302860/job/114652075622"
+        },
+        {
+          "id": 114652075636,
+          "name": "browser (directory-v3-readers, python3 scripts/test_auth_e2e.py --suite directory-v3-readers)",
+          "started_at": "2026-10-12T03:58:08Z",
+          "completed_at": "2026-10-12T04:10:07Z",
+          "conclusion": "success",
+          "html_url": "https://github.com/yunpiao/adtr/actions/runs/38200302860/job/114652075636"
+        },
+        {
+          "id": 114652075655,
+          "name": "browser (group-assets-v3, python3 scripts/test_auth_e2e.py --suite group-assets-v3)",
+          "started_at": "2026-10-12T03:47:08Z",
+          "completed_at": "2026-10-12T03:54:38Z",
+          "conclusion": "success",
+          "html_url": "https://github.com/yunpiao/adtr/actions/runs/38200302860/job/114652075655"
+        },
+        {
+          "id": 114652075671,
+          "name": "browser (directory-v2, python3 scripts/test_auth_e2e.py --suite directory-v2)",
+          "started_at": "2026-10-12T03:59:08Z",
+          "completed_at": "2026-10-12T04:07:37Z",
+          "conclusion": "success",
+          "html_url": "https://github.com/yunpiao/adtr/actions/runs/38200302860/job/114652075671"
+        },
+        {
+          "id": 114652075686,
+          "name": "browser (user-assets-v2, python3 scripts/test_auth_e2e.py --suite user-assets-v2)",
+          "started_at": "2026-10-12T03:35:34Z",
+          "completed_at": "2026-10-12T03:44:08Z",
+          "conclusion": "success",
+          "html_url": "https://github.com/yunpiao/adtr/actions/runs/38200302860/job/114652075686"
+        },
+        {
+          "id": 114652075694,
+          "name": "browser (directory-v3-backend, python3 scripts/test_auth_e2e.py --suite directory-v3-backend)",
+          "started_at": "2026-10-12T03:51:40Z",
+          "completed_at": "2026-10-12T03:59:06Z",
+          "conclusion": "success",
+          "html_url": "https://github.com/yunpiao/adtr/actions/runs/38200302860/job/114652075694"
+        },
+        {
+          "id": 114652075704,
+          "name": "browser (messages, python3 scripts/test_auth_e2e.py --suite messages)",
+          "started_at": "2026-10-12T03:35:34Z",
+          "completed_at": "2026-10-12T03:41:48Z",
+          "conclusion": "success",
+          "html_url": "https://github.com/yunpiao/adtr/actions/runs/38200302860/job/114652075704"
+        },
+        {
+          "id": 114652075706,
+          "name": "browser (user-assets-v3, python3 scripts/test_auth_e2e.py --suite user-assets-v3)",
+          "started_at": "2026-10-12T03:41:50Z",
+          "completed_at": "2026-10-12T03:51:06Z",
+          "conclusion": "success",
+          "html_url": "https://github.com/yunpiao/adtr/actions/runs/38200302860/job/114652075706"
+        },
+        {
+          "id": 114652075716,
+          "name": "browser (computer-assets-v3, python3 scripts/test_auth_e2e.py --suite computer-assets-v3)",
+          "started_at": "2026-10-12T03:44:10Z",
+          "completed_at": "2026-10-12T03:51:38Z",
+          "conclusion": "success",
+          "html_url": "https://github.com/yunpiao/adtr/actions/runs/38200302860/job/114652075716"
+        },
+        {
+          "id": 114652075718,
+          "name": "browser (directory-v3-controls, python3 scripts/test_auth_e2e.py --suite directory-v3-controls)",
+          "started_at": "2026-10-12T03:54:40Z",
+          "completed_at": "2026-10-12T04:02:10Z",
+          "conclusion": "success",
+          "html_url": "https://github.com/yunpiao/adtr/actions/runs/38200302860/job/114652075718"
+        },
+        {
+          "id": 114652075775,
+          "name": "browser (directory-v3, python3 scripts/test_auth_e2e.py --suite directory-v3)",
+          "started_at": "2026-10-12T03:52:08Z",
+          "completed_at": "2026-10-12T04:02:37Z",
+          "conclusion": "success",
+          "html_url": "https://github.com/yunpiao/adtr/actions/runs/38200302860/job/114652075775"
+        },
+        {
+          "id": 114652075780,
+          "name": "browser (group-assets-v3-readers, python3 scripts/test_auth_e2e.py --suite group-assets-v3-readers)",
+          "started_at": "2026-10-12T03:51:07Z",
+          "completed_at": "2026-10-12T03:58:06Z",
+          "conclusion": "success",
+          "html_url": "https://github.com/yunpiao/adtr/actions/runs/38200302860/job/114652075780"
+        },
+        {
+          "id": 114652076656,
+          "name": "browser (authentication, python3 scripts/test_auth_e2e.py)",
+          "started_at": "2026-10-12T04:09:41Z",
+          "completed_at": "2026-10-12T04:12:05Z",
+          "conclusion": "success",
+          "html_url": "https://github.com/yunpiao/adtr/actions/runs/38200302860/job/114652076656"
+        },
+        {
+          "id": 114652076687,
+          "name": "browser (directory-readers, python3 scripts/test_auth_e2e.py --suite directory-readers)",
+          "started_at": "2026-10-12T04:07:38Z",
+          "completed_at": "2026-10-12T04:18:50Z",
+          "conclusion": "success",
+          "html_url": "https://github.com/yunpiao/adtr/actions/runs/38200302860/job/114652076687"
+        },
+        {
+          "id": 114652076691,
+          "name": "browser (directory-v2-controls, python3 scripts/test_auth_e2e.py --suite directory-v2-controls)",
+          "started_at": "2026-10-12T04:02:11Z",
+          "completed_at": "2026-10-12T04:09:39Z",
+          "conclusion": "success",
+          "html_url": "https://github.com/yunpiao/adtr/actions/runs/38200302860/job/114652076691"
+        },
+        {
+          "id": 114652076692,
+          "name": "browser (directory-v2-readers, python3 scripts/test_auth_e2e.py --suite directory-v2-readers)",
+          "started_at": "2026-10-12T04:02:38Z",
+          "completed_at": "2026-10-12T04:14:36Z",
+          "conclusion": "success",
+          "html_url": "https://github.com/yunpiao/adtr/actions/runs/38200302860/job/114652076692"
+        },
+        {
+          "id": 114652076712,
+          "name": "browser (access, python3 scripts/test_auth_e2e.py --suite access)",
+          "started_at": "2026-10-12T04:12:06Z",
+          "completed_at": "2026-10-12T04:15:03Z",
+          "conclusion": "success",
+          "html_url": "https://github.com/yunpiao/adtr/actions/runs/38200302860/job/114652076712"
+        },
+        {
+          "id": 114652076780,
+          "name": "browser (expired-password, python3 scripts/test_auth_e2e.py --expired)",
+          "started_at": "2026-10-12T04:10:09Z",
+          "completed_at": "2026-10-12T04:12:35Z",
+          "conclusion": "success",
+          "html_url": "https://github.com/yunpiao/adtr/actions/runs/38200302860/job/114652076780"
+        },
+        {
+          "id": 114652076850,
+          "name": "browser (tasks, python3 scripts/test_auth_e2e.py --suite tasks)",
+          "started_at": "2026-10-12T04:14:38Z",
+          "completed_at": "2026-10-12T04:18:05Z",
+          "conclusion": "success",
+          "html_url": "https://github.com/yunpiao/adtr/actions/runs/38200302860/job/114652076850"
+        },
+        {
+          "id": 114652076887,
+          "name": "browser (resources, python3 scripts/test_auth_e2e.py --suite resource)",
+          "started_at": "2026-10-12T04:12:39Z",
+          "completed_at": "2026-10-12T04:17:35Z",
+          "conclusion": "success",
+          "html_url": "https://github.com/yunpiao/adtr/actions/runs/38200302860/job/114652076887"
+        },
+        {
+          "id": 114652076957,
+          "name": "browser (audit, python3 scripts/test_auth_e2e.py --suite audit)",
+          "started_at": "2026-10-12T04:15:05Z",
+          "completed_at": "2026-10-12T04:21:37Z",
+          "conclusion": "success",
+          "html_url": "https://github.com/yunpiao/adtr/actions/runs/38200302860/job/114652076957"
+        },
+        {
+          "id": 114652076980,
+          "name": "browser (system, python3 scripts/test_auth_e2e.py --suite system)",
+          "started_at": "2026-10-12T04:17:36Z",
+          "completed_at": "2026-10-12T04:22:27Z",
+          "conclusion": "success",
+          "html_url": "https://github.com/yunpiao/adtr/actions/runs/38200302860/job/114652076980"
+        },
+        {
+          "id": 114652077547,
+          "name": "browser (domains, python3 scripts/test_auth_e2e.py --suite domains)",
+          "started_at": "2026-10-12T04:18:51Z",
+          "completed_at": "2026-10-12T04:24:06Z",
+          "conclusion": "success",
+          "html_url": "https://github.com/yunpiao/adtr/actions/runs/38200302860/job/114652077547"
+        },
+        {
+          "id": 114652077551,
+          "name": "browser (maintenance, python3 scripts/test_auth_e2e.py --suite maintenance)",
+          "started_at": "2026-10-12T04:18:07Z",
+          "completed_at": "2026-10-12T04:24:06Z",
+          "conclusion": "success",
+          "html_url": "https://github.com/yunpiao/adtr/actions/runs/38200302860/job/114652077551"
+        },
+        {
+          "id": 114652077643,
+          "name": "browser (profile, python3 scripts/test_auth_e2e.py --suite profile)",
+          "started_at": "2026-10-12T04:22:29Z",
+          "completed_at": "2026-10-12T04:24:10Z",
+          "conclusion": "success",
+          "html_url": "https://github.com/yunpiao/adtr/actions/runs/38200302860/job/114652077643"
+        },
+        {
+          "id": 114652077741,
+          "name": "browser (credential-use, python3 scripts/test_auth_e2e.py --suite credential-use)",
+          "started_at": "2026-10-12T04:24:07Z",
+          "completed_at": "2026-10-12T04:29:34Z",
+          "conclusion": "success",
+          "html_url": "https://github.com/yunpiao/adtr/actions/runs/38200302860/job/114652077741"
+        },
+        {
+          "id": 114652077844,
+          "name": "browser (session-invalidation, python3 scripts/test_auth_e2e.py --suite session-invalidation)",
+          "started_at": "2026-10-12T04:24:11Z",
+          "completed_at": "2026-10-12T04:26:09Z",
+          "conclusion": "success",
+          "html_url": "https://github.com/yunpiao/adtr/actions/runs/38200302860/job/114652077844"
+        },
+        {
+          "id": 114652077863,
+          "name": "browser (operational-logs, python3 scripts/test_auth_e2e.py --suite operational-logs)",
+          "started_at": "2026-10-12T04:24:07Z",
+          "completed_at": "2026-10-12T04:28:38Z",
+          "conclusion": "success",
+          "html_url": "https://github.com/yunpiao/adtr/actions/runs/38200302860/job/114652077863"
+        },
+        {
+          "id": 114652077914,
+          "name": "browser (account-reference-barrier, python3 scripts/test_auth_e2e.py --suite account-reference-ba...",
+          "started_at": "2026-10-12T04:26:10Z",
+          "completed_at": "2026-10-12T04:32:35Z",
+          "conclusion": "success",
+          "html_url": "https://github.com/yunpiao/adtr/actions/runs/38200302860/job/114652077914"
+        },
+        {
+          "id": 114652077998,
+          "name": "browser (directory-controls, python3 scripts/test_auth_e2e.py --suite directory-controls)",
+          "started_at": "2026-10-12T04:29:07Z",
+          "completed_at": "2026-10-12T04:37:11Z",
+          "conclusion": "success",
+          "html_url": "https://github.com/yunpiao/adtr/actions/runs/38200302860/job/114652077998"
+        },
+        {
+          "id": 114652078002,
+          "name": "browser (directory, python3 scripts/test_auth_e2e.py --suite directory)",
+          "started_at": "2026-10-12T04:28:40Z",
+          "completed_at": "2026-10-12T04:36:05Z",
+          "conclusion": "success",
+          "html_url": "https://github.com/yunpiao/adtr/actions/runs/38200302860/job/114652078002"
+        },
+        {
+          "id": 114652078171,
+          "name": "browser (operations, python3 scripts/test_auth_e2e.py --suite operations)",
+          "started_at": "2026-10-12T04:21:39Z",
+          "completed_at": "2026-10-12T04:29:05Z",
+          "conclusion": "success",
+          "html_url": "https://github.com/yunpiao/adtr/actions/runs/38200302860/job/114652078171"
+        },
+        {
+          "id": 114664934649,
+          "name": "verify",
+          "started_at": "2026-10-12T04:37:13Z",
+          "completed_at": "2026-10-12T04:37:17Z",
+          "conclusion": "success",
+          "html_url": "https://github.com/yunpiao/adtr/actions/runs/38200302860/job/114664934649"
+        }
+      ]
+    }
+  ]
+}
