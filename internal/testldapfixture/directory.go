@@ -34,13 +34,14 @@ var directorySearchBody = bytes.Join([][]byte{
 }, nil)
 
 type directorySession struct {
-	v3           bool
-	v2           bool
-	userAssetsV2 bool
-	empty        bool
-	slow         bool
-	page         int
-	cookie       []byte
+	v3               bool
+	v2               bool
+	userAssetsV2     bool
+	computerAssetsV3 bool
+	empty            bool
+	slow             bool
+	page             int
+	cookie           []byte
 }
 
 func (d *directorySession) pages() int {
@@ -124,6 +125,9 @@ func (d *directorySession) writePage(ctx context.Context, conn io.Writer, id int
 		entry := directoryEntryForDictionary(id, row, d.v2)
 		if d.v3 {
 			entry = directoryV3Entry(id, row)
+		}
+		if d.computerAssetsV3 {
+			entry = computerAssetsV3Entry(id, row)
 		}
 		if d.userAssetsV2 {
 			entry = userAssetsV2Entry(id, row)
