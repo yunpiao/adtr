@@ -167,3 +167,32 @@ administrator /api/auth/me GET with socket_hang_up at attempt1/2. Original logs
 and artifact11719696334 are retained. Its fixed-engine artifact contains safe
 screenshots/provenance but no runtime process-liveness report, so the transport
 cause remains unproved. No authentication/native-guard change was made for it.
+
+## Complete controls runtime and pixel acceptance on reviewed source
+
+Run38187083865 tested merge976708d4539022d56840beab6ff518979437859d,
+tree3615ec2826ee919339c8776d8a96b23edd042ae5 (same runtime tree as170a5df).
+All three added suites passed: collection114611774335, controls114611774367 and
+readers114611774327. Collection completed original receipt recovery, real
+Worker/TLS LDAP/PostgreSQL observation, source invalidation and all native
+keyboard/viewport assertions. Artifact11720014737 ZIP SHA256 is
+`a20ac0df0b1e0522c5521595ff19706a9957a2dc1f4bdbd44c55bce1596e03df`.
+All six PNG hashes were verified and pixels inspected. Mobile focus action right
+348.875 is inside container right359 with the complete focus ring; document
+width390 and desktop1440 assertions passed. No test-side compensating scroll was
+introduced. The observed30-object body SHA256 is
+`eb9c1e78640733c9d9a33299c8eeaa3fe56e357833abd5fcbe8f79d236da1d71`.
+
+The whole run ended40successful/2failed: inherited baseline user-assets-v3 timed
+out waiting for a v2 source radio after version navigation, and dependent verify
+failed. Safe artifact11720458486 establishes API/worker alive until normal
+cleanup, exit0 and no HTTP panic, but missing browser capture leaves the precise
+cause unresolved. This is not an all42 pass. Parent chose to preserve the failure
+and run the next functional combined candidate rather than retry a superseded
+head. No guard or assertion was relaxed.
+
+Dependency134 cd9570a and current maindba8ac4 are now normally integrated.
+The19 imported file blobs exactly match the reviewed dependency: keyword binding,
+v2 recovery and delivery documentation. Controls production code and its tested
+browser sequence are unchanged. Dependency134 must merge before this PR; fresh
+combined full CI and final current-main compatibility remain required.
