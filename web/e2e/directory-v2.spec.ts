@@ -1,3 +1,4 @@
+import { directoryV2VerificationGET } from "./directory-v2-verification-get";
 import { recordSafeEvent } from "./safe-runtime-diagnostics";
 import { performance } from "node:perf_hooks";
 import { navigateTo } from "./navigation";
@@ -166,27 +167,7 @@ async function readJSON(
   path: string,
   actorId?: number,
 ) {
-  const requestStarted = performance.now();
-  recordSafeEvent("read-json", path, "start");
-  let response;
-  try {
-    response = await context.request.get(path);
-  } catch (error) {
-    recordSafeEvent(
-      "read-json",
-      path,
-      "transport-error",
-      performance.now() - requestStarted,
-    );
-    throw error;
-  }
-  recordSafeEvent(
-    "read-json",
-    path,
-    "response",
-    performance.now() - requestStarted,
-    response.status(),
-  );
+  const response = await directoryV2VerificationGET(context.request, path);
   expect(response.status(), `GET ${path}`).toBe(200);
   expect(response.headers()["cache-control"]).toBe("no-store");
   if (actorId !== undefined)

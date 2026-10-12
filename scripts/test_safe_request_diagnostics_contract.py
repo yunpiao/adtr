@@ -31,6 +31,16 @@ def validate(value):
 
 
 class SafeRequestContract(unittest.TestCase):
+    def test_directory_v2_attempts_are_scoped_and_strict(self):
+        for attempt in [1, 2]:
+            value = dict(event(), phase="directory-v2-verification-get", attempt=attempt)
+            self.assertEqual(validate(value), value)
+        for changes in [dict(attempt=3), dict(attempt=0), dict(attempt=True),
+                        dict(origin="step"), dict(method="POST"), dict(outcome="complete"),
+                        dict(phase="directory-get", attempt=2), dict(extra=CANARY)]:
+            with self.subTest(changes=changes), self.assertRaises((ValueError, TypeError)):
+                validate(dict(event(), phase="directory-v2-verification-get") | changes)
+
     def test_known_statuses_attempts_routes_and_page_header_failure(self):
         for status in [200, 401, 403, 429, 500, 599]:
             for attempt in [1, 2]:

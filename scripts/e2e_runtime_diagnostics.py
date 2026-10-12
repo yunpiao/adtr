@@ -54,7 +54,7 @@ def validate_event(event):
         raise ValueError("invalid safe browser event")
 
 
-REQUEST_PHASES = {"directory-get", "fixture-get", "page-request"}
+REQUEST_PHASES = {"directory-get", "directory-v2-verification-get", "fixture-get", "page-request"}
 SUBMIT_PHASES = {"grant-wait", "grant-click"}
 STEP_PHASES = {"test-start", "test-finish", "administrator-login", "version-switch", "source-select"}
 ERROR_CLASSES = {"none", "econnreset", "socket_hang_up", "response_aborted", "context_disposed", "target_closed", "connection_refused", "timeout", "unknown_error", "non_error", "page_request_failed"}
@@ -104,8 +104,8 @@ def validate_request_event(event):
     if event["snapshot"] is not None or event["method"] == "none":
         raise ValueError("invalid safe request relation")
     if event["origin"] == "api-request":
-        if (event["phase"] not in {"directory-get", "fixture-get"} or event["method"] != "GET"
-                or not integer(event["attempt"], 1, 2 if event["phase"] == "fixture-get" else 1)
+        if (event["phase"] not in {"directory-get", "directory-v2-verification-get", "fixture-get"} or event["method"] != "GET"
+                or not integer(event["attempt"], 1, 1 if event["phase"] == "directory-get" else 2)
                 or event["outcome"] not in {"start", "response", "transport-error"}):
             raise ValueError("invalid safe API request relation")
     elif event["phase"] != "page-request" or event["attempt"] != 0 or event["outcome"] not in {"start", "response", "finished", "transport-error"}:

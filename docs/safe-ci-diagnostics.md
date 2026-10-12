@@ -183,3 +183,43 @@ attempts listener removal; late rejected waits remain handled without changing
 the original failed result or recording events outside the submit's scope.
 The buffer, byte budget and dropped counter are unchanged. Root cause remains
 unknown; this is a narrow evidence extension, not a claimed repair.
+
+## Directory-v2 verification GET recovery
+
+Only directory-v2 `readJSON` uses `directoryV2VerificationGET`. It makes at most
+two immediate `request.get(path)` calls on the same context, without changing
+arguments or adding native retries, timers, deadlines or cached responses.
+The existing framework test budget remains authoritative. Do not reuse this
+helper for arbitrary contexts with a finite per-call timeout: it does not know
+or extend their original overall deadline. The existing `fixtureGET` retains
+its separate 30-second and sanitized-error contract.
+
+A retry requires an ordinary Error with the exact first line
+`apiRequestContext.get: socket hang up`, or the existing fixed ECONNRESET forms
+(optionally `read `, `write ` or `connect ` before ECONNRESET). Timeout and
+cancellation/closed-context subclasses never qualify, even with reset-like
+text. Unknown errors do not qualify. Any HTTP response is returned unchanged,
+including 401/403/429/500; caller status assertions and JSON parsing stay outside
+the retry catch. The actual terminal error object is rethrown, including a
+second failure; no third request is sent.
+
+Each actual call records start and response/transport-error under the strict
+`directory-v2-verification-get` phase, attempts 1/2 and one shared operation
+ordinal. Existing directory-get remains limited to attempt 1. Count distinct
+operations with attempt-2 response events to count recovered transport reads;
+that response may still be a denied HTTP status. A fixed
+`Directory-v2 verification GET recovered: attempt=2/2` receipt also counts such
+returns without adding identifiers or raw exception text. Diagnostic storage
+keeps its existing bounded ring, byte cap and dropped counter.
+
+Run 38259865516 attempt 2 failed before headers in 9ms after a successful grant.
+Its validated artifact 11753466229 has ZIP SHA256
+218362191675e1436e78565edae2f1661c0b69f35bf32c2c773ac5563ff950a3.
+Matching-version local Go/Playwright probes reproduced a stale keep-alive reset
+at accelerated idle boundaries; 26 observed first failures all recovered with
+an immediate new-socket GET. Real 30-second idle probes did not reproduce.
+The CI root cause remains unknown. This is bounded idempotent test verification
+transport recovery, not a demonstrated root-cause fix. Its cost is at most one
+additional read; preserving both attempt events prevents silently losing the
+first transport failure. A disposed-context probe produced no second network
+request, but does not establish exact CI framework teardown scheduling.
