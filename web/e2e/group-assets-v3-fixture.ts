@@ -208,7 +208,7 @@ async function storedEvidence(taskUUID: string) {
   const container = process.env.ADTR_E2E_DB_CONTAINER ?? "";
   if (!/^adtr-auth-e2e-[0-9a-f]{12}$/u.test(container))
     throw new Error("Owned isolated database required");
-  const sql = `SELECT jsonb_build_object('bodyBase64',replace(encode(o.body,'base64'),chr(10),''),'sha256',o.sha256,'dictionaryVersion',o.dictionary_version,'count',o.object_count,'taskState',t.state,'purpose',u.purpose,'useState',u.state,'reason',u.quiescence_reason,'dependencies',(SELECT count(*) FROM adtr.operation_account_dependencies d WHERE d.consumer_kind=u.purpose AND d.object_id=u.task_id)) FROM adtr.domain_directory_observations o JOIN adtr.tasks t ON t.task_id=o.task_id JOIN adtr.domain_directory_task_uses u ON u.task_id=o.task_id WHERE o.tenant_id='default' AND o.task_id='${taskUUID}'`;
+  const sql = `SELECT jsonb_build_object('taskUUID',o.task_id,'actorId',o.actor_id::text,'selection',jsonb_build_object('domainId',o.domain_id,'revision',u.connection_revision::text,'credentialRevision',u.connection_credential_generation::text),'sourcePins',jsonb_build_object('accountId',u.account_id,'accountCredentialRevision',u.account_credential_revision::text,'policyRevision',u.policy_revision,'grantRoleId',u.grant_role_id,'grantRevision',u.grant_revision::text),'bodyBase64',replace(encode(o.body,'base64'),chr(10),''),'sha256',o.sha256,'dictionaryVersion',o.dictionary_version,'count',o.object_count,'taskState',t.state,'taskName',t.kind,'payloadVersion',t.payload_version,'maxAttempts',t.max_attempts,'attempt',t.attempt,'purpose',u.purpose,'useState',u.state,'reason',u.quiescence_reason,'dependencies',(SELECT count(*) FROM adtr.operation_account_dependencies d WHERE d.consumer_kind=u.purpose AND d.object_id=u.task_id)) FROM adtr.domain_directory_observations o JOIN adtr.tasks t ON t.task_id=o.task_id JOIN adtr.domain_directory_task_uses u ON u.task_id=o.task_id WHERE o.tenant_id='default' AND o.task_id='${taskUUID}'`;
   let stdout: string;
   try {
     ({ stdout } = await run(
@@ -618,6 +618,6 @@ export async function setupGroupFixture(page: Page, context: BrowserContext) {
     bootstrap,
     producer: { username, password, auth },
     read: (path: string) => readJSON(context, path, actorId),
-    evidence: () => storedEvidence(taskUUID),
+    evidence: (observationTask = taskUUID) => storedEvidence(observationTask),
   };
 }

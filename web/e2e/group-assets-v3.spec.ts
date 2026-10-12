@@ -1,3 +1,4 @@
+import { captureAssetEmptyRefresh } from "./asset-empty-refresh";
 import { test, expect, type Page, type BrowserContext } from "@playwright/test";
 import { writeFile, readFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
@@ -230,6 +231,14 @@ test("group assets real Worker TLS LDAP PG API browser pinned facts", async ({
   );
   expect(refreshed.url.searchParams.has("observationId")).toBe(false);
   expect(refreshed.value.observationId).toBe(newer.task.taskUUID);
+  await captureAssetEmptyRefresh(
+    page,
+    info,
+    "group",
+    f,
+    newer.task.taskUUID,
+    expected,
+  );
   await navigateTo(page, "账户概览");
   await page.goBack();
   await expect(

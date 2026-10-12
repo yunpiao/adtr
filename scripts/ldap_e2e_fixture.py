@@ -16,9 +16,14 @@ from test_integration import IMAGE
 
 class LDAPFixture:
     def __init__(self, control_enabled=False, directory_enabled=False,
-                 directory_empty=False, directory_slow=False, *, directory_v2=False, user_assets_v2=False, directory_v3=False, computer_assets_v3=False, group_assets_v3=False):
-        if any(not isinstance(value, bool) for value in (directory_enabled, directory_empty, directory_slow, directory_v2, user_assets_v2, directory_v3, computer_assets_v3, group_assets_v3)):
+                 directory_empty=False, directory_slow=False, *, directory_v2=False, user_assets_v2=False, directory_v3=False, computer_assets_v3=False, group_assets_v3=False, empty_transition=False):
+        if any(not isinstance(value, bool) for value in (directory_enabled, directory_empty, directory_slow, directory_v2, user_assets_v2, directory_v3, computer_assets_v3, group_assets_v3, empty_transition)):
             raise TypeError("synthetic directory modes must be booleans")
+        if empty_transition and (not directory_enabled or not directory_v3 or
+                                 computer_assets_v3 == group_assets_v3 or
+                                 directory_empty or directory_slow or directory_v2 or
+                                 user_assets_v2 or control_enabled):
+            raise ValueError("synthetic empty transition requires exactly one dictionary3 asset mode without empty, slow, v2 or B2 control modes")
         if directory_v2 and not directory_enabled:
             raise ValueError("synthetic dictionary 2 requires directory mode")
         if (directory_empty or directory_slow) and not directory_enabled:
@@ -39,16 +44,30 @@ class LDAPFixture:
         self.directory_v2 = directory_v2
         self.directory_empty = directory_empty
         self.directory_slow = directory_slow
+        self.empty_transition = empty_transition
         self.name = "adtr-ldap-e2e-" + uuid.uuid4().hex[:12]
         self.network = self.name + "-net"
-        self.directory = tempfile.TemporaryDirectory(prefix="adtr-ldap-e2e-")
-        self.control_directory = tempfile.TemporaryDirectory(prefix="adtr-ldap-control-") if control_enabled else None
         self.created_network = False
         self.created_container = False
+        self.directory = None
+        self.control_directory = None
+        self.empty_transition_directory = None
+        try:
+            self.directory = tempfile.TemporaryDirectory(prefix="adtr-ldap-e2e-")
+            self.control_directory = tempfile.TemporaryDirectory(prefix="adtr-ldap-control-") if control_enabled else None
+            # Fresh private host directory; only Node publishes the fixed marker.
+            self.empty_transition_directory = tempfile.TemporaryDirectory(prefix="adtr-ldap-empty-transition-") if empty_transition else None
+        except BaseException:
+            self.close()
+            raise
 
     @property
     def control_path(self):
         return Path(self.control_directory.name) if self.control_directory else None
+
+    @property
+    def empty_transition_path(self):
+        return Path(self.empty_transition_directory.name) if self.empty_transition_directory else None
 
     def start(self, env):
         root = Path(self.directory.name)
@@ -80,11 +99,15 @@ class LDAPFixture:
                         "-e", "ADTR_LDAP_FIXTURE_USERNAME", "-e", "ADTR_LDAP_FIXTURE_PASSWORD"]
         if self.control_path is not None:
             command.extend(["-v", f"{self.control_path}:/control:rw"])
+        if self.empty_transition_path is not None:
+            command.extend(["-v", f"{self.empty_transition_path}:/empty-transition:ro"])
         command.extend([*postgres_image_args(IMAGE),
                         "-cert", "/fixture/server.crt", "-key", "/fixture/server.key",
                         "-starttls-listen", "0.0.0.0:389", "-ldaps-listen", "0.0.0.0:636"])
         if self.control_path is not None:
             command.extend(["-control-dir", "/control"])
+        if self.empty_transition_path is not None:
+            command.extend(["-empty-transition-dir", "/empty-transition"])
         if self.directory_enabled:
             command.append("-directory-mode")
         if self.directory_v3:
@@ -135,6 +158,10 @@ class LDAPFixture:
                 env.pop(key, None)
         if self.control_path is not None:
             env["ADTR_E2E_LDAP_CONTROL_DIR"] = str(self.control_path)
+        if self.empty_transition_path is not None:
+            env["ADTR_E2E_LDAP_EMPTY_TRANSITION_DIR"] = str(self.empty_transition_path)
+        else:
+            env.pop("ADTR_E2E_LDAP_EMPTY_TRANSITION_DIR", None)
 
     def close(self):
         error = None
@@ -153,8 +180,15 @@ class LDAPFixture:
                     if self.created_network:
                         subprocess.run(["docker", "network", "rm", self.network], check=True, capture_output=True, timeout=20)
                 finally:
-                    self.directory.cleanup()
-                    if self.control_directory:
-                        self.control_directory.cleanup()
+                    try:
+                        if self.directory is not None:
+                            self.directory.cleanup()
+                    finally:
+                        try:
+                            if self.control_directory is not None:
+                                self.control_directory.cleanup()
+                        finally:
+                            if self.empty_transition_directory is not None:
+                                self.empty_transition_directory.cleanup()
         if error:
             raise error

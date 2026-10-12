@@ -34,15 +34,17 @@ var directorySearchBody = bytes.Join([][]byte{
 }, nil)
 
 type directorySession struct {
-	v3               bool
-	v2               bool
-	userAssetsV2     bool
-	computerAssetsV3 bool
-	groupAssetsV3    bool
-	empty            bool
-	slow             bool
-	page             int
-	cookie           []byte
+	v3                bool
+	v2                bool
+	userAssetsV2      bool
+	computerAssetsV3  bool
+	groupAssetsV3     bool
+	empty             bool
+	slow              bool
+	page              int
+	cookie            []byte
+	emptyTransition   *fixtureEmptyTransition
+	transitionSampled bool
 }
 
 func (d *directorySession) pages() int {
@@ -66,6 +68,22 @@ func (d *directorySession) reset() {
 	clear(d.cookie)
 	d.cookie = nil
 	d.page = 0
+	if d.emptyTransition != nil {
+		d.empty = false
+		d.transitionSampled = false
+	}
+}
+
+func (d *directorySession) sampleEmptyTransition() error {
+	if d.emptyTransition == nil || d.transitionSampled {
+		return nil
+	}
+	empty, err := d.emptyTransition.sample()
+	if err != nil {
+		return err
+	}
+	d.empty, d.transitionSampled = empty, true
+	return nil
 }
 
 func pagingRequestControl(cookie []byte) []byte {
