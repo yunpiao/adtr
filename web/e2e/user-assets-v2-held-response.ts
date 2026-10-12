@@ -76,7 +76,14 @@ export async function holdAssetResponse(
   actorId: number,
   expectedDetail: unknown,
 ) {
-  if (!["/api/user-assets/v2", "/api/user-assets/v2/detail"].includes(path))
+  if (
+    ![
+      "/api/user-assets/v2",
+      "/api/user-assets/v2/detail",
+      "/api/user-assets/v3",
+      "/api/user-assets/v3/detail",
+    ].includes(path)
+  )
     throw new Error("Unsupported held user asset route");
   const browser = page.context().browser();
   if (!browser || browser.browserType().name() !== "chromium")
@@ -260,7 +267,9 @@ export async function holdAssetResponse(
         new TextDecoder("utf-8", { fatal: true }).decode(genuineBytes),
       );
       const query = new URL(held.url()).searchParams;
-      expect(genuineBody.dictionaryVersion).toBe(2);
+      expect(genuineBody.dictionaryVersion).toBe(
+        path.startsWith("/api/user-assets/v3") ? 3 : 2,
+      );
       expect(genuineBody.observationId).toBeTruthy();
       expect(genuineBody.selection).toEqual({
         domainId: query.get("domainId"),

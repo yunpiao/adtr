@@ -13,7 +13,7 @@ func TestDirectoryV3RoutesRequireExactPurposeAndPermissions(t *testing.T) {
 	if !directoryV3PathAllowed("GET", "/api/directory/v3/observation", grants) || directoryV3PathAllowed("POST", "/api/directory/v3/sync", grants) {
 		t.Fatal("reader permissions widened")
 	}
-	if !userAssetV3PathAllowed("GET", "/api/user-assets/v3/detail", grants) || userAssetV3PathAllowed("GET", "/api/user-assets/v2/detail", grants) || userAssetV3PathAllowed("GET", "/api/user-assets/v3", grants) {
+	if !userAssetV3PathAllowed("GET", "/api/user-assets/v3/detail", grants) || userAssetV3PathAllowed("GET", "/api/user-assets/v2/detail", grants) || !userAssetV3PathAllowed("GET", "/api/user-assets/v3", grants) {
 		t.Fatal("detail route widened")
 	}
 	for _, mark := range []string{"domains", "directory_assets"} {

@@ -10,14 +10,14 @@ class MessagesBrowserContract(unittest.TestCase):
         workflow = Path('.github/workflows/ci.yml').read_text()
         browser = workflow.split('  browser:\n', 1)[1].split('  native-no-store:\n', 1)[0]
         names = re.findall(r'^          - name: (.+)$', browser, re.M)
-        self.assertEqual(len(names), 26)
-        self.assertEqual(len(set(names)), 26)
+        self.assertEqual(len(names), 27)
+        self.assertEqual(len(set(names)), 27)
         self.assertEqual(names.count('messages'), 1)
         self.assertIn('command: python3 scripts/test_auth_e2e.py --suite messages\n', browser)
-        # 26 browser + 4 auth shards + 2 fixed user-assets + 5 scalar jobs = 37.
+        # 27 browser + 4 auth shards + 3 fixed user-assets + 5 scalar jobs = 39.
         jobs = re.findall(r'^  ([a-z][a-z-]+):$', workflow.split('jobs:\n', 1)[1], re.M)
         self.assertEqual(set(jobs), {'prepare-postgres', 'contracts', 'auth-integration', 'browser', 'native-no-store', 'native-no-store-fixed', 'user-assets-fixed', 'verify'})
-        self.assertEqual(len(names) + 4 + 2 + len(jobs) - 3, 37)
+        self.assertEqual(len(names) + 4 + 3 + len(jobs) - 3, 39)
         self.assertIn('BROWSER_RESULT: ${{ needs.browser.result }}', workflow)
         self.assertIn('test "$BROWSER_RESULT" = success', workflow)
         self.assertIn('path: web/test-results/**/messages-soc-*', browser)

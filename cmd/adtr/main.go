@@ -201,7 +201,9 @@ func run() (runErr error) {
 			directoryV3UseHandler := authentication.DirectoryV3CredentialUseHandler(credentialuse.New())
 			mux.Handle("/api/directory-credential-use/v3", directoryV3UseHandler)
 			mux.Handle("/api/directory-credential-use/v3/", directoryV3UseHandler)
-			mux.Handle("/api/user-assets/v3/detail", authentication.UserAssetV3Handler(domainStore))
+			userAssetsV3Handler := authentication.UserAssetV3Handler(domainStore)
+			mux.Handle("/api/user-assets/v3", userAssetsV3Handler)
+			mux.Handle("/api/user-assets/v3/", userAssetsV3Handler)
 
 			userAssetsV2Handler := authentication.UserAssetsV2Handler(domainStore)
 			mux.Handle("/api/user-assets/v2", userAssetsV2Handler)

@@ -92,6 +92,33 @@ beforeEach(() => vi.stubGlobal("location", new URL(origin)));
 afterEach(() => vi.unstubAllGlobals());
 
 describe("passive bounded directory browser response observer", () => {
+  it.each([
+    "/api/user-assets/v2",
+    "/api/user-assets/v2/detail",
+    "/api/user-assets/v3",
+    "/api/user-assets/v3/detail",
+  ])("observes original bounded-reader bytes for %s", async (route) => {
+    const text = JSON.stringify({
+      dictionaryVersion: route.includes("/v3") ? 3 : 2,
+    });
+    const native = response(text);
+    const fetch = vi.fn(() => Promise.resolve(native));
+    install(fetch);
+    const result = await window.fetch(route);
+    expect(result).toBe(native);
+    expect(await readDirectoryV2JSON(result, signal())).toEqual(
+      JSON.parse(text),
+    );
+    expect(await takeRecord(`GET ${origin}${route}`, 0)).toMatchObject({
+      state: "complete",
+      text,
+      readers: 1,
+      released: 1,
+      cancelCalls: 0,
+      signalAborted: false,
+    });
+    expect(fetch).toHaveBeenCalledExactlyOnceWith(route);
+  });
   it("returns the original fetch/read promises, response, reader and read result", async () => {
     const native = response('{"ok":true}');
     const reader = native.body!.getReader();
