@@ -11,7 +11,7 @@ class BrowserLifecycleContract(unittest.TestCase):
         with patch.object(test_auth_e2e.sys, "platform", "linux"), \
              patch.dict(os.environ, {}, clear=True), \
              patch.object(test_auth_e2e.shutil, "which", return_value="/usr/bin/xvfb-run"):
-            for suite in ["session-invalidation", "directory-readers", "directory-v2-readers", "user-assets-v2-readers"]:
+            for suite in ["session-invalidation", "directory-readers", "directory-v2-readers", "user-assets-v2-readers", "user-assets-v3"]:
                 with self.subTest(suite=suite):
                     self.assertEqual(test_auth_e2e.browser_command(suite), [
                         "xvfb-run", "-a", "npm", "run", "test:e2e", "--prefix",

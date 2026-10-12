@@ -21,6 +21,7 @@ export type SocPage =
   | "directory-credential-use"
   | "directory-v2"
   | "user-assets-v2"
+  | "user-assets-v3"
   | "directory-credential-use-v2";
 
 type NavigationGroup = "management" | "collection" | "identity";
@@ -74,6 +75,7 @@ export const SOC_WORKSPACE_LABELS: Record<SocPage, string> = {
   "directory-credential-use": "目录读取授权",
   "directory-v2": "补充目录资产",
   "user-assets-v2": "用户资产",
+  "user-assets-v3": "用户资产 · 字典 3",
   "directory-credential-use-v2": "补充目录凭据授权",
 };
 
@@ -244,16 +246,23 @@ export default function SocNavigation({
       "directory-credential-use",
       "directory-credential-use-v2",
     ].includes(page) || profile.role === "platform_admin";
+  const isCurrent = (page: SocPage) =>
+    active === page ||
+    (page === "user-assets-v2" && active === "user-assets-v3");
   const button = (page: SocPage, icon?: "assets" | "tasks" | "audit") => (
     <button
       type="button"
       key={page}
       disabled={(forced && page !== "password") || busy}
-      className={`soc-nav-item${active === page ? " selected" : ""}`}
-      aria-current={active === page ? "page" : undefined}
+      className={`soc-nav-item${isCurrent(page) ? " selected" : ""}`}
+      aria-current={isCurrent(page) ? "page" : undefined}
       onClick={() => {
         close();
-        onNavigate(page);
+        onNavigate(
+          page === "user-assets-v2" && active === "user-assets-v3"
+            ? "user-assets-v3"
+            : page,
+        );
       }}
     >
       {icon && <NavIcon kind={icon} />}

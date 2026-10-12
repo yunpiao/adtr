@@ -771,6 +771,8 @@ describe("UserAssetsV2 private workspace", () => {
     ])
       expect(within(panel).getByText(key)).toBeVisible();
     expect(within(panel).getByText("0")).toBeVisible();
+    expect(within(panel).getByText("未采集（字典 2）")).toBeVisible();
+    expect(calls("/api/user-assets/v3")).toHaveLength(0);
     expect(within(panel).getByText("0001-01-01T00:00:00Z")).toBeVisible();
     expect(
       screen.queryByRole("button", { name: /同步|采集|导出|取消任务/ }),

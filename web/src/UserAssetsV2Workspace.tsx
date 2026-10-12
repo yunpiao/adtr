@@ -1,3 +1,4 @@
+import AssetDictionaryNavigation from "./AssetDictionaryNavigation";
 import {
   useLayoutEffect,
   useRef,
@@ -122,6 +123,7 @@ function Workspace({ profile, sessionChanged }: Props) {
         <p className="asset-eyebrow">DIRECTORY &amp; IDENTITY</p>
         <h2 id="user-assets-v2-title">用户资产</h2>
         <p>检索已保存的目录用户，核对身份字段与观测来源。</p>
+        <AssetDictionaryNavigation version={2} />
       </div>
       <details className="asset-data-help">
         <summary>如何理解这些数据</summary>
@@ -135,6 +137,12 @@ function Workspace({ profile, sessionChanged }: Props) {
         </p>
       </details>
       <ErrorNotice error={gate.error || notice} />
+      {!source && (
+        <p role="status">
+          字典
+          2：请选择并核对数据源。切换版本或返回页面后需重新选择，尚未查询用户。
+        </p>
+      )}
       {gate.busy && <p role="status">正在核对用户资产访问权限…</p>}
       {gate.data && !canRead && (
         <p role="status">当前账户没有用户资产读取权限。</p>
@@ -230,6 +238,8 @@ function Provenance({
       className="facts"
       style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}
     >
+      <dt>采集字典版本</dt>
+      <dd>2</dd>
       <dt>观测编号</dt>
       <dd>{display(observationId)}</dd>
       <dt>观测服务器</dt>
@@ -293,6 +303,8 @@ function Facts({ object }: { object: UserAssetV2Object }) {
       </dd>
       <dt>创建时间（UTC）</dt>
       <dd>{nullable(object.whenCreated)}</dd>
+      <dt>主组 RID / SPN</dt>
+      <dd>未采集（字典 2）</dd>
     </dl>
   );
 }

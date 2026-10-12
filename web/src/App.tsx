@@ -35,6 +35,7 @@ import DirectoryWorkspace from "./DirectoryWorkspace";
 import DirectoryCredentialUseWorkspace from "./DirectoryCredentialUseWorkspace";
 import DirectoryV2Workspace from "./DirectoryV2Workspace";
 import UserAssetsV2Workspace from "./UserAssetsV2Workspace";
+import UserAssetsV3Workspace from "./UserAssetsV3Workspace";
 import DirectoryV2CredentialUseWorkspace from "./DirectoryV2CredentialUseWorkspace";
 import {
   listenForSessionInvalidation,
@@ -67,6 +68,7 @@ function pageFromHash(): Page {
       "directory-credential-use",
       "directory-v2",
       "user-assets-v2",
+      "user-assets-v3",
       "directory-credential-use-v2",
     ] as const
   ).find((name) => hash === `#${name}`);
@@ -384,6 +386,7 @@ export default function App() {
       page === "directory-credential-use" ||
       page === "directory-v2" ||
       page === "user-assets-v2" ||
+      page === "user-assets-v3" ||
       page === "directory-credential-use-v2" ||
       page === "profile"
     )
@@ -622,6 +625,15 @@ export default function App() {
                     )}
                     {active === "user-assets-v2" && (
                       <UserAssetsV2Workspace
+                        profile={profile}
+                        sessionChanged={() => {
+                          setPage("account");
+                          refresh();
+                        }}
+                      />
+                    )}
+                    {active === "user-assets-v3" && (
+                      <UserAssetsV3Workspace
                         profile={profile}
                         sessionChanged={() => {
                           setPage("account");

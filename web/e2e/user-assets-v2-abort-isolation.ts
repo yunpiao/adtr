@@ -5,7 +5,12 @@
 // untouched, so late data reaches parsing and only the UI generation can drop it.
 export function installUserAssetAbortIsolation() {
   if (window !== window.top) return;
-  const paths = new Set(["/api/user-assets/v2", "/api/user-assets/v2/detail"]);
+  const paths = new Set([
+    "/api/user-assets/v2",
+    "/api/user-assets/v2/detail",
+    "/api/user-assets/v3",
+    "/api/user-assets/v3/detail",
+  ]);
   type Witness = {
     path: string;
     requestURL: string | null;
