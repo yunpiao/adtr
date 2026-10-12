@@ -55,6 +55,44 @@ original rows; any malformed marker aborts the read instead of reporting a
 successful empty result. No production producer, schema, gate, grant, account or
 security configuration is changed.
 
+## Sensitive-action fixture budget and first CI failure
+
+The first published candidate `d33535ff59328309eececd73d3ae9e3003fa1b82`
+([run38252411161](https://github.com/yunpiao/adtr/actions/runs/38252411161))
+failed both standard primary suites on the added third sync with HTTP429.
+The existing producer had already used ten sensitive actions in the real
+15-minute per-actor window. The third sync was the eleventh; it never collected
+an empty observation. That run and its partial artifacts are failure evidence,
+not completed empty-refresh coverage. Waiting for that window would exceed the
+unchanged 930-second suite budget once preceding bootstrap setup is included.
+
+Only the two primary specs now opt into `emptyRefresh: true`. Their already
+scoped platform_admin bootstrap performs the SAME operation-account creation and
+connection-test-purpose grant before creating the existing producer. This is a
+grant, not execution of a connection-test task. Both writes generate and consume
+the bootstrap's own fresh proofs within its same session; auth/me checks bracket
+them. Account/domain and unverified-state checks bind the created fixture. The
+producer's actual authority to read that same tenant/domain account is checked
+before its normal binding. Its binding, denied v3 sync, v3 grant and three real
+syncs each use its own fresh proof; its CSRF header is read only after login and
+binding. Stored evidence still requires all three collected observations to
+have that same producer actor and unchanged source pins.
+
+Sensitive-action totals, preserving all existing assertions:
+
+- Bootstrap: password/MFA start/enable3 + domain/group/assignment3 + existing
+  operation-account/connection grant2 + existing producer creation1 =9
+- Producer: password/MFA start/enable3 + binding1 + denied v3 sync1 + v3 grant1 +
+  three successful syncs3 =9
+- Reader-specific specs leave the option at its default false and preserve the
+  original order: bootstrap7, producer setup9, existing source update as its
+  tenth action
+
+No new account, role, grant, permission, rate-limit parameter, database budget
+edit, clock change or cross-login proof transfer is introduced. The optional
+primary setup requires the explicit isolated transition fixture; omitting the
+option keeps the original reader provisioning sequence.
+
 ## Retained evidence and checks
 
 Each primary suite writes a separate

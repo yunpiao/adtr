@@ -23,7 +23,7 @@ test("computer assets real Worker TLS LDAP PG API browser pinned facts", async (
   test.setTimeout(930000);
   await page.setViewportSize({ width: 1440, height: 900 });
   await observeDirectoryV2Responses(context);
-  const f = await setupComputerFixture(page, context);
+  const f = await setupComputerFixture(page, context, { emptyRefresh: true });
   const expected = expectedComputers();
   const params = new URLSearchParams({
     domainId: f.domainId,

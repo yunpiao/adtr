@@ -120,6 +120,40 @@ class EmptyRefreshContract(unittest.TestCase):
             with self.assertRaises(subprocess.CalledProcessError):
                 harness.validate_asset_refresh_evidence('group-assets-v3')
 
+    def test_primary_setup_only_moves_existing_writes_with_actor_local_proofs(self):
+        for kind, title in [('group', 'Group'), ('computer', 'Computer')]:
+            fixture_source = Path(f'web/e2e/{kind}-assets-v3-fixture.ts').read_text()
+            primary = Path(f'web/e2e/{kind}-assets-v3.spec.ts').read_text()
+            readers = Path(f'web/e2e/{kind}-assets-v3-readers.spec.ts').read_text()
+            self.assertIn('options: { emptyRefresh?: boolean } = {}', fixture_source)
+            self.assertIn('options.emptyRefresh && !process.env.ADTR_E2E_LDAP_EMPTY_TRANSITION_DIR', fixture_source)
+            self.assertIn(f'setup{title}Fixture(page, context, {{ emptyRefresh: true }})', primary)
+            self.assertIn(f'setup{title}Fixture(page, context)', readers)
+            self.assertNotIn('emptyRefresh', readers)
+            provision = fixture_source.split('const provisionAccount = async (', 1)[1].split('const earlyAccountId', 1)[0]
+            self.assertIn('await proof(page, actorPassword, actorAuth)', provision)
+            self.assertIn('actorPassword,\n      actorAuth,\n      "/api/credential-use"', provision)
+            self.assertEqual(provision.count('.ID).toBe(provisionActor)'), 2)
+            self.assertIn('verificationState: "unverified"', provision)
+            self.assertIn('domainId,', provision)
+            self.assertEqual(fixture_source.count('"/api/operation-accounts/create"'), 1)
+            early = fixture_source.index('const earlyAccountId = options.emptyRefresh')
+            create = fixture_source.index('"/api/access/users/create"')
+            login = fixture_source.index('await login(page, producerUsername, producerInitial)')
+            reuse = fixture_source.index('earlyAccountId ?? (await provisionAccount(actorId, password, auth))')
+            binding = fixture_source.index('"/api/domains/credential-source/reference"')
+            csrf = fixture_source.index('const headers = {')
+            self.assertLess(early, create)
+            self.assertLess(create, login)
+            self.assertLess(login, reuse)
+            self.assertLess(reuse, binding)
+            self.assertLess(binding, csrf)
+            self.assertIn('const denied = await post("/api/directory/v3/sync", sync, 403)', fixture_source)
+            self.assertIn('explicitlyGranted: false, eligible: false', fixture_source)
+            self.assertIn('"/api/directory-credential-use/v2"', fixture_source)
+            self.assertNotIn('UPDATE adtr.auth_attempts', fixture_source)
+            self.assertNotIn('DELETE FROM adtr.auth_attempts', fixture_source)
+
     def test_provenance_manifest_matches_the_browser_capture(self):
         import re
         text = Path('web/e2e/asset-empty-refresh.ts').read_text().split('const sourceFiles = [', 1)[1].split('].sort()', 1)[0]
