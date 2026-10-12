@@ -143,3 +143,27 @@ no-inner-overflow regression. These corrected pixels/runtime checks remain pendi
 The normal integration of dependency9280049 includes actual mainaf9d9f5's safe
 CI diagnostics. Runner conflict resolution retains both original diagnostic
 phases and existing v3 time budgets. No native guard or failure threshold changes.
+
+## Native keyboard focus diagnosis
+
+Run38183997679 tested checkout4bf505a4f62b11791413688ca15e78694955907a,
+tree3dbd413de567a00a0b6a6de88e499890cc2fa111. Artifact11719851394's five PNG
+hashes were verified. After the original native ArrowRight then Tab, the revoke
+button was the actual focused element with visible outline styling. It was
+vertically inside the viewport but horizontally clipped: button left339.875,
+right414.875; local container left31/right359, scrollLeft38 of max104. Page
+width remained390. Actual pixels confirm the cropped focused action.
+
+The bounded LTR-only correction responds to focus inside either v3 table by
+adjusting only that table container's horizontal position to the focused control,
+with6px focus-ring clearance (3px outline plus3px offset) and native scroll-range clamping. It never moves
+page scroll, changes focus or initiates a request. Three DOM regressions cover
+right clipping, left clipping and already-visible/no movement; container focus
+itself is a no-op. The genuine browser keyboard sequence and ratio1 remain
+unchanged. Corrected real browser and pixel acceptance are still required.
+
+The same run's inherited fixed user-assets-v3 job114603021440 failed a read-only
+administrator /api/auth/me GET with socket_hang_up at attempt1/2. Original logs
+and artifact11719696334 are retained. Its fixed-engine artifact contains safe
+screenshots/provenance but no runtime process-liveness report, so the transport
+cause remains unproved. No authentication/native-guard change was made for it.

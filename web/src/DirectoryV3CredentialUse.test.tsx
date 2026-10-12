@@ -843,6 +843,55 @@ describe("credential governance views", () => {
       screen.getByRole("button", { name: "撤销 platform_admin" }),
     );
   });
+  it.each([
+    ["right clipped", 38, 339.875, 414.875, 99.875],
+    ["left clipped", 80, 5, 80, 48],
+    ["already visible", 38, 100, 175, 38],
+  ])(
+    "reveals %s focused v3 actions without scrolling the page or submitting",
+    async (_name, initial, left, right, expected) => {
+      grants = [grant()];
+      render(
+        <DirectoryV3CredentialUseWorkspace
+          profile={profile}
+          sessionChanged={vi.fn()}
+        />,
+      );
+      await screen.findByRole("table", {
+        name: "具有已保存目录读取授权的账户",
+      });
+      click("清理 测试凭据");
+      const action = await screen.findByRole("button", {
+        name: "撤销 platform_admin",
+      });
+      const container = screen.getByRole("region", {
+        name: "字典 3 角色授权表，可横向滚动",
+      });
+      Object.defineProperties(container, {
+        clientWidth: { value: 328 },
+        scrollWidth: { value: 432 },
+      });
+      vi.spyOn(container, "getBoundingClientRect").mockReturnValue({
+        left: 31,
+        right: 359,
+      } as DOMRect);
+      vi.spyOn(action, "getBoundingClientRect").mockReturnValue({
+        left,
+        right,
+      } as DOMRect);
+      container.scrollLeft = initial;
+      container.scrollTop = 11;
+      fireEvent.focus(container);
+      expect(container.scrollLeft).toBe(initial);
+      fireEvent.focus(action);
+      expect(container.scrollLeft).toBe(expected);
+      expect(container.scrollTop).toBe(11);
+      expect(document.documentElement.scrollLeft).toBe(0);
+      expect(document.documentElement.scrollTop).toBe(0);
+      expect(calls("revoke")).toHaveLength(0);
+      expect(screen.queryByLabelText("操作者当前密码")).not.toBeInTheDocument();
+    },
+  );
   it("honors deny path checks for the cleanup catalogue", async () => {
     paths[0] = false;
     render(

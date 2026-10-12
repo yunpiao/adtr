@@ -1,5 +1,5 @@
 import "./directory-v3-controls.css";
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent, type FocusEvent } from "react";
 import { ApiError, type Profile } from "./api";
 import { accessRequest, queryString, type Permission } from "./access-api";
 import {
@@ -32,6 +32,35 @@ import {
   saveDirectoryV3CredentialIntent,
   type DirectoryV3CredentialIntent,
 } from "./directory-v3-credential-use-intent";
+
+// This workspace is LTR. Keep native keyboard focus visible inside its own
+// horizontal table surface; never move the page or change the focused control.
+function revealFocusedV3Action(event: FocusEvent<HTMLDivElement>) {
+  const container = event.currentTarget;
+  const target = event.target;
+  if (target === container || !(target instanceof HTMLElement)) return;
+  const bounds = container.getBoundingClientRect();
+  const focused = target.getBoundingClientRect();
+  // Matches the button focus outline: 3px stroke plus 3px offset.
+  const focusClearance = 6;
+  const left = bounds.left + container.clientLeft + focusClearance;
+  const right =
+    bounds.left + container.clientLeft + container.clientWidth - focusClearance;
+  const delta =
+    focused.left < left
+      ? focused.left - left
+      : focused.right > right
+        ? focused.right - right
+        : 0;
+  if (delta !== 0)
+    container.scrollLeft = Math.max(
+      0,
+      Math.min(
+        container.scrollWidth - container.clientWidth,
+        container.scrollLeft + delta,
+      ),
+    );
+}
 
 type Props = { profile: Profile; sessionChanged: () => void };
 type Context = Props & {
@@ -252,6 +281,7 @@ function CleanupCatalogue({ context }: { context: Context }) {
                   role="region"
                   aria-label="字典 3 授权账户表，可横向滚动"
                   tabIndex={0}
+                  onFocusCapture={revealFocusedV3Action}
                 >
                   <table>
                     <caption>具有已保存目录读取授权的账户</caption>
@@ -493,6 +523,7 @@ function GrantManagement({
               role="region"
               aria-label="字典 3 角色授权表，可横向滚动"
               tabIndex={0}
+              onFocusCapture={revealFocusedV3Action}
             >
               <table>
                 <caption>已保存的角色目录读取授权</caption>
