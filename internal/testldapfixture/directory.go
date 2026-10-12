@@ -38,6 +38,7 @@ type directorySession struct {
 	v2               bool
 	userAssetsV2     bool
 	computerAssetsV3 bool
+	groupAssetsV3    bool
 	empty            bool
 	slow             bool
 	page             int
@@ -128,6 +129,9 @@ func (d *directorySession) writePage(ctx context.Context, conn io.Writer, id int
 		}
 		if d.computerAssetsV3 {
 			entry = computerAssetsV3Entry(id, row)
+		}
+		if d.groupAssetsV3 {
+			entry = groupAssetsV3Entry(id, row)
 		}
 		if d.userAssetsV2 {
 			entry = userAssetsV2Entry(id, row)
