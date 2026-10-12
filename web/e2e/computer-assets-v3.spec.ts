@@ -1,3 +1,4 @@
+import { captureAssetEmptyRefresh } from "./asset-empty-refresh";
 import { test, expect, type Page, type BrowserContext } from "@playwright/test";
 import { writeFile, readFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
@@ -22,7 +23,7 @@ test("computer assets real Worker TLS LDAP PG API browser pinned facts", async (
   test.setTimeout(930000);
   await page.setViewportSize({ width: 1440, height: 900 });
   await observeDirectoryV2Responses(context);
-  const f = await setupComputerFixture(page, context);
+  const f = await setupComputerFixture(page, context, { emptyRefresh: true });
   const expected = expectedComputers();
   const params = new URLSearchParams({
     domainId: f.domainId,
@@ -233,6 +234,14 @@ test("computer assets real Worker TLS LDAP PG API browser pinned facts", async (
   );
   expect(refreshed.url.searchParams.has("observationId")).toBe(false);
   expect(refreshed.value.observationId).toBe(newer.task.taskUUID);
+  await captureAssetEmptyRefresh(
+    page,
+    info,
+    "computer",
+    f,
+    newer.task.taskUUID,
+    expected,
+  );
   await navigateTo(page, "账户概览");
   await page.goBack();
   await expect(

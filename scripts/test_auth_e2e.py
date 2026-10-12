@@ -29,6 +29,7 @@ USER_ASSETS_V2_SUITES = {"user-assets-v2", "user-assets-v2-readers"}
 DIRECTORY_V2_SUITES = {"directory-v2", "directory-v2-controls", "directory-v2-readers"} | USER_ASSETS_V2_SUITES
 COMPUTER_ASSETS_V3_SUITES = {"computer-assets-v3", "computer-assets-v3-readers"}
 GROUP_ASSETS_V3_SUITES = {"group-assets-v3", "group-assets-v3-readers"}
+EMPTY_TRANSITION_SUITES = {"group-assets-v3", "computer-assets-v3"}
 DIRECTORY_V3_SUITES = {"directory-v3-backend", "user-assets-v3", "directory-v3", "directory-v3-controls", "directory-v3-readers"} | COMPUTER_ASSETS_V3_SUITES | GROUP_ASSETS_V3_SUITES
 DIRECTORY_SUITES = DIRECTORY_V3_SUITES | {"directory", "directory-controls", "directory-readers"} | DIRECTORY_V2_SUITES
 EMPTY_DIRECTORY_SUITES = {"directory-controls", "directory-readers", "directory-v2-controls", "directory-v2-readers", "directory-v3-controls", "directory-v3-readers"}
@@ -53,6 +54,14 @@ def browser_command(suite):
                 )
             command = ["xvfb-run", "-a", *command]
     return command
+
+
+def validate_asset_refresh_evidence(suite):
+    if suite in EMPTY_TRANSITION_SUITES:
+        subprocess.run([sys.executable, "scripts/validate_asset_empty_refresh.py",
+                        "--kind", suite.split("-")[0],
+                        "--evidence-root", "web/test-results", "--source-root", "."],
+                       check=True, timeout=30)
 
 
 def main():
@@ -143,6 +152,7 @@ def main():
                            check=True, capture_output=True, timeout=30)
             if args.suite in {"domains", "account-references", "account-reference-barrier"} | DIRECTORY_SUITES:
                 ldap_fixture = LDAPFixture(control_enabled=args.suite == "account-reference-barrier",
+                                           empty_transition=args.suite in EMPTY_TRANSITION_SUITES,
                                            directory_enabled=args.suite in DIRECTORY_SUITES,
                                            directory_empty=args.suite in EMPTY_DIRECTORY_SUITES,
                                            directory_slow=args.suite in SLOW_DIRECTORY_SUITES,
@@ -223,6 +233,7 @@ def main():
         env["PLAYWRIGHT_NO_COPY_PROMPT"] = "1"
         diagnostics.phase("browser-start")
         subprocess.run(command, env=env, check=True, timeout=660 if args.suite == "account-references" else 930 if args.suite in EMPTY_DIRECTORY_SUITES | USER_ASSETS_V2_SUITES | {"user-assets-v3"} | COMPUTER_ASSETS_V3_SUITES | GROUP_ASSETS_V3_SUITES else 660 if args.suite in {"directory", "directory-v2", "directory-v3-backend", "directory-v3"} else 600 if args.suite == "audit" else 540 if args.suite in {"maintenance", "domains", "operations", "credential-use", "account-references", "operational-logs", "account-reference-barrier"} else 480 if args.suite == "system" else 420)
+        validate_asset_refresh_evidence(args.suite)
         diagnostics.phase("browser-pass")
         chain = "real browser -> API -> worker/PostgreSQL" if worker is not None else "real browser -> API -> PostgreSQL"
     finally:

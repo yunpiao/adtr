@@ -24,6 +24,7 @@ type server struct {
 	tlsConfig          *tls.Config
 	username, password []byte
 	control            *fixtureControl
+	emptyTransition    *fixtureEmptyTransition
 	directoryMode      bool
 	directoryV3        bool
 	directoryV2        bool
@@ -121,7 +122,7 @@ func (s *server) handle(ctx context.Context, raw net.Conn, ldaps bool) {
 	conn := raw
 	secure, bound := false, false
 	rootRead := false
-	directory := directorySession{v2: s.directoryV2, v3: s.directoryV3, userAssetsV2: s.userAssetsV2, computerAssetsV3: s.computerAssetsV3, groupAssetsV3: s.groupAssetsV3, empty: s.directoryEmpty, slow: s.directorySlow}
+	directory := directorySession{v2: s.directoryV2, v3: s.directoryV3, userAssetsV2: s.userAssetsV2, computerAssetsV3: s.computerAssetsV3, groupAssetsV3: s.groupAssetsV3, empty: s.directoryEmpty, slow: s.directorySlow, emptyTransition: s.emptyTransition}
 	defer directory.reset()
 	upgrade := func() bool {
 		tlsConn := tls.Server(raw, s.tlsConfig)
@@ -178,7 +179,13 @@ func (s *server) handle(ctx context.Context, raw net.Conn, ldaps bool) {
 			if !secure || !bound {
 				err = result(conn, req.id, 0x65, 50, "synthetic bind required")
 			} else if directorySearch {
-				err = directory.writePage(ctx, conn, req.id)
+				// Sample only after TLS, bind, RootDSE and the exact search and
+				// paging control have passed. A malformed marker fails closed;
+				// continuation pages keep the first page's immutable snapshot.
+				err = directory.sampleEmptyTransition()
+				if err == nil {
+					err = directory.writePage(ctx, conn, req.id)
+				}
 			} else if !valid {
 				err = result(conn, req.id, 0x65, 53, "unsupported synthetic search")
 			} else {

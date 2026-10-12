@@ -22,6 +22,7 @@ import (
 type configuration struct {
 	cert, key, startTLSAddress, ldapsAddress string
 	controlDir                               string
+	emptyTransitionDir                       string
 	directoryMode                            bool
 	directoryV2                              bool
 	directoryV3                              bool
@@ -39,6 +40,7 @@ func readConfiguration(args []string, getenv func(string) string) (configuration
 	flags.StringVar(&cfg.cert, "cert", "", "synthetic server certificate PEM path")
 	flags.StringVar(&cfg.key, "key", "", "synthetic server private key PEM path")
 	flags.StringVar(&cfg.controlDir, "control-dir", "", "optional disposable integration control directory")
+	flags.StringVar(&cfg.emptyTransitionDir, "empty-transition-dir", "", "optional private marker directory; requires exclusive nonempty fast group/computer dictionary3 mode")
 	flags.BoolVar(&cfg.directoryMode, "directory-mode", false, "enable the fixed synthetic directory dictionary for integration tests")
 	flags.BoolVar(&cfg.directoryV2, "directory-v2", false, "select the fixed eight-attribute dictionary; requires directory mode")
 	flags.BoolVar(&cfg.directoryV3, "directory-v3", false, "select the fixed ten-attribute dictionary; requires directory mode")
@@ -55,7 +57,9 @@ func readConfiguration(args []string, getenv func(string) string) (configuration
 		(cfg.directoryV3 && (cfg.directoryV2 || cfg.userAssetsV2)) ||
 		(cfg.userAssetsV2 && (!cfg.directoryMode || !cfg.directoryV2 || cfg.directoryEmpty || cfg.directorySlow)) ||
 		(cfg.computerAssetsV3 && (!cfg.directoryMode || !cfg.directoryV3 || cfg.directoryEmpty || cfg.directorySlow || cfg.userAssetsV2 || cfg.groupAssetsV3)) ||
-		(cfg.groupAssetsV3 && (!cfg.directoryMode || !cfg.directoryV3 || cfg.directoryEmpty || cfg.directorySlow || cfg.userAssetsV2 || cfg.computerAssetsV3)) {
+		(cfg.groupAssetsV3 && (!cfg.directoryMode || !cfg.directoryV3 || cfg.directoryEmpty || cfg.directorySlow || cfg.userAssetsV2 || cfg.computerAssetsV3)) ||
+		(cfg.emptyTransitionDir != "" && (!cfg.directoryMode || !cfg.directoryV3 || cfg.directoryV2 || cfg.userAssetsV2 ||
+			cfg.directoryEmpty || cfg.directorySlow || cfg.computerAssetsV3 == cfg.groupAssetsV3 || cfg.controlDir != "")) {
 		return configuration{}, errors.New("invalid synthetic LDAP fixture configuration")
 	}
 	cfg.username = []byte(getenv("ADTR_LDAP_FIXTURE_USERNAME"))
@@ -99,6 +103,13 @@ func run(ctx context.Context, args []string, getenv func(string) string, output 
 	if control != nil {
 		defer control.root.Close()
 	}
+	emptyTransition, err := openFixtureEmptyTransition(cfg.emptyTransitionDir)
+	if err != nil {
+		return err
+	}
+	if emptyTransition != nil {
+		defer emptyTransition.root.Close()
+	}
 	certificate, err := tls.LoadX509KeyPair(cfg.cert, cfg.key)
 	if err != nil {
 		return errors.New("synthetic LDAP fixture certificate unavailable")
@@ -118,6 +129,7 @@ func run(ctx context.Context, args []string, getenv func(string) string, output 
 		username:         cfg.username,
 		password:         cfg.password,
 		control:          control,
+		emptyTransition:  emptyTransition,
 		directoryMode:    cfg.directoryMode,
 		directoryV2:      cfg.directoryV2,
 		directoryV3:      cfg.directoryV3,

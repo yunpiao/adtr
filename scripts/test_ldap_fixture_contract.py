@@ -1,8 +1,11 @@
 """Synthetic LDAP launcher contracts. Docker/OpenSSL/Go are mocked here."""
 from contextlib import contextmanager
+import inspect
 from itertools import product
 from pathlib import Path
+import stat
 import subprocess
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -10,24 +13,25 @@ import ldap_e2e_fixture
 
 
 class LDAPFixtureContract(unittest.TestCase):
+    def fixture_output(self, command, **options):
+        self.assertEqual(options["timeout"], 5)
+        if command[:2] == ["docker", "logs"]:
+            return "synthetic LDAP fixture ready\n"
+        if command[:4] == ["docker", "inspect", "-f", "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}"]:
+            return "172.29.0.2\n"
+        if command[:4] == ["docker", "inspect", "-f", "{{.State.ExitCode}}"]:
+            return "0\n"
+        self.fail(f"unexpected fixture read: {command}")
+
     @contextmanager
-    def started_fixture(self, **modes):
+    def started_fixture(self, *, inherited_transition="/unowned/inherited/path", **modes):
         fixture = ldap_e2e_fixture.LDAPFixture(**modes)
         env = {"ADTR_E2E_LDAP_DIRECTORY_" + suffix: "inherited"
-               for suffix in ("MODE", "EMPTY", "SLOW", "V2", "USER_ASSETS_V2")}
-
-        def output(command, **options):
-            self.assertEqual(options["timeout"], 5)
-            if command[:2] == ["docker", "logs"]:
-                return "synthetic LDAP fixture ready\n"
-            if command[:4] == ["docker", "inspect", "-f", "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}"]:
-                return "172.29.0.2\n"
-            if command[:4] == ["docker", "inspect", "-f", "{{.State.ExitCode}}"]:
-                return "0\n"
-            self.fail(f"unexpected fixture read: {command}")
+               for suffix in ("MODE", "EMPTY", "SLOW", "V2", "USER_ASSETS_V2", "V3", "COMPUTER_ASSETS_V3", "GROUP_ASSETS_V3")}
+        env["ADTR_E2E_LDAP_EMPTY_TRANSITION_DIR"] = inherited_transition
 
         with patch.object(ldap_e2e_fixture.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)) as run, \
-             patch.object(ldap_e2e_fixture.subprocess, "check_output", side_effect=output):
+             patch.object(ldap_e2e_fixture.subprocess, "check_output", side_effect=self.fixture_output):
             try:
                 fixture.start(env)
                 yield fixture, env, run
@@ -45,8 +49,8 @@ class LDAPFixtureContract(unittest.TestCase):
             ldap_e2e_fixture.LDAPFixture(False, True, False, False, True)
 
     def test_all_directory_flags_require_booleans_before_allocating_resources(self):
-        for name in ("directory_enabled", "directory_empty", "directory_slow", "directory_v2", "user_assets_v2"):
-            for value in (None, 0, 1, "true", [], {}):
+        for name in ("directory_enabled", "directory_empty", "directory_slow", "directory_v2", "user_assets_v2", "directory_v3", "computer_assets_v3", "group_assets_v3", "empty_transition"):
+            for value in (None, 0, 1, 0.0, 1.0, "true", "false", [], {}):
                 with self.subTest(name=name, value=value), \
                      patch.object(ldap_e2e_fixture.tempfile, "TemporaryDirectory") as allocate:
                     with self.assertRaisesRegex(TypeError, "must be booleans"):
@@ -114,6 +118,7 @@ class LDAPFixtureContract(unittest.TestCase):
             command = next(call.args[0] for call in run.call_args_list if call.args[0][:2] == ["docker", "run"])
             self.assertFalse(any(arg.startswith("-directory-") for arg in command))
             self.assertFalse(any(key.startswith("ADTR_E2E_LDAP_DIRECTORY_") for key in env))
+            self.assertNotIn("ADTR_E2E_LDAP_EMPTY_TRANSITION_DIR", env)
 
     def test_user_assets_mode_requires_v2_nonempty_fast_before_allocating(self):
         for enabled, v2, empty, slow in product((False, True), repeat=4):
@@ -151,6 +156,213 @@ class LDAPFixtureContract(unittest.TestCase):
             self.assertEqual(env["ADTR_E2E_LDAP_CONTROL_DIR"], str(fixture.control_path))
             control = fixture.control_path
         self.assertFalse(control.exists())
+
+    def test_empty_transition_is_keyword_only_and_default_false_without_allocation(self):
+        parameter = inspect.signature(ldap_e2e_fixture.LDAPFixture).parameters["empty_transition"]
+        self.assertEqual(parameter.kind, inspect.Parameter.KEYWORD_ONLY)
+        self.assertIs(parameter.default, False)
+        with patch.object(ldap_e2e_fixture.tempfile, "TemporaryDirectory", wraps=tempfile.TemporaryDirectory) as allocate:
+            fixture = ldap_e2e_fixture.LDAPFixture()
+            try:
+                self.assertIs(fixture.empty_transition, False)
+                self.assertIsNone(fixture.empty_transition_path)
+                self.assertIsNone(fixture.empty_transition_directory)
+                allocate.assert_called_once_with(prefix="adtr-ldap-e2e-")
+            finally:
+                fixture.close()
+
+    def test_empty_transition_accepts_only_two_exact_mode_combinations_before_allocation(self):
+        names = ("directory_enabled", "directory_v3", "computer_assets_v3", "group_assets_v3",
+                 "directory_empty", "directory_slow", "directory_v2", "user_assets_v2", "control_enabled")
+        accepted = []
+        for values in product((False, True), repeat=len(names)):
+            modes = dict(zip(names, values))
+            valid = (modes["directory_enabled"] and modes["directory_v3"] and
+                     modes["computer_assets_v3"] != modes["group_assets_v3"] and
+                     not any(modes[name] for name in names[4:]))
+            with self.subTest(**modes), \
+                 patch.object(ldap_e2e_fixture.tempfile, "TemporaryDirectory", wraps=tempfile.TemporaryDirectory) as allocate:
+                if valid:
+                    fixture = ldap_e2e_fixture.LDAPFixture(empty_transition=True, **modes)
+                    try:
+                        self.assertEqual(allocate.call_count, 2)
+                        self.assertEqual(allocate.call_args.kwargs, {"prefix": "adtr-ldap-empty-transition-"})
+                        self.assertIs(fixture.empty_transition, True)
+                        accepted.append(modes)
+                    finally:
+                        fixture.close()
+                else:
+                    with self.assertRaisesRegex(ValueError, "empty transition requires"):
+                        ldap_e2e_fixture.LDAPFixture(empty_transition=True, **modes)
+                    allocate.assert_not_called()
+        self.assertEqual(len(accepted), 2)
+
+    def test_disabled_transition_preserves_existing_modes_and_clears_inherited_path(self):
+        cases = ({}, {"directory_enabled": True},
+                 {"directory_enabled": True, "directory_empty": True, "directory_slow": True},
+                 {"directory_enabled": True, "directory_v2": True},
+                 {"directory_enabled": True, "directory_v2": True, "user_assets_v2": True},
+                 {"directory_enabled": True, "directory_v3": True},
+                 {"directory_enabled": True, "directory_v3": True, "computer_assets_v3": True},
+                 {"directory_enabled": True, "directory_v3": True, "group_assets_v3": True},
+                 {"control_enabled": True})
+        for modes in cases:
+            with self.subTest(**modes), \
+                 patch.object(ldap_e2e_fixture.tempfile, "TemporaryDirectory", wraps=tempfile.TemporaryDirectory) as allocate:
+                with self.started_fixture(**modes) as (fixture, env, run):
+                    command = next(call.args[0] for call in run.call_args_list if call.args[0][:2] == ["docker", "run"])
+                    self.assertIsNone(fixture.empty_transition_path)
+                    self.assertNotIn("ADTR_E2E_LDAP_EMPTY_TRANSITION_DIR", env)
+                    self.assertNotIn("-empty-transition-dir", command)
+                    self.assertFalse(any("/empty-transition" in arg for arg in command))
+                    self.assertEqual(allocate.call_count, 2 if modes.get("control_enabled") else 1)
+
+    def test_transition_owns_fresh_private_directory_mount_flag_and_local_env_only(self):
+        for asset in ("computer_assets_v3", "group_assets_v3"):
+            with self.subTest(asset=asset), tempfile.TemporaryDirectory(prefix="unowned-test-") as inherited:
+                unowned = Path(inherited) / "keep"
+                unowned.write_bytes(b"untouched")
+                with self.started_fixture(directory_enabled=True, directory_v3=True,
+                                          empty_transition=True, inherited_transition=inherited,
+                                          **{asset: True}) as (fixture, env, run):
+                    directory = Path(fixture.directory.name)
+                    transition = fixture.empty_transition_path
+                    self.assertTrue(transition.is_absolute())
+                    self.assertRegex(transition.name, r"^adtr-ldap-empty-transition-[A-Za-z0-9_-]+$")
+                    self.assertNotEqual(transition, directory)
+                    self.assertNotEqual(transition, Path(inherited))
+                    self.assertEqual(stat.S_IMODE(transition.stat().st_mode), 0o700)
+                    self.assertEqual(list(transition.iterdir()), [])
+                    self.assertIsNone(fixture.control_path)
+                    command = next(call.args[0] for call in run.call_args_list if call.args[0][:2] == ["docker", "run"])
+                    mounts = [command[index + 1] for index, arg in enumerate(command) if arg == "-v"]
+                    self.assertEqual(mounts, [f"{directory}:/fixture:ro", f"{transition}:/empty-transition:ro"])
+                    self.assertEqual(command.count("-empty-transition-dir"), 1)
+                    self.assertEqual(command[command.index("-empty-transition-dir") + 1], "/empty-transition")
+                    self.assertLess(command.index(f"{transition}:/empty-transition:ro"), command.index("-cert"))
+                    self.assertGreater(command.index("-empty-transition-dir"), command.index("-cert"))
+                    self.assertNotIn("-control-dir", command)
+                    self.assertEqual([command[index + 1] for index, arg in enumerate(command) if arg == "-e"],
+                                     ["ADTR_LDAP_FIXTURE_USERNAME", "ADTR_LDAP_FIXTURE_PASSWORD"])
+                    self.assertEqual({key: value for key, value in env.items() if "EMPTY_TRANSITION" in key},
+                                     {"ADTR_E2E_LDAP_EMPTY_TRANSITION_DIR": str(transition)})
+                    self.assertNotIn("ADTR_DIRECTORY_READ_ENABLED", env)
+                    self.assertNotIn("ADTR_DIRECTORY_READ_V3_ENABLED", env)
+                    # Cleanup owns the whole private directory, including published/staged markers.
+                    (transition / "empty-v1").write_bytes(b"empty-v1\n")
+                    (transition / ".empty-v1.pending").write_bytes(b"empty-v1\n")
+                self.assertFalse(transition.exists())
+                self.assertFalse(directory.exists())
+                self.assertEqual(unowned.read_bytes(), b"untouched")
+
+    def test_simultaneous_transition_fixtures_never_share_a_directory(self):
+        modes = {"directory_enabled": True, "directory_v3": True,
+                 "computer_assets_v3": True, "empty_transition": True}
+        first = ldap_e2e_fixture.LDAPFixture(**modes)
+        try:
+            second = ldap_e2e_fixture.LDAPFixture(**modes)
+            try:
+                self.assertNotEqual(first.empty_transition_path, second.empty_transition_path)
+                (first.empty_transition_path / "empty-v1").write_bytes(b"empty-v1\n")
+                self.assertEqual(list(second.empty_transition_path.iterdir()), [])
+            finally:
+                second.close()
+        finally:
+            first.close()
+
+    def test_allocation_failure_cleans_any_previously_owned_directory(self):
+        allocate = tempfile.TemporaryDirectory
+        for fail_at in (1, 2):
+            owned = []
+
+            def fail_allocation(**options):
+                if len(owned) + 1 == fail_at:
+                    raise OSError("synthetic allocation failure")
+                directory = allocate(**options)
+                owned.append(directory)
+                return directory
+
+            with self.subTest(fail_at=fail_at), \
+                 patch.object(ldap_e2e_fixture.tempfile, "TemporaryDirectory", side_effect=fail_allocation), \
+                 patch.object(ldap_e2e_fixture.subprocess, "run") as run:
+                with self.assertRaisesRegex(OSError, "synthetic allocation failure"):
+                    ldap_e2e_fixture.LDAPFixture(directory_enabled=True, directory_v3=True,
+                                                computer_assets_v3=True, empty_transition=True)
+                self.assertTrue(all(not Path(directory.name).exists() for directory in owned))
+                run.assert_not_called()
+
+    def test_startup_failures_still_release_owned_transition_directory_on_close(self):
+        failures = (["openssl"], ["go"], ["docker", "network", "create"], ["docker", "run"],
+                    ["docker", "logs"], ["docker", "inspect", "-f", "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}"])
+        for prefix in failures:
+            fixture = ldap_e2e_fixture.LDAPFixture(directory_enabled=True, directory_v3=True,
+                                                 computer_assets_v3=True, empty_transition=True)
+            directory = Path(fixture.directory.name)
+            transition = fixture.empty_transition_path
+
+            def run_command(command, **options):
+                if command[:len(prefix)] == prefix:
+                    raise subprocess.CalledProcessError(1, command)
+                return subprocess.CompletedProcess(command, 0)
+
+            def read_command(command, **options):
+                if command[:len(prefix)] == prefix:
+                    raise subprocess.CalledProcessError(1, command)
+                return self.fixture_output(command, **options)
+
+            with self.subTest(prefix=prefix), \
+                 patch.object(ldap_e2e_fixture.subprocess, "run", side_effect=run_command) as run, \
+                 patch.object(ldap_e2e_fixture.subprocess, "check_output", side_effect=read_command):
+                try:
+                    with self.assertRaises(subprocess.CalledProcessError):
+                        fixture.start({})
+                finally:
+                    fixture.close()
+                self.assertFalse(directory.exists())
+                self.assertFalse(transition.exists())
+                commands = [call.args[0] for call in run.call_args_list]
+                self.assertEqual(["docker", "network", "rm", fixture.network] in commands, fixture.created_network)
+                self.assertEqual(["docker", "rm", "--force", fixture.name] in commands, fixture.created_container)
+
+    def test_docker_cleanup_failures_still_remove_transition_directory(self):
+        for prefix in (["docker", "stop"], ["docker", "rm"], ["docker", "network", "rm"]):
+            with self.subTest(prefix=prefix):
+                with self.assertRaises(subprocess.CalledProcessError):
+                    with self.started_fixture(directory_enabled=True, directory_v3=True,
+                                              computer_assets_v3=True, empty_transition=True) as (fixture, _, run):
+                        directory = Path(fixture.directory.name)
+                        transition = fixture.empty_transition_path
+
+                        def fail_cleanup(command, **options):
+                            if command[:len(prefix)] == prefix:
+                                raise subprocess.CalledProcessError(1, command)
+                            return subprocess.CompletedProcess(command, 0)
+
+                        run.side_effect = fail_cleanup
+                self.assertFalse(directory.exists())
+                self.assertFalse(transition.exists())
+                self.assertEqual([call.args[0] for call in run.call_args_list[-3:]], [
+                    ["docker", "stop", "--time", "10", fixture.name],
+                    ["docker", "rm", "--force", fixture.name],
+                    ["docker", "network", "rm", fixture.network],
+                ])
+
+    def test_fixture_directory_cleanup_failure_still_cleans_transition_directory(self):
+        fixture = ldap_e2e_fixture.LDAPFixture(directory_enabled=True, directory_v3=True,
+                                             computer_assets_v3=True, empty_transition=True)
+        directory = Path(fixture.directory.name)
+        transition = fixture.empty_transition_path
+        cleanup = fixture.directory.cleanup
+
+        def fail_cleanup():
+            cleanup()
+            raise OSError("synthetic cleanup failure")
+
+        with patch.object(fixture.directory, "cleanup", side_effect=fail_cleanup):
+            with self.assertRaisesRegex(OSError, "synthetic cleanup failure"):
+                fixture.close()
+        self.assertFalse(directory.exists())
+        self.assertFalse(transition.exists())
 
 
 if __name__ == "__main__":

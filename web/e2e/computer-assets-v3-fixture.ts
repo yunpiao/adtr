@@ -27,7 +27,7 @@ type DirectoryObject = {
   whenCreated: string | null;
 };
 
-// Run only through the directory-v2 suite on its owned disposable database, real
+// Run only through computer-assets-v3 / computer-assets-v3-readers on the owned disposable database, real
 // worker and TLS LDAPFixture(directory_enabled=True, directory_v3=True). The fixture has 30 objects
 // on two wire pages; it must never resolve or contact a real AD server.
 // A missing fixture is a failed acceptance run, never a skipped/passing test.
@@ -208,7 +208,7 @@ async function storedEvidence(taskUUID: string) {
   const container = process.env.ADTR_E2E_DB_CONTAINER ?? "";
   if (!/^adtr-auth-e2e-[0-9a-f]{12}$/u.test(container))
     throw new Error("Owned isolated database required");
-  const sql = `SELECT jsonb_build_object('bodyBase64',replace(encode(o.body,'base64'),chr(10),''),'sha256',o.sha256,'dictionaryVersion',o.dictionary_version,'count',o.object_count,'taskState',t.state,'purpose',u.purpose,'useState',u.state,'reason',u.quiescence_reason,'dependencies',(SELECT count(*) FROM adtr.operation_account_dependencies d WHERE d.consumer_kind=u.purpose AND d.object_id=u.task_id)) FROM adtr.domain_directory_observations o JOIN adtr.tasks t ON t.task_id=o.task_id JOIN adtr.domain_directory_task_uses u ON u.task_id=o.task_id WHERE o.tenant_id='default' AND o.task_id='${taskUUID}'`;
+  const sql = `SELECT jsonb_build_object('taskUUID',o.task_id,'actorId',o.actor_id::text,'selection',jsonb_build_object('domainId',o.domain_id,'revision',u.connection_revision::text,'credentialRevision',u.connection_credential_generation::text),'sourcePins',jsonb_build_object('accountId',u.account_id,'accountCredentialRevision',u.account_credential_revision::text,'policyRevision',u.policy_revision,'grantRoleId',u.grant_role_id,'grantRevision',u.grant_revision::text),'bodyBase64',replace(encode(o.body,'base64'),chr(10),''),'sha256',o.sha256,'dictionaryVersion',o.dictionary_version,'count',o.object_count,'taskState',t.state,'taskName',t.kind,'payloadVersion',t.payload_version,'maxAttempts',t.max_attempts,'attempt',t.attempt,'purpose',u.purpose,'useState',u.state,'reason',u.quiescence_reason,'dependencies',(SELECT count(*) FROM adtr.operation_account_dependencies d WHERE d.consumer_kind=u.purpose AND d.object_id=u.task_id)) FROM adtr.domain_directory_observations o JOIN adtr.tasks t ON t.task_id=o.task_id JOIN adtr.domain_directory_task_uses u ON u.task_id=o.task_id WHERE o.tenant_id='default' AND o.task_id='${taskUUID}'`;
   let stdout: string;
   try {
     ({ stdout } = await run(
@@ -241,7 +241,12 @@ async function storedEvidence(taskUUID: string) {
 export async function setupComputerFixture(
   page: Page,
   context: BrowserContext,
+  options: { emptyRefresh?: boolean } = {},
 ) {
+  if (options.emptyRefresh && !process.env.ADTR_E2E_LDAP_EMPTY_TRANSITION_DIR)
+    throw new Error(
+      "Empty refresh setup requires its isolated transition fixture",
+    );
   requireFixture();
   let username = process.env.ADTR_E2E_USERNAME!;
   const initialPassword = process.env.ADTR_E2E_PASSWORD!;
@@ -358,13 +363,97 @@ export async function setupComputerFixture(
   ).toBeVisible();
   let actorId = (await readJSON(context, "/api/auth/me")).ID as number;
 
-  // Production allows ten sensitive actions per actor per fifteen minutes.
-  // Bootstrap: password/MFA start/enable (3), domain/group/assignment (3),
-  // producer creation (1) = 7. The assignment revokes
-  // the bootstrap session; create the producer only after that UI re-login.
-  // Producer: password/MFA (3), account/connection grant/binding (3), denied
-  // v3 sync (1), v3 grant (1), committed v3 sync (1), v3 revoke (1) = 10.
-  // The forbidden sync still consumes rate budget. Login/logout never resets it.
+  // Production permits ten sensitive actions per actor per fifteen minutes.
+  // Default readers preserve the original sequence: bootstrap7; producer
+  // password/MFA3 + account/grant/binding3 + denied sync1 + v3 grant1 + sync1
+  // =9, leaving the reader's existing source update as its tenth action.
+  // Only primary emptyRefresh moves the SAME account create/connection grant
+  // to the already authorized bootstrap BEFORE producer creation:
+  // bootstrap password/MFA3 + domain/group/assignment3 + account/grant2 +
+  // producer creation1 =9; producer password/MFA3 + binding1 + denied sync1 +
+  // v3 grant1 + THREE real syncs3 =9. No new account, grant, clock or rate edit.
+  // A forbidden sync consumes budget; login/logout never resets it.
+  // The existing bootstrap may provision these same two scoped fixtures in
+  // primary empty-refresh runs. Every proof is generated and consumed in the
+  // same current actor session; readers retain the original producer ordering.
+  const provisionAccount = async (
+    provisionActor: number,
+    actorPassword: string,
+    actorAuth: Authenticator,
+  ) => {
+    if (options.emptyRefresh)
+      expect((await readJSON(context, "/api/auth/me")).ID).toBe(provisionActor);
+    await navigateTo(page, "管理操作账户");
+    await page
+      .getByRole("button", { name: "新增操作账户", exact: true })
+      .click();
+    await page
+      .getByRole("button", { name: `选择 ${domain}`, exact: true })
+      .click();
+    await page
+      .getByLabel("登记标签（可选）", { exact: true })
+      .fill(accountLabel);
+    await fillSecret(
+      page.getByLabel("AD 用户名", { exact: true }),
+      accountUser,
+    );
+    await fillSecret(
+      page.getByLabel("AD 密码", { exact: true }),
+      accountPassword,
+    );
+    await proof(page, actorPassword, actorAuth);
+    const createdAccount = await submit(
+      page,
+      "/api/operation-accounts/create",
+      "保存本地登记",
+    );
+    safe(createdAccount.value);
+    const accountId = createdAccount.value.accountId as string;
+    await page
+      .getByRole("button", { name: "查看凭据使用授权", exact: true })
+      .click();
+    const connectionGrant = await grant(
+      page,
+      actorPassword,
+      actorAuth,
+      "/api/credential-use",
+    );
+    expect(connectionGrant.value).toMatchObject({
+      result: "SUCCESS",
+      purpose: "domain.connection_test",
+      allowed: true,
+    });
+    safe(connectionGrant.value);
+
+    if (options.emptyRefresh) {
+      expect(createdAccount.value).toMatchObject({
+        domainId,
+        accountId,
+        verificationState: "unverified",
+      });
+      expect((await readJSON(context, "/api/auth/me")).ID).toBe(provisionActor);
+      expect(
+        (
+          await readJSON(
+            context,
+            `/api/operation-accounts/detail?accountId=${accountId}`,
+            provisionActor,
+          )
+        ).account,
+      ).toMatchObject({
+        accountId,
+        domainId,
+        domain,
+        credentialConfigured: true,
+        verificationState: "unverified",
+      });
+    }
+    return accountId;
+  };
+  const earlyAccountId = options.emptyRefresh
+    ? await provisionAccount(actorId, password, auth)
+    : null;
+
   await navigateTo(page, "访问管理");
   await page.getByRole("button", { name: "用户管理", exact: true }).click();
   await page.getByRole("button", { name: "新增用户", exact: true }).click();
@@ -415,40 +504,26 @@ export async function setupComputerFixture(
   actorId = (await readJSON(context, "/api/auth/me")).ID as number;
   expect(actorId).toBe(producer.value.ID);
 
-  await navigateTo(page, "管理操作账户");
-  await page.getByRole("button", { name: "新增操作账户", exact: true }).click();
-  await page
-    .getByRole("button", { name: `选择 ${domain}`, exact: true })
-    .click();
-  await page.getByLabel("登记标签（可选）", { exact: true }).fill(accountLabel);
-  await fillSecret(page.getByLabel("AD 用户名", { exact: true }), accountUser);
-  await fillSecret(
-    page.getByLabel("AD 密码", { exact: true }),
-    accountPassword,
-  );
-  await proof(page, password, auth);
-  const createdAccount = await submit(
-    page,
-    "/api/operation-accounts/create",
-    "保存本地登记",
-  );
-  safe(createdAccount.value);
-  const accountId = createdAccount.value.accountId as string;
-  await page
-    .getByRole("button", { name: "查看凭据使用授权", exact: true })
-    .click();
-  const connectionGrant = await grant(
-    page,
-    password,
-    auth,
-    "/api/credential-use",
-  );
-  expect(connectionGrant.value).toMatchObject({
-    result: "SUCCESS",
-    purpose: "domain.connection_test",
-    allowed: true,
-  });
-  safe(connectionGrant.value);
+  const accountId =
+    earlyAccountId ?? (await provisionAccount(actorId, password, auth));
+  if (options.emptyRefresh) {
+    // Producer authority is checked by the real endpoint before its binding.
+    expect((await readJSON(context, "/api/auth/me")).ID).toBe(actorId);
+    expect(
+      (
+        await readJSON(
+          context,
+          `/api/operation-accounts/detail?accountId=${accountId}`,
+          actorId,
+        )
+      ).account,
+    ).toMatchObject({
+      accountId,
+      domainId,
+      domain,
+      credentialConfigured: true,
+    });
+  }
 
   await navigateTo(page, "域连接");
   const backToDomains = page.getByRole("button", {
@@ -621,6 +696,6 @@ export async function setupComputerFixture(
     bootstrap,
     producer: { username, password, auth },
     read: (path: string) => readJSON(context, path, actorId),
-    evidence: () => storedEvidence(taskUUID),
+    evidence: (observationTask = taskUUID) => storedEvidence(observationTask),
   };
 }

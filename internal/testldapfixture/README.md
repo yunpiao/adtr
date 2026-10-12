@@ -70,3 +70,42 @@ PostgreSQL, real API/worker and this TLS LDAP fixture. The fixture marker
 application capability. Browser publication/execution is a separate check from
 the local protocol tests above. Synthetic screenshots are captured only after
 leaving credential-entry forms and retained by the pinned CI artifact action.
+
+## Nonempty-to-empty observation transition
+
+`LDAPFixture(..., empty_transition=True)` is an optional, default-disabled
+Linux-container fixture input for the isolated dictionary3 group or computer
+mode. It requires `directory_enabled=True`, `directory_v3=True` and exactly one
+of `group_assets_v3=True` / `computer_assets_v3=True`. Empty, slow, dictionary2,
+user-asset and B2 control modes are incompatible; both launcher and CLI reject
+invalid combinations before startup. No application gate or permission changes.
+
+The launcher owns a new private `adtr-ldap-empty-transition-*` directory, mounts
+it at `/empty-transition:ro`, passes `-empty-transition-dir /empty-transition`,
+and exposes its host path only as `ADTR_E2E_LDAP_EMPTY_TRANSITION_DIR` to the
+Node test. When disabled, it clears any inherited value. The directory is
+removed during owned fixture cleanup; it is never accepted from caller input.
+
+The Node test writes the exact bytes `empty-v1\n` to an exclusive staging file,
+hardlinks it to the fixed basename `empty-v1` without overwriting, and removes
+the staging name. Only that final basename is read. There is no public endpoint,
+control command, alternate filename or caller-selected response. Absence keeps
+the original nonempty dictionary. A valid marker yields one terminal LDAP page
+with zero entries, estimate zero and an empty continuation cookie.
+
+The first authenticated, RootDSE-complete, strictly validated directory page
+samples the marker once per bind. Every continuation page retains that same
+snapshot even if the marker appears later; a rebind clears the latch and paging
+cookie. RootDSE, failed binds and malformed searches never sample the marker.
+The directory is anchored with `os.Root`; a Linux `openat` descriptor open
+rejects symlinks and cannot block on a FIFO. Nonregular, unreadable, oversized or
+malformed markers close the search without publishing successful empty data.
+The opt-in transition fails closed on other OSes; existing fixture modes remain
+available there.
+
+Focused tests cover the launcher/CLI mode matrices, default-off behavior,
+private readonly mount and cleanup, marker/filesystem validation, directory
+anchoring, and real certificate-verified StartTLS/LDAPS group/computer BER
+before and after transition, including publication mid-pagination and rebind.
+These protocol tests use `net.Pipe`; Docker, production persistence and browser
+observation-refresh evidence are separate checks.
