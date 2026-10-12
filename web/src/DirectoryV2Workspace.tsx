@@ -414,6 +414,15 @@ function SyncForm({
         ),
       (value) => recovered({ ...intent, taskUUID: value.task.taskUUID }),
       (error) => {
+        // Preserve the uncertain receipt identity while stopping obsolete retries.
+        if (
+          original &&
+          error instanceof ApiError &&
+          error.code === "revision_conflict"
+        ) {
+          recovered({ ...intent, receiptOnly: true });
+          return;
+        }
         if (
           original ||
           uncertainDirectoryV2Error(error) ||
@@ -515,19 +524,22 @@ function Recovery({
       {!read.busy && read.data && !read.data.task && (
         <>
           <p role="status">
-            未找到原同步回执。重试将保留原域、版本和操作编号。
+            {intent.receiptOnly
+              ? "原配置或凭据版本已冲突。保留原操作编号继续核对回执，此操作不再提供重试。请通过数据源选择器重新核对当前配置；新版本不能覆盖原操作。"
+              : "未找到原同步回执。重试将保留原域、版本和操作编号。"}
           </p>
-          {context.can("POST /api/directory/v2/sync") && (
-            <SyncForm
-              key={`${intent.idempotencyKey}:${revision}`}
-              context={context}
-              original={intent}
-              recovered={(value) => {
-                recovered(value);
-                setRevision((v) => v + 1);
-              }}
-            />
-          )}
+          {!intent.receiptOnly &&
+            context.can("POST /api/directory/v2/sync") && (
+              <SyncForm
+                key={`${intent.idempotencyKey}:${revision}`}
+                context={context}
+                original={intent}
+                recovered={(value) => {
+                  recovered(value);
+                  setRevision((v) => v + 1);
+                }}
+              />
+            )}
         </>
       )}
     </section>
