@@ -1,0 +1,12 @@
+/* Fixed dictionary3 collection facts remain readable without changing v1/v2. */
+.directory-v3-observation td {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-width: 28rem;
+}
+
+/* Keyboard users can enter the same local scroll surface as touch users. */
+.directory-v3-governance-scroll:focus-visible {
+  outline: 3px solid #2766a3;
+  outline-offset: 2px;
+}

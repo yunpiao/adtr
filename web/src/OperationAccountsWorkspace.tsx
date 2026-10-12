@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { ApiError, type Profile } from "./api";
 import { CredentialUsePanel } from "./CredentialUseWorkspace";
 import { DirectoryCredentialUsePanel } from "./DirectoryCredentialUseWorkspace";
+import { DirectoryV3CredentialUsePanel } from "./DirectoryV3CredentialUseWorkspace";
 import { DirectoryV2CredentialUsePanel } from "./DirectoryV2CredentialUseWorkspace";
 import { accessRequest, queryString, type Permission } from "./access-api";
 import {
@@ -646,6 +647,11 @@ function AccountDetails({
                 accountId={read.data.accountId}
               />
               <DirectoryV2CredentialUsePanel
+                profile={context.profile}
+                sessionChanged={context.sessionChanged}
+                accountId={read.data.accountId}
+              />{" "}
+              <DirectoryV3CredentialUsePanel
                 profile={context.profile}
                 sessionChanged={context.sessionChanged}
                 accountId={read.data.accountId}

@@ -33,6 +33,8 @@ import ProfileWorkspace from "./ProfileWorkspace";
 import CredentialUseWorkspace from "./CredentialUseWorkspace";
 import DirectoryWorkspace from "./DirectoryWorkspace";
 import DirectoryCredentialUseWorkspace from "./DirectoryCredentialUseWorkspace";
+import DirectoryV3Workspace from "./DirectoryV3Workspace";
+import DirectoryV3CredentialUseWorkspace from "./DirectoryV3CredentialUseWorkspace";
 import DirectoryV2Workspace from "./DirectoryV2Workspace";
 import UserAssetsV2Workspace from "./UserAssetsV2Workspace";
 import UserAssetsV3Workspace from "./UserAssetsV3Workspace";
@@ -67,6 +69,8 @@ function pageFromHash(): Page {
       "directory",
       "directory-credential-use",
       "directory-v2",
+      "directory-v3",
+      "directory-credential-use-v3",
       "user-assets-v2",
       "user-assets-v3",
       "directory-credential-use-v2",
@@ -385,6 +389,8 @@ export default function App() {
       page === "directory" ||
       page === "directory-credential-use" ||
       page === "directory-v2" ||
+      page === "directory-v3" ||
+      page === "directory-credential-use-v3" ||
       page === "user-assets-v2" ||
       page === "user-assets-v3" ||
       page === "directory-credential-use-v2" ||
@@ -653,6 +659,25 @@ export default function App() {
                     {active === "directory-credential-use-v2" &&
                       profile.role === "platform_admin" && (
                         <DirectoryV2CredentialUseWorkspace
+                          profile={profile}
+                          sessionChanged={() => {
+                            setPage("account");
+                            refresh();
+                          }}
+                        />
+                      )}
+                    {active === "directory-v3" && (
+                      <DirectoryV3Workspace
+                        profile={profile}
+                        sessionChanged={() => {
+                          setPage("account");
+                          refresh();
+                        }}
+                      />
+                    )}
+                    {active === "directory-credential-use-v3" &&
+                      profile.role === "platform_admin" && (
+                        <DirectoryV3CredentialUseWorkspace
                           profile={profile}
                           sessionChanged={() => {
                             setPage("account");

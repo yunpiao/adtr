@@ -97,6 +97,18 @@ describe("passive bounded directory browser response observer", () => {
     "/api/user-assets/v2/detail",
     "/api/user-assets/v3",
     "/api/user-assets/v3/detail",
+    "/api/directory/v3/observation",
+    "/api/directory/v3/receipt",
+    "/api/directory/v3/task",
+    "/api/directory/v3/sync",
+    "/api/directory/v3/cancel",
+    "/api/directory-credential-use/v3/accounts",
+    "/api/directory-credential-use/v3/grants",
+    "/api/directory-credential-use/v3/roles",
+    "/api/directory-credential-use/v3/effective",
+    "/api/directory-credential-use/v3/mutation",
+    "/api/directory-credential-use/v3/grant",
+    "/api/directory-credential-use/v3/revoke",
   ])("observes original bounded-reader bytes for %s", async (route) => {
     const text = JSON.stringify({
       dictionaryVersion: route.includes("/v3") ? 3 : 2,

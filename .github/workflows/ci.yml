@@ -175,6 +175,12 @@ jobs:
             command: python3 scripts/test_auth_e2e.py --suite user-assets-v3
           - name: directory-v3-backend
             command: python3 scripts/test_auth_e2e.py --suite directory-v3-backend
+          - name: directory-v3
+            command: python3 scripts/test_auth_e2e.py --suite directory-v3
+          - name: directory-v3-controls
+            command: python3 scripts/test_auth_e2e.py --suite directory-v3-controls
+          - name: directory-v3-readers
+            command: python3 scripts/test_auth_e2e.py --suite directory-v3-readers
           - name: directory-v2
             command: python3 scripts/test_auth_e2e.py --suite directory-v2
           - name: directory-v2-controls
@@ -352,6 +358,14 @@ jobs:
         with:
           name: system-soc-evidence-${{ github.run_id }}-${{ github.run_attempt }}
           path: web/test-results/**/system-soc-*
+          if-no-files-found: error
+          retention-days: 7
+      - name: Retain synthetic dictionary3 collection and governance evidence
+        if: ${{ always() && matrix.name == 'directory-v3' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: directory-v3-controls-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: web/test-results/**/directory-v3-*
           if-no-files-found: error
           retention-days: 7
       - name: Retain synthetic dictionary3 workspace evidence
