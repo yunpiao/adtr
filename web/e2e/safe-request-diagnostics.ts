@@ -7,6 +7,7 @@ const limit = 1_000_000;
 let ordinal = 0;
 const phases = [
   "directory-get",
+  "directory-v2-verification-get",
   "fixture-get",
   "page-request",
   "test-start",
@@ -161,7 +162,12 @@ export function validRequestEvent(e: SafeRequestEvent): boolean {
     );
   if (e.origin === "step")
     return (
-      !["directory-get", "fixture-get", "page-request"].includes(e.phase) &&
+      ![
+        "directory-get",
+        "directory-v2-verification-get",
+        "fixture-get",
+        "page-request",
+      ].includes(e.phase) &&
       e.method === "none" &&
       e.route === "unknown" &&
       e.attempt === 0 &&
@@ -174,9 +180,15 @@ export function validRequestEvent(e: SafeRequestEvent): boolean {
   if (e.snapshot !== null || e.method === "none") return false;
   if (
     e.origin === "api-request" &&
-    (!(["directory-get", "fixture-get"] as string[]).includes(e.phase) ||
+    (!(
+      [
+        "directory-get",
+        "directory-v2-verification-get",
+        "fixture-get",
+      ] as string[]
+    ).includes(e.phase) ||
       e.method !== "GET" ||
-      !integer(e.attempt, 1, e.phase === "fixture-get" ? 2 : 1) ||
+      !integer(e.attempt, 1, e.phase === "directory-get" ? 1 : 2) ||
       !["start", "response", "transport-error"].includes(e.outcome))
   )
     return false;
@@ -247,7 +259,7 @@ export function safeErrorClass(error: unknown): ErrorClass {
   }
 }
 export function beginGET(
-  phase: "directory-get" | "fixture-get",
+  phase: "directory-get" | "directory-v2-verification-get" | "fixture-get",
   path: string,
   operation = nextOperation(),
   attempt = 1,
@@ -492,6 +504,7 @@ export async function checkpoint(
   phase: Exclude<
     DiagnosticPhase,
     | "directory-get"
+    | "directory-v2-verification-get"
     | "fixture-get"
     | "page-request"
     | "grant-wait"
