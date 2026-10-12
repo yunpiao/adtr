@@ -1,3 +1,4 @@
+import { directoryLiteralSearchMatches } from "./directory-search-lowercase";
 import {
   validDirectoryV3Object,
   type DirectoryV3Object,
@@ -170,6 +171,10 @@ export function parseUserAssetsV3List(
     const created = userAssetsV2Time(row.whenCreated);
     if (
       seen.has(row.objectGUID) ||
+      !directoryLiteralSearchMatches(
+        [row.samAccountName, row.objectSid, row.mail, row.distinguishedName],
+        q.search,
+      ) ||
       (q.sAMAccountName !== undefined &&
         q.sAMAccountName !== "" &&
         row.samAccountName !== q.sAMAccountName) ||

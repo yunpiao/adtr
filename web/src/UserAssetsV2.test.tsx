@@ -317,6 +317,53 @@ async function start(changed = vi.fn()) {
 }
 
 describe("UserAssetsV2 strict parser and transport", () => {
+  it.each(["OBSERVED-1", "S-1-5-21", "observed@synthetic", "cn=user 1"])(
+    "accepts independently matching keyword %s",
+    (search) => {
+      const query = { ...q, search };
+      expect(parseUserAssetsV2List(list(query), query).list).toEqual([row()]);
+    },
+  );
+  it.each([
+    "Factual description",
+    "top",
+    "user 1observed-1",
+    " Observed-1 ",
+    row().objectGUID,
+  ])("rejects non-search-field or non-literal match %s", (search) => {
+    const query = { ...q, search };
+    expect(() => parseUserAssetsV2List(list(query), query)).toThrow(
+      "invalid_response",
+    );
+  });
+  it.each([
+    ["İ", "i", true],
+    ["İ", "i\u0307", false],
+    ["ΟΣ", "οσ", true],
+    ["ΟΣ", "ος", false],
+    ["é", "e\u0301", false],
+    ["[A]*%_", "[a]*%_", true],
+    ["a\u0000b", "A\u0000B", true],
+    ["Straße", "STRASSE", false],
+  ])("binds Go literal keyword %s / %s exactly", (sam, search, matches) => {
+    const object = { ...row(), mail: sam as string };
+    const query = { ...q, search: search as string };
+    const parse = () => parseUserAssetsV2List(list(query, [object]), query);
+    if (matches) expect(parse().list).toEqual([object]);
+    else expect(parse).toThrow("invalid_response");
+  });
+  it("rejects an entire mixed-match page instead of filtering it locally", () => {
+    const query = { ...q, search: "observed-1" };
+    expect(() =>
+      parseUserAssetsV2List(list(query, [row(1), row(2)]), query),
+    ).toThrow("invalid_response");
+  });
+  it("rejects same-pin rows that do not match the requested keyword", () => {
+    const query = { ...q, search: "absent-keyword" };
+    expect(() => parseUserAssetsV2List(list(query), query)).toThrow(
+      "invalid_response",
+    );
+  });
   it("preserves exact ten-key facts, null versus zero and year 0001", () => {
     expect(parseUserAssetsV2List(list(), q).list[0]).toEqual(row());
     const nullable = {
@@ -725,6 +772,20 @@ describe("UserAssetsV2 strict parser and transport", () => {
 });
 
 describe("UserAssetsV2 private workspace", () => {
+  it("does not render a same-pin response for another keyword", async () => {
+    await start();
+    override = (url) =>
+      url.startsWith("/api/user-assets/v2?")
+        ? response(list(queryFrom(url), [row(2)]))
+        : undefined;
+    fill("用户资产关键词", "observed-1");
+    click("搜索用户");
+    await screen.findByText(
+      "服务器结果无法安全确认，未展示用户资产。请重试原读取。",
+    );
+    expect(screen.queryByRole("table", { name: "用户资产列表" })).toBeNull();
+    expect(screen.queryByText("observed-2")).toBeNull();
+  });
   it("successful source resolution collapses its chooser and focuses the asset query", async () => {
     await start();
     expect(document.getElementById("asset-source-picker")).not.toBeVisible();
