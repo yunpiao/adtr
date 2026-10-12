@@ -4,9 +4,11 @@ import hashlib
 import json
 import struct
 import tempfile
+import subprocess
+from unittest.mock import patch
 import unittest
 from pathlib import Path
-from validate_empty_asset_evidence import SOURCES, load, validate
+from validate_empty_asset_evidence import SOURCES, EXPECTED_FILES, discover, load, validate
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -133,6 +135,75 @@ class EmptyAssetEvidenceContract(unittest.TestCase):
         path = self.directory / 'evidence.json'
         path.write_text('{"format":1,"format":1}')
         with self.assertRaises(ValueError): load(path)
+
+    def test_shallow_checkout_retains_actual_commit_parents(self):
+        source, shallow = self.directory / 'git-source', self.directory / 'shallow'
+        source.mkdir()
+        def git(*args, cwd=source):
+            return subprocess.check_output(['git', *args], cwd=cwd, text=True, stderr=subprocess.DEVNULL).strip()
+        git('init', '-q', '-b', 'main')
+        for message in ['first', 'second']:
+            git('-c', 'user.name=Validator Test', '-c', 'user.email=validator@example.invalid', 'commit', '-q', '--allow-empty', '-m', message)
+        expected = git('rev-parse', 'HEAD^')
+        git('clone', '-q', '--depth=1', source.as_uri(), str(shallow))
+        self.assertEqual(git('show', '-s', '--format=%P', 'HEAD', cwd=shallow), '')
+        parents = [line[7:] for line in git('cat-file', '-p', 'HEAD', cwd=shallow).split('\n\n', 1)[0].splitlines() if line.startswith('parent ')]
+        self.assertEqual(parents, [expected])
+        helper = (ROOT / 'web/e2e/directory-v3-empty-assets.ts').read_text()
+        self.assertIn('git("cat-file", "-p", "HEAD")', helper)
+        self.assertNotIn('git("show", "-s", "--format=%P"', helper)
+
+    def test_parent_directory_symlink_is_rejected(self):
+        link = self.directory / 'alias'
+        link.symlink_to(self.directory, target_is_directory=True)
+        with self.assertRaises(ValueError): validate(self.data, link, ROOT)
+
+    def test_fixed_root_discovers_only_unique_exact_upload_files(self):
+        root = self.directory / 'checkout'
+        script = root / 'scripts' / 'validate_empty_asset_evidence.py'
+        output = root / 'web' / 'test-results'
+        scenario = output / 'owned-scenario'
+        scenario.mkdir(parents=True)
+        for name in EXPECTED_FILES: (scenario / name).write_text('unit fixture only')
+        with patch('validate_empty_asset_evidence.__file__', str(script)):
+            expected = scenario / 'directory-v3-empty-assets-evidence.json'
+            self.assertEqual(discover(output, root), expected)
+            with self.assertRaises(ValueError): discover(self.directory, root)
+            extra = output / 'extra'
+            extra.mkdir()
+            (extra / expected.name).write_text('{}')
+            with self.assertRaises(ValueError): discover(output, root)
+            (extra / expected.name).unlink()
+            image = next(name for name in EXPECTED_FILES if name.endswith('.png'))
+            (extra / image).write_text('duplicate would enter wildcard upload')
+            with self.assertRaises(ValueError): discover(output, root)
+            (extra / image).unlink()
+            (extra / 'alias').symlink_to(self.directory, target_is_directory=True)
+            with self.assertRaises(ValueError): discover(output, root)
+
+    def test_fixed_root_rejects_missing_screenshot(self):
+        root = self.directory / 'checkout'
+        output = root / 'web' / 'test-results'
+        output.mkdir(parents=True)
+        (output / 'directory-v3-empty-assets-evidence.json').write_text('{}')
+        with patch('validate_empty_asset_evidence.__file__', str(root / 'scripts' / 'validator.py')):
+            with self.assertRaises(ValueError): discover(output, root)
+
+    def test_exact_workflow_evidence_gate_and_upload(self):
+        workflow = (ROOT / '.github/workflows/ci.yml').read_text()
+        start = workflow.index('      - name: Validate real empty asset observation evidence\n')
+        end = workflow.index('      - name: Retain synthetic profile visual evidence\n', start)
+        steps = workflow[start:end]
+        self.assertEqual(steps.count("if: ${{ success() && matrix.name == 'directory-v3-controls' }}"), 2)
+        self.assertIn('run: python3 scripts/validate_empty_asset_evidence.py --evidence-root web/test-results --source-root .', steps)
+        paths = {line.strip().split('/')[-1] for line in steps.splitlines() if line.strip().startswith('web/test-results/**/')}
+        self.assertEqual(paths, EXPECTED_FILES)
+        self.assertEqual(len(paths), 13)
+        self.assertIn('uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02', steps)
+        self.assertIn('if-no-files-found: error', steps)
+        self.assertNotIn('include-hidden-files', steps)
+        # This exact two-step delta is the only workflow change from published 3d9fee4.
+        self.assertEqual(hashlib.sha256((workflow[:start] + workflow[end:]).encode()).hexdigest(), 'a0368741a173743aa8ffddfb6a54a115d7ac9f01d775d494475c51bac503072b')
 
     def test_original_controls_are_preserved_and_helpers_are_read_only(self):
         code = (ROOT / 'web/e2e/directory-v3-controls.spec.ts').read_text()

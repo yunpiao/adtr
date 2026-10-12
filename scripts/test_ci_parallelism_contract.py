@@ -10,8 +10,9 @@ from pathlib import Path
 import unittest
 
 
-BASELINE_SHA = 'cc5a79170e7bb8389a11406b589bd59cd8ca4a6c'
-BASELINE_WORKFLOW_SHA256 = '46476c8dc9cc49cd589eddfd1319fa96aa4192fc0bc9bd165e10e0e59d454323'
+# Base plus the explicitly reviewed #143 two-step empty-evidence upload delta.
+BASELINE_SHA = '8a6672b9710fce8768e5c276fa7775217e695563'
+BASELINE_WORKFLOW_SHA256 = '51fc3120f8f4770f6d3058dbe726e1a3da6847d2203e4f0facfac9598e37456f'
 
 
 def preserves_reviewed_workflow(text):

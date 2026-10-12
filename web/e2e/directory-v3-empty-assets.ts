@@ -282,7 +282,11 @@ export function writeEmptyAssetEvidence(
     provenance: {
       checkoutCommit: git("rev-parse", "HEAD"),
       checkoutTree: git("rev-parse", "HEAD^{tree}"),
-      checkoutParents: git("show", "-s", "--format=%P", "HEAD").split(" "),
+      checkoutParents: git("cat-file", "-p", "HEAD")
+        .split("\n\n", 1)[0]
+        .split("\n")
+        .filter((line) => /^parent [0-9a-f]{40}$/u.test(line))
+        .map((line) => line.slice(7)),
       dirty: git("status", "--porcelain") !== "",
       eventHeadCommit: process.env.ADTR_EVENT_HEAD_SHA ?? null,
       eventBaseCommit: process.env.ADTR_EVENT_BASE_SHA ?? null,

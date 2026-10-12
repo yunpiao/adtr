@@ -18,6 +18,12 @@ SOURCES = {
     'web/package-lock.json',
 }
 
+EXPECTED_FILES = {'directory-v3-empty-assets-evidence.json'} | {
+    f'directory-v3-empty-assets-{stage}-{kind}-{width}.png'
+    for stage in ['no-observation', 'observed-empty']
+    for kind in ['user', 'computer', 'group'] for width in [1440, 390]
+}
+
 
 def require(condition, label):
     if not condition:
@@ -40,7 +46,35 @@ def integer(value, low, high):
     return type(value) is int and low <= value <= high
 
 
+def no_symlinks(path):
+    require(not any(part.is_symlink() for part in [path, *path.parents]), 'symlink path')
+
+
+def discover(evidence_root, source_root):
+    # The workflow entry accepts only this checkout's normal Playwright output.
+    # Positional evidence paths remain available for inspecting downloaded artifacts.
+    no_symlinks(source_root)
+    no_symlinks(evidence_root)
+    require(source_root.resolve() == Path(__file__).resolve().parents[1], 'source checkout')
+    expected = source_root.resolve() / 'web' / 'test-results'
+    require(evidence_root.resolve() == expected and evidence_root.is_dir(), 'fixed evidence root')
+    entries = list(evidence_root.rglob('*'))
+    require(len(entries) <= 1000, 'bounded evidence output')
+    for entry in entries:
+        no_symlinks(entry)
+    candidates = [p for p in entries if p.name == 'directory-v3-empty-assets-evidence.json']
+    require(len(candidates) == 1, 'unique evidence document')
+    no_symlinks(candidates[0])
+    require(candidates[0].resolve().is_relative_to(expected), 'evidence containment')
+    for filename in EXPECTED_FILES:
+        matches = [p for p in entries if p.name == filename]
+        require(matches == [candidates[0].parent / filename], 'unique fixed upload files')
+    return candidates[0]
+
+
 def validate(data, directory, source_root):
+    no_symlinks(directory)
+    no_symlinks(source_root)
     exact(data, ['format', 'actorId', 'selection', 'observation', 'successfulTask',
                  'successfulUse', 'syncPosts', 'cancelPosts', 'records', 'provenance'], 'top-level fields')
     require(type(data['format']) is int and data['format'] == 1, 'format')
@@ -135,10 +169,12 @@ def validate(data, directory, source_root):
     exact(hashes, SOURCES, 'source set')
     for filename, sha in hashes.items():
         require(digest(sha), 'source digest')
+        no_symlinks(source_root / filename)
         require(hashlib.sha256((source_root / filename).read_bytes()).hexdigest() == sha, 'source hash mismatch')
 
 
 def load(path):
+    no_symlinks(path)
     require(not path.is_symlink() and path.stat().st_size <= 128 * 1024, 'bounded evidence JSON')
     def unique(pairs):
         result = {}
@@ -151,8 +187,11 @@ def load(path):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('evidence', type=Path)
+    parser.add_argument('evidence', type=Path, nargs='?')
+    parser.add_argument('--evidence-root', type=Path)
     parser.add_argument('--source-root', type=Path, required=True)
     args = parser.parse_args()
-    validate(load(args.evidence), args.evidence.parent, args.source_root)
+    require((args.evidence is None) != (args.evidence_root is None), 'choose one evidence input')
+    evidence = args.evidence if args.evidence is not None else discover(args.evidence_root, args.source_root)
+    validate(load(evidence), evidence.parent, args.source_root)
     print('Empty-asset evidence and 12 screenshot/source hashes verified; visual review remains separate.')
