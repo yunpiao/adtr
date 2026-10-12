@@ -205,8 +205,11 @@ func run() (runErr error) {
 			mux.Handle("/api/user-assets/v3", userAssetsV3Handler)
 			mux.Handle("/api/user-assets/v3/", userAssetsV3Handler)
 			computerAssetsV3Handler := authentication.ComputerAssetsV3Handler(domainStore)
+			groupAssetsV3Handler := authentication.GroupAssetsV3Handler(domainStore)
 			mux.Handle("/api/computer-assets/v3", computerAssetsV3Handler)
+			mux.Handle("/api/group-assets/v3", groupAssetsV3Handler)
 			mux.Handle("/api/computer-assets/v3/", computerAssetsV3Handler)
+			mux.Handle("/api/group-assets/v3/", groupAssetsV3Handler)
 
 			userAssetsV2Handler := authentication.UserAssetsV2Handler(domainStore)
 			mux.Handle("/api/user-assets/v2", userAssetsV2Handler)

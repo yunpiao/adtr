@@ -54,7 +54,7 @@ class CIEventContract(unittest.TestCase):
         self.assertIn('engine_fix=62473ad0f747e245e514c93e741bb8e168a2a207', fixed)
         self.assertIn('${{ runner.temp }}/adtr-native-fixed/provenance.txt', fixed)
         self.assertIn('ADTR_E2E_NATIVE_STREAM_MODE: stable-body', baseline)
-        self.assertIn("ADTR_E2E_NATIVE_STREAM_MODE: ${{ (matrix.name == 'user-assets-v2' || matrix.name == 'user-assets-v2-readers' || matrix.name == 'user-assets-v3' || matrix.name == 'computer-assets-v3' || matrix.name == 'computer-assets-v3-readers') && 'stable-body' || 'native-finish' }}", browser)
+        self.assertIn("ADTR_E2E_NATIVE_STREAM_MODE: ${{ (matrix.name == 'user-assets-v2' || matrix.name == 'user-assets-v2-readers' || matrix.name == 'user-assets-v3' || matrix.name == 'computer-assets-v3' || matrix.name == 'computer-assets-v3-readers' || matrix.name == 'group-assets-v3' || matrix.name == 'group-assets-v3-readers') && 'stable-body' || 'native-finish' }}", browser)
         self.assertNotIn('ADTR_E2E_NATIVE_STREAM_MODE: stable-body', browser)
         self.assertIn('name: Require complete application reads and record native outcomes', baseline)
         self.assertNotIn('name: Require native no-store stream completion', baseline)
@@ -64,7 +64,7 @@ class CIEventContract(unittest.TestCase):
         self.assertNotIn('ADTR_E2E_CHROMIUM_PATH', browser)
         self.assertIn('USER_ASSETS_FIXED_RESULT: ${{ needs.user-assets-fixed.result }}', text)
         self.assertIn('&& test "$USER_ASSETS_FIXED_RESULT" = success', text)
-        self.assertIn('suite: [user-assets-v2, user-assets-v2-readers, user-assets-v3, computer-assets-v3, computer-assets-v3-readers]', assets_fixed)
+        self.assertIn('suite: [user-assets-v2, user-assets-v2-readers, user-assets-v3, computer-assets-v3, computer-assets-v3-readers, group-assets-v3, group-assets-v3-readers]', assets_fixed)
         self.assertIn('run: python3 scripts/test_auth_e2e.py --suite "${{ matrix.suite }}"', assets_fixed)
         self.assertIn('run: go mod verify && make build web-build', assets_fixed)
         self.assertIn('fail-fast: false', assets_fixed)
@@ -101,7 +101,7 @@ class CIEventContract(unittest.TestCase):
         browser = workflow.split('  browser:\n', 1)[1].split('  native-no-store:\n', 1)[0]
         fixed = workflow.split('  user-assets-fixed:\n', 1)[1].split('  verify:\n', 1)[0]
         self.assertIn('path: web/test-results/**/user-assets-v2-*\n', browser)
-        self.assertIn('path: |\n            web/test-results/**/user-assets-v2-*\n            web/test-results/**/user-assets-v3-*\n            web/test-results/**/computer-assets-v3-*\n            ${{ runner.temp }}/adtr-native-fixed/provenance.txt\n', fixed)
+        self.assertIn('path: |\n            web/test-results/**/user-assets-v2-*\n            web/test-results/**/user-assets-v3-*\n            web/test-results/**/computer-assets-v3-*\n            web/test-results/**/group-assets-v3-*\n            ${{ runner.temp }}/adtr-native-fixed/provenance.txt\n', fixed)
 
 
 if __name__ == '__main__':

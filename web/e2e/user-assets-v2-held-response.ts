@@ -82,6 +82,7 @@ export async function holdAssetResponse(
       "/api/user-assets/v2/detail",
       "/api/user-assets/v3",
       "/api/computer-assets/v3",
+      "/api/group-assets/v3",
       "/api/user-assets/v3/detail",
     ].includes(path)
   )
@@ -270,7 +271,8 @@ export async function holdAssetResponse(
       const query = new URL(held.url()).searchParams;
       expect(genuineBody.dictionaryVersion).toBe(
         path.startsWith("/api/user-assets/v3") ||
-          path === "/api/computer-assets/v3"
+          path === "/api/computer-assets/v3" ||
+          path === "/api/group-assets/v3"
           ? 3
           : 2,
       );
