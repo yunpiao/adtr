@@ -32,7 +32,7 @@ PHASES = {"setup", "api-start", "api-ready", "worker-start", "worker-ready",
 ROUTES = {"/api/domain-selection", "/api/domain-selection/resolve", "/api/access/menu", "/api/access/check",
           "/api/user-assets/v2", "/api/user-assets/v3", "unknown", "/api/resources/tenant", "/api/auth/me", "/api/domains/detail",
           "/api/directory-credential-use/effective", "/api/directory-credential-use/v2/effective",
-          "/api/credential-use/effective", "/api/tasks", "/api/tasks/detail",
+          "/api/credential-use/effective", "/api/credential-use/grant", "/api/tasks", "/api/tasks/detail",
           "/api/directory/v2/task", "/api/directory/v2/receipt",
           "/api/directory/observation", "/api/directory/v2/observation"}
 BROWSER_PHASES = {"read-json", "totp-wait", "grant-v2-complete"}
@@ -55,6 +55,7 @@ def validate_event(event):
 
 
 REQUEST_PHASES = {"directory-get", "fixture-get", "page-request"}
+SUBMIT_PHASES = {"grant-wait", "grant-click"}
 STEP_PHASES = {"test-start", "test-finish", "administrator-login", "version-switch", "source-select"}
 ERROR_CLASSES = {"none", "econnreset", "socket_hang_up", "response_aborted", "context_disposed", "target_closed", "connection_refused", "timeout", "unknown_error", "non_error", "page_request_failed"}
 
@@ -79,14 +80,20 @@ def validate_request_event(event):
     if set(event) != {"origin", "phase", "operation", "attempt", "method", "route", "outcome", "status", "error_class", "at_ms", "elapsed_ms", "snapshot"}:
         raise ValueError("invalid safe request event")
     if (event["origin"] not in {"api-request", "page-request", "step"}
-            or event["phase"] not in REQUEST_PHASES | STEP_PHASES
+            or event["phase"] not in REQUEST_PHASES | STEP_PHASES | SUBMIT_PHASES
             or not integer(event["operation"], 1, 1000000) or not integer(event["attempt"], 0, 2)
             or event["method"] not in {"GET", "POST", "other", "none"} or event["route"] not in ROUTES
-            or event["outcome"] not in {"start", "response", "finished", "transport-error", "complete", "failed"}
+            or event["outcome"] not in {"start", "registered", "response", "finished", "transport-error", "complete", "failed"}
             or event["error_class"] not in ERROR_CLASSES
             or not (event["status"] is None or integer(event["status"], 100, 599))
             or not integer(event["at_ms"], 0, MAX_MS) or not integer(event["elapsed_ms"], 0, MAX_MS)):
         raise ValueError("invalid safe request fields")
+    if event["origin"] == "step" and event["phase"] in SUBMIT_PHASES:
+        if (event["method"] != "none" or event["route"] != "/api/credential-use/grant"
+                or event["attempt"] != 0 or event["status"] is not None or event["error_class"] != "none" or event["snapshot"] is not None
+                or not (event["outcome"] in {"start", "complete", "failed"} or (event["phase"] == "grant-wait" and event["outcome"] == "registered"))):
+            raise ValueError("invalid safe submit relation")
+        return
     if event["origin"] == "step":
         if (event["phase"] not in STEP_PHASES or event["method"] != "none" or event["route"] != "unknown"
                 or event["attempt"] != 0 or event["status"] is not None or event["error_class"] != "none"

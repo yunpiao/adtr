@@ -14,6 +14,8 @@ const phases = [
   "administrator-login",
   "version-switch",
   "source-select",
+  "grant-wait",
+  "grant-click",
 ] as const;
 const errors = [
   "none",
@@ -49,6 +51,7 @@ export type SafeRequestEvent = {
   outcome:
     | "start"
     | "response"
+    | "registered"
     | "finished"
     | "transport-error"
     | "complete"
@@ -133,6 +136,7 @@ export function validRequestEvent(e: SafeRequestEvent): boolean {
     !oneOf(e.outcome, [
       "start",
       "response",
+      "registered",
       "finished",
       "transport-error",
       "complete",
@@ -144,6 +148,17 @@ export function validRequestEvent(e: SafeRequestEvent): boolean {
     !integer(e.elapsed_ms, 0, 86_400_000)
   )
     return false;
+  if (e.origin === "step" && ["grant-wait", "grant-click"].includes(e.phase))
+    return (
+      e.method === "none" &&
+      e.route === "/api/credential-use/grant" &&
+      e.attempt === 0 &&
+      e.status === null &&
+      e.error_class === "none" &&
+      e.snapshot === null &&
+      (["start", "complete", "failed"].includes(e.outcome) ||
+        (e.phase === "grant-wait" && e.outcome === "registered"))
+    );
   if (e.origin === "step")
     return (
       !["directory-get", "fixture-get", "page-request"].includes(e.phase) &&
@@ -290,7 +305,10 @@ export async function diagnosticGET<T extends { status(): number }>(
 }
 
 // Read-only listeners: no routing, waiting for a response, bodies or headers.
-export function observeSafePageRequests(page: Page) {
+export function observeSafePageRequests(
+  page: Page,
+  routeFilter?: "/api/credential-use/grant",
+) {
   if (!process.env.ADTR_E2E_SAFE_DIAGNOSTICS) return () => {};
   let active = true;
   const pending = new Map<
@@ -326,7 +344,13 @@ export function observeSafePageRequests(page: Page) {
     if (!active) return;
     try {
       const route = safeRoute(new URL(r.url()).pathname);
-      if (route === "unknown" || pending.size >= 256) return;
+      if (
+        route === "unknown" ||
+        (route === "/api/credential-use/grant" && routeFilter !== route) ||
+        (routeFilter !== undefined && route !== routeFilter) ||
+        pending.size >= 256
+      )
+        return;
       const method = r.method();
       pending.set(r, {
         operation: nextOperation(),
@@ -467,7 +491,11 @@ export async function checkpoint(
   page: Page,
   phase: Exclude<
     DiagnosticPhase,
-    "directory-get" | "fixture-get" | "page-request"
+    | "directory-get"
+    | "fixture-get"
+    | "page-request"
+    | "grant-wait"
+    | "grant-click"
   >,
   outcome: "start" | "complete" | "failed",
   operation = nextOperation(),
@@ -503,5 +531,87 @@ export async function diagnosticStep<T>(
   } catch (error) {
     await checkpoint(page, phase, "failed", operation);
     throw error;
+  }
+}
+
+// Only the credential-grant submit uses this observer. The callbacks keep the
+// original matcher, options and request data in the spec; diagnostics never
+// receive a body, error string, DOM value or response object to serialize.
+export async function diagnosticGrantSubmit<T>(
+  page: Page,
+  path: string,
+  waitForResponse: () => Promise<T>,
+  click: () => Promise<void>,
+): Promise<[T, void]> {
+  if (
+    path !== "/api/credential-use/grant" ||
+    !process.env.ADTR_E2E_SAFE_DIAGNOSTICS
+  )
+    return Promise.all([waitForResponse(), click()]);
+  const operation = nextOperation();
+  const start = performance.now();
+  const stop = observeSafePageRequests(page, "/api/credential-use/grant");
+  let active = true;
+  const emit = (
+    phase: "grant-wait" | "grant-click",
+    outcome: "start" | "registered" | "complete" | "failed",
+  ) => {
+    if (!active) return;
+    recordRequestEvent({
+      origin: "step",
+      phase,
+      operation,
+      attempt: 0,
+      method: "none",
+      route: "/api/credential-use/grant",
+      outcome,
+      status: null,
+      error_class: "none",
+      at_ms: milliseconds(performance.now() - started),
+      elapsed_ms: milliseconds(performance.now() - start),
+      snapshot: null,
+    });
+  };
+  const settled = <U>(
+    promise: Promise<U>,
+    phase: "grant-wait" | "grant-click",
+  ) =>
+    promise.then(
+      (value) => {
+        emit(phase, "complete");
+        return value;
+      },
+      (error) => {
+        emit(phase, "failed");
+        throw error;
+      },
+    );
+  try {
+    emit("grant-wait", "start");
+    let wait: Promise<T>;
+    try {
+      wait = waitForResponse();
+    } catch (error) {
+      emit("grant-wait", "failed");
+      throw error;
+    }
+    // This means the existing wait callback returned its promise. It does not
+    // mean a request was sent or a response was received.
+    emit("grant-wait", "registered");
+    const observedWait = settled(wait, "grant-wait");
+    emit("grant-click", "start");
+    let clicked: Promise<void>;
+    try {
+      clicked = click();
+    } catch (error) {
+      emit("grant-click", "failed");
+      // A synchronous click exception must not orphan a later wait rejection.
+      void observedWait.catch(() => {});
+      throw error;
+    }
+    return await Promise.all([observedWait, settled(clicked, "grant-click")]);
+  } finally {
+    active = false;
+    stop();
   }
 }

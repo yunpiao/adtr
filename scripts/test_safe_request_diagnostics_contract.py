@@ -93,6 +93,30 @@ class SafeRequestContract(unittest.TestCase):
         self.assertLessEqual(len(validate_report(report)), 65536)
         self.assertNotIn(CANARY.encode(), validate_report(report))
 
+    def test_grant_submit_fixed_phases_and_page_lifecycle_are_strict(self):
+        base = dict(event(), origin="step", phase="grant-wait", attempt=0,
+                    route="/api/credential-use/grant", method="none", outcome="registered")
+        for phase in ["grant-wait", "grant-click"]:
+            for outcome in ["start", "complete", "failed"]:
+                value = dict(base, phase=phase, outcome=outcome)
+                self.assertEqual(validate(value), value)
+        self.assertEqual(validate(base), base)
+        for field in list(base) + ["body", "error", "dom", "value"]:
+            with self.subTest(field=field), self.assertRaises((ValueError, TypeError)):
+                validate(dict(base, **{field: CANARY}))
+        for changes in [dict(phase="grant-click"), dict(origin="page-request"),
+                        dict(method="POST"), dict(attempt=1), dict(route="/api/auth/me"),
+                        dict(status=200), dict(error_class="timeout"), dict(snapshot={}),
+                        dict(operation=0), dict(elapsed_ms=float("nan")), dict(at_ms=True)]:
+            with self.subTest(changes=changes), self.assertRaises((ValueError, TypeError)):
+                validate(dict(base, **changes))
+        for status in [200, 401, 403, 429, 500]:
+            page = dict(event(), origin="page-request", phase="page-request", attempt=0,
+                        route="/api/credential-use/grant", method="POST", outcome="response", status=status)
+            self.assertEqual(validate(page), page)
+        with self.assertRaises(ValueError):
+            validate(dict(event(), outcome="registered"))
+
     def test_baseline_and_fixed_failure_uploads_require_successful_validation(self):
         workflow = (Path(__file__).resolve().parents[1] / ".github/workflows/ci.yml").read_text()
         for job, end, name in [("browser:", "native-no-store:", "safe-runtime-${{ matrix.name }}"),

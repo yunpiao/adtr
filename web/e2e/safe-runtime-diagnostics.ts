@@ -14,6 +14,7 @@ const routes = new Set([
   "/api/directory-credential-use/effective",
   "/api/directory-credential-use/v2/effective",
   "/api/credential-use/effective",
+  "/api/credential-use/grant",
   "/api/tasks",
   "/api/tasks/detail",
   "/api/directory/v2/task",
