@@ -69,13 +69,62 @@ describe("bounded request diagnostics", () => {
     const h = await setup();
     const { recordSafeEvent } = await import("../e2e/safe-runtime-diagnostics");
     recordSafeEvent("read-json", "/api/auth/me", "response", 1, 200);
-    for (let i = 0; i < 1000; i++) {
+    // One legacy event plus three real recorder events per round. 86 is the
+    // minimum whole-round workload above 256 (1 + 3 * 86 = 259), not a benchmark.
+    // Separate 1000-event count/byte and 1500-event grant stress tests remain.
+    const rounds = Math.ceil(256 / 3);
+    let minimumRoundBytes = 0;
+    for (let i = 0; i < rounds; i++) {
       await h.diagnosticGET(
         async () => ({ status: () => 500 }),
-        "/api/auth/me",
+        `/api/auth/me?token=${canary}`,
       );
       await h.checkpoint(page(), "source-select", "start");
+      if (i === 0) {
+        const firstRound = h.read().events.slice(1);
+        expect(firstRound).toHaveLength(3);
+        // Zero is the shortest numeric encoding; timestamps and operation IDs
+        // can only increase this conservative size of the actual event shapes.
+        minimumRoundBytes = firstRound.reduce(
+          (bytes, event) =>
+            bytes +
+            Buffer.byteLength(
+              JSON.stringify(event, (_key, value) =>
+                typeof value === "number" ? 0 : value,
+              ),
+            ) +
+            1,
+          0,
+        );
+      }
     }
+    expect(1 + 3 * rounds).toBe(259);
+    expect(minimumRoundBytes * rounds).toBeGreaterThan(61_440);
+    // Keep a legacy event in the final bounded output as well as API/step
+    // events: the initial legacy entry is correctly evicted by the byte cap.
+    recordSafeEvent(
+      "read-json",
+      `/api/auth/me?token=${canary}`,
+      "response",
+      1,
+      200,
+    );
+    await h.checkpoint(page(), "source-select", "start");
+    const sourceText = readFileSync(h.file, "utf8");
+    const capture = JSON.parse(sourceText);
+    expect(capture.dropped + capture.events.length).toBe(261);
+    expect(capture.dropped).toBeGreaterThan(0);
+    // Fewer than 256 retained records proves the byte cap actually bound.
+    expect(capture.events.length).toBeLessThan(256);
+    expect(Buffer.byteLength(sourceText)).toBeLessThanOrEqual(61_472);
+    expect(sourceText).not.toContain(canary);
+    expect(
+      new Set(
+        capture.events.map(
+          (event: { origin?: string }) => event.origin ?? "legacy",
+        ),
+      ),
+    ).toEqual(new Set(["legacy", "api-request", "step"]));
     const result = spawnSync(
       "python3",
       [
@@ -89,7 +138,12 @@ RuntimeDiagnostics().write(source / "runtime.json")
 publish(source, source / "validated")
 report = json.loads((source / "validated" / "diagnostics.json").read_bytes())
 assert report["browser_capture"] == "present"
+capture = json.loads((source / "browser.json").read_bytes())
 assert report["browser_dropped"] > 0
+assert report["browser_dropped"] + len(report["browser"]) == 261
+assert report["browser_dropped"] == capture["dropped"]
+assert report["browser"] == capture["events"]
+assert {event.get("origin", "legacy") for event in report["browser"]} == {"legacy", "api-request", "step"}
 assert report["browser"][-1]["phase"] == "source-select"
 `,
         directory,
@@ -100,9 +154,14 @@ assert report["browser"][-1]["phase"] == "source-select"
       },
     );
     expect(result.status, result.stderr).toBe(0);
-    expect(
-      readFileSync(join(directory, "validated", "diagnostics.json"), "utf8"),
-    ).not.toContain(canary);
+    const publishedText = readFileSync(
+      join(directory, "validated", "diagnostics.json"),
+      "utf8",
+    );
+    const published = JSON.parse(publishedText);
+    expect(published.browser).toEqual(capture.events);
+    expect(published.browser_dropped).toBe(capture.dropped);
+    expect(publishedText).not.toContain(canary);
   });
 
   it.each([200, 401, 403, 429, 500])(
