@@ -134,3 +134,52 @@ that does not establish a 900-second radio wait. Before-cleanup snapshots had
 running API/worker processes and no detected HTTP panic. New evidence can
 separate missing HTTP responses, HTTP errors, and loading/empty/hidden/login
 UI states; it cannot establish keepalive, rate limiting or process failure.
+
+
+## Credential grant submit checkpoints (#141)
+
+The first observed fixed v2-readers failure after #138 was main run
+[38218794284](https://github.com/yunpiao/adtr/actions/runs/38218794284), job
+[114709876817](https://github.com/yunpiao/adtr/actions/runs/38218794284/job/114709876817),
+head `7e12fec40ac006ee8f36ed95251628977d8a3952`. Its grant submit's response
+wait exhausted the **whole test** 900,000ms budget. That stack does not prove
+how long this one wait ran, whether click settled, or whether a POST was sent.
+The genuine safe artifact was validated/uploaded: ZIP 11733986150 has SHA256
+`1fa115562ca3600f59b498d2d6e355757cc493c8183bf2967224b107d9ca4807` and contains
+only `diagnostics.json`. It records four first-attempt fixture GETs, all 200,
+with no dropped events; no page POST was sampled in that suite. API/worker
+were alive at the before-cleanup snapshot, then exited 0 without a forced kill;
+no HTTP panic was detected. Fixed evidence ZIP 11734535722 has SHA256
+`7d0a531bd7b52deeee02463a30d186e9b0b7fc4b171df476103b2a6847556996`, contains
+only provenance, and its 16 source hashes match that head. This verifies the
+real failure-only artifact path, not the test's success or failure cause.
+
+For the exact `/api/credential-use/grant` submit in v2-readers, the same strict
+bounded recorder now adds `origin=step` phases `grant-wait` and `grant-click`.
+Both require method=none, that exact route, attempt=0, null status/snapshot and
+error_class=none. Their operation ordinal is shared; elapsed_ms is measured
+from entry to the scoped submit. Outcomes are start/complete/failed. Only
+`grant-wait` additionally accepts `registered`: the original wait callback has
+returned its promise. This is not proof a request was sent or received. A
+complete wait means its original promise resolved; complete click means its
+original click promise resolved. Failed records contain no exception text or
+classification and the original rejection object is preserved.
+
+The wait callback is invoked before click, retaining the original matcher,
+options and Promise.all result. Only during this submit, existing read-only
+page listeners also record the exact grant route's request/response/finished/
+failed lifecycle and safe status. They do not read bodies, DOM, form values or
+headers; no semantic page snapshot is taken. HTTP failures retain their actual
+status, whereas a failure before any response has null status. Unknown routes
+are not sampled by this scoped observer. Neither request failure nor click
+completion alone establishes why an expected response was absent.
+
+No timer, timeout increase, retry, new interception or assertion is added.
+The existing optional `ADTR_E2E_SAFE_DIAGNOSTICS` control remains required only
+for evidence: absent means the original callbacks and Promise.all run without
+listeners or checkpoint writes. Synchronous bounded evidence I/O adds small
+observation overhead. Finally always deactivates sampling and independently
+attempts listener removal; late rejected waits remain handled without changing
+the original failed result or recording events outside the submit's scope.
+The buffer, byte budget and dropped counter are unchanged. Root cause remains
+unknown; this is a narrow evidence extension, not a claimed repair.

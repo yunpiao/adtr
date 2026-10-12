@@ -1,3 +1,4 @@
+import { diagnosticGrantSubmit } from "./safe-request-diagnostics";
 import { navigateTo } from "./navigation";
 import {
   test,
@@ -197,14 +198,17 @@ async function readJSON(
 }
 
 async function submit(page: Page, path: string, button: string, status = 200) {
-  const [response] = await Promise.all([
-    page.waitForResponse(
-      (candidate) =>
-        new URL(candidate.url()).pathname === path &&
-        candidate.request().method() === "POST",
-    ),
-    page.getByRole("button", { name: button, exact: true }).click(),
-  ]);
+  const [response] = await diagnosticGrantSubmit(
+    page,
+    path,
+    () =>
+      page.waitForResponse(
+        (candidate) =>
+          new URL(candidate.url()).pathname === path &&
+          candidate.request().method() === "POST",
+      ),
+    () => page.getByRole("button", { name: button, exact: true }).click(),
+  );
   expect(response.status(), `POST ${path}`).toBe(status);
   expect(response.headers()["cache-control"]).toBe("no-store");
   // Never return the password/TOTP-bearing POST body to assertion reporters.
