@@ -1,5 +1,9 @@
 # Same-run PostgreSQL image preparation
 
+Historical four-slot record; the current 50-job eight-slot candidate is documented
+separately in [ci-eight-slot-validation.md](ci-eight-slot-validation.md). The timings
+below remain historical evidence and do not establish eight-slot success.
+
 Engineering issue: [#96](https://github.com/yunpiao/adtr/issues/96).
 
 ## Conclusion and measured baseline
