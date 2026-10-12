@@ -67,6 +67,9 @@ export function installDirectoryV2ResponseObserver() {
     "/api/directory/v2/task",
     "/api/directory/v2/sync",
     "/api/directory/v2/cancel",
+    ...["observation", "receipt", "task", "sync", "cancel"].map(
+      (suffix) => `/api/directory/v3/${suffix}`,
+    ),
     ...[
       "accounts",
       "grants",
@@ -75,7 +78,10 @@ export function installDirectoryV2ResponseObserver() {
       "mutation",
       "grant",
       "revoke",
-    ].map((suffix) => `/api/directory-credential-use/v2/${suffix}`),
+    ].flatMap((suffix) => [
+      `/api/directory-credential-use/v2/${suffix}`,
+      `/api/directory-credential-use/v3/${suffix}`,
+    ]),
   ]);
   const originalFetch = window.fetch;
   window.fetch = function (...args: Parameters<typeof fetch>) {
@@ -456,10 +462,10 @@ const directoryPath = (url: URL) =>
     "/api/computer-assets/v3",
     "/api/user-assets/v3/detail",
   ].includes(url.pathname) ||
-  /^\/api\/directory\/v2\/(?:observation|receipt|task|sync|cancel)$/u.test(
+  /^\/api\/directory\/v[23]\/(?:observation|receipt|task|sync|cancel)$/u.test(
     url.pathname,
   ) ||
-  /^\/api\/directory-credential-use\/v2\/(?:accounts|grants|roles|effective|mutation|grant|revoke)$/u.test(
+  /^\/api\/directory-credential-use\/v[23]\/(?:accounts|grants|roles|effective|mutation|grant|revoke)$/u.test(
     url.pathname,
   );
 
