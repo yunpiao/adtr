@@ -16,6 +16,11 @@ import { isIP } from "node:net";
 import type { Task } from "../src/task-api";
 import { readDirectoryV3Use } from "./directory-v3-ledger-observer";
 
+import {
+  captureEmptyAssetWorkspaces,
+  writeEmptyAssetEvidence,
+} from "./directory-v3-empty-assets";
+
 type Authenticator = { secret: string; lastCounter: number };
 
 // Run only on the directory-v3-controls suite’s fresh owned database, real worker
@@ -325,7 +330,7 @@ test.beforeEach(async ({ context }) => {
 test("real empty dictionary-v3 observation and cancellation during paged I/O", async ({
   page,
   context,
-}) => {
+}, testInfo) => {
   test.setTimeout(900_000);
   const username = process.env.ADTR_E2E_USERNAME!;
   const initialPassword = process.env.ADTR_E2E_PASSWORD!;
@@ -609,6 +614,19 @@ test("real empty dictionary-v3 observation and cancellation during paged I/O", a
       hasText: "尚无当前配置的成功目录观察。此状态不表示目录为空。",
     }),
   ).toBeVisible();
+  const assetSelection = {
+    domainId,
+    revision: beforeConnection.revision,
+    credentialRevision: beforeConnection.credentialRevision,
+  };
+  const emptyAssetRecords = await captureEmptyAssetWorkspaces(
+    page,
+    testInfo,
+    actorId,
+    assetSelection,
+    safe,
+  );
+  expect(syncPosts).toBe(0);
   await navigateTo(page, "管理操作账户");
   const backToAccounts = page.getByRole("button", {
     name: "返回操作账户列表",
@@ -769,6 +787,22 @@ test("real empty dictionary-v3 observation and cancellation during paged I/O", a
   await taskRegion
     .getByRole("button", { name: "结束此任务查看", exact: true })
     .click();
+
+  emptyAssetRecords.push(
+    ...(await captureEmptyAssetWorkspaces(
+      page,
+      testInfo,
+      actorId,
+      assetSelection,
+      safe,
+      {
+        observationId: successfulUUID,
+        source: refreshed.value.source,
+      },
+    )),
+  );
+  const restoredObservation = await openDirectory(page);
+  expect(restoredObservation.value).toEqual(refreshed.value);
 
   // Capture only real browser task polls. No route interception, fake responses,
   // clock edits, lifecycle writes or fabricated executor-return witnesses.
@@ -1086,6 +1120,30 @@ test("real empty dictionary-v3 observation and cancellation during paged I/O", a
   expect(
     consoles.filter((message) => /Uncaught|unhandled/i.test(message)),
   ).toEqual([]);
+  writeEmptyAssetEvidence(
+    testInfo,
+    {
+      actorId: String(actorId),
+      selection: assetSelection,
+      observation: {
+        observationId: successfulUUID,
+        source: refreshed.value.source,
+      },
+      successfulTask: {
+        taskUUID: completed.taskUUID,
+        state: completed.state,
+        attempt: completed.attempt,
+        progress: completed.progress,
+      },
+      successfulUse: await readDirectoryV3Use(successfulUUID),
+      syncPosts,
+      cancelPosts: requests.filter(
+        (request) => request.path === "/api/directory/v3/cancel",
+      ).length,
+      records: emptyAssetRecords,
+    },
+    safe,
+  );
   await navigateTo(page, "退出登录");
   await expect(
     page.getByRole("heading", { name: "登录账户", exact: true }),
