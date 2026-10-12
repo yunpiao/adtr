@@ -424,9 +424,7 @@ describe("computer private workspace", () => {
     await screen.findByText(
       "服务器结果无法安全确认，未展示计算机资产。请重试原读取。",
     );
-    expect(
-      screen.queryByRole("table", { name: "计算机资产列表" }),
-    ).toBeNull();
+    expect(screen.queryByRole("table", { name: "计算机资产列表" })).toBeNull();
     expect(screen.queryByText("observed-1")).toBeNull();
   });
   it("paginates within captured observation and expands only pinned list facts", async () => {

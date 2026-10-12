@@ -1,6 +1,7 @@
 # Safe browser failure evidence
 
-Refs engineering [#123](https://github.com/yunpiao/adtr/issues/123).
+Refs engineering [#123](https://github.com/yunpiao/adtr/issues/123) and
+[#137](https://github.com/yunpiao/adtr/issues/137).
 
 The browser matrix retains only `.e2e-validated/diagnostics.json` after a failed
 job and a successful independent validation step. Retention is seven days.
@@ -32,23 +33,70 @@ retains the matching log line; unmatched log lines are discarded entirely.
   log inspection; null means that inspection did not finish. API and worker
   currently share the temporary log, so this flag does not attribute a panic
   to one process. Raw logs stay temporary and are not uploaded.
-- `browser`: currently instrumented only in the directory-v2 acceptance spec.
-  Each readJSON GET records start and either response status or the fixed
-  `transport-error` class, without classifying exception text. Exact known
-  pathnames become route templates; any other pathname is `unknown`, and all
-  queries are dropped. TOTP wait start/completion and v2 grant completion are
-  also fixed phases. `at_ms` uses the browser test module's own monotonic
-  origin; it must not be compared directly to the Python clock origin.
-  `elapsed_ms` measures that operation in this clock, not server processing.
-  A response record proves headers/status were obtained, not successful JSON
-  decoding or assertion completion. Transport-error rethrows the original
-  error unchanged: there are no request retries or altered timeouts.
+- `browser`: directory-v2 retains its original seven-field readJSON/TOTP/grant
+  event contract. Directory readJSON and every fixture GET attempt add the
+  separately validated request contract below. User-assets-v3 also records
+  read-only page request lifecycle events and fixed step checkpoints. Each
+  exact allowlisted pathname is retained as a template; all query strings,
+  origins and unknown paths are discarded. Response records prove status was
+  obtained, not successful body decoding or assertions. Original GET results,
+  errors, fixture error sanitization, request options and retry eligibility
+  remain unchanged.
 - `browser_capture`: `present` means the validator read the event file;
   `missing` means no event file was present (expected for other suites or an
   early startup failure); `pending` occurs only before upload validation.
 
+## Request and step contract
+
+Request events contain exactly `origin`, `phase`, `operation`, `attempt`,
+`method`, `route`, `outcome`, `status`, `error_class`, `at_ms`, `elapsed_ms` and
+`snapshot`. Python repeats the strict schema independently before upload.
+The legacy directory-v2 shape remains accepted only with its exact seven keys.
+Unknown keys and invalid cross-field combinations fail closed.
+
+- `origin=api-request`: `phase=directory-get` or `fixture-get`, GET only.
+  An operation ordinal (1 through 1,000,000) groups one logical call; fixture
+  attempts 1 and 2 share it, while directory GET always has attempt 1.
+  Outcomes are start, response, or transport-error. A transport failure has
+  null status; error_class is a fixed classification from the complete first
+  error line (or the existing TimeoutError/deadline classification). Original
+  messages/cause/call logs never enter events. Only the unchanged strict
+  ECONNRESET rule authorizes a fixture retry; socket_hang_up does not.
+- `origin=page-request`: fixed phase, attempt 0, one ordinal per request.
+  GET/POST are recorded explicitly; all other methods become `other`.
+  Read-only request/response/requestfinished/requestfailed listeners retain
+  no request body, header or error message. HTTP 500 has status 500. Failure
+  before headers has null status; failure after headers keeps the received
+  status and error_class=page_request_failed. At most 256 in-flight known
+  requests are tracked; new requests beyond that cap are not sampled.
+- `origin=step`: test-start/test-finish/administrator-login/version-switch/
+  source-select, method=none, route=unknown, attempt=0, null status, and
+  error_class=none. Start/complete/failed describe the wrapped action only.
+  A pre-action checkpoint is retained before the action can fail. Snapshots
+  are one immediate, read-only page evaluation with a 100ms diagnostic wait
+  ceiling, never locator waits or changed test/request timeouts. They expose
+  only view (v2/v3/login/other), picker (visible/hidden/absent), source
+  (loading/empty/radio-present/absent), and alert/permission-denied booleans.
+  Closed/unavailable pages use only unavailable states and flags. DOM text is
+  compared to fixed UI labels inside the page; no text, HTML, form values or
+  source names are returned. Failed or delayed snapshots cannot replace the
+  original action error. Listeners are removed in afterEach.
+
+Ordinals are local to the test process and cease capture at exhaustion rather
+than wrap. The bounded ring can omit the start of a retained operation;
+absence of a matching start is not proof the request never began. Browser
+monotonic timing is process-local, unrelated to Python's harness time; page
+request elapsed time is not server processing time. No connection lifecycle
+or server-side root cause is inferred from these client events.
+
+Both baseline and fixed-engine user asset jobs validate only after failure
+and upload exactly `.e2e-validated/diagnostics.json` only if validation succeeds.
+Fixed artifact names use `safe-runtime-fixed-<suite>-<run>-<attempt>` to avoid
+collision with baseline artifacts. Existing synthetic evidence stays unchanged.
+
 Both inputs and the final output have a 65,536-byte budget. Browser evidence
-keeps the most recent 256 records within its byte cap; earlier records are
+keeps at most the most recent 256 records within a 61,440-byte event budget
+(reserving room for the Python envelope); earlier records are
 dropped so a late transport failure is retained. `browser_dropped` records the
 number discarded (saturating at one million), so incomplete histories are
 explicit. `collection_errors` can contain only the fixed `snapshot` value when
@@ -66,7 +114,9 @@ unwritable means no browser event capture. It is required only to retain these
 extra request timing facts. Removing it does not change assertions or request
 behavior, but makes browser evidence missing. It is removed from the API and
 worker environment along with all other `ADTR_E2E_` variables. Synchronous
-bounded file rewrites add diagnostic I/O overhead to this test only.
+bounded file rewrites and optional 100ms-bounded snapshot reads add diagnostic
+I/O and observation overhead only to instrumented tests. Without the variable,
+page listeners and checkpoints are disabled.
 The harness clears its two fixed input files at the start of each invocation;
 for the messages job, the nested messages-bulk run replaces them with the most
 recent suite's evidence. Each matrix job has its own isolated workspace.
@@ -77,3 +127,10 @@ transport failure before a response, and time spent in authentication waits.
 A connection idle timeout remains a hypothesis until a failed run provides
 supporting transport and server-side evidence. This change does not claim to
 fix the transient failure or change product behavior.
+
+The historical directory socket hang up and v3-to-v2 source radio failure are
+not yet diagnosed. The latter exhausted the entire test's 900,000ms budget;
+that does not establish a 900-second radio wait. Before-cleanup snapshots had
+running API/worker processes and no detected HTTP panic. New evidence can
+separate missing HTTP responses, HTTP errors, and loading/empty/hidden/login
+UI states; it cannot establish keepalive, rate limiting or process failure.

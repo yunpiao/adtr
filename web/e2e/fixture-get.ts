@@ -1,3 +1,4 @@
+import { beginGET, nextOperation } from "./safe-request-diagnostics";
 import type { APIRequestContext, APIResponse } from "@playwright/test";
 
 // Only fixture-side GET verification uses this helper. Browser requests, held
@@ -65,6 +66,7 @@ export async function fixtureGET(
   request: Pick<APIRequestContext, "get">,
   path: string,
 ): Promise<APIResponse> {
+  const operation = nextOperation();
   const deadline = performance.now() + fixtureGetDeadlineMilliseconds;
   const timeoutError = new Error(
     "User-assets fixture GET failed: deadline_exceeded",
@@ -90,15 +92,19 @@ export async function fixtureGET(
       const remaining = Math.ceil(deadline - performance.now());
       if (remaining <= 0) throw timeoutError;
       if (attempt === 1) console.log(retryReceipt);
+      const capture = beginGET("fixture-get", path, operation, attempt + 1);
       try {
         // Keep the existing context/cookie jar and exact path. Each attempt has
         // no hidden Playwright retry and shares one overall 30-second deadline.
         // HTTP responses, including 401/403/500, are returned unchanged.
-        return await Promise.race([
+        const response = await Promise.race([
           request.get(path, { maxRetries: 0, timeout: remaining }),
           expired,
         ]);
+        capture.response(response);
+        return response;
       } catch (error) {
+        capture.failure(error, error === timeoutError);
         if (error === timeoutError || timedOut(error)) throw timeoutError;
         if (reset(error)) {
           if (attempt === 0) continue;
