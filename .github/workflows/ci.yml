@@ -289,6 +289,30 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
+      - name: Validate real empty asset observation evidence
+        if: ${{ success() && matrix.name == 'directory-v3-controls' }}
+        run: python3 scripts/validate_empty_asset_evidence.py --evidence-root web/test-results --source-root .
+      - name: Retain validated empty asset observation evidence
+        if: ${{ success() && matrix.name == 'directory-v3-controls' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: directory-v3-empty-assets-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            web/test-results/**/directory-v3-empty-assets-evidence.json
+            web/test-results/**/directory-v3-empty-assets-no-observation-user-1440.png
+            web/test-results/**/directory-v3-empty-assets-no-observation-user-390.png
+            web/test-results/**/directory-v3-empty-assets-no-observation-computer-1440.png
+            web/test-results/**/directory-v3-empty-assets-no-observation-computer-390.png
+            web/test-results/**/directory-v3-empty-assets-no-observation-group-1440.png
+            web/test-results/**/directory-v3-empty-assets-no-observation-group-390.png
+            web/test-results/**/directory-v3-empty-assets-observed-empty-user-1440.png
+            web/test-results/**/directory-v3-empty-assets-observed-empty-user-390.png
+            web/test-results/**/directory-v3-empty-assets-observed-empty-computer-1440.png
+            web/test-results/**/directory-v3-empty-assets-observed-empty-computer-390.png
+            web/test-results/**/directory-v3-empty-assets-observed-empty-group-1440.png
+            web/test-results/**/directory-v3-empty-assets-observed-empty-group-390.png
+          if-no-files-found: error
+          retention-days: 7
       - name: Retain synthetic profile visual evidence
         if: ${{ success() && matrix.name == 'profile' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
