@@ -84,3 +84,19 @@ decoder lowercases/sorts objectClass and returned organizationalperson. The orac
 is corrected without reducing deep equality, and both real in-process TLS fixture
 modes now assert the canonical class list. These local checks do not establish a
 passing real PG/browser rerun; remaining runtime and visual gates still apply.
+
+## Post-merge user-parser review follow-up
+
+After run161 passed all43 jobs, review of the shared feature family exposed a
+missing computer response-row keyword check. A new regression with a structurally
+valid but nonmatching row actually failed: the old parser did not throw. This is a
+response/query consistency gap, with no established authority leakage. Historical
+CI success does not cover the newly added case.
+
+The computer parser now checks each row's SAM/SID/DN using the shared exact Go
+Unicode17 lowercase/literal-contains helper. It does not search mail, description,
+SPN or RID. Browser ICU, context-sensitive sigma, expanding lowercase, locale and
+normalization are not used. Independent field/null, punctuation/whitespace,
+Turkish-I, Greek-sigma, combining and astral cases, mixed rows and UI fail-closed
+regressions accompany the fix; corresponding Go vectors verify backend semantics.
+Final shared-helper integration review and new exact-head CI remain required.

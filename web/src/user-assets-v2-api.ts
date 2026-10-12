@@ -1,3 +1,4 @@
+import { directoryLiteralSearchMatches } from "./directory-search-lowercase";
 import { ApiError } from "./api";
 import { accessMessages, type PageInfo } from "./access-api";
 import { validDomainID, validRevision } from "./domain-api";
@@ -168,6 +169,10 @@ export function parseUserAssetsV2List(
     const created = userAssetsV2Time(row.whenCreated);
     if (
       seen.has(row.objectGUID) ||
+      !directoryLiteralSearchMatches(
+        [row.samAccountName, row.objectSid, row.mail, row.distinguishedName],
+        q.search,
+      ) ||
       (q.sAMAccountName !== undefined &&
         q.sAMAccountName !== "" &&
         row.samAccountName !== q.sAMAccountName) ||

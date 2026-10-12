@@ -3,6 +3,7 @@ import {
   type DirectoryV3Object,
 } from "./directory-v3-facts";
 import { ApiError } from "./api";
+import { directoryLiteralSearchMatches } from "./directory-search-lowercase";
 import { accessMessages, type PageInfo } from "./access-api";
 import { validDomainID, validRevision } from "./domain-api";
 import {
@@ -163,6 +164,10 @@ export function parseComputerAssetsV3List(
     const created = userAssetsV2Time(row.whenCreated);
     if (
       seen.has(row.objectGUID) ||
+      !directoryLiteralSearchMatches(
+        [row.samAccountName, row.objectSid, row.distinguishedName],
+        q.search,
+      ) ||
       (start !== undefined &&
         end !== undefined &&
         (created === undefined || created < start || created >= end)) ||

@@ -103,6 +103,8 @@ export function computerEvidenceProvenance() {
     "cmd/adtr/main.go",
     "web/src/computer-assets-v3-api.ts",
     "web/src/directory-v3-facts.ts",
+    "web/src/directory-search-lowercase.ts",
+    "web/src/directory-search-case-map.ts",
     "web/src/App.tsx",
     "web/src/SocNavigation.tsx",
     "internal/domains/computer_assets_v3.go",

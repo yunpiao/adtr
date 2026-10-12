@@ -290,6 +290,48 @@ async function start(changed = vi.fn()) {
 }
 
 describe("computer strict bounded fact parser", () => {
+  it("rejects a structurally valid row outside the requested literal keyword", () => {
+    const query = { ...q, search: "not-present-in-sam-sid-or-dn" };
+    expect(() => parseComputerAssetsV3List(list(query), query)).toThrow(
+      ApiError,
+    );
+  });
+  it.each([
+    ["OBSERVED-1", {}, true],
+    ["s-1-5-21", {}, true],
+    ["DC=SYNTHETIC", {}, true],
+    ["Observed@Synthetic", {}, false],
+    ["HOST/Z", {}, false],
+    ["Factual description", {}, false],
+    ["not-a-null-alias", { samAccountName: null, objectSid: null }, false],
+    ["a%_?*[x]", { samAccountName: "prefixA%_?*[x]suffix" }, true],
+    ["a.*b", { samAccountName: "axxxb" }, false],
+    [" literal ", { samAccountName: "literal" }, false],
+    ["i", { samAccountName: "İ", distinguishedName: "CN=X" }, true],
+    ["i\u0307", { samAccountName: "İ", distinguishedName: "CN=X" }, false],
+    ["ΟΣ", { samAccountName: "οσ", distinguishedName: "CN=X" }, true],
+    ["ΟΣ", { samAccountName: "ος", distinguishedName: "CN=X" }, false],
+    ["é", { samAccountName: "e\u0301", distinguishedName: "CN=X" }, false],
+    ["𐐀", { samAccountName: "𐐨", distinguishedName: "CN=X" }, true],
+  ] as const)(
+    "validates Go literal search %s against allowed facts",
+    (search, change, matches) => {
+      const query = { ...q, search };
+      const value = list(query, [{ ...row(), ...change }]);
+      if (matches)
+        expect(parseComputerAssetsV3List(value, query).list).toEqual(
+          value.list,
+        );
+      else
+        expect(() => parseComputerAssetsV3List(value, query)).toThrow(ApiError);
+    },
+  );
+  it("validates every row rather than accepting one matching row", () => {
+    const query = { ...q, search: "observed-1" };
+    expect(() =>
+      parseComputerAssetsV3List(list(query, [row(1), row(2)]), query),
+    ).toThrow(ApiError);
+  });
   it("distinguishes unavailable, observed zero and no matches", () => {
     expect(parseComputerAssetsV3List(absent(), q).observedComputerCount).toBe(
       null,
@@ -371,6 +413,22 @@ describe("computer strict bounded fact parser", () => {
   });
 });
 describe("computer private workspace", () => {
+  it("clears prior facts and rejects a successful response outside the active keyword", async () => {
+    await start();
+    override = (url) =>
+      url.startsWith("/api/computer-assets/v3")
+        ? response(list(queryFrom(url), [row(1)]))
+        : undefined;
+    fill("计算机资产关键词", "observed-2");
+    click("应用计算机筛选");
+    await screen.findByText(
+      "服务器结果无法安全确认，未展示计算机资产。请重试原读取。",
+    );
+    expect(
+      screen.queryByRole("table", { name: "计算机资产列表" }),
+    ).toBeNull();
+    expect(screen.queryByText("observed-1")).toBeNull();
+  });
   it("paginates within captured observation and expands only pinned list facts", async () => {
     await start();
     expect(params().observationId).toBeUndefined();

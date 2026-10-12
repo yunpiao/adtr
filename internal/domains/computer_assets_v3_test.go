@@ -160,3 +160,25 @@ func TestComputerAssetsV3CreationHalfOpenNullLastAndCancellation(t *testing.T) {
 		t.Fatal("partial cancellation", e)
 	}
 }
+
+func TestComputerAssetsV3UnicodeLowercasePredicateVectors(t *testing.T) {
+	for _, tc := range []struct {
+		value, query string
+		match        bool
+	}{
+		{"İ", "i", true}, {"İ", "i\u0307", false},
+		{"οσ", "ΟΣ", true}, {"ος", "ΟΣ", false},
+		{"e\u0301", "é", false}, {"𐐨", "𐐀", true},
+		{"prefixA%_?*[x]suffix", "a%_?*[x]", true},
+		{"axxxb", "a.*b", false}, {"literal", " literal ", false},
+	} {
+		t.Run(tc.value+"/"+tc.query, func(t *testing.T) {
+			o := directoryassets.PublicObjectV3{}
+			o.DN = "CN=X"
+			o.SAMAccountName = &tc.value
+			if got := computerAssetsV3Match(o, strings.ToLower(tc.query)); got != tc.match {
+				t.Fatalf("literal predicate mismatch: got %v, want %v", got, tc.match)
+			}
+		})
+	}
+}

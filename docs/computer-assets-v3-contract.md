@@ -130,3 +130,12 @@ unchanged LDAP attribute bytes. The computer list adds no further transformation
 The RID is the decoded uint32 value (including zero); SPN values preserve their
 validated strings and order before safe display escaping. Neither makes claims
 about device identity or relationships.
+
+### Response-row predicate integrity
+
+The browser validates every returned row against the requested keyword, in
+addition to source pins, counts, ordering and time predicates. It reuses the
+backend-pinned Go Unicode17 simple-lowercase table and literal substring matcher;
+SAM, SID and DN are independent fields. Mail, description, RID and SPN remain
+excluded. JavaScript locale/context-sensitive lowercase or normalization must not
+replace this mapping, because a valid backend row could otherwise be rejected.
