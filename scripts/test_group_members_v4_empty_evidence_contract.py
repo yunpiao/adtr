@@ -56,6 +56,23 @@ class EmptyMembershipEvidence(unittest.TestCase):
     def accept(self, data=None, shots=None):
         v.validate(self.data if data is None else data, self.data['provenance'], (self.shots if shots is None else shots).__getitem__)
 
+    def test_user_export_mark_is_explicitly_denied(self):
+        data, shots = specimen()
+        permission = next(p for p in data['reader']['permissions'] if p['mark'] == 'user_asset_exports')
+        self.assertEqual(permission['auth'], {'readable': False, 'writeable': False})
+        self.assertEqual(len(data['reader']['permissions']), 14)
+        # Registration expands the exact catalog, never this reader's authority.
+        for field in ('readable', 'writeable'):
+            for value in (True, 1):
+                altered = copy.deepcopy(data)
+                next(p for p in altered['reader']['permissions'] if p['mark'] == 'user_asset_exports')['auth'][field] = value
+                with self.subTest(field=field, value=value), self.assertRaises(ValueError):
+                    self.accept(altered)
+        altered = copy.deepcopy(data)
+        altered['reader']['permissions'] = [p for p in altered['reader']['permissions'] if p['mark'] != 'user_asset_exports']
+        with self.assertRaises(ValueError):
+            self.accept(altered)
+
     def test_valid_contract_specimen(self):
         self.accept()
 

@@ -155,6 +155,7 @@ test("real browser → API → PostgreSQL users and function permissions", async
     "system_logs",
     "task_archive",
     "tasks",
+    "user_asset_exports",
     "users",
   ]);
 
@@ -213,6 +214,7 @@ test("real browser → API → PostgreSQL users and function permissions", async
     { mark: "operation_accounts", auth: { readable: false, writeable: false } },
     { mark: "system_logs", auth: { readable: false, writeable: false } },
     { mark: "directory_assets", auth: { readable: false, writeable: false } },
+    { mark: "user_asset_exports", auth: { readable: false, writeable: false } },
   ]);
   expect(persistedRole.permissions).toEqual(permissions.permissions);
 

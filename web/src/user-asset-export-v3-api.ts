@@ -103,8 +103,10 @@ async function bytes(response: Response, signal: AbortSignal, limit: number): Pr
   }
   if (!response.body) return invalid();
   const reader = response.body.getReader(), chunks: Uint8Array[] = [];
-  let size = 0;
-  const abort = () => { void reader.cancel().catch(() => undefined); };
+  let size = 0, completed = false;
+  let cancellation: Promise<void> | undefined;
+  const cancel = () => cancellation ??= reader.cancel().catch(() => undefined);
+  const abort = () => { void cancel(); };
   signal.addEventListener("abort", abort, { once: true });
   try {
     while (true) {
@@ -119,6 +121,7 @@ async function bytes(response: Response, signal: AbortSignal, limit: number): Pr
     const result = new Uint8Array(size);
     let offset = 0;
     for (const chunk of chunks) { result.set(chunk, offset); offset += chunk.byteLength; }
+    completed = true;
     return result;
   } catch (error) {
     signal.throwIfAborted();
@@ -128,7 +131,8 @@ async function bytes(response: Response, signal: AbortSignal, limit: number): Pr
     throw new ApiError("network");
   } finally {
     signal.removeEventListener("abort", abort);
-    await reader.cancel().catch(() => undefined); reader.releaseLock();
+    if (!completed) await cancel();
+    reader.releaseLock();
   }
 }
 async function fetchExport(path: string, actor: number, signal: AbortSignal, body?: unknown, csrf?: string) {

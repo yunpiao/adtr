@@ -123,3 +123,68 @@ describe("authority status survives invalid error pages", () => {
     }
   });
 });
+
+// Observe the reader methods, not merely the underlying source.cancel callback:
+// a native reader can accept cancel() after EOF without calling source.cancel.
+function observeReader(response: Response) {
+  const stream = response.body!;
+  const reader = stream.getReader();
+  const cancel = vi.spyOn(reader, "cancel");
+  const release = vi.spyOn(reader, "releaseLock");
+  const acquire = vi.fn(() => reader);
+  Object.defineProperty(stream, "getReader", { configurable: true, value: acquire });
+  return { response, cancel, release, acquire };
+}
+describe("bounded reader completion proof", () => {
+  it("releases a fully consumed JSON body once without cancelling after EOF", async () => {
+    const tracked = observeReader(exportJSON(exportReceipt));
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(tracked.response));
+    await expect(userAssetExportAPI.receipt(exportRequest.domainId, "key", 1, signal())).resolves.toEqual(exportReceipt);
+    expect(tracked.acquire).toHaveBeenCalledTimes(1);
+    expect(tracked.cancel).not.toHaveBeenCalled();
+    expect(tracked.release).toHaveBeenCalledTimes(1);
+    expect(tracked.response.body!.locked).toBe(false);
+  });
+  it("keeps both manifest reads and the verified XLSX EOF cancel-free", async () => {
+    vi.stubGlobal("crypto", webcrypto);
+    const tracked = [observeReader(exportJSON(readyExport)), observeReader(file()), observeReader(exportJSON(readyExport))];
+    const fetcher = vi.fn();
+    for (const item of tracked) fetcher.mockResolvedValueOnce(item.response);
+    vi.stubGlobal("fetch", fetcher);
+    await expect(userAssetExportAPI.download(readyExport, 1, signal())).resolves.toHaveProperty("size", 3);
+    for (const item of tracked) {
+      expect(item.acquire).toHaveBeenCalledTimes(1);
+      expect(item.cancel).not.toHaveBeenCalled();
+      expect(item.release).toHaveBeenCalledTimes(1);
+    }
+  });
+  it("cancels and releases once on a read rejection without claiming completion", async () => {
+    const stream = new ReadableStream<Uint8Array>({ pull(controller) { controller.error(new TypeError("connection interrupted")); } });
+    const tracked = observeReader(new Response(stream, { headers: exportJSON(exportReceipt).headers }));
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(tracked.response));
+    await expect(userAssetExportAPI.receipt(exportRequest.domainId, "key", 1, signal())).rejects.toMatchObject({ code: "network" });
+    expect(tracked.cancel).toHaveBeenCalledTimes(1);
+    expect(tracked.release).toHaveBeenCalledTimes(1);
+  });
+  it("deduplicates abort-listener and finally cancellation while a read is pending", async () => {
+    const tracked = observeReader(new Response(new ReadableStream<Uint8Array>(), { headers: exportJSON(exportReceipt).headers }));
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(tracked.response));
+    const control = new AbortController();
+    const pending = userAssetExportAPI.receipt(exportRequest.domainId, "key", 1, control.signal);
+    await vi.waitFor(() => expect(tracked.acquire).toHaveBeenCalledTimes(1));
+    control.abort();
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+    expect(tracked.cancel).toHaveBeenCalledTimes(1);
+    expect(tracked.release).toHaveBeenCalledTimes(1);
+  });
+  it.each(["oversized", "length mismatch"])("does not treat %s as a completed read", async (reason) => {
+    const headers = exportJSON(exportReceipt).headers;
+    const body = reason === "oversized" ? "x".repeat(65537) : JSON.stringify(exportReceipt);
+    if (reason === "length mismatch") headers.set("Content-Length", "1");
+    const tracked = observeReader(new Response(body, { headers }));
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(tracked.response));
+    await expect(userAssetExportAPI.receipt(exportRequest.domainId, "key", 1, signal())).rejects.toMatchObject({ code: "invalid_response" });
+    expect(tracked.cancel).toHaveBeenCalledTimes(1);
+    expect(tracked.release).toHaveBeenCalledTimes(1);
+  });
+});

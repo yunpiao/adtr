@@ -71,7 +71,7 @@ def validate(data, provenance, ui_provenance, read_screenshot):
 READABLE = ['directory_assets', 'domains']
 PERMISSIONS = {'users', 'roles', 'permissions', 'tasks', 'audit', 'audit_exports',
                'system', 'schedules', 'task_archive', 'domains', 'operation_accounts',
-               'system_logs', 'directory_assets'}
+               'system_logs', 'directory_assets', 'user_asset_exports'}
 READ_PATHS = ['/api/domain-selection', '/api/domain-selection/resolve',
               '/api/directory/v4/observation', '/api/group-assets/v4/members']
 WRITE_PATHS = ['/api/directory/v4/sync', '/api/directory/v4/cancel',
