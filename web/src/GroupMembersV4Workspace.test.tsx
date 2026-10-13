@@ -202,6 +202,75 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 describe("isolated dictionary4 membership consumer", () => {
+  it("keeps the old pin and restores detail on focus, then explicitly rediscovers a newer empty observation", async () => {
+    await open();
+    await expand();
+    const newSource = {
+      ...source,
+      started_at: "2026-10-11T00:00:00Z",
+      completed_at: "2026-10-11T00:00:01Z",
+    };
+    override = (url) => {
+      if (
+        url.startsWith(listPath) &&
+        !new URL(url, "https://test.invalid").searchParams.has("observationId")
+      )
+        return response({
+          ...page(url, 0),
+          observationId: "observation-two",
+          source: newSource,
+        });
+    };
+    fireEvent.blur(window);
+    expect(
+      screen.queryByRole("region", { name: "组原始成员详情" }),
+    ).not.toBeInTheDocument();
+    fireEvent.focus(window);
+    await screen.findByRole("region", { name: "组原始成员详情" });
+    expect(params(listPath).observationId).toBe("observation-one");
+    expect(params(detailPath).observationId).toBe("observation-one");
+    click("重读原观测");
+    await screen.findByText("group-1");
+    expect(params(listPath).observationId).toBe("observation-one");
+    expect(
+      screen.queryByRole("region", { name: "组原始成员详情" }),
+    ).not.toBeInTheDocument();
+    await expand();
+    const details = calls(detailPath).length;
+    for (let i = 0; i < 2; i++) {
+      click("重新选择数据源");
+      expect(
+        screen.queryByRole("region", { name: "组原始成员详情" }),
+      ).not.toBeInTheDocument();
+      expect(screen.queryByText("observation-one")).not.toBeInTheDocument();
+      fireEvent.click(
+        await screen.findByRole("radio", {
+          name: `选择数据源 ${choice.domain}`,
+        }),
+      );
+      click("核对并打开连接详情");
+      await screen.findByText("本页观测未返回组对象；成员情况未知。");
+      expect(params(listPath).observationId).toBeUndefined();
+      expect(screen.getByText("observation-two")).toBeVisible();
+      expect(screen.getByText(newSource.started_at)).toBeVisible();
+      expect(
+        screen.queryByRole("button", { name: "查看原始成员" }),
+      ).not.toBeInTheDocument();
+    }
+    override = (url) =>
+      url.startsWith(listPath)
+        ? response({
+            ...page(url, 0),
+            observationId: "observation-two",
+            source: newSource,
+          })
+        : undefined;
+    click("重读原观测");
+    await screen.findByText("本页观测未返回组对象；成员情况未知。");
+    expect(params(listPath).observationId).toBe("observation-two");
+    expect(calls(detailPath)).toHaveLength(details);
+  });
+
   it("wraps long observation and DN facts locally without truncating their text", async () => {
     const dn = "CN=" + "x".repeat(300) + ",OU=Groups,DC=synthetic,DC=invalid";
     override = (url) => {

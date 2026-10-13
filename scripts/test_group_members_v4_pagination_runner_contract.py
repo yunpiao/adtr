@@ -8,6 +8,9 @@ import re
 from pathlib import Path
 import unittest
 import test_auth_e2e as runner
+from test_group_members_v4_refresh_runner_contract import (
+    restore_workflow as restore_refresh_workflow, restore_runner as restore_refresh_runner,
+)
 
 BASE_WORKFLOW_SHA256 = 'afe5ee8b0cef0fe72b9d9b07ef1674d84dec7b1b474eb05f897ff4db7118049a'
 BASE_RUNNER_SHA256 = '629b3258daa15aac2c559d9b5a700c7d82055950ce759dbf71f2d7a344d3ecc8'
@@ -57,10 +60,12 @@ def remove_exact(text, addition, count=1):
 
 
 def restore_workflow(text):
+    text = restore_refresh_workflow(text)
     return remove_exact(remove_exact(text, ENTRY), WORKFLOW_BLOCK)
 
 
 def restore_runner(text):
+    text = restore_refresh_runner(text)
     text = remove_exact(text, VALIDATE)
     text = remove_exact(text, ', "group-members-v4-pagination"', 3)
     return remove_exact(text, FIXTURE_FLAG)
@@ -75,7 +80,7 @@ class PaginationGroupMembersRunnerContract(unittest.TestCase):
         self.assertNotIn('continue-on-error', workflow)
         self.assertNotIn('include-hidden-files', WORKFLOW_BLOCK)
 
-    def test_intended_58_jobs_and_existing_parallelism(self):
+    def test_intended_59_jobs_and_existing_parallelism(self):
         workflow = Path('.github/workflows/ci.yml').read_text()
         jobs = workflow.split('jobs:\n', 1)[1]
         blocks = dict(re.findall(r'^  ([a-z][a-z-]*):\n(.*?)(?=^  [a-z][a-z-]*:|\Z)', jobs, re.M | re.S))
@@ -84,14 +89,14 @@ class PaginationGroupMembersRunnerContract(unittest.TestCase):
                                       'user-assets-fixed', 'verify'})
         browser_suites = re.findall(r'^          - name: ([a-z0-9-]+)$', blocks['browser'], re.M)
         self.assertEqual(len(browser_suites), len(set(browser_suites)))
-        self.assertEqual(len(browser_suites), 38)
+        self.assertEqual(len(browser_suites), 39)
         self.assertEqual(browser_suites.count('group-members-v4-pagination'), 1)
         shards = re.search(r'^        shard: \[(.*?)\]$', blocks['auth-integration'], re.M).group(1).split(', ')
         fixed = re.search(r'^        suite: \[(.*?)\]$', blocks['user-assets-fixed'], re.M).group(1).split(', ')
         self.assertEqual(len(shards), 8)
         self.assertEqual(len(fixed), 7)
         self.assertNotIn('group-members-v4-pagination', fixed)
-        self.assertEqual(5 + len(shards) + len(browser_suites) + len(fixed), 58)
+        self.assertEqual(5 + len(shards) + len(browser_suites) + len(fixed), 59)
         for job, budget in [('browser', 8), ('auth-integration', 2), ('user-assets-fixed', 2)]:
             self.assertEqual(re.findall(r'^      max-parallel: (\d+)$', blocks[job], re.M), [str(budget)])
         self.assertEqual(len(re.findall(r'^            web/test-results/.*\.png$', WORKFLOW_BLOCK, re.M)), 14)
