@@ -1207,6 +1207,11 @@ test("real browser → Linux sampler → PostgreSQL history/settings and actual 
   const sourceFiles = [
     "web/e2e/system.spec.ts",
     "web/e2e/navigation.ts",
+    "web/e2e/safe-runtime-diagnostics.ts",
+    "scripts/e2e_runtime_diagnostics.py",
+    "scripts/test_safe_navigation_diagnostics_contract.py",
+    "web/src/e2e-navigation.test.ts",
+    "web/src/SocNavigation.test.tsx",
     "web/playwright.config.ts",
     "web/src/SystemWorkspace.tsx",
     "web/src/system-common.tsx",

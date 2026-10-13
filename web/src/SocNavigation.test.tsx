@@ -258,6 +258,57 @@ describe("SOC workspace navigation", () => {
   });
 });
 
+describe("responsive navigation readiness contract", () => {
+  it("exposes the stale desktop state until the compact media change is delivered", async () => {
+    const mediaQuery = vi.spyOn(window, "matchMedia");
+    render(<Navigation active="user-assets-v2" />);
+    expect(mediaQuery).toHaveBeenCalledWith("(max-width: 760px)");
+    const panel = document.getElementById("soc-navigation-panel")!;
+    const trigger = document.querySelector<HTMLButtonElement>(
+      'button[aria-controls="soc-navigation-panel"]',
+    )!;
+    expect(panel).toBeVisible();
+    expect(panel).not.toHaveAttribute("inert");
+    expect(trigger).toHaveAttribute("hidden");
+
+    // Resize updates the media query before React receives its change event.
+    // This controlled gap is a possible interleaving, not a claim about CI timing.
+    compact = true;
+    expect(window.matchMedia("(max-width: 760px)").matches).toBe(true);
+    expect(panel).toBeVisible();
+    expect(trigger).not.toBeVisible();
+    expect(navigate).not.toHaveBeenCalled();
+
+    await act(async () => {
+      await Promise.resolve();
+      mediaChanged?.();
+    });
+    expect(panel).toHaveAttribute("hidden");
+    expect(panel).toHaveAttribute("inert");
+    expect(trigger).toBeVisible();
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+
+    await userEvent.click(trigger);
+    expect(panel).toBeVisible();
+    expect(panel).not.toHaveAttribute("inert");
+    expect(panel).toHaveAttribute("role", "dialog");
+    expect(trigger).toHaveAttribute("aria-expanded", "true");
+    expect(trigger).not.toBeVisible();
+    await userEvent.click(screen.getByRole("button", { name: "后台任务" }));
+    expect(navigate).toHaveBeenCalledExactlyOnceWith("tasks");
+    expect(panel).toHaveAttribute("hidden");
+    expect(panel).toHaveAttribute("inert");
+    expect(trigger).toBeVisible();
+
+    // A later navigation must reopen the drawer rather than reuse prior readiness.
+    await userEvent.click(trigger);
+    expect(panel).toBeVisible();
+    expect(panel).not.toHaveAttribute("inert");
+    await userEvent.click(screen.getByRole("button", { name: "操作审计" }));
+    expect(navigate.mock.calls).toEqual([["tasks"], ["audit"]]);
+  });
+});
+
 describe("compact SOC navigation lifecycle", () => {
   beforeEach(() => {
     compact = true;

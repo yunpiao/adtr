@@ -43,6 +43,8 @@ def integer(value, low, high):
 
 
 def validate_event(event):
+    if type(event) is dict and event.get("origin") == "navigation":
+        return validate_navigation_event(event)
     if type(event) is dict and "origin" in event:
         return validate_request_event(event)
     if type(event) is not dict or set(event) != {"phase", "method", "route", "elapsed_ms", "at_ms", "outcome", "status"}:
@@ -52,6 +54,36 @@ def validate_event(event):
             or not integer(event["elapsed_ms"], 0, MAX_MS) or not integer(event["at_ms"], 0, MAX_MS)
             or not (event["status"] is None or integer(event["status"], 100, 599))):
         raise ValueError("invalid safe browser event")
+
+
+NAVIGATION_STAGES = {"start", "layout-ready", "menu-open", "target-ready", "failed"}
+NAVIGATION_BOOLEANS = {"compact", "panelVisible", "panelHidden", "panelInert", "panelDialog",
+                       "toggleVisible", "toggleEnabled", "toggleExpanded", "targetVisible",
+                       "targetEnabled", "groupOpen", "pageClosed", "unavailable"}
+
+
+def validate_navigation_event(event):
+    # A separate closed schema preserves every legacy event's strict contract.
+    if type(event) is not dict or set(event) != {"origin", "stage", "operation", "at_ms", "elapsed_ms", "snapshot"}:
+        raise ValueError("invalid safe navigation event")
+    if (event["origin"] != "navigation" or type(event["stage"]) is not str or event["stage"] not in NAVIGATION_STAGES
+            or not integer(event["operation"], 1, 1000000)
+            or not integer(event["at_ms"], 0, MAX_MS)
+            or not integer(event["elapsed_ms"], 0, MAX_MS)):
+        raise ValueError("invalid safe navigation fields")
+    snapshot = event["snapshot"]
+    if (type(snapshot) is not dict or set(snapshot) != NAVIGATION_BOOLEANS | {"width", "height"}
+            or any(type(snapshot[key]) is not bool for key in NAVIGATION_BOOLEANS)):
+        raise ValueError("invalid safe navigation snapshot")
+    if snapshot["unavailable"]:
+        valid = (type(snapshot["width"]) is int and snapshot["width"] == 0
+                 and type(snapshot["height"]) is int and snapshot["height"] == 0
+                 and all(not snapshot[key] for key in NAVIGATION_BOOLEANS - {"unavailable", "pageClosed"}))
+    else:
+        valid = (not snapshot["pageClosed"] and integer(snapshot["width"], 1, 16384)
+                 and integer(snapshot["height"], 1, 16384))
+    if not valid:
+        raise ValueError("invalid safe navigation snapshot relation")
 
 
 REQUEST_PHASES = {"directory-get", "directory-v2-verification-get", "fixture-get", "page-request"}

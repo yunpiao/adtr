@@ -10,6 +10,11 @@ from pathlib import Path
 SOURCES = {
     'web/e2e/directory-v3-controls.spec.ts', 'web/e2e/directory-v3-empty-assets.ts',
     'web/e2e/directory-v2-response-observer.ts', 'web/e2e/directory-v3-ledger-observer.ts',
+    'web/e2e/safe-runtime-diagnostics.ts',
+    'scripts/e2e_runtime_diagnostics.py',
+    'scripts/test_safe_navigation_diagnostics_contract.py',
+    'web/src/e2e-navigation.test.ts',
+    'web/src/SocNavigation.test.tsx',
     'web/e2e/navigation.ts', 'web/src/UserAssetsV3Workspace.tsx',
     'web/src/ComputerAssetsV3Workspace.tsx', 'web/src/GroupAssetsV3Workspace.tsx',
     'web/src/user-assets-v3-api.ts', 'web/src/computer-assets-v3-api.ts',
