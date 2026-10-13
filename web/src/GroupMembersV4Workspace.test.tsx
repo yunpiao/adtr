@@ -72,7 +72,7 @@ const row = (
   distinguishedName: `CN=Group ${index},DC=synthetic,DC=invalid`,
   kind: "group",
   objectClass: ["group", "top"],
-  samAccountName: `group-${index}`,
+  samAccountName: `group-${index}` as string | null,
   userAccountControl: null,
   objectSid: null,
   mail: null,
@@ -202,6 +202,37 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 describe("isolated dictionary4 membership consumer", () => {
+  it("wraps long observation and DN facts locally without truncating their text", async () => {
+    const dn = "CN=" + "x".repeat(300) + ",OU=Groups,DC=synthetic,DC=invalid";
+    override = (url) => {
+      if (url.startsWith(listPath)) {
+        const value = page(url);
+        value.list[1].samAccountName = null;
+        value.list[1].distinguishedName = dn;
+        return response(value);
+      }
+      if (url.startsWith(detailPath)) {
+        const value = detail([dn]);
+        value.object.distinguishedName = dn;
+        return response(value);
+      }
+    };
+    await open();
+    await expand();
+    const workspace = screen.getByRole("region", {
+      name: "组成员原始观测 · 字典 4",
+    });
+    expect(workspace).toHaveStyle({ overflowWrap: "anywhere" });
+    expect(workspace.style.overflow).toBe("");
+    expect(workspace.style.overflowX).toBe("");
+    expect(workspace.style.textOverflow).toBe("");
+    expect(
+      within(workspace).getByRole("heading", { name: dn }).textContent,
+    ).toBe(dn);
+    expect(within(workspace).getAllByText(dn)).toHaveLength(3);
+    expect(within(workspace).getByText(q.observationId)).toBeVisible();
+    expect(within(workspace).getByText(source.started_at)).toBeVisible();
+  });
   it("requires explicit selection, pins pages and sends exactly five detail pins with no write endpoints", async () => {
     render(
       <GroupMembersV4Workspace profile={profile} sessionChanged={vi.fn()} />,

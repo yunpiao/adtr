@@ -221,7 +221,10 @@ function Workspace({ profile, sessionChanged }: Props) {
     };
   }, []);
   return (
-    <section aria-labelledby="group-members-v4-title">
+    <section
+      aria-labelledby="group-members-v4-title"
+      style={{ overflowWrap: "anywhere" }}
+    >
       <h2 id="group-members-v4-title">组成员原始观测 · 字典 4</h2>
       <p>
         仅读取已保存的字典 4 观测。多页观测不是 AD

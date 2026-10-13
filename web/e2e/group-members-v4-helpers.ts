@@ -189,10 +189,33 @@ export async function captureMembers(
           await expect(detail.locator("a, script")).toHaveCount(0);
         }
         await detail.scrollIntoViewIfNeeded();
+        const geometry = await page.evaluate(() => ({
+          viewport: window.innerWidth,
+          scrollWidth: document.documentElement.scrollWidth,
+          overflowing: Array.from(document.querySelectorAll("*"))
+            .filter((element) => {
+              const rect = element.getBoundingClientRect();
+              return (
+                rect.right > window.innerWidth ||
+                element.scrollWidth > element.clientWidth
+              );
+            })
+            .slice(0, 30)
+            .map((element) => {
+              const rect = element.getBoundingClientRect();
+              // Geometry only: never include observed text, values or attributes.
+              return {
+                tag: element.tagName,
+                width: rect.width,
+                right: rect.right,
+                clientWidth: element.clientWidth,
+                scrollWidth: element.scrollWidth,
+              };
+            }),
+        }));
         expect(
-          await page.evaluate(
-            () => document.documentElement.scrollWidth <= window.innerWidth,
-          ),
+          geometry.scrollWidth <= geometry.viewport,
+          `group-members-v4 viewport geometry: ${JSON.stringify(geometry)}`,
         ).toBe(true);
         const filename = `group-members-v4-${viewport.width}-${index}.png`;
         const bytes = await page.screenshot({
