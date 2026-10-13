@@ -30,6 +30,9 @@ export const membershipSources = [
   "web/src/style.css",
   "web/src/soc-shell.css",
   "web/package-lock.json",
+  "internal/auth/access_types.go",
+  "internal/auth/access_http.go",
+  "internal/auth/resource_types.go",
   "internal/auth/group_members_v4_http.go",
   "internal/domains/group_members_v4.go",
 ];
@@ -105,6 +108,7 @@ export async function captureMembers(
   source: unknown,
   expected: any[],
   info: TestInfo,
+  reader = false,
 ) {
   const writes: string[] = [];
   const listener = (request: import("@playwright/test").Request) => {
@@ -217,7 +221,7 @@ export async function captureMembers(
           geometry.scrollWidth <= geometry.viewport,
           `group-members-v4 viewport geometry: ${JSON.stringify(geometry)}`,
         ).toBe(true);
-        const filename = `group-members-v4-${viewport.width}-${index}.png`;
+        const filename = `group-members-v4-${reader ? "reader-" : ""}${viewport.width}-${index}.png`;
         const bytes = await page.screenshot({
           path: info.outputPath(filename),
           fullPage: false,
@@ -242,7 +246,9 @@ export async function captureMembers(
     expect(writes).toEqual([]);
     return {
       actorId,
-      authorization: "platform_admin_after_v4_use_revoke",
+      authorization: reader
+        ? "custom_readonly_role"
+        : "platform_admin_after_v4_use_revoke",
       discovery,
       reread,
       cases,
