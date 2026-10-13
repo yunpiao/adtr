@@ -1,0 +1,381 @@
+//go:build integration
+
+package auth_test
+
+import (
+	"bytes"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
+	"encoding/base64"
+	"encoding/json"
+	"encoding/pem"
+	"math/big"
+	"net/http"
+	"os"
+	"path/filepath"
+	"reflect"
+	"strconv"
+	"testing"
+	"time"
+
+	"github.com/yunpiao/adtr/internal/auth"
+	"github.com/yunpiao/adtr/internal/credentialuse"
+	"github.com/yunpiao/adtr/internal/domainconfig"
+	"github.com/yunpiao/adtr/internal/domains"
+	"github.com/yunpiao/adtr/internal/schemaversion"
+	"github.com/yunpiao/adtr/internal/store"
+	"github.com/yunpiao/adtr/internal/tasks"
+)
+
+const directoryV4HTTPPrefix = "/api/directory/v4"
+const directoryV4HTTPUsePrefix = "/api/directory-credential-use/v4"
+
+type directoryV4HTTPFixture struct {
+	*directoryHTTPFixture
+	environment map[string]string
+	fallback    http.Handler
+}
+
+// The shared fixture runs store.Migrate/Ready, real password/TOTP proofs and
+// authenticated HTTP against an isolated PostgreSQL database. Missing DSN is a
+// hard failure. No version stamps, schema fragments or security replacements.
+func newDirectoryV4HTTPFixture(t *testing.T) *directoryV4HTTPFixture {
+	t.Helper()
+	base := newDirectoryHTTPFixture(t)
+	f := &directoryV4HTTPFixture{directoryHTTPFixture: base, fallback: base.handler}
+	if store.SchemaVersion != schemaversion.Current || f.count(`SELECT version FROM adtr.schema_version WHERE singleton`) != schemaversion.Current {
+		t.Fatal("v4 HTTP requires the exact current production schema migration")
+	}
+	if f.count(`SELECT count(*) FROM pg_trigger WHERE NOT tgisinternal AND tgenabled='O' AND tgname=ANY($1::text[])`, []string{"domain_directory_use_guard", "domain_directory_use_consistency", "domain_directory_task_reservation", "domain_directory_observation_guard", "domain_directory_observations_immutable", "domain_directory_observations_no_truncate"}) != 6 {
+		t.Fatal("v4 HTTP requires enabled production ledger and observation guards")
+	}
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cert := &x509.Certificate{SerialNumber: big.NewInt(2), NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour), BasicConstraintsValid: true, IsCA: true, KeyUsage: x509.KeyUsageCertSign}
+	der, err := x509.CreateCertificate(rand.Reader, cert, cert, &key.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	ca, policy := filepath.Join(dir, "ca.pem"), filepath.Join(dir, "policy.json")
+	if err = os.WriteFile(ca, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(policy, []byte(`{"version":1,"targets":[{"tenantId":"governance-http","domain":"one.invalid","serverNames":["dc.one.invalid"],"cidrs":["192.0.2.0/24"]}]}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	f.environment = map[string]string{"ADTR_DOMAIN_KEY_ID": "synthetic-directory-v4", "ADTR_DOMAIN_KEY": base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{'d'}, 32)), "ADTR_LDAP_CA_FILE": ca, "ADTR_LDAP_EGRESS_POLICY_FILE": policy}
+	f.installV4(f.runtimeWithGates(true, true), nil)
+	return f
+}
+
+// Preserve identical key/trust/egress snapshots while changing only flags.
+func (f *directoryV4HTTPFixture) runtimeWithGates(master, v4 bool) *domainconfig.Runtime {
+	f.t.Helper()
+	runtime, err := domainconfig.Load(func(key string) string {
+		switch key {
+		case "ADTR_DIRECTORY_READ_ENABLED":
+			return strconv.FormatBool(master)
+		case "ADTR_DIRECTORY_READ_V4_ENABLED":
+			return strconv.FormatBool(v4)
+		default:
+			return f.environment[key]
+		}
+	})
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	return runtime
+}
+
+func (f *directoryV4HTTPFixture) installV4(runtime *domainconfig.Runtime, synthetic tasks.Executor) {
+	f.t.Helper()
+	ds := domains.New(runtime)
+	kind := ds.DirectoryV4Kind()
+	if synthetic != nil {
+		// Only Execute is synthetic. Keep production admission, validation,
+		// authorization, fencing and original-return OnQuiesced callbacks.
+		kind.Execute = synthetic
+	}
+	engine, err := tasks.New(f.conn.Config(), tasks.ProductionRegistry(ds.Kind(), ds.AccountKind(), ds.DirectoryKind(), kind), auth.NewTaskAuthorizer(), store.SchemaVersion)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	mux := http.NewServeMux()
+	mux.Handle(directoryV4HTTPPrefix+"/", f.service.DirectoryV4Handler(ds, engine))
+	mux.Handle(directoryV4HTTPUsePrefix+"/", f.service.DirectoryV4CredentialUseHandler(credentialuse.New()))
+	mux.Handle("/api/directory-credential-use/v3/", f.service.DirectoryV3CredentialUseHandler(credentialuse.New()))
+	mux.Handle("/api/directory/", f.service.DirectoryHandler(ds, engine))
+	mux.Handle("/api/directory-credential-use/", f.service.DirectoryCredentialUseHandler(credentialuse.New()))
+	mux.Handle("/api/domains/", f.service.DomainsHandler(ds, engine))
+	mux.Handle("/api/tasks", f.service.TasksHandler(engine))
+	mux.Handle("/api/tasks/", f.service.TasksHandler(engine))
+	mux.Handle("/", f.fallback)
+	f.handler, f.store, f.engine, f.runtime = mux, ds, engine, runtime
+}
+
+func directoryV4HTTPGrantBody(role, revision, key string) map[string]any {
+	body := directoryHTTPGrantBody(role, revision, key)
+	body["purpose"] = credentialuse.DirectoryV4Purpose
+	return body
+}
+
+// Mutation responses flatten the durable receipt and add the fixed consumer
+// capability. Keep strict decoding; do not discard other unknown fields.
+type directoryV4HTTPGrantReceipt struct {
+	credentialuse.Receipt
+	ConsumerEnabled bool `json:"consumerEnabled"`
+}
+
+func (f *directoryV4HTTPFixture) grantV4(actor, role, key string) string {
+	f.t.Helper()
+	out := operationalDecode[directoryV4HTTPGrantReceipt](f.t, f.request(actor, directoryV4HTTPUsePrefix+"/grant", f.proof(actor, directoryV4HTTPGrantBody(role, "0", key)), 200).Body.Bytes())
+	if !out.ConsumerEnabled || !out.Allowed || out.Purpose != credentialuse.DirectoryV4Purpose || out.GrantRevision == "" || out.GrantRevision == "0" || out.Replayed {
+		f.t.Fatal("v4 HTTP grant did not commit its exact purpose")
+	}
+	return out.GrantRevision
+}
+
+func (f *directoryV4HTTPFixture) submitV4(actor, key string) tasks.Task {
+	f.t.Helper()
+	w := f.request(actor, directoryV4HTTPPrefix+"/sync", f.proof(actor, directoryHTTPSyncBody(key)), 200)
+	out := operationalDecode[tasks.Submission](f.t, w.Body.Bytes())
+	if out.Task.ID == "" || out.Task.Kind != domains.DirectoryV4KindName || out.Task.State != tasks.Queued || out.Replayed {
+		f.t.Fatal("v4 HTTP admission did not persist a new queued task")
+	}
+	directoryHTTPRedacted(f.t, w.Body.Bytes())
+	if f.count(`SELECT count(*) FROM adtr.tasks WHERE task_id=$1 AND payload_version=1 AND payload->'dictionaryVersion'='4'::jsonb AND (SELECT count(*) FROM jsonb_object_keys(payload))=9`, out.Task.ID) != 1 {
+		f.t.Fatal("v4 task did not retain its closed nine-field immutable payload")
+	}
+	return out.Task
+}
+
+func (f *directoryV4HTTPFixture) unavailableV4(pin string) {
+	f.t.Helper()
+	path := directoryV4HTTPPrefix + "/observation?domainId=domain-one"
+	out := operationalDecode[domains.DirectoryV4List](f.t, f.request("directory-http-reader", path, nil, 200).Body.Bytes())
+	if out.DictionaryVersion != 4 || out.Available || out.List == nil || len(out.List) != 0 || out.Source != nil || out.ObservationID != "" {
+		f.t.Fatal("v4 unavailable response lost its version or disclosed staged rows")
+	}
+	if pin != "" {
+		f.error(f.request("directory-http-reader", path+"&observationId="+pin, nil, 409), "directory_observation_unavailable")
+	}
+}
+
+func TestDirectoryV4MigratedHTTPReadAndPurposeBoundaries(t *testing.T) {
+	f := newDirectoryV4HTTPFixture(t)
+	path := directoryV4HTTPPrefix + "/observation?domainId=domain-one"
+	f.request("", path, nil, 401)
+	for _, actor := range []string{"member", "directory-http-no-assets", "directory-http-no-domains"} {
+		f.request(actor, path, nil, 403)
+	}
+	f.request("directory-http-no-scope", path, nil, 404)
+	f.request("directory-admin", directoryV4HTTPPrefix+"/observation?domainId=domain-two", nil, 404)
+	f.unavailableV4("")
+	for _, query := range []string{"pageIdx=2", "pageSize=26", "kind=all", "domainId=domain-two", "actorId=1", "pageIdx=01", "dictionaryVersion=2", "purpose=domain.directory_read", "pageSize=25&pageSize=50"} {
+		f.request("directory-admin", path+"&"+query, nil, 400)
+	}
+	effective := directoryV4HTTPUsePrefix + "/effective?accountId=" + governanceHTTPAccount
+	for _, actor := range []string{"directory-admin", directoryHTTPWriterRole, "directory-http-reader"} {
+		out := operationalDecode[credentialuse.Effective](t, f.request(actor, effective, nil, 200).Body.Bytes())
+		if out.ExplicitlyGranted || out.Eligible || out.GrantRevision != "0" || out.Purpose != credentialuse.DirectoryV4Purpose {
+			t.Fatal("v4 builtin administrator or ordinary rights invented a credential grant")
+		}
+	}
+	for _, suffix := range []string{"/accounts", "/grants?accountId=" + governanceHTTPAccount, "/roles?accountId=" + governanceHTTPAccount, "/mutation?idempotencyKey=absent"} {
+		f.request(directoryHTTPWriterRole, directoryV4HTTPUsePrefix+suffix, nil, 403)
+	}
+	f.request("directory-http-no-scope", effective, nil, 404)
+	f.request("directory-http-no-assets", effective, nil, 403)
+	f.request("directory-http-reader", directoryV4HTTPPrefix+"/receipt?domainId=domain-one&idempotencyKey=absent", nil, 403)
+
+	// The same introspection path used by the UI must agree with execution.
+	checks := []string{"GET /api/directory/v4/observation", "GET /api/directory-credential-use/v4/effective", "GET /api/directory/v4/task", "POST /api/directory/v4/sync", "POST /api/directory-credential-use/v4/grant", "GET /api/directory/v4/v4/observation"}
+	check := operationalDecode[struct {
+		Results []bool `json:"results"`
+	}](t, f.request("directory-http-reader", "/api/access/check", map[string]any{"paths": checks}, 200).Body.Bytes())
+	if !reflect.DeepEqual(check.Results, []bool{true, true, false, false, false, false}) {
+		t.Fatal("v4 introspection widened exact paths or permissions", check.Results)
+	}
+
+	body := f.proof("directory-grant", directoryV4HTTPGrantBody(directoryHTTPWriterRole, "0", "separate-grant-receipt"))
+	for _, prefix := range []string{"/api/credential-use", "/api/directory-credential-use"} {
+		f.error(f.request("directory-grant", prefix+"/grant", body, 422), "unsupported_credential_purpose")
+	}
+	legacy := f.proof("directory-grant", directoryHTTPGrantBody(directoryHTTPWriterRole, "0", "separate-grant-receipt"))
+	f.error(f.request("directory-grant", directoryV4HTTPUsePrefix+"/grant", legacy, 422), "unsupported_credential_purpose")
+	f.request(directoryHTTPWriterRole, directoryV4HTTPUsePrefix+"/grant", f.proof(directoryHTTPWriterRole, directoryV4HTTPGrantBody(directoryHTTPWriterRole, "0", "self-grant-denied")), 403)
+	f.request(directoryHTTPWriterRole, directoryV4HTTPUsePrefix+"/revoke", f.proof(directoryHTTPWriterRole, directoryV4HTTPGrantBody(directoryHTTPWriterRole, "1", "self-revoke-denied")), 403)
+	if f.count(`SELECT count(*) FROM adtr.operation_account_use_grants`) != 0 || f.count(`SELECT mfa_last_step FROM adtr.users WHERE id=$1`, f.clients["directory-grant"].id) != -1 {
+		t.Fatal("wrong-purpose or non-admin request changed grants or consumed proof")
+	}
+	f.request("directory-grant", "/api/directory-credential-use/grant", legacy, 200)
+	f.request("directory-grant", directoryV4HTTPUsePrefix+"/mutation?idempotencyKey=separate-grant-receipt", nil, 404)
+	f.bind()
+	f.grant("directory-grant-writer", "platform_admin")
+	for _, actor := range []string{directoryHTTPWriterRole, "directory-admin"} {
+		out := operationalDecode[credentialuse.Effective](t, f.request(actor, effective, nil, 200).Body.Bytes())
+		if out.ExplicitlyGranted || out.Eligible {
+			t.Fatal("connection-test/v1 allow silently authorized v4")
+		}
+		f.error(f.request(actor, directoryV4HTTPPrefix+"/sync", f.proof(actor, directoryHTTPSyncBody("v1-cannot-authorize-v4")), 403), "forbidden")
+	}
+	if f.count(`SELECT count(*) FROM adtr.tasks`) != 0 {
+		t.Fatal("denied v4 admission left a task")
+	}
+	body = f.proof("directory-grant", directoryV4HTTPGrantBody(directoryHTTPWriterRole, "0", "separate-grant-receipt"))
+	beforeConflict := f.count(`SELECT mfa_last_step FROM adtr.users WHERE id=$1`, f.clients["directory-grant"].id)
+	f.error(f.request("directory-grant", directoryV4HTTPUsePrefix+"/grant", body, 409), "idempotency_conflict")
+	if f.count(`SELECT mfa_last_step FROM adtr.users WHERE id=$1`, f.clients["directory-grant"].id) != beforeConflict || f.count(`SELECT count(*) FROM adtr.operation_account_use_grants WHERE purpose='domain.directory_read.v4'`) != 0 {
+		t.Fatal("cross-purpose actor/key reuse changed v4 authority or consumed proof")
+	}
+	body = f.proof("directory-grant", directoryV4HTTPGrantBody(directoryHTTPWriterRole, "0", "separate-v4-grant-receipt"))
+	granted := operationalDecode[directoryV4HTTPGrantReceipt](t, f.request("directory-grant", directoryV4HTTPUsePrefix+"/grant", body, 200).Body.Bytes())
+	step := f.count(`SELECT mfa_last_step FROM adtr.users WHERE id=$1`, f.clients["directory-grant"].id)
+	replay := operationalDecode[directoryV4HTTPGrantReceipt](t, f.request("directory-grant", directoryV4HTTPUsePrefix+"/grant", body, 200).Body.Bytes())
+	if !granted.ConsumerEnabled || !replay.ConsumerEnabled || granted.Purpose != credentialuse.DirectoryV4Purpose || !replay.Replayed || granted.GrantRevision != replay.GrantRevision || f.count(`SELECT mfa_last_step FROM adtr.users WHERE id=$1`, f.clients["directory-grant"].id) != step {
+		t.Fatal("v4 committed grant replay changed purpose/revision or consumed proof twice")
+	}
+	for _, version := range []struct{ prefix, purpose, key string }{{"/api/directory-credential-use", credentialuse.DirectoryPurpose, "separate-grant-receipt"}, {directoryV4HTTPUsePrefix, credentialuse.DirectoryV4Purpose, "separate-v4-grant-receipt"}} {
+		receipt := operationalDecode[struct {
+			Receipt         credentialuse.Receipt `json:"receipt"`
+			ConsumerEnabled bool                  `json:"consumerEnabled"`
+		}](t, f.request("directory-grant", version.prefix+"/mutation?idempotencyKey="+version.key, nil, 200).Body.Bytes())
+		if receipt.Receipt.Purpose != version.purpose || !receipt.ConsumerEnabled {
+			t.Fatal("grant receipts crossed the trusted purpose")
+		}
+	}
+	f.request("directory-admin-other", directoryV4HTTPUsePrefix+"/mutation?idempotencyKey=separate-v4-grant-receipt", nil, 404)
+	f.request("directory-grant", "/api/credential-use/mutation?idempotencyKey=separate-v4-grant-receipt", nil, 404)
+	allowed := operationalDecode[credentialuse.Effective](t, f.request(directoryHTTPWriterRole, effective, nil, 200).Body.Bytes())
+	if !allowed.ExplicitlyGranted || !allowed.Eligible || allowed.Purpose != credentialuse.DirectoryV4Purpose {
+		t.Fatal("qualified writer could not inspect its explicit v4 grant")
+	}
+	grants := operationalDecode[credentialuse.GrantList](t, f.request("directory-admin", directoryV4HTTPUsePrefix+"/grants?accountId="+governanceHTTPAccount, nil, 200).Body.Bytes())
+	if len(grants.Grants) != 1 || grants.Grants[0].Purpose != credentialuse.DirectoryV4Purpose || grants.Grants[0].RoleID != directoryHTTPWriterRole {
+		t.Fatal("v4 grant listing mixed profiles")
+	}
+	roles := operationalDecode[credentialuse.RoleList](t, f.request("directory-admin", directoryV4HTTPUsePrefix+"/roles?accountId="+governanceHTTPAccount, nil, 200).Body.Bytes())
+	found := false
+	for _, role := range roles.Roles {
+		found = found || role.RoleID == directoryHTTPWriterRole
+	}
+	if !found {
+		t.Fatal("v4 grant catalogue omitted a qualified minimal writer")
+	}
+	accounts := operationalDecode[credentialuse.AccountList](t, f.request("directory-admin", directoryV4HTTPUsePrefix+"/accounts", nil, 200).Body.Bytes())
+	if len(accounts.List) != 1 || accounts.List[0].AccountID != governanceHTTPAccount || !accounts.ConsumerEnabled {
+		t.Fatal("v4 account catalogue lost its exact-purpose grant")
+	}
+}
+
+func TestDirectoryV4MigratedHTTPProofReceiptsAndGenericControls(t *testing.T) {
+	f := newDirectoryV4HTTPFixture(t)
+	f.bind()
+	f.grant("directory-grant", "platform_admin")
+	f.grantV4("directory-grant-writer", "platform_admin", "v4-admin-grant")
+	body := f.proof("directory-admin", directoryHTTPSyncBody("protected-v4-intent"))
+	raw, err := json.Marshal(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.raw("", http.MethodPost, directoryV4HTTPPrefix+"/sync", raw, 401, nil)
+	for _, edit := range []func(*http.Request){
+		func(r *http.Request) { r.Header.Del("Origin") },
+		func(r *http.Request) { r.Header.Set("Origin", "https://other.invalid") },
+		func(r *http.Request) { r.Header.Add("Origin", governanceHTTPOrigin) },
+		func(r *http.Request) { r.Header.Del("X-CSRF-Token") },
+		func(r *http.Request) { r.Header.Set("X-CSRF-Token", f.clients["directory-admin-other"].csrf) },
+	} {
+		f.raw("directory-admin", http.MethodPost, directoryV4HTTPPrefix+"/sync", raw, 403, edit)
+	}
+	for _, field := range []string{`,"dictionaryVersion":2}`, `,"purpose":"domain.directory_read"}`, `,"attributes":["unicodePwd"]}`, `,"domainId":"domain-two"}`} {
+		malformed := append(bytes.Clone(raw[:len(raw)-1]), []byte(field)...)
+		f.raw("directory-admin", http.MethodPost, directoryV4HTTPPrefix+"/sync", malformed, 400, nil)
+	}
+	f.raw("directory-admin", http.MethodPost, directoryV4HTTPPrefix+"/sync?domainId=domain-one", raw, 400, nil)
+	f.raw("directory-admin", http.MethodPost, directoryV4HTTPPrefix+"/sync", raw, 400, func(r *http.Request) { r.Header.Set("Content-Type", "text/plain") })
+	f.request("directory-no-mfa", directoryV4HTTPPrefix+"/sync", body, 403)
+	for _, actor := range []string{"directory-http-reader", "directory-http-no-assets", "directory-http-no-domains"} {
+		f.request(actor, directoryV4HTTPPrefix+"/sync", f.proof(actor, directoryHTTPSyncBody("no-rights")), 403)
+	}
+	body["actorPassword"] = "incorrect synthetic password"
+	f.error(f.request("directory-admin", directoryV4HTTPPrefix+"/sync", body, 401), "invalid_credentials")
+	stale := directoryHTTPSyncBody("stale-v4-pins")
+	stale["expectedCredentialGeneration"] = "1"
+	f.error(f.request("directory-admin", directoryV4HTTPPrefix+"/sync", f.proof("directory-admin", stale), 409), "revision_conflict")
+	if f.count(`SELECT count(*) FROM adtr.tasks`) != 0 || f.count(`SELECT mfa_last_step FROM adtr.users WHERE id=$1`, f.clients["directory-admin"].id) != -1 {
+		t.Fatal("rejected v4 proof/pins admitted work or consumed proof")
+	}
+	v1 := f.submit("directory-submit-one", "shared-profile-intent")
+	f.request("directory-submit-one", directoryV4HTTPPrefix+"/receipt?domainId=domain-one&idempotencyKey=shared-profile-intent", nil, 404)
+	v4 := f.submitV4("directory-submit-one", "shared-profile-intent")
+	if v1.ID == v4.ID {
+		t.Fatal("v1/v4 idempotency keys collapsed into one task")
+	}
+	for _, version := range []struct{ prefix, id string }{{"/api/directory", v1.ID}, {directoryV4HTTPPrefix, v4.ID}} {
+		receipt := operationalDecode[struct {
+			Task tasks.Task `json:"task"`
+		}](t, f.request("directory-submit-one", version.prefix+"/receipt?domainId=domain-one&idempotencyKey=shared-profile-intent", nil, 200).Body.Bytes())
+		if receipt.Task.ID != version.id {
+			t.Fatal("same-key task receipt crossed profiles")
+		}
+	}
+	for _, mismatch := range []struct{ prefix, id string }{{"/api/directory", v4.ID}, {directoryV4HTTPPrefix, v1.ID}} {
+		f.request("directory-admin", mismatch.prefix+"/task?taskUUID="+mismatch.id, nil, 404)
+		f.request("directory-cancel", mismatch.prefix+"/cancel", f.proof("directory-cancel", map[string]any{"taskUUID": mismatch.id}), 404)
+	}
+	for _, actor := range []string{"directory-http-no-scope", "directory-foreign"} {
+		f.request(actor, directoryV4HTTPPrefix+"/task?taskUUID="+v4.ID, nil, 404)
+		f.request(actor, directoryV4HTTPPrefix+"/receipt?domainId=domain-one&idempotencyKey=shared-profile-intent", nil, 404)
+	}
+	f.request("directory-admin-other", directoryV4HTTPPrefix+"/receipt?domainId=domain-one&idempotencyKey=shared-profile-intent", nil, 404)
+	f.request("directory-submit-one", directoryV4HTTPPrefix+"/receipt?domainId=domain-two&idempotencyKey=shared-profile-intent", nil, 404)
+	f.request("directory-http-reader", directoryV4HTTPPrefix+"/task?taskUUID="+v4.ID, nil, 403)
+	f.request("directory-http-reader", directoryV4HTTPPrefix+"/cancel", f.proof("directory-http-reader", map[string]any{"taskUUID": v4.ID}), 403)
+	for _, path := range []string{"/api/tasks/cancel", "/api/tasks/recover"} {
+		control := map[string]any{"taskUUID": v4.ID}
+		if path == "/api/tasks/recover" {
+			control["idempotencyKey"] = "no-generic-v4-recovery"
+		}
+		f.error(f.request("directory-cancel", path, f.proof("directory-cancel", control), 400), "directory_route_required")
+	}
+	f.error(f.request("directory-cancel", "/api/tasks/submit", f.proof("directory-cancel", map[string]any{"taskName": domains.DirectoryV4KindName, "domainId": "domain-one", "payloadVersion": 1, "payload": map[string]any{}, "idempotencyKey": "no-generic-v4-submit"}), 400), "directory_route_required")
+	if f.count(`SELECT count(*) FROM adtr.tasks WHERE task_id=$1 AND state='queued'`, v4.ID) != 1 || f.count(`SELECT count(*) FROM adtr.domain_directory_task_uses WHERE task_id=$1 AND state='reserved'`, v4.ID) != 1 {
+		t.Fatal("generic or cross-profile controls changed the v4 lifecycle")
+	}
+	// A valid replay needs fresh proof; the previous committed proof is denied.
+	proof := f.proof("directory-submit-two", directoryHTTPSyncBody("v4-replay"))
+	first := operationalDecode[tasks.Submission](t, f.request("directory-submit-two", directoryV4HTTPPrefix+"/sync", proof, 200).Body.Bytes())
+	f.error(f.request("directory-submit-two", directoryV4HTTPPrefix+"/sync", proof, 401), "invalid_credentials")
+	replay := operationalDecode[tasks.Submission](t, f.request("directory-submit-two", directoryV4HTTPPrefix+"/sync", f.proof("directory-submit-two", directoryHTTPSyncBody("v4-replay")), 200).Body.Bytes())
+	if !replay.Replayed || replay.Task.ID != first.Task.ID || f.count(`SELECT count(*) FROM adtr.tasks`) != 3 {
+		t.Fatal("v4 replay duplicated admitted work")
+	}
+	f.request("directory-submit-two", "/api/directory/receipt?domainId=domain-one&idempotencyKey=v4-replay", nil, 404)
+	result := operationalDecode[struct {
+		Task tasks.Task `json:"task"`
+	}](t, f.request("directory-cancel", directoryV4HTTPPrefix+"/cancel", f.proof("directory-cancel", map[string]any{"taskUUID": v4.ID}), 200).Body.Bytes())
+	if result.Task.State != tasks.Cancelled || f.count(`SELECT count(*) FROM adtr.domain_audit WHERE task_id=$1 AND action='domain_directory_v4_cancel'`, v4.ID) != 1 {
+		t.Fatal("dedicated v4 cancel failed to commit its outcome/audit")
+	}
+}
+
+func TestDirectoryV4V3GrantCannotAuthorizeProducer(t *testing.T) {
+	f := newDirectoryV4HTTPFixture(t)
+	f.bind()
+	body := directoryHTTPGrantBody("platform_admin", "0", "explicit-v3-only")
+	body["purpose"] = credentialuse.DirectoryV3Purpose
+	f.request("directory-grant", "/api/directory-credential-use/v3/grant", f.proof("directory-grant", body), 200)
+	if f.count(`SELECT count(*) FROM adtr.operation_account_use_grants WHERE purpose='domain.directory_read.v3' AND allowed`) != 1 {
+		t.Fatal("v3 allow fixture missing")
+	}
+	f.error(f.request("directory-admin", directoryV4HTTPPrefix+"/sync", f.proof("directory-admin", directoryHTTPSyncBody("v3-cannot-authorize-v4")), 403), "forbidden")
+	if f.count(`SELECT count(*) FROM adtr.tasks WHERE kind='domain.directory_read.v4'`) != 0 {
+		t.Fatal("v3 grant created v4 task")
+	}
+}

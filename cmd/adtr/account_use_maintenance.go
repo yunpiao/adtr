@@ -61,3 +61,18 @@ func reconcileCredentialReservationsV3(ctx context.Context, account, directory, 
 	joined.Wait()
 	return errors.Join(previousErr, v3Err)
 }
+
+// The fifth fixed purpose is reconciled independently within the same budget.
+// All callbacks are joined before shutdown or another maintenance cycle.
+func reconcileCredentialReservationsV4(ctx context.Context, account, directory, directoryV2, directoryV3, directoryV4 func(context.Context) error) error {
+	var previousErr, v4Err error
+	var joined sync.WaitGroup
+	joined.Add(2)
+	go func() {
+		defer joined.Done()
+		previousErr = reconcileCredentialReservationsV3(ctx, account, directory, directoryV2, directoryV3)
+	}()
+	go func() { defer joined.Done(); v4Err = directoryV4(ctx) }()
+	joined.Wait()
+	return errors.Join(previousErr, v4Err)
+}

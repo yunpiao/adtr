@@ -352,7 +352,7 @@ func dedicatedTaskRouteCode(kind string) string {
 		return "audit_route_required"
 	case operationallogs.BundleKindName:
 		return "operational_log_route_required"
-	case domains.DirectoryKindName, domains.DirectoryV2KindName, domains.DirectoryV3KindName:
+	case domains.DirectoryKindName, domains.DirectoryV2KindName, domains.DirectoryV3KindName, domains.DirectoryV4KindName:
 		return "directory_route_required"
 	case domains.KindName, domains.AccountKindName:
 		return "domain_route_required"

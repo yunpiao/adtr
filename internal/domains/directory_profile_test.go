@@ -106,7 +106,7 @@ func TestDirectoryV2PayloadRejectsDictionaryAndPinAmbiguity(t *testing.T) {
 
 func TestDirectoryProfileBoundariesFailBeforeSQL(t *testing.T) {
 	ctx, store := context.Background(), New(nil)
-	for _, profile := range []directoryTaskProfile{0, directoryTaskV1, directoryTaskV2, 4} {
+	for _, profile := range []directoryTaskProfile{0, directoryTaskV1, directoryTaskV2, directoryTaskV3, directoryTaskV4, 5} {
 		for _, task := range []tasks.Task{directoryUseTestTask(), directoryV2UseTestTask()} {
 			identity, ok := profile.identity()
 			if ok && identity.kind == task.Kind {
@@ -124,7 +124,7 @@ func TestDirectoryProfileBoundariesFailBeforeSQL(t *testing.T) {
 			t.Fatal("unissued witness accepted", err)
 		}
 	}
-	for _, profile := range []directoryTaskProfile{0, 4} {
+	for _, profile := range []directoryTaskProfile{0, 5} {
 		if _, _, err := lockDirectoryUseForProfileTx(ctx, nil, profile, "tenant", "task"); !errors.Is(err, errDirectoryUseEvidence) {
 			t.Fatal("unknown profile reached lock SQL")
 		}

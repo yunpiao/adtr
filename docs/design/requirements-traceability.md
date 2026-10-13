@@ -123,7 +123,7 @@
 | AD-F-039 | 用户资产详情 | P1 | not_started | [#30](https://github.com/yunpiao/adtr/issues/30) |
 | AD-F-040 | 计算机资产列表 | P1 | not_started | [#30](https://github.com/yunpiao/adtr/issues/30) |
 | AD-F-042 | 组资产列表 | P1 | not_started | [#30](https://github.com/yunpiao/adtr/issues/30) |
-| AD-F-043 | 所属组与成员查看 | P1 | not_started | [#30](https://github.com/yunpiao/adtr/issues/30) |
+| AD-F-043 | 所属组与成员查看 | P1 | in_progress | [#30](https://github.com/yunpiao/adtr/issues/30) |
 | AD-F-048 | 域信任关系查看 | P1 | not_started | [#30](https://github.com/yunpiao/adtr/issues/30) |
 | AD-F-049 | 关联身份与设备查看 | P1 | not_started | [#30](https://github.com/yunpiao/adtr/issues/30) |
 | AD-F-052 | 资产安全概览与分类统计 | P1 | not_started | [#30](https://github.com/yunpiao/adtr/issues/30) |

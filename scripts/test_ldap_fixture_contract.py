@@ -27,7 +27,7 @@ class LDAPFixtureContract(unittest.TestCase):
     def started_fixture(self, *, inherited_transition="/unowned/inherited/path", **modes):
         fixture = ldap_e2e_fixture.LDAPFixture(**modes)
         env = {"ADTR_E2E_LDAP_DIRECTORY_" + suffix: "inherited"
-               for suffix in ("MODE", "EMPTY", "SLOW", "V2", "USER_ASSETS_V2", "V3", "COMPUTER_ASSETS_V3", "GROUP_ASSETS_V3")}
+               for suffix in ("MODE", "EMPTY", "SLOW", "V2", "USER_ASSETS_V2", "V3", "V4", "COMPUTER_ASSETS_V3", "GROUP_ASSETS_V3")}
         env["ADTR_E2E_LDAP_EMPTY_TRANSITION_DIR"] = inherited_transition
 
         with patch.object(ldap_e2e_fixture.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)) as run, \
@@ -49,7 +49,7 @@ class LDAPFixtureContract(unittest.TestCase):
             ldap_e2e_fixture.LDAPFixture(False, True, False, False, True)
 
     def test_all_directory_flags_require_booleans_before_allocating_resources(self):
-        for name in ("directory_enabled", "directory_empty", "directory_slow", "directory_v2", "user_assets_v2", "directory_v3", "computer_assets_v3", "group_assets_v3", "empty_transition"):
+        for name in ("directory_enabled", "directory_empty", "directory_slow", "directory_v2", "user_assets_v2", "directory_v3", "directory_v4", "computer_assets_v3", "group_assets_v3", "empty_transition"):
             for value in (None, 0, 1, 0.0, 1.0, "true", "false", [], {}):
                 with self.subTest(name=name, value=value), \
                      patch.object(ldap_e2e_fixture.tempfile, "TemporaryDirectory") as allocate:

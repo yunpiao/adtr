@@ -134,7 +134,7 @@ func (s *Service) serveDirectoryForProfile(w http.ResponseWriter, r *http.Reques
 		s.writeDirectoryErrorForProfile(w, ctx, path, err, profile)
 		return
 	}
-	if (profile == directoryHTTPV2 || profile == directoryHTTPV3) && path == "/observation" {
+	if (profile == directoryHTTPV2 || profile == directoryHTTPV3 || profile == directoryHTTPV4) && path == "/observation" {
 		// Bound the complete encoded response before writing headers or bytes.
 		raw, encodeErr := json.Marshal(out.value)
 		defer clear(raw)
@@ -142,7 +142,7 @@ func (s *Service) serveDirectoryForProfile(w http.ResponseWriter, r *http.Reques
 			s.writeDirectoryErrorForProfile(w, ctx, path, fail(503, "directory_observation_unavailable"), profile)
 			return
 		}
-		if len(raw) > domains.DirectoryV2PageMaxBytes || profile == directoryHTTPV3 && len(raw)+1 > domains.DirectoryV3PageMaxBytes {
+		if len(raw) > domains.DirectoryV2PageMaxBytes || (profile == directoryHTTPV3 || profile == directoryHTTPV4) && len(raw)+1 > domains.DirectoryV3PageMaxBytes {
 			s.writeDirectoryErrorForProfile(w, ctx, path, fail(422, "directory_limit_exceeded"), profile)
 			return
 		}
@@ -254,6 +254,9 @@ func (s *Service) writeDirectoryErrorForProfile(w http.ResponseWriter, ctx conte
 	if profile == directoryHTTPV3 {
 		path = "/v3" + path
 	}
+	if profile == directoryHTTPV4 {
+		path = "/v4" + path
+	}
 	status, code := domainHTTPError(err)
 	// A failed schema gate must never trigger writes through failure attribution.
 	if status != http.StatusServiceUnavailable {
@@ -338,6 +341,8 @@ func (s *Service) handleDirectoryForProfile(ctx context.Context, r *http.Request
 			value, err = store.DirectoryV2ListTx(ctx, tx, actor.tenant, allowed, filter)
 		} else if profile == directoryHTTPV3 {
 			value, err = store.DirectoryV3ListTx(ctx, tx, actor.tenant, allowed, filter)
+		} else if profile == directoryHTTPV4 {
+			value, err = store.DirectoryV4ListTx(ctx, tx, actor.tenant, allowed, filter)
 		} else {
 			value, err = store.DirectoryListTx(ctx, tx, actor.tenant, allowed, filter)
 		}
@@ -347,6 +352,8 @@ func (s *Service) handleDirectoryForProfile(ctx context.Context, r *http.Request
 			task, err = store.DirectoryV2ReceiptTx(ctx, tx, engine, p, filter.DomainID, q.Get("idempotencyKey"))
 		} else if profile == directoryHTTPV3 {
 			task, err = store.DirectoryV3ReceiptTx(ctx, tx, engine, p, filter.DomainID, q.Get("idempotencyKey"))
+		} else if profile == directoryHTTPV4 {
+			task, err = store.DirectoryV4ReceiptTx(ctx, tx, engine, p, filter.DomainID, q.Get("idempotencyKey"))
 		} else {
 			task, err = store.DirectoryReceiptTx(ctx, tx, engine, p, filter.DomainID, q.Get("idempotencyKey"))
 		}
@@ -363,6 +370,8 @@ func (s *Service) handleDirectoryForProfile(ctx context.Context, r *http.Request
 			value, err = store.SubmitDirectoryV2Tx(ctx, tx, engine, p, in.DirectoryInput)
 		} else if profile == directoryHTTPV3 {
 			value, err = store.SubmitDirectoryV3Tx(ctx, tx, engine, p, in.DirectoryInput)
+		} else if profile == directoryHTTPV4 {
+			value, err = store.SubmitDirectoryV4Tx(ctx, tx, engine, p, in.DirectoryInput)
 		} else {
 			value, err = store.SubmitDirectoryTx(ctx, tx, engine, p, in.DirectoryInput)
 		}
@@ -375,6 +384,8 @@ func (s *Service) handleDirectoryForProfile(ctx context.Context, r *http.Request
 			task, err = store.CancelDirectoryV2Tx(ctx, tx, engine, p, in.TaskUUID, allowed)
 		} else if profile == directoryHTTPV3 {
 			task, err = store.CancelDirectoryV3Tx(ctx, tx, engine, p, in.TaskUUID, allowed)
+		} else if profile == directoryHTTPV4 {
+			task, err = store.CancelDirectoryV4Tx(ctx, tx, engine, p, in.TaskUUID, allowed)
 		} else {
 			task, err = store.CancelDirectoryTx(ctx, tx, engine, p, in.TaskUUID, allowed)
 		}

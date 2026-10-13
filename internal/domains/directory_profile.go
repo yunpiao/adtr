@@ -6,6 +6,7 @@ import "github.com/yunpiao/adtr/internal/credentialuse"
 // Its task envelope version remains 1.
 const DirectoryV2KindName = "domain.directory_read.v2"
 const DirectoryV3KindName = "domain.directory_read.v3"
+const DirectoryV4KindName = "domain.directory_read.v4"
 
 // directoryTaskProfile is a closed selector, never a caller-provided purpose or
 // serializer. A zero or unknown value fails before database or credential work.
@@ -15,6 +16,7 @@ const (
 	directoryTaskV1 directoryTaskProfile = iota + 1
 	directoryTaskV2
 	directoryTaskV3
+	directoryTaskV4
 )
 
 type directoryTaskIdentity struct {
@@ -31,6 +33,8 @@ func (p directoryTaskProfile) identity() (directoryTaskIdentity, bool) {
 		return directoryTaskIdentity{DirectoryV2KindName, credentialuse.DirectoryV2Purpose, 2}, true
 	case directoryTaskV3:
 		return directoryTaskIdentity{DirectoryV3KindName, credentialuse.DirectoryV3Purpose, 3}, true
+	case directoryTaskV4:
+		return directoryTaskIdentity{DirectoryV4KindName, credentialuse.DirectoryV4Purpose, 4}, true
 	default:
 		return directoryTaskIdentity{}, false
 	}
@@ -46,6 +50,8 @@ func (p directoryTaskProfile) payload(pins directoryPinnedPayload) []byte {
 		return (directoryV2PinnedPayload{directoryPinnedPayload: pins, DictionaryVersion: 2}).json()
 	case directoryTaskV3:
 		return (directoryV3PinnedPayload{directoryPinnedPayload: pins, DictionaryVersion: 3}).json()
+	case directoryTaskV4:
+		return (directoryV4PinnedPayload{directoryPinnedPayload: pins, DictionaryVersion: 4}).json()
 	default:
 		return nil
 	}
@@ -59,6 +65,8 @@ func (s *Store) directoryEnabled(profile directoryTaskProfile) bool {
 		return s.runtime.DirectoryReadEnabled() && s.runtime.DirectoryReadV2Enabled()
 	case directoryTaskV3:
 		return s.runtime.DirectoryReadEnabled() && s.runtime.DirectoryReadV3Enabled()
+	case directoryTaskV4:
+		return s.runtime.DirectoryReadEnabled() && s.runtime.DirectoryReadV4Enabled()
 	default:
 		return false
 	}
@@ -72,6 +80,8 @@ func (p directoryTaskProfile) auditAction(suffix string) string {
 		return "domain_directory_v2_" + suffix
 	case directoryTaskV3:
 		return "domain_directory_v3_" + suffix
+	case directoryTaskV4:
+		return "domain_directory_v4_" + suffix
 	default:
 		return ""
 	}

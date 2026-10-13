@@ -181,6 +181,8 @@ jobs:
             command: python3 scripts/test_auth_e2e.py --suite group-assets-v3
           - name: group-assets-v3-readers
             command: python3 scripts/test_auth_e2e.py --suite group-assets-v3-readers
+          - name: directory-v4-backend
+            command: python3 scripts/test_auth_e2e.py --suite directory-v4-backend
           - name: directory-v3-backend
             command: python3 scripts/test_auth_e2e.py --suite directory-v3-backend
           - name: directory-v3
@@ -344,6 +346,17 @@ jobs:
             web/test-results/**/operational-logs.png
           if-no-files-found: error
           retention-days: 7
+      - name: Validate dictionary4 backend evidence
+        if: ${{ success() && matrix.name == 'directory-v4-backend' }}
+        run: python3 scripts/validate_directory_v4_evidence.py --source-root .
+      - name: Upload dictionary4 backend evidence
+        if: ${{ success() && matrix.name == 'directory-v4-backend' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: directory-v4-backend-${{ github.run_id }}-${{ github.run_attempt }}
+          path: web/test-results/**/directory-v4-backend-evidence.json
+          if-no-files-found: error
+          retention-days: 14
       - name: Retain dictionary3 backend per-value evidence
         if: ${{ success() && matrix.name == 'directory-v3-backend' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

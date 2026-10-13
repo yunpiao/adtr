@@ -113,7 +113,7 @@ func TestSchema19PreservesNonemptyV1V2HistoryAndDoesNotGrant(t *testing.T) {
 		}
 	}
 	var valid bool
-	if err := f.conn.QueryRow(f.ctx, `SELECT version=19 AND NOT EXISTS(SELECT FROM adtr.operation_account_use_grants WHERE purpose='domain.directory_read.v3') AND NOT EXISTS(SELECT FROM adtr.domain_directory_observations WHERE dictionary_version=3) AND to_regprocedure('adtr.domain_directory_identity_v3(jsonb)') IS NOT NULL FROM adtr.schema_version`).Scan(&valid); err != nil || !valid {
+	if err := f.conn.QueryRow(f.ctx, `SELECT version=$1 AND NOT EXISTS(SELECT FROM adtr.operation_account_use_grants WHERE purpose='domain.directory_read.v3') AND NOT EXISTS(SELECT FROM adtr.domain_directory_observations WHERE dictionary_version=3) AND to_regprocedure('adtr.domain_directory_identity_v3(jsonb)') IS NOT NULL FROM adtr.schema_version`, SchemaVersion).Scan(&valid); err != nil || !valid {
 		t.Fatal("migration invented authority/data or missed v3 guard", err)
 	}
 	f.assertOldEngineRejected(engine2, task2)
