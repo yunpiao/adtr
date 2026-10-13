@@ -28,6 +28,7 @@ type configuration struct {
 	directoryV3                              bool
 	directoryV4                              bool
 	groupMembersV4Pagination                 bool
+	groupMembersV4Refresh                    bool
 	userAssetsV2                             bool
 	computerAssetsV3                         bool
 	groupAssetsV3                            bool
@@ -46,6 +47,7 @@ func readConfiguration(args []string, getenv func(string) string) (configuration
 	flags.BoolVar(&cfg.directoryMode, "directory-mode", false, "enable the fixed synthetic directory dictionary for integration tests")
 	flags.BoolVar(&cfg.directoryV2, "directory-v2", false, "select the fixed eight-attribute dictionary; requires directory mode")
 	flags.BoolVar(&cfg.directoryV4, "directory-v4", false, "select the fixed eleven-attribute dictionary; requires exclusive directory mode")
+	flags.BoolVar(&cfg.groupMembersV4Refresh, "group-members-v4-refresh", false, "enable private empty transition; requires exclusive nonempty fast dictionary4 mode")
 	flags.BoolVar(&cfg.groupMembersV4Pagination, "group-members-v4-pagination", false, "select 26 synthetic groups and four non-groups; requires exclusive nonempty fast dictionary4 mode")
 	flags.BoolVar(&cfg.directoryV3, "directory-v3", false, "select the fixed ten-attribute dictionary; requires directory mode")
 	flags.BoolVar(&cfg.computerAssetsV3, "computer-assets-v3", false, "select isolated computer rows; requires dictionary3 nonempty fast mode")
@@ -58,13 +60,14 @@ func readConfiguration(args []string, getenv func(string) string) (configuration
 	if flags.Parse(args) != nil || flags.NArg() != 0 || cfg.cert == "" || cfg.key == "" ||
 		!validListenAddress(cfg.startTLSAddress, "389") || !validListenAddress(cfg.ldapsAddress, "636") ||
 		((cfg.directoryV2 || cfg.directoryV3 || cfg.directoryV4 || cfg.directoryEmpty || cfg.directorySlow) && !cfg.directoryMode) ||
-		(cfg.directoryV4 && (cfg.directoryV2 || cfg.directoryV3 || cfg.userAssetsV2 || cfg.computerAssetsV3 || cfg.groupAssetsV3 || cfg.emptyTransitionDir != "" || cfg.controlDir != "")) ||
+		(cfg.directoryV4 && (cfg.directoryV2 || cfg.directoryV3 || cfg.userAssetsV2 || cfg.computerAssetsV3 || cfg.groupAssetsV3 || (cfg.emptyTransitionDir != "" && !cfg.groupMembersV4Refresh) || cfg.controlDir != "")) ||
+		(cfg.groupMembersV4Refresh && (!cfg.directoryMode || !cfg.directoryV4 || cfg.emptyTransitionDir == "" || cfg.directoryEmpty || cfg.directorySlow || cfg.groupMembersV4Pagination)) ||
 		(cfg.groupMembersV4Pagination && (!cfg.directoryMode || !cfg.directoryV4 || cfg.directoryEmpty || cfg.directorySlow)) ||
 		(cfg.directoryV3 && (cfg.directoryV2 || cfg.userAssetsV2)) ||
 		(cfg.userAssetsV2 && (!cfg.directoryMode || !cfg.directoryV2 || cfg.directoryEmpty || cfg.directorySlow)) ||
 		(cfg.computerAssetsV3 && (!cfg.directoryMode || !cfg.directoryV3 || cfg.directoryEmpty || cfg.directorySlow || cfg.userAssetsV2 || cfg.groupAssetsV3)) ||
 		(cfg.groupAssetsV3 && (!cfg.directoryMode || !cfg.directoryV3 || cfg.directoryEmpty || cfg.directorySlow || cfg.userAssetsV2 || cfg.computerAssetsV3)) ||
-		(cfg.emptyTransitionDir != "" && (!cfg.directoryMode || !cfg.directoryV3 || cfg.directoryV2 || cfg.userAssetsV2 ||
+		(cfg.emptyTransitionDir != "" && !cfg.groupMembersV4Refresh && (!cfg.directoryMode || !cfg.directoryV3 || cfg.directoryV2 || cfg.userAssetsV2 ||
 			cfg.directoryEmpty || cfg.directorySlow || cfg.computerAssetsV3 == cfg.groupAssetsV3 || cfg.controlDir != "")) {
 		return configuration{}, errors.New("invalid synthetic LDAP fixture configuration")
 	}

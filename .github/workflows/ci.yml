@@ -201,6 +201,8 @@ jobs:
             command: python3 scripts/test_auth_e2e.py --suite group-assets-v3-readers
           - name: group-members-v4-pagination
             command: python3 scripts/test_auth_e2e.py --suite group-members-v4-pagination
+          - name: group-members-v4-refresh
+            command: python3 scripts/test_auth_e2e.py --suite group-members-v4-refresh
           - name: group-members-v4-empty
             command: python3 scripts/test_auth_e2e.py --suite group-members-v4-empty
           - name: group-members-v4
@@ -395,6 +397,23 @@ jobs:
             web/test-results/**/group-members-v4-pagination-reader-390-size25.png
             web/test-results/**/group-members-v4-pagination-reader-390-reread.png
           # Strict success validation above requires JSON and all 14 step/viewport PNGs.
+          # Keep partial failure evidence without masking the browser error.
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Validate refreshed group membership dictionary4 browser evidence
+        if: ${{ success() && matrix.name == 'group-members-v4-refresh' }}
+        run: python3 scripts/validate_group_members_v4_refresh_evidence.py --source-root .
+      - name: Retain refreshed group membership dictionary4 browser evidence
+        if: ${{ always() && matrix.name == 'group-members-v4-refresh' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: group-members-v4-refresh-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            web/test-results/**/group-members-v4-refresh-evidence.json
+            web/test-results/**/group-members-v4-refresh-reader-1440-initial.png
+            web/test-results/**/group-members-v4-refresh-reader-1440.png
+            web/test-results/**/group-members-v4-refresh-reader-390.png
+          # Strict success validation above requires JSON and all three PNGs.
           # Keep partial failure evidence without masking the browser error.
           if-no-files-found: warn
           retention-days: 14
