@@ -14,6 +14,7 @@ import zlib
 import validate_directory_v4_evidence as backend
 
 SOURCES = {
+    'internal/auth/access_types.go', 'internal/auth/access_http.go', 'internal/auth/resource_types.go',
     'web/e2e/group-members-v4-response-observer.ts', 'web/src/GroupMembersV4Observer.test.ts',
     'web/e2e/group-members-v4.spec.ts', 'web/e2e/group-members-v4-helpers.ts',
     'scripts/validate_group_members_v4_evidence.py', 'scripts/test_group_members_v4_evidence_contract.py',
@@ -45,25 +46,80 @@ def expected_ui(root, provenance):
 
 
 def validate(data, provenance, ui_provenance, read_screenshot):
-    exact(data, ['format', 'backend', 'uiProvenance', 'noObservation', 'ui'], 'envelope')
+    exact(data, ['format', 'backend', 'uiProvenance', 'noObservation', 'ui', 'readerUi', 'reader'], 'envelope')
     require(type(data['format']) is int and data['format'] == 1, 'format')
     backend.validate(data['backend'], provenance)
     require(data['uiProvenance'] == ui_provenance, 'UI source/checkout/run mismatch')
     require(set(ui_provenance['sourceDigests']) == SOURCES and all(re.fullmatch('[0-9a-f]{64}', v) for v in ui_provenance['sourceDigests'].values()), 'source coverage')
     b, ui = data['backend'], data['ui']
-    exact(ui, ['actorId', 'authorization', 'discovery', 'reread', 'cases', 'writes'], 'UI fields')
-    require(type(ui['actorId']) is int and ui['actorId'] > 0, 'actor')
-    require(ui['authorization'] == 'platform_admin_after_v4_use_revoke' and ui['writes'] == [], 'read-only interaction boundary')
-    for response in [data['noObservation'], ui['discovery'], ui['reread']]:
-        exact(response, ['query', 'value'], 'response fields')
+    exact(data['noObservation'], ['query', 'value'], 'no-observation response')
     empty = data['noObservation']['value']
     exact(empty, ['dictionaryVersion', 'available', 'list', 'page'], 'no-observation fields')
     require(type(empty['dictionaryVersion']) is int and empty['dictionaryVersion'] == 4 and empty['available'] is False and empty['list'] == [] and empty['page'] == {'pageIdx': 1, 'pageSize': 25, 'total': 0, 'totalPage': 0}, 'no-observation truth')
+    require(data['noObservation']['query'] == ui['discovery']['query'], 'same no-observation domain')
+    validate_ui(b, ui, read_screenshot, 'platform_admin_after_v4_use_revoke', '')
+    validate_ui(b, data['readerUi'], read_screenshot, 'custom_readonly_role', 'reader-')
+    require(data['readerUi']['discovery'] == ui['discovery'] and data['readerUi']['reread'] == ui['reread'], 'same reader/producer observation')
+    validate_reader(data, ui_provenance)
+
+
+READABLE = ['directory_assets', 'domains']
+PERMISSIONS = {'users', 'roles', 'permissions', 'tasks', 'audit', 'audit_exports',
+               'system', 'schedules', 'task_archive', 'domains', 'operation_accounts',
+               'system_logs', 'directory_assets'}
+READ_PATHS = ['/api/domain-selection', '/api/domain-selection/resolve',
+              '/api/directory/v4/observation', '/api/group-assets/v4/members']
+WRITE_PATHS = ['/api/directory/v4/sync', '/api/directory/v4/cancel',
+               '/api/directory-credential-use/v4/grant', '/api/directory-credential-use/v4/revoke']
+
+
+def validate_permissions(entries, marks, label):
+    require(type(entries) is list and len(entries) == len(marks), label)
+    seen = set()
+    for entry in entries:
+        exact(entry, ['mark', 'auth'], label + ' fields')
+        require(type(entry['mark']) is str and entry['mark'] in marks and entry['mark'] not in seen, label + ' marks')
+        seen.add(entry['mark'])
+        exact(entry['auth'], ['readable', 'writeable'], label + ' auth')
+        require(entry['auth']['readable'] is (entry['mark'] in READABLE) and entry['auth']['writeable'] is False, label + ' authority')
+    require(seen == set(marks), label + ' complete')
+
+
+def validate_reader(data, ui_provenance):
+    reader, ui, b = data['reader'], data['readerUi'], data['backend']
+    exact(reader, ['actorId', 'producerActorId', 'roleId', 'permissions', 'menu', 'checks', 'provenance', 'before', 'after', 'denied'], 'reader fields')
+    require(type(reader['actorId']) is int and reader['actorId'] > 0 and reader['actorId'] == ui['actorId'], 'reader identity')
+    require(type(reader['producerActorId']) is int and reader['producerActorId'] == data['ui']['actorId'] and reader['actorId'] != reader['producerActorId'], 'independent reader actor')
+    require(type(reader['roleId']) is str and re.fullmatch('[A-Za-z0-9_-]{24}', reader['roleId']) is not None, 'custom reader role')
+    require(reader['provenance'] == ui_provenance, 'reader exact checkout/source/run')
+    validate_permissions(reader['permissions'], PERMISSIONS, 'reader permissions')
+    validate_permissions(reader['menu'], set(READABLE), 'reader menu')
+    require(reader['checks'] == [*({'method': 'GET', 'path': path, 'allowed': True} for path in READ_PATHS), *({'method': 'POST', 'path': path, 'allowed': False} for path in WRITE_PATHS)], 'reader route checks')
+    require(type(reader['checks']) is list and all(type(check.get('allowed')) is bool for check in reader['checks']), 'boolean route checks')
+    require(type(reader['denied']) is list and all(type(probe.get('status')) is int for probe in reader['denied']), 'integer probe statuses')
+    require(reader['denied'] == [{'method': 'POST', 'path': path, 'status': 403, 'value': {'error': 'forbidden'}} for path in WRITE_PATHS], 'direct denied probes')
+    for phase in ['before', 'after']:
+        snapshot = reader[phase]
+        exact(snapshot, ['actorId', 'roleId', 'baseRole', 'readable', 'writeable', 'domainIds', 'useGrants', 'taskCount', 'useCount', 'observationCount', 'observationSha256', 'mfaLastStep'], 'reader database snapshot')
+        require(type(snapshot['actorId']) is int and snapshot['actorId'] == reader['actorId'] and snapshot['roleId'] == reader['roleId'] and snapshot['baseRole'] == 'viewer', 'stored reader identity/role')
+        require(snapshot['readable'] == READABLE and snapshot['writeable'] == [] and snapshot['domainIds'] == [ui['discovery']['query']['domainId']], 'exact stored reader permission/scope')
+        require(type(snapshot['useGrants']) is int and snapshot['useGrants'] == 0, 'zero reader credential-use grants')
+        require(all(type(snapshot[key]) is int and snapshot[key] > 0 for key in ['taskCount', 'useCount', 'observationCount']), 'actual stored counts')
+        require(snapshot['observationSha256'] == b['sha256'], 'same stored reader observation body')
+        require(type(snapshot['mfaLastStep']) is int and snapshot['mfaLastStep'] >= 0, 'stored reader MFA counter')
+    require(reader['before'] == reader['after'], 'reads and denied probes preserve storage')
+
+
+def validate_ui(b, ui, read_screenshot, authorization, filename_prefix):
+    exact(ui, ['actorId', 'authorization', 'discovery', 'reread', 'cases', 'writes'], 'UI fields')
+    require(type(ui['actorId']) is int and ui['actorId'] > 0, 'actor')
+    require(ui['authorization'] == authorization and ui['writes'] == [], 'read-only interaction boundary')
+    for response in [ui['discovery'], ui['reread']]:
+        exact(response, ['query', 'value'], 'response fields')
     discovery, reread = ui['discovery'], ui['reread']
     query = discovery['query']
     exact(query, ['domainId', 'kind', 'pageIdx', 'pageSize'], 'discovery query')
     require(query['kind'] == 'group' and query['pageIdx'] == '1' and query['pageSize'] == '25' and re.fullmatch('[A-Za-z0-9_.-]{1,128}', query['domainId']), 'discovery selection')
-    require(data['noObservation']['query'] == query, 'same no-observation domain')
     require(reread['query'] == {**query, 'observationId': b['taskUUID']} and reread['value'] == discovery['value'], 'pinned reread')
     groups = [o for o in b['objects'] if o['kind'] == 'group']
     require(discovery['value'] == {'dictionaryVersion': 4, 'available': True, 'observationId': b['taskUUID'], 'source': b['source'], 'list': groups, 'page': {'pageIdx': 1, 'pageSize': 25, 'total': 12, 'totalPage': 1}}, 'UI/API/stored list')
@@ -85,7 +141,7 @@ def validate(data, provenance, ui_provenance, read_screenshot):
         require(case['rendered'] == [display(x) for x in obj['rawMember'] or []], 'ordered escaped UI facts')
         shot = case['screenshot']
         exact(shot, ['filename', 'sha256'], 'screenshot fields')
-        require(shot['filename'] == f'group-members-v4-{width}-{index}.png' and re.fullmatch('[0-9a-f]{64}', shot['sha256']), 'screenshot name/hash')
+        require(shot['filename'] == f'group-members-v4-{filename_prefix}{width}-{index}.png' and re.fullmatch('[0-9a-f]{64}', shot['sha256']), 'screenshot name/hash')
         raw = read_screenshot(shot['filename'])
         require(24 <= len(raw) <= 10000000 and raw[:16] == b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR' and struct.unpack('>II', raw[16:24]) == (width, height), 'actual PNG dimensions')
         validate_png(raw, width, height)

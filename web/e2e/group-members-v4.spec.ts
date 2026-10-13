@@ -19,6 +19,10 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { directoryV2ResponseJSON } from "./directory-v2-response-observer";
 const run = promisify(execFile);
+type Permission = {
+  mark: string;
+  auth: { readable: boolean; writeable: boolean };
+};
 type Authenticator = { secret: string; lastCounter: number };
 type DirectoryObject = {
   objectGUID: string;
@@ -337,6 +341,61 @@ async function storedEvidence(taskUUID: string) {
   }
   return stdout.trim() ? JSON.parse(stdout) : null;
 }
+async function readerSnapshot(
+  actorId: number,
+  roleId: string,
+  taskUUID: string,
+) {
+  if (
+    !Number.isSafeInteger(actorId) ||
+    actorId <= 0 ||
+    !/^[A-Za-z0-9_-]{24}$/u.test(roleId) ||
+    !/^[A-Za-z0-9_.-]{1,128}$/u.test(taskUUID)
+  )
+    throw new Error("Invalid synthetic reader identity");
+  const container = process.env.ADTR_E2E_DB_CONTAINER ?? "";
+  if (!/^adtr-auth-e2e-[0-9a-f]{12}$/u.test(container))
+    throw new Error("Owned isolated database required");
+  const sql = `BEGIN READ ONLY; SELECT jsonb_build_object(
+    'actorId',u.id,'roleId',u.role_id,'baseRole',u.role,'mfaLastStep',u.mfa_last_step,
+    'readable',COALESCE((SELECT jsonb_agg(mark ORDER BY mark) FROM adtr.access_permissions WHERE tenant_id=u.tenant_id AND role_id=u.role_id AND readable),'[]'::jsonb),
+    'writeable',COALESCE((SELECT jsonb_agg(mark ORDER BY mark) FROM adtr.access_permissions WHERE tenant_id=u.tenant_id AND role_id=u.role_id AND writeable),'[]'::jsonb),
+    'domainIds',COALESCE((SELECT jsonb_agg(domain_id ORDER BY domain_id) FROM (SELECT DISTINCT m.domain_id FROM adtr.resource_role_groups g JOIN adtr.resource_group_members m USING(tenant_id,group_id) WHERE g.tenant_id=u.tenant_id AND g.role_id=u.role_id) d),'[]'::jsonb),
+    'useGrants',(SELECT count(*) FROM adtr.operation_account_use_grants WHERE tenant_id=u.tenant_id AND role_id=u.role_id),
+    'taskCount',(SELECT count(*) FROM adtr.tasks),
+    'useCount',(SELECT count(*) FROM adtr.domain_directory_task_uses),
+    'observationCount',(SELECT count(*) FROM adtr.domain_directory_observations),
+    'observationSha256',(SELECT encode(sha256(body),'hex') FROM adtr.domain_directory_observations WHERE tenant_id=u.tenant_id AND task_id='${taskUUID}')
+  ) FROM adtr.users u WHERE u.tenant_id='default' AND u.id=${actorId} AND u.role_id='${roleId}'; COMMIT;`;
+  try {
+    const { stdout } = await run(
+      "docker",
+      [
+        "exec",
+        "-e",
+        "PGOPTIONS=-c statement_timeout=2000",
+        container,
+        "psql",
+        "-U",
+        "postgres",
+        "-d",
+        "adtr_e2e",
+        "-X",
+        "-A",
+        "-t",
+        "-q",
+        "-v",
+        "ON_ERROR_STOP=1",
+        "-c",
+        sql,
+      ],
+      { encoding: "utf8", timeout: 5000, maxBuffer: 1 << 20 },
+    );
+    return JSON.parse(stdout.trim());
+  } catch {
+    throw new Error("Read-only isolated reader authority query failed");
+  }
+}
 // Existing setup provisions real isolated accounts/domain and registered Worker.
 // New checks consume saved v4 facts through the production membership route.
 test.use({ trace: "off", screenshot: "off", video: "off" });
@@ -349,6 +408,9 @@ test("group members dictionary4 real Worker TLS LDAP PostgreSQL API UI facts", a
   let username = process.env.ADTR_E2E_USERNAME!;
   const initialPassword = process.env.ADTR_E2E_PASSWORD!;
   let password = "Changed Directory Password 123";
+  const readerUsername = "membership-reader";
+  const readerInitial = "Initial Membership Reader Password 123";
+  const readerPassword = "Changed Membership Reader Password 123";
   const producerUsername = "directory-producer";
   const producerInitial = "Initial Directory Producer Password 123";
   const producerPassword = "Changed Directory Producer Password 123";
@@ -363,6 +425,8 @@ test("group members dictionary4 real Worker TLS LDAP PostgreSQL API UI facts", a
     password,
     producerInitial,
     producerPassword,
+    readerInitial,
+    readerPassword,
     accountUser,
     accountPassword,
   ];
@@ -461,13 +525,78 @@ test("group members dictionary4 real Worker TLS LDAP PostgreSQL API UI facts", a
   ).toBeVisible();
   let actorId = (await readJSON(context, "/api/auth/me")).ID as number;
 
-  // Production allows ten sensitive actions per actor per fifteen minutes.
-  // Bootstrap: password/MFA start/enable (3), domain/group/assignment (3),
-  // producer creation (1) = 7. The assignment revokes
-  // the bootstrap session; create the producer only after that UI re-login.
-  // Producer: password/MFA (3), account/connection grant/binding (3), denied
-  // v4 sync (1), v4 grant (1), committed v4 sync (1), v4 revoke (1) = 10.
-  // The forbidden sync still consumes rate budget. Login/logout never resets it.
+  // Ten real sensitive actions per bootstrap: password/MFA (3), domain/group/
+  // assignment (3), reader role/assignment/user (3), producer creation (1).
+  // Producer remains at ten; no bucket resets or authentication shortcuts.
+  await navigateTo(page, "访问管理");
+  await page.getByRole("button", { name: "角色管理", exact: true }).click();
+  await page.getByRole("button", { name: "新增角色", exact: true }).click();
+  await page
+    .getByLabel("角色名称", { exact: true })
+    .fill("E2EMembershipReader");
+  for (const name of ["域连接：读取", "目录资产：读取"])
+    await page.getByRole("checkbox", { name, exact: true }).check();
+  await proof(page, password, auth);
+  const readerRole = await submit(page, "/api/access/roles/save", "保存角色");
+  expect(readerRole.value).toMatchObject({
+    result: "SUCCESS",
+    sessionRevoked: false,
+  });
+  const roleId = readerRole.value.roleID as string;
+  expect(roleId).toMatch(/^[A-Za-z0-9_-]{24}$/u);
+  const permissions = (
+    await readJSON(context, `/api/access/permissions?roleID=${roleId}`)
+  ).permissions.map(({ mark, auth }: Permission) => ({ mark, auth }));
+  expect(
+    permissions
+      .filter((p: Permission) => p.auth.readable)
+      .map((p: Permission) => p.mark)
+      .sort(),
+  ).toEqual(["directory_assets", "domains"]);
+  expect(permissions.every((p: Permission) => !p.auth.writeable)).toBe(true);
+  await navigateTo(page, "资源与租户");
+  await page.getByRole("button", { name: "资源组", exact: true }).click();
+  await page
+    .getByRole("button", { name: `查看 ${groupName}`, exact: true })
+    .click();
+  await page.getByRole("button", { name: "调整关联角色", exact: true }).click();
+  await expect(
+    page.getByLabel("显式关联 platform_admin", { exact: true }),
+  ).toBeChecked();
+  await page.getByLabel("自定义角色 ID", { exact: true }).fill(roleId);
+  await proof(page, password, auth);
+  expect(
+    (await submit(page, "/api/resources/groups/assign", "保存角色关联")).value,
+  ).toMatchObject({ result: "SUCCESS", sessionRevoked: true });
+  await login(page, username, password);
+  await fillSecret(
+    page.getByLabel("二次认证验证码", { exact: true }),
+    await freshCode(auth),
+  );
+  await page.getByRole("button", { name: "登录", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "账户概览", exact: true }),
+  ).toBeVisible();
+  await navigateTo(page, "访问管理");
+  await page.getByRole("button", { name: "用户管理", exact: true }).click();
+  await page.getByRole("button", { name: "新增用户", exact: true }).click();
+  await page.getByLabel("用户名", { exact: true }).fill(readerUsername);
+  await fillSecret(page.getByLabel("初始密码", { exact: true }), readerInitial);
+  await fillSecret(
+    page.getByLabel("确认初始密码", { exact: true }),
+    readerInitial,
+  );
+  await page.getByLabel("角色", { exact: true }).fill(roleId);
+  await proof(page, password, auth);
+  const readerUser = await submit(page, "/api/access/users/create", "创建用户");
+  expect(readerUser.value).toMatchObject({
+    result: "SUCCESS",
+    sessionRevoked: false,
+  });
+  const readerId = readerUser.value.ID as number;
+  expect(readerId).toBeGreaterThan(0);
+  expect(readerId).not.toBe(actorId);
+
   await navigateTo(page, "访问管理");
   await page.getByRole("button", { name: "用户管理", exact: true }).click();
   await page.getByRole("button", { name: "新增用户", exact: true }).click();
@@ -935,6 +1064,157 @@ test("group members dictionary4 real Worker TLS LDAP PostgreSQL API UI facts", a
     testInfo,
   );
   safe(ui);
+  // Switch the actual shared browser cookie through real logout and login.
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await navigateTo(page, "退出登录");
+  await login(page, readerUsername, readerInitial);
+  await expect(
+    page.getByRole("heading", { name: "修改密码", exact: true }),
+  ).toBeVisible();
+  await fillSecret(page.getByLabel("当前密码", { exact: true }), readerInitial);
+  await fillSecret(page.getByLabel("新密码", { exact: true }), readerPassword);
+  await fillSecret(
+    page.getByLabel("确认新密码", { exact: true }),
+    readerPassword,
+  );
+  await page.getByRole("button", { name: "更新密码", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "账户概览", exact: true }),
+  ).toBeVisible();
+  const readerAuth = await enrollMfa(page, readerPassword);
+  secrets.push(readerAuth.secret);
+  const readerMe = await readJSON(context, "/api/auth/me");
+  expect(readerMe).toMatchObject({
+    ID: readerId,
+    username: readerUsername,
+    role: "viewer",
+    needChangePwd: false,
+    hasMfa: true,
+  });
+  expect(readerId).not.toBe(actorId);
+  secrets.push(readerMe.csrfToken);
+  const readerHeaders = {
+    Origin: new URL(page.url()).origin,
+    "X-CSRF-Token": readerMe.csrfToken,
+  };
+  const menu = (await readJSON(context, "/api/access/menu")).menu
+    .map(({ mark, auth }: Permission) => ({ mark, auth }))
+    .sort((a: Permission, b: Permission) => a.mark.localeCompare(b.mark));
+  expect(menu).toEqual([
+    { mark: "directory_assets", auth: { readable: true, writeable: false } },
+    { mark: "domains", auth: { readable: true, writeable: false } },
+  ]);
+  const checks = [
+    ...[
+      "/api/domain-selection",
+      "/api/domain-selection/resolve",
+      "/api/directory/v4/observation",
+      "/api/group-assets/v4/members",
+    ].map((path) => ({ method: "GET", path, allowed: true })),
+    ...[
+      "/api/directory/v4/sync",
+      "/api/directory/v4/cancel",
+      "/api/directory-credential-use/v4/grant",
+      "/api/directory-credential-use/v4/revoke",
+    ].map((path) => ({ method: "POST", path, allowed: false })),
+  ];
+  const checked = await context.request.post("/api/access/check", {
+    headers: readerHeaders,
+    data: { paths: checks.map((c) => `${c.method} ${c.path}`) },
+  });
+  expect(checked.status()).toBe(200);
+  expect(await checked.json()).toEqual({
+    results: checks.map((c) => c.allowed),
+  });
+  const before = await readerSnapshot(readerId, roleId, taskUUID);
+  expect(before).toMatchObject({
+    actorId: readerId,
+    roleId,
+    baseRole: "viewer",
+    readable: ["directory_assets", "domains"],
+    writeable: [],
+    domainIds: [domainId],
+    useGrants: 0,
+    observationSha256: evidence.sha256,
+  });
+  for (const key of ["taskCount", "useCount", "observationCount"])
+    expect(before[key]).toBeGreaterThan(0);
+  const readerUi = await captureMembers(
+    page,
+    readerId,
+    domainId,
+    beforeConnection,
+    taskUUID,
+    observed.source,
+    expected,
+    testInfo,
+    true,
+  );
+  const readerDenied = [];
+  // Role authorization precedes proof consumption on all four production routes.
+  // Each probe uses a current genuine unconsumed code. Verify the persisted
+  // MFA step after EACH denial before reusing it; no replay bypass or bucket reset.
+  await freshCode(readerAuth);
+  for (const [path, data] of [
+    [
+      "/api/directory/v4/sync",
+      { ...sync, idempotencyKey: "membership-reader-denied-sync" },
+    ],
+    ["/api/directory/v4/cancel", { taskUUID }],
+    ...["grant", "revoke"].map((operation) => [
+      `/api/directory-credential-use/v4/${operation}`,
+      {
+        ...mutation,
+        roleId: operation === "grant" ? roleId : "platform_admin",
+        expectedGrantRevision:
+          operation === "grant" ? "0" : revoked.grantRevision,
+        idempotencyKey: `membership-reader-denied-${operation}`,
+      },
+    ]),
+  ] as [string, Record<string, unknown>][]) {
+    let response;
+    try {
+      response = await context.request.post(path, {
+        headers: readerHeaders,
+        data: {
+          ...data,
+          actorPassword: readerPassword,
+          totpCode: totp(readerAuth.secret),
+        },
+        maxRedirects: 0,
+        timeout: 15000,
+      });
+    } catch {
+      throw new Error("Synthetic reader authorization probe failed");
+    }
+    expect(response.status(), `POST ${path}`).toBe(403);
+    expect(response.headers()["cache-control"]).toBe("no-store");
+    const value = await response.json();
+    expect(value).toEqual({ error: "forbidden" });
+    readerDenied.push({
+      method: "POST",
+      path,
+      status: response.status(),
+      value,
+    });
+    expect(await readerSnapshot(readerId, roleId, taskUUID)).toEqual(before);
+  }
+  const after = await readerSnapshot(readerId, roleId, taskUUID);
+  expect(after).toEqual(before);
+  const reader = {
+    actorId: readerId,
+    producerActorId: actorId,
+    roleId,
+    permissions,
+    menu,
+    checks,
+    provenance: await membershipProvenance(),
+    before,
+    after,
+    denied: readerDenied,
+  };
+  safe(readerUi);
+  safe(reader);
   safe(consoles);
   await writeFile(
     testInfo.outputPath("group-members-v4-evidence.json"),
@@ -945,6 +1225,8 @@ test("group members dictionary4 real Worker TLS LDAP PostgreSQL API UI facts", a
           uiProvenance: await membershipProvenance(),
           noObservation,
           ui,
+          readerUi,
+          reader,
           backend: {
             format: 1,
             provenance: await provenance(),
