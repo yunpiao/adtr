@@ -3,7 +3,9 @@ from pathlib import Path
 import re
 import unittest
 
+import ci_postgres_image
 import ldap_e2e_fixture
+import prepare_ci_image
 import test_auth_e2e
 import test_integration
 
@@ -12,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 # Independent expectations: importing the expected values from production would
 # allow an accidental registry, tag, or digest change to silently pass.
 POSTGRES = (
-    "public.ecr.aws/docker/library/postgres:17.6-alpine@sha256:"
+    "docker.io/library/postgres:17.6-alpine@sha256:"
     "ef257d85f76e48da1c64832459b59fcaba1a4dac97bf5d7450c77753542eee94"
 )
 GOLANG = (
@@ -24,6 +26,12 @@ GOLANG = (
 class ContainerImagePinsContract(unittest.TestCase):
     def test_integration_uses_exact_official_postgres_pin(self):
         self.assertEqual(test_integration.IMAGE, POSTGRES)
+
+    def test_preparation_and_transfer_keep_the_independent_postgres_pin(self):
+        self.assertEqual(prepare_ci_image.EXPECTED_REFERENCE, POSTGRES)
+        self.assertEqual(prepare_ci_image.IMAGE, POSTGRES)
+        self.assertEqual(ci_postgres_image.REFERENCE, POSTGRES)
+        self.assertEqual(ci_postgres_image.INDEX_DIGEST, POSTGRES.split('@')[1])
 
     def test_browser_and_ldap_keep_the_shared_postgres_pin(self):
         self.assertEqual(test_auth_e2e.IMAGE, POSTGRES)

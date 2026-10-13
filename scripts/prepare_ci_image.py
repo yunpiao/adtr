@@ -15,7 +15,7 @@ from test_integration import IMAGE
 # Independently byte-verified linux/amd64 config in container-image-provenance.md.
 EXPECTED_IMAGE_ID = "sha256:d741b376874687de90374fd34f55c6b2760e8f7bd7e4ae5cd47f50757fc08cf8"
 EXPECTED_REFERENCE = (
-    "public.ecr.aws/docker/library/postgres:17.6-alpine@sha256:"
+    "docker.io/library/postgres:17.6-alpine@sha256:"
     "ef257d85f76e48da1c64832459b59fcaba1a4dac97bf5d7450c77753542eee94"
 )
 RETRY_DELAYS = (10, 30)
@@ -81,13 +81,17 @@ def inspect_image(run=subprocess.run):
             raise ValueError("expected exactly one inspected image")
         image = images[0]
         repository, digest = EXPECTED_REFERENCE.split("@")
-        expected_digest = repository.rsplit(":", 1)[0] + "@" + digest
+        # Docker may canonicalize docker.io/library/postgres to postgres.
+        # These are two spellings of one fixed source identity, not fallbacks.
+        expected_digests = {repository.rsplit(":", 1)[0] + "@" + digest,
+                            "postgres@" + digest}
         if image.get("Id") != EXPECTED_IMAGE_ID:
             raise ValueError("fixed linux/amd64 image config digest mismatch")
         if image.get("Os") != "linux" or image.get("Architecture") != "amd64":
             raise ValueError("expected linux/amd64 image platform")
         digests = image.get("RepoDigests")
-        if not isinstance(digests, list) or expected_digest not in digests:
+        if (not isinstance(digests, list) or not digests
+                or not all(isinstance(value, str) and value in expected_digests for value in digests)):
             raise ValueError("fixed repository digest missing or mismatched")
         return image
     except (ValueError, TypeError) as error:

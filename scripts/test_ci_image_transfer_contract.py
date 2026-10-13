@@ -147,7 +147,18 @@ class ImageTransferContract(unittest.TestCase):
                 self.metadata[field] = copy.deepcopy(CURRENT[field])
 
     def test_metadata_source_platform_id_attempt_and_archive_are_not_trusted(self):
-        changes = [('reference', transfer.REFERENCE.replace('public.ecr.aws', 'other.invalid')),
+        # INDEX_DIGEST is patched to the synthetic fixture chain in setUp;
+        # use the reference's own digest so these mutations isolate source only.
+        fixed_digest = transfer.REFERENCE.split('@')[1]
+        foreign = 'other.invalid/library/postgres:17.6-alpine@' + fixed_digest
+        old_source = 'public.ecr.aws/docker/library/postgres:17.6-alpine@' + fixed_digest
+        self.assertNotEqual(foreign, transfer.REFERENCE)
+        self.assertNotEqual(old_source, transfer.REFERENCE)
+        for changed in [foreign, old_source]:
+            self.assertEqual(changed.split('@')[1], transfer.REFERENCE.split('@')[1])
+            self.assertEqual(changed.split('@')[0].rsplit(':', 1)[1],
+                             transfer.REFERENCE.split('@')[0].rsplit(':', 1)[1])
+        changes = [('reference', foreign), ('reference', old_source),
                    ('platform', 'linux/arm64'), ('image_id', 'sha256:' + 'e' * 64),
                    ('producer_attempt', '2'), ('archive_sha256', 'f' * 64), ('archive_bytes', 1),
                    ('schema', 2)]
@@ -341,7 +352,7 @@ class WorkflowImageGateContract(unittest.TestCase):
                 with self.subTest(key=key, value=value):
                     self.assertNotEqual(subprocess.run(['bash', '-c', command], env=dict(valid, **{key: value})).returncode, 0)
 
-    def test_all_55_jobs_preserve_their_gates_and_bounded_parallelism(self):
+    def test_all_56_jobs_preserve_their_gates_and_bounded_parallelism(self):
         text = Path('.github/workflows/ci.yml').read_text()
         matches = list(re.finditer(r'^  ([a-z][a-z-]*):\n', text.split('jobs:\n', 1)[1], re.MULTILINE))
         jobs_text = text.split('jobs:\n', 1)[1]
@@ -350,7 +361,7 @@ class WorkflowImageGateContract(unittest.TestCase):
         self.assertEqual(set(jobs), {'prepare-postgres', 'contracts', 'auth-integration', 'browser',
                                     'native-no-store', 'native-no-store-fixed', 'user-assets-fixed', 'verify'})
         browser_names = re.findall(r'^          - name: (.+)$', jobs['browser'], re.MULTILINE)
-        self.assertEqual(len(browser_names), 35)
+        self.assertEqual(len(browser_names), 36)
         self.assertEqual(len(set(browser_names)), len(browser_names))
         shard_matrices = re.findall(r'^        shard: \[([^\]]+)\]$', jobs['auth-integration'], re.MULTILINE)
         fixed_matrices = re.findall(r'^        suite: \[([^\]]+)\]$', jobs['user-assets-fixed'], re.MULTILINE)
@@ -362,7 +373,7 @@ class WorkflowImageGateContract(unittest.TestCase):
         self.assertEqual(len(fixed_names), 7)
         self.assertEqual(len(set(fixed_names)), len(fixed_names))
         self.assertIn('suite: [user-assets-v2, user-assets-v2-readers, user-assets-v3, computer-assets-v3, computer-assets-v3-readers, group-assets-v3, group-assets-v3-readers]', jobs['user-assets-fixed'])
-        self.assertEqual(len(browser_names) + len(shard_ids) + len(fixed_names) + len(jobs) - 3, 55)
+        self.assertEqual(len(browser_names) + len(shard_ids) + len(fixed_names) + len(jobs) - 3, 56)
         for name in ['auth-integration', 'browser', 'user-assets-fixed']:
             expected_parallelism = 8 if name == 'browser' else 2
             self.assertIn(f'max-parallel: {expected_parallelism}', jobs[name])

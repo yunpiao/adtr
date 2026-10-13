@@ -205,8 +205,9 @@ class EmptyAssetEvidenceContract(unittest.TestCase):
         # Guard the rest of the workflow separately from the exact empty-evidence block.
         # #151 adds the dictionary4 backend entry/evidence upload and the reviewed
         # four-to-eight auth shard split and fixed Go image identity/evidence steps;
-        # the existing empty-observation block below stays byte-exact.
-        self.assertEqual(hashlib.sha256((workflow[:start] + workflow[end:]).encode()).hexdigest(), '0222be70545d47b17d7f74aff125469433731f618aeee668bda393463d22d07e')
+        # group-members-v4 now adds only its primary suite and evidence steps.
+        # The existing empty-observation block below stays byte-exact.
+        self.assertEqual(hashlib.sha256((workflow[:start] + workflow[end:]).encode()).hexdigest(), 'f99d1778df808ae9beb979b660c567f5cf5d92cc87aee93ad3d0900b87d9ea5d')
 
     def test_original_controls_are_preserved_and_helpers_are_read_only(self):
         code = (ROOT / 'web/e2e/directory-v3-controls.spec.ts').read_text()

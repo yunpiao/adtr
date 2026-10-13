@@ -199,6 +199,8 @@ jobs:
             command: python3 scripts/test_auth_e2e.py --suite group-assets-v3
           - name: group-assets-v3-readers
             command: python3 scripts/test_auth_e2e.py --suite group-assets-v3-readers
+          - name: group-members-v4
+            command: python3 scripts/test_auth_e2e.py --suite group-members-v4
           - name: directory-v4-backend
             command: python3 scripts/test_auth_e2e.py --suite directory-v4-backend
           - name: directory-v3-backend
@@ -364,6 +366,21 @@ jobs:
             web/test-results/**/operational-logs.png
           if-no-files-found: error
           retention-days: 7
+      - name: Validate group membership dictionary4 browser evidence
+        if: ${{ success() && matrix.name == 'group-members-v4' }}
+        run: python3 scripts/validate_group_members_v4_evidence.py --source-root .
+      - name: Retain group membership dictionary4 browser evidence
+        if: ${{ always() && matrix.name == 'group-members-v4' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: group-members-v4-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            web/test-results/**/group-members-v4-evidence.json
+            web/test-results/**/group-members-v4-*.png
+          # Success requires complete validated JSON/PNGs above. A failed test
+          # may leave partial/no evidence; retain it without replacing its error.
+          if-no-files-found: warn
+          retention-days: 14
       - name: Validate dictionary4 backend evidence
         if: ${{ success() && matrix.name == 'directory-v4-backend' }}
         run: python3 scripts/validate_directory_v4_evidence.py --source-root .

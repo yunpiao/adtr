@@ -26,6 +26,7 @@ export type SocPage =
   | "user-assets-v3"
   | "computer-assets-v3"
   | "group-assets-v3"
+  | "group-members-v4"
   | "directory-credential-use-v2";
 
 type NavigationGroup = "management" | "collection" | "identity";
@@ -86,6 +87,7 @@ export const SOC_WORKSPACE_LABELS: Record<SocPage, string> = {
   "user-assets-v3": "用户资产 · 字典 3",
   "computer-assets-v3": "计算机资产",
   "group-assets-v3": "组资产",
+  "group-members-v4": "组原始成员 · 字典 4",
   "directory-credential-use-v2": "补充目录凭据授权",
 };
 
@@ -334,6 +336,7 @@ export default function SocNavigation({
             {button("user-assets-v2", "assets")}
             {button("computer-assets-v3", "assets")}
             {button("group-assets-v3", "assets")}
+            {button("group-members-v4", "assets")}
             {button("tasks", "tasks")}
             {button("audit", "audit")}
             {button("messages", "audit")}
