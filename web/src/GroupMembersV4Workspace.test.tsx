@@ -457,6 +457,56 @@ describe("observation and authorization races", () => {
     await screen.findByText(/暂无可读取的字典 4 已完成观测/);
     expect(calls(detailPath)).toHaveLength(0);
   });
+  it("renders an available zero-group observation as unknown, pins reread and disables both pages", async () => {
+    override = (url) =>
+      url.startsWith(listPath) ? response(page(url, 0)) : undefined;
+    render(
+      <GroupMembersV4Workspace profile={profile} sessionChanged={vi.fn()} />,
+    );
+    fireEvent.click(await screen.findByRole("radio"));
+    click("核对并打开连接详情");
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "本页观测未返回组对象；成员情况未知。",
+    );
+    expect(screen.queryByText(/暂无可读取的字典 4 已完成观测/)).toBeNull();
+    expect(screen.getByText("observation-one")).toBeVisible();
+    expect(screen.getByText(source.completed_at)).toBeVisible();
+    expect(screen.getByRole("button", { name: "上一页" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "下一页" })).toBeDisabled();
+    expect(screen.getByLabelText("每页组数")).toHaveValue("25");
+    expect(
+      screen.getByText("第 1 页 · 共 0 页（仅本次观测中的组）"),
+    ).toBeVisible();
+    expect(
+      within(screen.getByRole("list", { name: "本次观测的组" })).queryAllByRole(
+        "listitem",
+      ),
+    ).toHaveLength(0);
+    expect(screen.queryByRole("button", { name: "查看原始成员" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "组原始成员详情" })).toBeNull();
+    click("上一页");
+    click("下一页");
+    expect(calls(listPath)).toHaveLength(1);
+    click("重读原观测");
+    await waitFor(() => expect(calls(listPath)).toHaveLength(2));
+    await screen.findByRole("button", { name: "重读原观测" });
+    expect(params(listPath)).toEqual({
+      domainId: choice.domainId,
+      kind: "group",
+      pageIdx: "1",
+      pageSize: "25",
+      observationId: "observation-one",
+    });
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "本页观测未返回组对象；成员情况未知。",
+    );
+    expect(calls(detailPath)).toHaveLength(0);
+    expect(
+      fetcher.mock.calls.every(
+        ([url, init]) => init?.method === "GET" || url === "/api/access/check",
+      ),
+    ).toBe(true);
+  });
   it.each([401, 403, 409])(
     "page %i clears old source and data without latest rediscovery",
     async (status) => {
