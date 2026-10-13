@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -245,7 +246,33 @@ func TestGroupMembersV4MigratedHTTPRevocation(t *testing.T) {
 			mountGroupMembersV4HTTP(f)
 			path := groupMembersV4HTTPPath("2", task.ID, o.Objects[0].Base.GUID)
 			f.request("directory-http-reader", path, nil, 200)
-			f.exec(tc.sql, tc.args...)
+			if tc.name == "expired" {
+				// An allowed producer grant makes tenant expiry a governed
+				// mutation. Keep the production guard exercised before using
+				// the real proof-protected management route to expire it.
+				before := f.count(`SELECT expire_time FROM adtr.resource_tenant_config WHERE tenant_id=$1`, governanceHTTPTenant)
+				_, err := f.conn.Exec(f.ctx, tc.sql, tc.args...)
+				var denied *pgconn.PgError
+				if !errors.As(err, &denied) || denied.Code != "42501" || denied.ConstraintName != "credential_use_governance" {
+					t.Fatal("unguarded tenant expiry must be rejected by credential governance", err)
+				}
+				if f.count(`SELECT expire_time FROM adtr.resource_tenant_config WHERE tenant_id=$1`, governanceHTTPTenant) != before {
+					t.Fatal("rejected tenant expiry changed persisted configuration")
+				}
+				f.request("directory-http-reader", path, nil, 200)
+				expires := time.Now().Add(-time.Hour).Unix()
+				out := f.mutate("tenant", "/api/resources/tenant/save", map[string]any{"maxAdCount": 10, "expireTime": expires, "uid": "synthetic-http", "name": "HTTP governance"}, 200)
+				if out["sessionRevoked"] != true || f.count(`SELECT expire_time FROM adtr.resource_tenant_config WHERE tenant_id=$1`, governanceHTTPTenant) != expires {
+					t.Fatal("governed tenant expiry was not persisted with session revocation")
+				}
+				// Tenant management also revokes sessions. Verify that effect,
+				// then issue the fixture's usual authenticated session so the
+				// final response specifically exercises current tenant expiry.
+				f.error(f.request("directory-http-reader", path, nil, 401), "unauthenticated")
+				reissueSourceHTTPSession(t, f.governanceHTTPFixture, f.clients["directory-http-reader"])
+			} else {
+				f.exec(tc.sql, tc.args...)
+			}
 			f.error(f.request("directory-http-reader", path, nil, tc.status), tc.code)
 		})
 	}
