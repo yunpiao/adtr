@@ -21,3 +21,9 @@ func ReadDirectoryWithDialForIntegrationTest(ctx context.Context, cfg DirectoryC
 func ReadDirectoryV2WithDialForIntegrationTest(ctx context.Context, cfg DirectoryV2Config, credential Credential, dial func(context.Context, string, string) (net.Conn, error)) (DirectoryV2Observation, error) {
 	return readDirectoryV2(ctx, cfg, credential, transport{lookup: net.DefaultResolver.LookupNetIP, dial: dial})
 }
+
+// ReadDirectoryV4WithDialForIntegrationTest uses production dictionary-4 TLS,
+// authorization and parsing; only the isolated synthetic dial is replaced.
+func ReadDirectoryV4WithDialForIntegrationTest(ctx context.Context, cfg DirectoryV4Config, credential Credential, dial func(context.Context, string, string) (net.Conn, error)) (DirectoryV4Observation, error) {
+	return readDirectoryV4(ctx, cfg, credential, transport{lookup: net.DefaultResolver.LookupNetIP, dial: dial})
+}

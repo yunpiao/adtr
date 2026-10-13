@@ -9,6 +9,11 @@ const DirectoryPurpose = "domain.directory_read"
 const DirectoryV2Purpose = "domain.directory_read.v2"
 const DirectoryV3Purpose = "domain.directory_read.v3"
 
+const DirectoryV4Purpose = "domain.directory_read.v4"
+
+// DirectoryV4ConsumerEnabled reports compiled capability, never a deployment gate or grant.
+const DirectoryV4ConsumerEnabled = true
+
 // DirectoryV3ConsumerEnabled reports code registration only. It conveys neither
 // the deployment gate state nor any credential-use grant or eligibility.
 const DirectoryV3ConsumerEnabled = true
@@ -23,7 +28,7 @@ const DirectoryConsumerEnabled = true
 const DirectoryV2ConsumerEnabled = true
 
 func validatePurpose(purpose string) error {
-	if purpose != Purpose && purpose != DirectoryPurpose && purpose != DirectoryV2Purpose && purpose != DirectoryV3Purpose {
+	if purpose != Purpose && purpose != DirectoryPurpose && purpose != DirectoryV2Purpose && purpose != DirectoryV3Purpose && purpose != DirectoryV4Purpose {
 		return problem(422, "unsupported_credential_purpose")
 	}
 	return nil
@@ -39,6 +44,8 @@ func consumerEnabledForPurpose(purpose string) bool {
 		return DirectoryV2ConsumerEnabled
 	case DirectoryV3Purpose:
 		return DirectoryV3ConsumerEnabled
+	case DirectoryV4Purpose:
+		return DirectoryV4ConsumerEnabled
 	default:
 		return false
 	}
@@ -47,5 +54,5 @@ func consumerEnabledForPurpose(purpose string) bool {
 // isDirectoryPurpose selects the shared directory eligibility rules only for
 // known exact purposes. Every store entry point validates before selecting SQL.
 func isDirectoryPurpose(purpose string) bool {
-	return purpose == DirectoryPurpose || purpose == DirectoryV2Purpose || purpose == DirectoryV3Purpose
+	return purpose == DirectoryPurpose || purpose == DirectoryV2Purpose || purpose == DirectoryV3Purpose || purpose == DirectoryV4Purpose
 }

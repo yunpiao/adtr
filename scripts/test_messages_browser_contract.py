@@ -10,14 +10,26 @@ class MessagesBrowserContract(unittest.TestCase):
         workflow = Path('.github/workflows/ci.yml').read_text()
         browser = workflow.split('  browser:\n', 1)[1].split('  native-no-store:\n', 1)[0]
         names = re.findall(r'^          - name: (.+)$', browser, re.M)
-        self.assertEqual(len(names), 34)
-        self.assertEqual(len(set(names)), 34)
+        self.assertEqual(len(names), 35)
+        self.assertEqual(len(set(names)), 35)
         self.assertEqual(names.count('messages'), 1)
         self.assertIn('command: python3 scripts/test_auth_e2e.py --suite messages\n', browser)
-        # 34 browser + 4 auth shards + 7 fixed assets + 5 scalar jobs = 50.
+        # Count actual matrix entries, so a changed shard count cannot silently
+        # retain a stale total while all browser suites still look correct.
         jobs = re.findall(r'^  ([a-z][a-z-]+):$', workflow.split('jobs:\n', 1)[1], re.M)
         self.assertEqual(set(jobs), {'prepare-postgres', 'contracts', 'auth-integration', 'browser', 'native-no-store', 'native-no-store-fixed', 'user-assets-fixed', 'verify'})
-        self.assertEqual(len(names) + 4 + 7 + len(jobs) - 3, 50)
+        auth = workflow.split('  auth-integration:\n', 1)[1].split('  browser:\n', 1)[0]
+        fixed = workflow.split('  user-assets-fixed:\n', 1)[1].split('  verify:\n', 1)[0]
+        shards = re.findall(r'^        shard: \[([^\]]+)\]$', auth, re.M)
+        suites = re.findall(r'^        suite: \[([^\]]+)\]$', fixed, re.M)
+        self.assertEqual(len(shards), 1)
+        self.assertEqual(len(suites), 1)
+        shard_ids = [int(value) for value in shards[0].split(',')]
+        fixed_names = [value.strip() for value in suites[0].split(',')]
+        self.assertEqual(shard_ids, list(range(1, 9)))
+        self.assertEqual(len(fixed_names), 7)
+        self.assertEqual(len(set(fixed_names)), len(fixed_names))
+        self.assertEqual(len(names) + len(shard_ids) + len(fixed_names) + len(jobs) - 3, 55)
         self.assertIn('BROWSER_RESULT: ${{ needs.browser.result }}', workflow)
         self.assertIn('test "$BROWSER_RESULT" = success', workflow)
         self.assertIn('path: web/test-results/**/messages-soc-*', browser)

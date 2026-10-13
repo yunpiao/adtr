@@ -335,7 +335,7 @@ func readDirectoryMessageProfile(reader io.Reader, expectedID, remaining int, pr
 		return out, errBER
 	}
 	if length > remaining {
-		if profile == directoryProfileV2 {
+		if profile == directoryProfileV2 || profile == directoryProfileV4 {
 			return out, directoryassets.ErrLimit
 		}
 		return out, errBER

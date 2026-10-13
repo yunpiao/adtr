@@ -2820,9 +2820,24 @@
         "UI-0489",
         "UI-0490"
       ],
-      "status": "not_started",
+      "status": "in_progress",
       "product_accepted": false,
-      "evidence": null
+      "evidence": {
+        "engineering_issue": "https://github.com/yunpiao/adtr/issues/151",
+        "contract": "docs/directory-v4-contract.md",
+        "implemented_scope": "实现中的dictionary4独立默认关闭原始组member采集、不可变存储和固定观测只读API；区分未返回与返回空集合；returnedMemberCount仅表示返回值数，不声称旧memberCount口径；所有ranged属性整次拒绝。",
+        "verified": [
+          "基线main013ba239e5a6af5061a252125a92779c33bf1725完整make check通过；第一版整合候选完整make check通过；最终冻结版本另跑完整check和精确远端CI",
+          "独立codec/transport race与真实StartTLS/LDAPS fixture精确11属性、30行/2页、缺失/空/原始值测试通过；integration-tag测试编译通过，不替代PG执行",
+          "独立API审查提出的浅clone provenance与stored body/hash链缺口已修复，具名对抗测试通过；最终精确tree复核与CI待完成"
+        ],
+        "remaining": [
+          "最终完整本地check、独立实际diff复审、精确head全CI、current-main兼容、合并及main-push CI待完成",
+          "真实注册Worker到合成TLS LDAP再到PostgreSQL/API逐值链已编写，当前executor缺Docker/PG，远端运行前不计通过",
+          "FLD0511旧memberCount、memberOf、主组补齐、递归/跨域完整性、ranged continuation、完整旧字段/分页/UI未完成",
+          "真实AD、八版本Windows、容量和生产验收开放；#30与#151保持open，product_accepted=false"
+        ]
+      }
     },
     {
       "id": "AD-F-044",

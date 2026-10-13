@@ -202,8 +202,11 @@ class EmptyAssetEvidenceContract(unittest.TestCase):
         self.assertIn('uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02', steps)
         self.assertIn('if-no-files-found: error', steps)
         self.assertNotIn('include-hidden-files', steps)
-        # This exact two-step delta is the only workflow change from published 3d9fee4.
-        self.assertEqual(hashlib.sha256((workflow[:start] + workflow[end:]).encode()).hexdigest(), 'a0368741a173743aa8ffddfb6a54a115d7ac9f01d775d494475c51bac503072b')
+        # Guard the rest of the workflow separately from the exact empty-evidence block.
+        # #151 adds the dictionary4 backend entry/evidence upload and the reviewed
+        # four-to-eight auth shard split and fixed Go image identity/evidence steps;
+        # the existing empty-observation block below stays byte-exact.
+        self.assertEqual(hashlib.sha256((workflow[:start] + workflow[end:]).encode()).hexdigest(), '0222be70545d47b17d7f74aff125469433731f618aeee668bda393463d22d07e')
 
     def test_original_controls_are_preserved_and_helpers_are_read_only(self):
         code = (ROOT / 'web/e2e/directory-v3-controls.spec.ts').read_text()

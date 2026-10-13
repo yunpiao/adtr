@@ -360,7 +360,7 @@ func TestDirectoryV3LimitsAndUnknownProfilesFailBeforeAuthority(t *testing.T) {
 		assertError(t, err, CodeInvalidConfig, StageValidate)
 		assertEmptyDirectoryV3Observation(t, result)
 	}
-	for _, profile := range []directoryProfile{0, 4, 255} {
+	for _, profile := range []directoryProfile{0, 5, 255} {
 		cfg := fixtureDirectoryConfig(t, LDAPS, nil)
 		cfg.Authorize = func(context.Context, DirectoryStage) error { t.Error("unknown profile reached authority"); return nil }
 		credential := fixtureCredential()

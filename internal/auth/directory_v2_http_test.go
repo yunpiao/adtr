@@ -116,7 +116,7 @@ func TestDirectoryV2GenericTaskMetadataAndControlsRemainProtected(t *testing.T) 
 			t.Fatal("generic directory task leaked data or bypassed dedicated controls")
 		}
 	}
-	if isDirectoryTaskKind("domain.directory_read.v4") || isDirectoryTaskKind("domain.directory_read.v2 ") {
+	if isDirectoryTaskKind("domain.directory_read.v5") || isDirectoryTaskKind("domain.directory_read.v2 ") {
 		t.Fatal("unknown kind selected directory policy")
 	}
 	prefix, enabled := credentialUseEndpointForPurpose(credentialuse.DirectoryV2Purpose)

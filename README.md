@@ -129,3 +129,15 @@ F38 增加当前账户的审计导出历史：离开页面后可重新发现实�
 F56/AD-F-205 本地切片记录本应用从部署后实际产生的 api/worker 运行事件，可按确认的时间范围查询并生成受保护 ZIP/JSONL 诊断包。它不采集历史 stdout、不读取任意路径，也不生成不存在的服务日志；失败、队列拒绝和不确定确认分别记录，覆盖范围始终是尽力记录。默认安装租户还须具有 system 与 system_logs 权限。迁移14遇到尚未确认停止的账户凭据使用时会拒绝升级，必须让旧版本执行器完成真实确认后再重试。详见 [docs/operational-log-contract.md](docs/operational-log-contract.md)。网络诊断 AD-F-204 仍待目标、协议、端口与授权契约。
 
 浏览器会话隔离已在本地增强：另一标签的登录/退出会触发真实会话重核验，通知不可用时由重新聚焦/可见性补核验；旧私有响应不能恢复旧身份。非敏感未知结果记录按actor保留，避免会话轮换丢失原幂等键。上述精确 head CI 的 [session-invalidation 套件](https://github.com/yunpiao/adtr/actions/runs/37945689472/job/113871223388) 已通过真实跨标签链路；范围见 [docs/session-invalidation-contract.md](docs/session-invalidation-contract.md)，不替代完整产品验收。
+
+## Dictionary4 原始组成员后端（实现中）
+
+[工程#151](https://github.com/yunpiao/adtr/issues/151) 新增独立默认关闭的
+`domain.directory_read.v4`：固定请求原始 member，schema20不可变观察和
+`GET /api/group-assets/v4/members` 固定observation/GUID/当前revision读取。
+`ADTR_DIRECTORY_READ_ENABLED` 与 `ADTR_DIRECTORY_READ_V4_ENABLED` 必须同时开启，
+且必须有独立当前v4授权；旧v3开关/授权不隐式升级。开关用于防止新生产者意外执行，
+删除开关会改变默认执行边界；代码安装不会创建实际授权或启用生产设置。
+原始返回值数不等于旧memberCount，null与返回空集合分开；所有range返回整次拒绝。
+详细预算、错误、权限和剩余范围见[dictionary4契约](docs/directory-v4-contract.md)。
+尚无此功能UI；未验证真实AD、Windows、生产或容量，不改变0/209。

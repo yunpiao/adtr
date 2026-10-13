@@ -16,7 +16,7 @@ POSTGRES = (
     "ef257d85f76e48da1c64832459b59fcaba1a4dac97bf5d7450c77753542eee94"
 )
 GOLANG = (
-    "public.ecr.aws/docker/library/golang:1.27.1-alpine@sha256:"
+    "docker.io/library/golang:1.27.1-alpine@sha256:"
     "8a5910f31396cd4d89662f56c68b3ae31d374308270a1c3bd96672ee5ed43414"
 )
 

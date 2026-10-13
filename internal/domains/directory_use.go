@@ -37,6 +37,9 @@ func reserveDirectoryUseForProfileTx(ctx context.Context, tx pgx.Tx, profile dir
 	} else if profile == directoryTaskV3 {
 		statement = `INSERT INTO adtr.domain_directory_task_uses(tenant_id,domain_id,task_id,account_id,account_credential_revision,connection_revision,connection_credential_generation,policy_revision,grant_role_id,grant_revision,actor_id,purpose,state,dictionary_version)
  VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'reserved',3)`
+	} else if profile == directoryTaskV4 {
+		statement = `INSERT INTO adtr.domain_directory_task_uses(tenant_id,domain_id,task_id,account_id,account_credential_revision,connection_revision,connection_credential_generation,policy_revision,grant_role_id,grant_revision,actor_id,purpose,state,dictionary_version)
+ VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'reserved',4)`
 	}
 	_, err = tx.Exec(ctx, statement, t.TenantID, t.DomainID, t.ID, p.AccountID, p.AccountCredentialRevision, p.ConnectionRevision, p.ConnectionCredentialGeneration, p.PolicyRevision, p.GrantRoleID, p.GrantRevision, t.ActorID, identity.purpose)
 	if err != nil {
@@ -259,6 +262,10 @@ func (s *Store) ReconcileReservedDirectoryV2Uses(ctx context.Context, cfg *pgx.C
 }
 func (s *Store) ReconcileReservedDirectoryV3Uses(ctx context.Context, cfg *pgx.ConnConfig, limit int) (int, error) {
 	return s.reconcileReservedDirectoryUsesForProfile(ctx, cfg, directoryTaskV3, limit)
+}
+
+func (s *Store) ReconcileReservedDirectoryV4Uses(ctx context.Context, cfg *pgx.ConnConfig, limit int) (int, error) {
+	return s.reconcileReservedDirectoryUsesForProfile(ctx, cfg, directoryTaskV4, limit)
 }
 
 func (s *Store) reconcileReservedDirectoryUsesForProfile(ctx context.Context, cfg *pgx.ConnConfig, profile directoryTaskProfile, limit int) (int, error) {

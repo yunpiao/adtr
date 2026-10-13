@@ -5,7 +5,9 @@ import re
 import subprocess
 
 AUTH_PACKAGE = "github.com/yunpiao/adtr/internal/auth"
-AUTH_SHARDS = 4
+# Doubling preserves each old shard as two disjoint subsets, without relaxing
+# race detection, password-proof cost or the per-package execution timeout.
+AUTH_SHARDS = 8
 TEST_FLAGS = ["-race", "-count=1", "-tags=integration", "-timeout=10m"]
 
 

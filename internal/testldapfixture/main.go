@@ -26,6 +26,7 @@ type configuration struct {
 	directoryMode                            bool
 	directoryV2                              bool
 	directoryV3                              bool
+	directoryV4                              bool
 	userAssetsV2                             bool
 	computerAssetsV3                         bool
 	groupAssetsV3                            bool
@@ -43,6 +44,7 @@ func readConfiguration(args []string, getenv func(string) string) (configuration
 	flags.StringVar(&cfg.emptyTransitionDir, "empty-transition-dir", "", "optional private marker directory; requires exclusive nonempty fast group/computer dictionary3 mode")
 	flags.BoolVar(&cfg.directoryMode, "directory-mode", false, "enable the fixed synthetic directory dictionary for integration tests")
 	flags.BoolVar(&cfg.directoryV2, "directory-v2", false, "select the fixed eight-attribute dictionary; requires directory mode")
+	flags.BoolVar(&cfg.directoryV4, "directory-v4", false, "select the fixed eleven-attribute dictionary; requires exclusive directory mode")
 	flags.BoolVar(&cfg.directoryV3, "directory-v3", false, "select the fixed ten-attribute dictionary; requires directory mode")
 	flags.BoolVar(&cfg.computerAssetsV3, "computer-assets-v3", false, "select isolated computer rows; requires dictionary3 nonempty fast mode")
 	flags.BoolVar(&cfg.groupAssetsV3, "group-assets-v3", false, "select isolated group rows; requires dictionary3 nonempty fast mode")
@@ -53,7 +55,8 @@ func readConfiguration(args []string, getenv func(string) string) (configuration
 	flags.StringVar(&cfg.ldapsAddress, "ldaps-listen", "127.0.0.1:636", "fixture LDAPS IP:636")
 	if flags.Parse(args) != nil || flags.NArg() != 0 || cfg.cert == "" || cfg.key == "" ||
 		!validListenAddress(cfg.startTLSAddress, "389") || !validListenAddress(cfg.ldapsAddress, "636") ||
-		((cfg.directoryV2 || cfg.directoryV3 || cfg.directoryEmpty || cfg.directorySlow) && !cfg.directoryMode) ||
+		((cfg.directoryV2 || cfg.directoryV3 || cfg.directoryV4 || cfg.directoryEmpty || cfg.directorySlow) && !cfg.directoryMode) ||
+		(cfg.directoryV4 && (cfg.directoryV2 || cfg.directoryV3 || cfg.userAssetsV2 || cfg.computerAssetsV3 || cfg.groupAssetsV3 || cfg.emptyTransitionDir != "" || cfg.controlDir != "")) ||
 		(cfg.directoryV3 && (cfg.directoryV2 || cfg.userAssetsV2)) ||
 		(cfg.userAssetsV2 && (!cfg.directoryMode || !cfg.directoryV2 || cfg.directoryEmpty || cfg.directorySlow)) ||
 		(cfg.computerAssetsV3 && (!cfg.directoryMode || !cfg.directoryV3 || cfg.directoryEmpty || cfg.directorySlow || cfg.userAssetsV2 || cfg.groupAssetsV3)) ||
@@ -133,6 +136,7 @@ func run(ctx context.Context, args []string, getenv func(string) string, output 
 		directoryMode:    cfg.directoryMode,
 		directoryV2:      cfg.directoryV2,
 		directoryV3:      cfg.directoryV3,
+		directoryV4:      cfg.directoryV4,
 		userAssetsV2:     cfg.userAssetsV2,
 		computerAssetsV3: cfg.computerAssetsV3,
 		groupAssetsV3:    cfg.groupAssetsV3,
