@@ -13,7 +13,7 @@ import {
 import type { UserAssetsV3Query } from "./user-assets-v3-api";
 
 type Props = { profile: Profile; query: UserAssetsV3Query; disabled: boolean; failure: (error: unknown) => void };
-import { clearExportRecovery, readExportRecovery, writeExportRecovery } from "./user-asset-export-v3-recovery";
+import { clearExportRecovery, readExportRecovery, writeExportRecovery, type ExportRecovery } from "./user-asset-export-v3-recovery";
 type Intent = { request: ExportRequest; key: string; attempted: boolean; taskID?: string };
 const statusText = {
   pending: "正在等待持久化任务完成", ready: "完整文件已就绪",
@@ -125,7 +125,7 @@ function Export({ profile, query, disabled, failure, request }: Props & { reques
     const proof = getProof(values);
     if (!proof) { setError("请输入有效的操作者密码及六位未使用验证码。"); return; }
     const current: Intent = intentRef.current ?? { request: { ...request, screenColumns: [...columns] }, key: crypto.randomUUID(), attempted: true };
-    const locator = { version: 1 as const, kind: exportKind, actorID: profile.ID, domainId: request.domainId, idempotencyKey: current.key };
+    const locator: ExportRecovery = { version: 1, kind: exportKind, actorID: profile.ID, domainId: request.domainId, idempotencyKey: current.key };
     writeExportRecovery(locator); setRecovery(locator);
     intentRef.current = current; setIntent(current); setProofVersion((v) => v + 1);
     void operation(async (signal) => {

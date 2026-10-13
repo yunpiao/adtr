@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -74,12 +75,31 @@ func (f *userExportHTTPFixture) submit(actor, key string, edit func(map[string]a
 		edit(body)
 	}
 	out := operationalDecode[struct {
-		TaskID   string     `json:"taskID"`
-		Task     tasks.Task `json:"task"`
-		Replayed bool       `json:"replayed"`
+		TaskID   string                           `json:"taskID"`
+		Task     tasks.Task                       `json:"task"`
+		Request  domains.UserAssetExportV3Payload `json:"request"`
+		Replayed bool                             `json:"replayed"`
 	}](f.t, f.request(actor, assetExportPath, f.proof(actor, body), 200).Body.Bytes())
 	if out.TaskID == "" || out.TaskID != out.Task.ID || out.Task.Kind != domains.UserAssetExportV3KindName || string(out.Task.Result) != "{}" {
 		f.t.Fatal("invalid submission", out)
+	}
+	optional := func(key string) string {
+		if value, present := body[key]; present {
+			text, ok := value.(string)
+			if !ok {
+				f.t.Fatalf("invalid test input %s", key)
+			}
+			return text
+		}
+		return ""
+	}
+	columns := body["screenColumns"].([]string)
+	if len(columns) == 0 {
+		columns = []string{"guid", "sAMAccountName", "sid", "mail", "dn", "whenCreated"}
+	}
+	want := domains.UserAssetExportV3Payload{DomainID: "domain-one", ExpectedRevision: "2", ExpectedCredentialRevision: "2", ObservationID: f.observation, Search: optional("search"), SAMAccountName: optional("sAMAccountName"), StartTm: optional("startTm"), EndTm: optional("endTm"), CreatTm: optional("creatTm"), ScreenColumns: columns}
+	if !reflect.DeepEqual(out.Request, want) {
+		f.t.Fatal("submission canonical request changed")
 	}
 	return out.TaskID
 }
@@ -202,11 +222,17 @@ func TestUserAssetExportV3FullDatasetLiteralDownloadAndReceipt(t *testing.T) {
 	if len(rows) != 13 || len(rows[0]) != 6 || rows[1][0] != "00000000-0000-0000-0000-000000000001" || rows[12][0] != "00000000-0000-0000-0000-00000000000c" || !strings.HasPrefix(rows[1][3], "=HYPERLINK(") {
 		t.Fatal("all matching users/literal text lost", rows)
 	}
-	generic := operationalDecode[struct {
-		Task tasks.Task `json:"task"`
-	}](t, f.request("directory-admin", "/api/tasks/detail?taskUUID="+id, nil, 200).Body.Bytes())
+	generic := operationalDecode[tasks.Detail](t, f.request("directory-admin", "/api/tasks/detail?taskUUID="+id, nil, 200).Body.Bytes())
 	if string(generic.Task.Result) != "{}" || string(generic.Task.Cursor) != "{}" {
 		t.Fatal("generic metadata exposure")
+	}
+	submitted, finished := false, false
+	for _, event := range generic.Events {
+		submitted = submitted || event.Action == "submitted"
+		finished = finished || event.Action == "finished" && event.State == tasks.Succeeded
+	}
+	if !submitted || !finished {
+		t.Fatal("generic task history lost persisted lifecycle")
 	}
 	emptyID := f.submit("directory-admin-other", "no-users", func(b map[string]any) { b["search"] = "unmatched-unique"; b["screenColumns"] = []string{"guid"} })
 	l, o := f.execute()
@@ -513,8 +539,19 @@ func TestUserAssetExportV3LostExecutorRecoveryAndCancellationCleanup(t *testing.
 
 func TestUserAssetExportV3NaturalEntitlementExpiryWithoutEpochChange(t *testing.T) {
 	f := newUserExportHTTPFixture(t, false)
+	var maxADCount int
+	var uid, name string
+	if err := f.conn.QueryRow(f.ctx, `SELECT max_ad_count,uid,name FROM adtr.resource_tenant_config WHERE tenant_id=$1`, governanceHTTPTenant).Scan(&maxADCount, &uid, &name); err != nil {
+		t.Fatal(err)
+	}
 	expires := time.Now().Unix() + 8
-	f.exec(`UPDATE adtr.resource_tenant_config SET expire_time=$1 WHERE tenant_id=$2`, expires, governanceHTTPTenant)
+	// Existing allowed credential uses require the real proof-bound tenant
+	// governance path. Configure the deadline before admission; after this
+	// operation the test changes no grants, source pins, epoch or clock.
+	f.request("directory-admin-other", "/api/resources/tenant/save", f.proof("directory-admin-other", map[string]any{"maxAdCount": maxADCount, "expireTime": expires, "uid": uid, "name": name}), 200)
+	if f.count(`SELECT expire_time FROM adtr.resource_tenant_config WHERE tenant_id=$1`, governanceHTTPTenant) != expires {
+		t.Fatal("governed expiry was not persisted")
+	}
 	reissueSourceHTTPSession(t, f.governanceHTTPFixture, f.clients["directory-admin"])
 	epoch := f.count(`SELECT authorization_version FROM adtr.users WHERE id=$1`, f.clients["directory-admin"].id)
 	id := f.submit("directory-admin", "natural-expiry", nil)

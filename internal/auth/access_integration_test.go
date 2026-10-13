@@ -66,7 +66,7 @@ func newAccessFixture(t *testing.T) *accessFixture {
 		}
 		admin.Close(ctx)
 	})
-	if _, e = conn.Exec(ctx, "CREATE SCHEMA adtr;"+Schema+SchemaV3+ResourceSchema+TaskPermissionSchema+AuditPermissionMarks+SystemPermissionMarks+SchedulePermissionMarks+DomainPermissionMarks+OperationAccountPermissionMarks+OperationalLogPermissionMarks+DirectoryPermissionMarks); e != nil {
+	if _, e = conn.Exec(ctx, "CREATE SCHEMA adtr;"+Schema+SchemaV3+ResourceSchema+TaskPermissionSchema+AuditPermissionMarks+SystemPermissionMarks+SchedulePermissionMarks+DomainPermissionMarks+OperationAccountPermissionMarks+OperationalLogPermissionMarks+DirectoryPermissionMarks+UserAssetExportV3PermissionMarks); e != nil {
 		t.Fatal(e)
 	}
 	s, e := New(cfg, []byte(strings.Repeat("x", 32)), "http://localhost:8080", true)
@@ -158,6 +158,20 @@ func (f *accessFixture) count(query string, args ...any) int {
 		f.t.Fatal(e)
 	}
 	return n
+}
+
+// This reduced access fixture intentionally has no task executor/schema. It
+// still installs the current closed permission vocabulary used by role saving.
+func TestAccessUserAssetExportPermissionRoundTripDoesNotGrantDependencies(t *testing.T) {
+	f := newAccessFixture(t)
+	role := f.role("Export permission only", accessGrantInput("user_asset_exports", true, false))
+	if f.count(`SELECT count(*) FROM adtr.access_permissions WHERE role_id=$1 AND mark='user_asset_exports' AND readable AND NOT writeable`, role) != 1 || f.count(`SELECT count(*) FROM adtr.access_permissions WHERE role_id=$1 AND mark<>'user_asset_exports' AND (readable OR writeable)`, role) != 0 {
+		t.Fatal("export permission changed or automatically granted dependencies")
+	}
+	f.call(&f.admin, "/api/access/permissions/save", f.proof(map[string]any{"roleID": role, "permissions": []map[string]any{accessGrantInput("user_asset_exports", true, true)}}), 200)
+	if f.count(`SELECT count(*) FROM adtr.access_permissions WHERE role_id=$1 AND mark='user_asset_exports' AND readable AND writeable`, role) != 1 || f.count(`SELECT count(*) FROM adtr.access_permissions WHERE role_id=$1 AND mark<>'user_asset_exports' AND (readable OR writeable)`, role) != 0 {
+		t.Fatal("explicit export write grant changed unrelated permissions")
+	}
 }
 func (f *accessFixture) createUser(name string, role string) {
 	f.t.Helper()

@@ -125,7 +125,12 @@ class EmptyRefreshContract(unittest.TestCase):
             fixture_source = Path(f'web/e2e/{kind}-assets-v3-fixture.ts').read_text()
             primary = Path(f'web/e2e/{kind}-assets-v3.spec.ts').read_text()
             readers = Path(f'web/e2e/{kind}-assets-v3-readers.spec.ts').read_text()
-            self.assertIn('options: { emptyRefresh?: boolean } = {}', fixture_source)
+            if kind == 'group':
+                self.assertIn('options: { emptyRefresh?: boolean; userAssetExport?: boolean } = {}', fixture_source)
+                self.assertIn('options.emptyRefresh && options.userAssetExport', fixture_source)
+                self.assertIn('Export fixture cannot use group empty-refresh mode', fixture_source)
+            else:
+                self.assertIn('options: { emptyRefresh?: boolean } = {}', fixture_source)
             self.assertIn('options.emptyRefresh && !process.env.ADTR_E2E_LDAP_EMPTY_TRANSITION_DIR', fixture_source)
             self.assertIn(f'setup{title}Fixture(page, context, {{ emptyRefresh: true }})', primary)
             self.assertIn(f'setup{title}Fixture(page, context)', readers)
