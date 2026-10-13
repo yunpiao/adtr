@@ -12,11 +12,12 @@ import unittest
 
 # Base plus #151's dictionary4 backend suite/evidence upload and the reviewed
 # four-to-eight auth shard split and fixed Go image identity/evidence steps.
-# Auth max-parallel remains two.
+# Auth max-parallel remains two. Add only group-members-v4 plus evidence.
+# Intended 56 jobs; no execution claim. Main baseline retains all 55 prior jobs.
 # This hash is an explicit workflow-baseline change requiring independent review;
 # every old job, condition and safety check remains present.
-BASELINE_SHA = '013ba239e5a6af5061a252125a92779c33bf1725'
-BASELINE_WORKFLOW_SHA256 = 'a4ca8a58427c3175fcaa7e69dfa566ea05ae28214192718b92ec80e6c1760493'
+BASELINE_SHA = 'bd302da441323891cec156d951b06f4f4369181d'
+BASELINE_WORKFLOW_SHA256 = '4c9be470d365e9aa9abf1781bff30f699de4f0311351fec79a3d8aed086df232'
 
 
 def preserves_reviewed_workflow(text):
@@ -30,7 +31,7 @@ def preserves_reviewed_workflow(text):
 
 
 class CIParallelismContract(unittest.TestCase):
-    def test_only_browser_budget_differs_from_explicit_55_job_baseline(self):
+    def test_only_browser_budget_differs_from_explicit_56_job_baseline(self):
         self.assertTrue(preserves_reviewed_workflow(Path('.github/workflows/ci.yml').read_text()))
 
     def test_other_budget_and_safety_changes_fail_closed(self):

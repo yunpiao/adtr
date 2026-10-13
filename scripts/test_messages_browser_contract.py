@@ -10,8 +10,8 @@ class MessagesBrowserContract(unittest.TestCase):
         workflow = Path('.github/workflows/ci.yml').read_text()
         browser = workflow.split('  browser:\n', 1)[1].split('  native-no-store:\n', 1)[0]
         names = re.findall(r'^          - name: (.+)$', browser, re.M)
-        self.assertEqual(len(names), 35)
-        self.assertEqual(len(set(names)), 35)
+        self.assertEqual(len(names), 36)
+        self.assertEqual(len(set(names)), 36)
         self.assertEqual(names.count('messages'), 1)
         self.assertIn('command: python3 scripts/test_auth_e2e.py --suite messages\n', browser)
         # Count actual matrix entries, so a changed shard count cannot silently
@@ -29,7 +29,7 @@ class MessagesBrowserContract(unittest.TestCase):
         self.assertEqual(shard_ids, list(range(1, 9)))
         self.assertEqual(len(fixed_names), 7)
         self.assertEqual(len(set(fixed_names)), len(fixed_names))
-        self.assertEqual(len(names) + len(shard_ids) + len(fixed_names) + len(jobs) - 3, 55)
+        self.assertEqual(len(names) + len(shard_ids) + len(fixed_names) + len(jobs) - 3, 56)
         self.assertIn('BROWSER_RESULT: ${{ needs.browser.result }}', workflow)
         self.assertIn('test "$BROWSER_RESULT" = success', workflow)
         self.assertIn('path: web/test-results/**/messages-soc-*', browser)
