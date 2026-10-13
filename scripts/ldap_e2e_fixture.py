@@ -16,8 +16,8 @@ from test_integration import IMAGE
 
 class LDAPFixture:
     def __init__(self, control_enabled=False, directory_enabled=False,
-                 directory_empty=False, directory_slow=False, *, directory_v2=False, user_assets_v2=False, directory_v3=False, directory_v4=False, computer_assets_v3=False, group_assets_v3=False, empty_transition=False):
-        if any(not isinstance(value, bool) for value in (directory_enabled, directory_empty, directory_slow, directory_v2, user_assets_v2, directory_v3, directory_v4, computer_assets_v3, group_assets_v3, empty_transition)):
+                 directory_empty=False, directory_slow=False, *, directory_v2=False, user_assets_v2=False, directory_v3=False, directory_v4=False, computer_assets_v3=False, group_assets_v3=False, empty_transition=False, group_members_v4_pagination=False):
+        if any(not isinstance(value, bool) for value in (directory_enabled, directory_empty, directory_slow, directory_v2, user_assets_v2, directory_v3, directory_v4, computer_assets_v3, group_assets_v3, empty_transition, group_members_v4_pagination)):
             raise TypeError("synthetic directory modes must be booleans")
         if empty_transition and (not directory_enabled or not directory_v3 or
                                  computer_assets_v3 == group_assets_v3 or
@@ -36,6 +36,9 @@ class LDAPFixture:
         if directory_v4 and (not directory_enabled or directory_v2 or directory_v3 or user_assets_v2 or computer_assets_v3 or group_assets_v3 or empty_transition or control_enabled):
             raise ValueError("synthetic dictionary 4 requires exclusive directory mode")
         self.directory_v4 = directory_v4
+        if group_members_v4_pagination and (not directory_enabled or not directory_v4 or directory_empty or directory_slow):
+            raise ValueError("group member pagination requires exclusive nonempty fast dictionary4 mode")
+        self.group_members_v4_pagination = group_members_v4_pagination
         if computer_assets_v3 and (not directory_enabled or not directory_v3 or directory_empty or directory_slow or user_assets_v2 or group_assets_v3):
             raise ValueError("computer assets require dictionary3 nonempty fast mode")
         self.computer_assets_v3 = computer_assets_v3
@@ -115,6 +118,8 @@ class LDAPFixture:
             command.append("-directory-mode")
         if self.directory_v4:
             command.append("-directory-v4")
+        if self.group_members_v4_pagination:
+            command.append("-group-members-v4-pagination")
         if self.directory_v3:
             command.append("-directory-v3")
         if self.directory_v2:
@@ -154,7 +159,7 @@ class LDAPFixture:
                    ADTR_E2E_LDAP_USERNAME=username, ADTR_E2E_LDAP_PASSWORD=password)
         for suffix, enabled in (("MODE", self.directory_enabled),
                                 ("EMPTY", self.directory_empty), ("SLOW", self.directory_slow),
-                                ("V4", self.directory_v4), ("V3", self.directory_v3), ("V2", self.directory_v2), ("USER_ASSETS_V2", self.user_assets_v2), ("COMPUTER_ASSETS_V3", self.computer_assets_v3), ("GROUP_ASSETS_V3", self.group_assets_v3)):
+                                ("GROUP_MEMBERS_V4_PAGINATION", self.group_members_v4_pagination), ("V4", self.directory_v4), ("V3", self.directory_v3), ("V2", self.directory_v2), ("USER_ASSETS_V2", self.user_assets_v2), ("COMPUTER_ASSETS_V3", self.computer_assets_v3), ("GROUP_ASSETS_V3", self.group_assets_v3)):
             key = "ADTR_E2E_LDAP_DIRECTORY_" + suffix
             if enabled:
                 env[key] = "true"

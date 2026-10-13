@@ -199,6 +199,8 @@ jobs:
             command: python3 scripts/test_auth_e2e.py --suite group-assets-v3
           - name: group-assets-v3-readers
             command: python3 scripts/test_auth_e2e.py --suite group-assets-v3-readers
+          - name: group-members-v4-pagination
+            command: python3 scripts/test_auth_e2e.py --suite group-members-v4-pagination
           - name: group-members-v4-empty
             command: python3 scripts/test_auth_e2e.py --suite group-members-v4-empty
           - name: group-members-v4
@@ -368,6 +370,34 @@ jobs:
             web/test-results/**/operational-logs.png
           if-no-files-found: error
           retention-days: 7
+      - name: Validate paginated group membership dictionary4 browser evidence
+        if: ${{ success() && matrix.name == 'group-members-v4-pagination' }}
+        run: python3 scripts/validate_group_members_v4_pagination_evidence.py --source-root .
+      - name: Retain paginated group membership dictionary4 browser evidence
+        if: ${{ always() && matrix.name == 'group-members-v4-pagination' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: group-members-v4-pagination-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            web/test-results/**/group-members-v4-pagination-evidence.json
+            web/test-results/**/group-members-v4-pagination-reader-1440-discovery.png
+            web/test-results/**/group-members-v4-pagination-reader-1440-next.png
+            web/test-results/**/group-members-v4-pagination-reader-1440-detail.png
+            web/test-results/**/group-members-v4-pagination-reader-1440-previous.png
+            web/test-results/**/group-members-v4-pagination-reader-1440-size50.png
+            web/test-results/**/group-members-v4-pagination-reader-1440-size25.png
+            web/test-results/**/group-members-v4-pagination-reader-1440-reread.png
+            web/test-results/**/group-members-v4-pagination-reader-390-discovery.png
+            web/test-results/**/group-members-v4-pagination-reader-390-next.png
+            web/test-results/**/group-members-v4-pagination-reader-390-detail.png
+            web/test-results/**/group-members-v4-pagination-reader-390-previous.png
+            web/test-results/**/group-members-v4-pagination-reader-390-size50.png
+            web/test-results/**/group-members-v4-pagination-reader-390-size25.png
+            web/test-results/**/group-members-v4-pagination-reader-390-reread.png
+          # Strict success validation above requires JSON and all 14 step/viewport PNGs.
+          # Keep partial failure evidence without masking the browser error.
+          if-no-files-found: warn
+          retention-days: 14
       - name: Validate empty group membership dictionary4 browser evidence
         if: ${{ success() && matrix.name == 'group-members-v4-empty' }}
         run: python3 scripts/validate_group_members_v4_empty_evidence.py --source-root .

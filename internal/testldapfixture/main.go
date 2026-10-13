@@ -27,6 +27,7 @@ type configuration struct {
 	directoryV2                              bool
 	directoryV3                              bool
 	directoryV4                              bool
+	groupMembersV4Pagination                 bool
 	userAssetsV2                             bool
 	computerAssetsV3                         bool
 	groupAssetsV3                            bool
@@ -45,6 +46,7 @@ func readConfiguration(args []string, getenv func(string) string) (configuration
 	flags.BoolVar(&cfg.directoryMode, "directory-mode", false, "enable the fixed synthetic directory dictionary for integration tests")
 	flags.BoolVar(&cfg.directoryV2, "directory-v2", false, "select the fixed eight-attribute dictionary; requires directory mode")
 	flags.BoolVar(&cfg.directoryV4, "directory-v4", false, "select the fixed eleven-attribute dictionary; requires exclusive directory mode")
+	flags.BoolVar(&cfg.groupMembersV4Pagination, "group-members-v4-pagination", false, "select 26 synthetic groups and four non-groups; requires exclusive nonempty fast dictionary4 mode")
 	flags.BoolVar(&cfg.directoryV3, "directory-v3", false, "select the fixed ten-attribute dictionary; requires directory mode")
 	flags.BoolVar(&cfg.computerAssetsV3, "computer-assets-v3", false, "select isolated computer rows; requires dictionary3 nonempty fast mode")
 	flags.BoolVar(&cfg.groupAssetsV3, "group-assets-v3", false, "select isolated group rows; requires dictionary3 nonempty fast mode")
@@ -57,6 +59,7 @@ func readConfiguration(args []string, getenv func(string) string) (configuration
 		!validListenAddress(cfg.startTLSAddress, "389") || !validListenAddress(cfg.ldapsAddress, "636") ||
 		((cfg.directoryV2 || cfg.directoryV3 || cfg.directoryV4 || cfg.directoryEmpty || cfg.directorySlow) && !cfg.directoryMode) ||
 		(cfg.directoryV4 && (cfg.directoryV2 || cfg.directoryV3 || cfg.userAssetsV2 || cfg.computerAssetsV3 || cfg.groupAssetsV3 || cfg.emptyTransitionDir != "" || cfg.controlDir != "")) ||
+		(cfg.groupMembersV4Pagination && (!cfg.directoryMode || !cfg.directoryV4 || cfg.directoryEmpty || cfg.directorySlow)) ||
 		(cfg.directoryV3 && (cfg.directoryV2 || cfg.userAssetsV2)) ||
 		(cfg.userAssetsV2 && (!cfg.directoryMode || !cfg.directoryV2 || cfg.directoryEmpty || cfg.directorySlow)) ||
 		(cfg.computerAssetsV3 && (!cfg.directoryMode || !cfg.directoryV3 || cfg.directoryEmpty || cfg.directorySlow || cfg.userAssetsV2 || cfg.groupAssetsV3)) ||
@@ -128,20 +131,21 @@ func run(ctx context.Context, args []string, getenv func(string) string, output 
 	}
 	defer ldaps.Close()
 	fixture := server{
-		tlsConfig:        &tls.Config{MinVersion: tls.VersionTLS12, Certificates: []tls.Certificate{certificate}},
-		username:         cfg.username,
-		password:         cfg.password,
-		control:          control,
-		emptyTransition:  emptyTransition,
-		directoryMode:    cfg.directoryMode,
-		directoryV2:      cfg.directoryV2,
-		directoryV3:      cfg.directoryV3,
-		directoryV4:      cfg.directoryV4,
-		userAssetsV2:     cfg.userAssetsV2,
-		computerAssetsV3: cfg.computerAssetsV3,
-		groupAssetsV3:    cfg.groupAssetsV3,
-		directoryEmpty:   cfg.directoryEmpty,
-		directorySlow:    cfg.directorySlow,
+		tlsConfig:                &tls.Config{MinVersion: tls.VersionTLS12, Certificates: []tls.Certificate{certificate}},
+		username:                 cfg.username,
+		password:                 cfg.password,
+		control:                  control,
+		emptyTransition:          emptyTransition,
+		directoryMode:            cfg.directoryMode,
+		directoryV2:              cfg.directoryV2,
+		directoryV3:              cfg.directoryV3,
+		directoryV4:              cfg.directoryV4,
+		groupMembersV4Pagination: cfg.groupMembersV4Pagination,
+		userAssetsV2:             cfg.userAssetsV2,
+		computerAssetsV3:         cfg.computerAssetsV3,
+		groupAssetsV3:            cfg.groupAssetsV3,
+		directoryEmpty:           cfg.directoryEmpty,
+		directorySlow:            cfg.directorySlow,
 	}
 	if _, err := fmt.Fprintln(output, "synthetic LDAP fixture ready"); err != nil {
 		return errors.New("synthetic LDAP fixture readiness output unavailable")
