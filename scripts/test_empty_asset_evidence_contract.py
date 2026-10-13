@@ -203,9 +203,10 @@ class EmptyAssetEvidenceContract(unittest.TestCase):
         self.assertIn('if-no-files-found: error', steps)
         self.assertNotIn('include-hidden-files', steps)
         # Guard the rest of the workflow separately from the exact empty-evidence block.
-        # #151 adds the explicit dictionary4 backend matrix entry/evidence upload;
+        # #151 adds the dictionary4 backend entry/evidence upload and the reviewed
+        # four-to-eight auth shard split and fixed Go image identity/evidence steps;
         # the existing empty-observation block below stays byte-exact.
-        self.assertEqual(hashlib.sha256((workflow[:start] + workflow[end:]).encode()).hexdigest(), '93e38bbf3a463e39b5dda67a0d3e483aca0e8acf1d661fea354ec70741596d71')
+        self.assertEqual(hashlib.sha256((workflow[:start] + workflow[end:]).encode()).hexdigest(), '0222be70545d47b17d7f74aff125469433731f618aeee668bda393463d22d07e')
 
     def test_original_controls_are_preserved_and_helpers_are_read_only(self):
         code = (ROOT / 'web/e2e/directory-v3-controls.spec.ts').read_text()

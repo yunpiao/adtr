@@ -49,3 +49,42 @@ PostgreSQL 10/10 层、Go 5/5 层均通过；两侧压缩层分别流式解压�
 Compose/BuildKit、PostgreSQL、四个认证分片及全部 22 个浏览器套件的运行。
 必须对发布后的精确 head 完成原有全部 CI，并在独立代码审查、base/head 与依赖复核后才推进合并；
 合并后另核对 main 内容树/父提交与 main-push CI。产品验收仍为 **0/209**，不涉及生产部署。
+
+## Go 构建源修复（2026-10-13，当前候选）
+
+上文保留 2026-10-09 的来源调整与历史验证。本次仅将 Go 编译阶段固定为
+`docker.io/library/golang:1.27.1-alpine@sha256:8a5910f31396cd4d89662f56c68b3ae31d374308270a1c3bd96672ee5ed43414`。
+完整 index、`linux/amd64` manifest/config 身份与上文一致；运行阶段仍为 `scratch`，
+PostgreSQL 的固定 ECR 来源与共享镜像校验流程不变。没有动态源回退或 Docker 登录。
+
+精确 head `19650a58019eab5eb5d9b70d38c64b89ba0b8543` 的
+[CI run 38369355048](https://github.com/yunpiao/adtr/actions/runs/38369355048)
+两次 contracts 尝试均已通过 make check 和真实 PostgreSQL/schema 检查，随后在
+Compose 构建读取 Go 基镜像 manifest 时收到 ECR `429 / Data limit exceeded`：
+[attempt1](https://github.com/yunpiao/adtr/actions/runs/38369355048/job/115202366341)、
+[attempt2](https://github.com/yunpiao/adtr/actions/runs/38369355048/job/115216503428)。
+两次 lifecycle 均失败，不能写成通过；日志未提供 Retry-After 或额度恢复时点。
+
+2026-10-13 Docker Hub 公开 tag API 返回与上述 pin 相同的 index/amd64 digest；
+这是元数据声明核对。本地直接 ECR manifest 请求返回 401 后停止，未取得原始字节，
+没有获取或传输 token。2026-10-09 的独立层字节复核仍是历史证据，不是今日重验。
+
+`scripts/verify_go_build_image.py` 在 CI 使用 Docker 原生公共读取与 pull：
+原始二进制 stdout 不做 strip 或 JSON 重编码，逐级核验固定 index/amd64 manifest
+的 SHA-256、descriptor 长度、config 与五层描述；随后以同一完整 digest 拉取
+`linux/amd64`，检查实际 image/config ID、平台与 RepoDigest。
+压缩层内容由 Docker pull 的内容寻址校验保证；脚本不声称独立下载重算全部层字节，
+不运行镜像、配置登录或自行获取 token。任一步失败均返回非零，不回退、不忽略。
+
+`--evidence-dir` 指定 CI 临时证据目录，用来保留成功核验的原始 index、manifest 和
+固定身份摘要；它对脚本运行是必需的，缺少时不执行核验。目录不应包含认证文件。
+工作流包装步骤保留脚本的安全分类日志与实际退出码；上传步骤在核验成功或失败后
+均保留这份证据，失败仍阻止后续 make check 和 Compose 生命周期。失败目录中的
+日志和退出码不是成功身份核验结果，不能替代 identity.json 或真实生命周期通过。
+该步骤用于在昂贵检查前确认构建输入身份；删除步骤虽仍保留 Dockerfile 的 digest pin，
+但会失去显式平台/config 证据及提前失败诊断。额外元数据请求、拉取与小型证据文件
+带来网络/磁盘开销；Docker Hub 也有配额，换官方等价来源不保证永久可用。
+
+离线契约仅验证固定源、字节处理和拒绝边界。当前本地没有 Docker，候选仍须独立
+实际 diff 复审和新精确 head 的真实拉取、完整 Compose 生命周期及所有必需 CI。
+不更改既有身份/权限/证书校验、超时和产品验收门禁，产品验收保持 0/209。

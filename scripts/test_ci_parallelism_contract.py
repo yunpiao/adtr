@@ -10,11 +10,13 @@ from pathlib import Path
 import unittest
 
 
-# Base plus #151's exact additional dictionary4 backend suite/evidence upload.
+# Base plus #151's dictionary4 backend suite/evidence upload and the reviewed
+# four-to-eight auth shard split and fixed Go image identity/evidence steps.
+# Auth max-parallel remains two.
 # This hash is an explicit workflow-baseline change requiring independent review;
 # every old job, condition and safety check remains present.
 BASELINE_SHA = '013ba239e5a6af5061a252125a92779c33bf1725'
-BASELINE_WORKFLOW_SHA256 = '3a53348d8a4e8759318a04c509b3dc0bd1787214f83acfed627ae87d3b258677'
+BASELINE_WORKFLOW_SHA256 = 'a4ca8a58427c3175fcaa7e69dfa566ea05ae28214192718b92ec80e6c1760493'
 
 
 def preserves_reviewed_workflow(text):
@@ -28,7 +30,7 @@ def preserves_reviewed_workflow(text):
 
 
 class CIParallelismContract(unittest.TestCase):
-    def test_only_browser_budget_differs_from_explicit_51_job_baseline(self):
+    def test_only_browser_budget_differs_from_explicit_55_job_baseline(self):
         self.assertTrue(preserves_reviewed_workflow(Path('.github/workflows/ci.yml').read_text()))
 
     def test_other_budget_and_safety_changes_fail_closed(self):
@@ -37,6 +39,7 @@ class CIParallelismContract(unittest.TestCase):
             ('max-parallel: 8', 'max-parallel: 4'),
             ('max-parallel: 8', 'max-parallel: 9'),
             ('max-parallel: 2', 'max-parallel: 3'),
+            ('shard: [1, 2, 3, 4, 5, 6, 7, 8]', 'shard: [1, 2, 3, 4]'),
             ('fail-fast: false', 'fail-fast: true'),
             ('timeout-minutes: 20', 'timeout-minutes: 25'),
             ('runs-on: ubuntu-24.04', 'runs-on: ubuntu-latest'),

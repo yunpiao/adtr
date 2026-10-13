@@ -85,6 +85,24 @@ jobs:
           cache-dependency-path: web/package-lock.json
       - name: Verify dependency checksums
         run: go mod verify
+      - name: Verify fixed official Go build image identity
+        id: go_image
+        run: |
+          evidence="$RUNNER_TEMP/adtr-go-image"
+          mkdir -p "$evidence"
+          status=0
+          python3 scripts/verify_go_build_image.py --evidence-dir "$evidence" > "$evidence/verification.log" 2>&1 || status=$?
+          printf '%s\n' "$status" > "$evidence/exit-code.txt"
+          cat "$evidence/verification.log"
+          exit "$status"
+      - name: Retain Go build image verification evidence
+        if: ${{ always() && (steps.go_image.outcome == 'success' || steps.go_image.outcome == 'failure') }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: go-build-image-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/adtr-go-image
+          if-no-files-found: error
+          retention-days: 7
       - name: Lint, race tests, type checking and build
         run: make check
       - name: Real PostgreSQL migration and schema contracts
@@ -110,7 +128,7 @@ jobs:
       fail-fast: false
       max-parallel: 2
       matrix:
-        shard: [1, 2, 3, 4]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:

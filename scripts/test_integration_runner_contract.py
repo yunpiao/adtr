@@ -1,6 +1,7 @@
 """Guard complete integration coverage and fail-closed test discovery."""
 import contextlib
 import io
+from pathlib import Path
 import re
 import subprocess
 import unittest
@@ -28,6 +29,28 @@ class IntegrationRunnerContract(unittest.TestCase):
         self.assertTrue(all(shards))
         self.assertLessEqual(max(map(len, shards)) - min(map(len, shards)), 1)
         self.assertEqual(shards, runner.partition_auth_tests("\n".join(self.names)))
+
+    def test_eight_shards_split_each_previous_four_shard_without_moving_coverage(self):
+        self.assertEqual(runner.AUTH_SHARDS, 8)
+        # Exercise uneven discovery sizes as well as the current 297-test suite.
+        for count in (8, 19, 296, 297, 298):
+            names = sorted(f"TestCase{index}" for index in range(count))
+            shards = runner.partition_auth_tests("\n".join(reversed(names)))
+            for index in range(4):
+                with self.subTest(count=count, old_shard=index + 1):
+                    old = names[index::4]
+                    self.assertEqual(shards[index], old[::2])
+                    self.assertEqual(shards[index + 4], old[1::2])
+                    self.assertFalse(set(shards[index]) & set(shards[index + 4]))
+                    self.assertCountEqual(shards[index] + shards[index + 4], old)
+
+    def test_workflow_matrix_matches_every_runner_shard_exactly_once(self):
+        workflow = Path('.github/workflows/ci.yml').read_text()
+        auth = workflow.split('  auth-integration:\n', 1)[1].split('  browser:\n', 1)[0]
+        matrices = re.findall(r'^        shard: \[([0-9, ]+)\]$', auth, re.M)
+        self.assertEqual(len(matrices), 1)
+        self.assertEqual([int(value) for value in matrices[0].split(',')],
+                         list(range(1, runner.AUTH_SHARDS + 1)))
 
     def test_discovery_rejects_missing_duplicate_ambiguous_and_empty_shards(self):
         for output in ("", "ok \tpackage\t1s", "TestOnly", self.discovery + "TestCase0\n",
@@ -91,7 +114,7 @@ class IntegrationRunnerContract(unittest.TestCase):
 
     def test_invalid_shard_configuration_is_rejected(self):
         for argv in (["--suite", "auth"], ["--shard", "1"], ["--suite", "non-auth", "--shard", "1"],
-                     ["--suite", "auth", "--shard", "0"], ["--suite", "auth", "--shard", "5"]):
+                     ["--suite", "auth", "--shard", "0"], ["--suite", "auth", "--shard", "9"]):
             with self.subTest(argv=argv), contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
                 runner.parse_args(argv)
 
