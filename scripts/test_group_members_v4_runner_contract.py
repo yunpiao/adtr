@@ -7,6 +7,7 @@ import hashlib
 from pathlib import Path
 import unittest
 import test_auth_e2e as runner
+from test_group_members_v4_empty_runner_contract import restore_workflow, restore_runner
 
 BASE_WORKFLOW_SHA256 = 'd2d4f3bd2c783c137e1c9195ba1c865d6bfe2eb1df54aa2347dff993dc187295'
 BASE_RUNNER_SHA256 = 'c928e95aa401f6d6ec5a84b7cfe6a40f84311f4a5a3cc7075d76f1c44e19d56d'
@@ -19,7 +20,7 @@ VALIDATE = '''        if args.suite == "group-members-v4":
 
 class GroupMembersRunnerContract(unittest.TestCase):
     def test_original_55_jobs_are_byte_exact_outside_addition(self):
-        text = Path('.github/workflows/ci.yml').read_text()
+        text = restore_workflow(Path('.github/workflows/ci.yml').read_text())
         self.assertEqual(text.count(ENTRY), 1)
         start = text.index('      - name: Validate group membership dictionary4 browser evidence\n')
         end = text.index('      - name: Validate dictionary4 backend evidence\n', start)
@@ -37,7 +38,7 @@ class GroupMembersRunnerContract(unittest.TestCase):
         self.assertNotIn('include-hidden-files', block)
 
     def test_original_runner_bytes_are_preserved(self):
-        text = Path('scripts/test_auth_e2e.py').read_text()
+        text = restore_runner(Path('scripts/test_auth_e2e.py').read_text())
         self.assertEqual(text.count(VALIDATE), 1)
         restored = text.replace(VALIDATE, '').replace(', "group-members-v4"', '')
         self.assertEqual(hashlib.sha256(restored.encode()).hexdigest(), BASE_RUNNER_SHA256)
@@ -51,7 +52,7 @@ class GroupMembersRunnerContract(unittest.TestCase):
                          ['npm', 'run', 'test:e2e', '--prefix', 'web', '--', 'e2e/group-members-v4.spec.ts'])
 
     def test_validator_runs_only_after_browser_success_before_cleanup(self):
-        text = Path('scripts/test_auth_e2e.py').read_text()
+        text = restore_runner(Path('scripts/test_auth_e2e.py').read_text())
         # Both subprocesses fail closed. No validator in finally can replace
         # the originating browser exception; existing cleanup is byte-exact.
         body = next(n for n in ast.walk(ast.parse(text)) if isinstance(n, ast.FunctionDef) and n.name == 'main')

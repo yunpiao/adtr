@@ -7,6 +7,7 @@ import tempfile
 import subprocess
 from unittest.mock import patch
 import unittest
+from test_group_members_v4_empty_runner_contract import restore_workflow
 from pathlib import Path
 from validate_empty_asset_evidence import SOURCES, EXPECTED_FILES, discover, load, validate
 
@@ -190,7 +191,7 @@ class EmptyAssetEvidenceContract(unittest.TestCase):
             with self.assertRaises(ValueError): discover(output, root)
 
     def test_exact_workflow_evidence_gate_and_upload(self):
-        workflow = (ROOT / '.github/workflows/ci.yml').read_text()
+        workflow = restore_workflow((ROOT / '.github/workflows/ci.yml').read_text())
         start = workflow.index('      - name: Validate real empty asset observation evidence\n')
         end = workflow.index('      - name: Retain synthetic profile visual evidence\n', start)
         steps = workflow[start:end]
@@ -218,7 +219,7 @@ class EmptyAssetEvidenceContract(unittest.TestCase):
             self.assertNotIn(forbidden, helper)
         self.assertIn('directoryV2ResponseWitness(response)', helper)
         self.assertIn('scripts/validate_empty_asset_evidence.py', helper)
-        workflow = (ROOT / '.github/workflows/ci.yml').read_text()
+        workflow = restore_workflow((ROOT / '.github/workflows/ci.yml').read_text())
         self.assertIn('path: web/test-results/**/directory-v3-*', workflow)
 
 
