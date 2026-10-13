@@ -555,7 +555,8 @@ test("group members dictionary4 refresh real Worker TLS LDAP PostgreSQL read-onl
 
   // Ten real sensitive actions per bootstrap: password/MFA (3), domain/group/
   // assignment (3), reader role/assignment/user (3), producer creation (1).
-  // Producer remains at ten; no bucket resets or authentication shortcuts.
+  // The separate producer also has ten sensitive actions; see its budget below.
+  // No bucket resets or authentication shortcuts.
   await navigateTo(producerPage, "访问管理");
   await producerPage
     .getByRole("button", { name: "角色管理", exact: true })
@@ -841,9 +842,13 @@ test("group members dictionary4 refresh real Worker TLS LDAP PostgreSQL read-onl
       consumerEnabled: true,
     },
   );
-  // A real connection-test grant already exists; it cannot authorize v4.
-  const denied = await post("/api/directory/v4/sync", sync, 403);
-  expect(denied).toEqual({ error: "forbidden" });
+  // This refresh suite spends the producer's ten-action/15-minute budget on:
+  // password + MFA enrollment/confirmation (3), account/reference/connection
+  // grant (3), v4 grant (1), two real syncs (2), and v4 revoke (1).
+  // The primary, empty and pagination suites retain the real connection-grant
+  // cannot-authorize-v4 403 probe. Repeating it here would make revoke the 11th
+  // sensitive request. The independent effective-use check above remains false.
+
   const account = (
     await readJSON(
       producerContext,

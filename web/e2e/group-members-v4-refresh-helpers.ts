@@ -37,6 +37,10 @@ export const refreshMembershipSources = [
   "scripts/test_group_members_v4_refresh_evidence_contract.py",
   "scripts/test_group_members_v4_refresh_runner_contract.py",
   "scripts/test_group_members_v4_refresh_fixture_contract.py",
+  "scripts/test_group_members_v4_refresh_budget_contract.py",
+  "internal/auth/service.go",
+  "internal/auth/credential_use_http.go",
+  "internal/auth/directory_http.go",
   "web/src/GroupMembersV4Workspace.test.tsx",
 ];
 export async function refreshMembershipProvenance() {

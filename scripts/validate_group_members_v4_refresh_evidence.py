@@ -31,6 +31,8 @@ SOURCES = backend.SOURCES | membership.SOURCES | {
     'scripts/test_group_members_v4_refresh_evidence_contract.py',
     'scripts/test_group_members_v4_refresh_runner_contract.py',
     'scripts/test_group_members_v4_refresh_fixture_contract.py',
+    'scripts/test_group_members_v4_refresh_budget_contract.py',
+    'internal/auth/service.go', 'internal/auth/credential_use_http.go', 'internal/auth/directory_http.go',
     'web/src/GroupMembersV4Workspace.test.tsx',
     'internal/testldapfixture/empty_transition.go', 'internal/testldapfixture/empty_transition_linux.go',
     'internal/testldapfixture/empty_transition_other.go', 'internal/testldapfixture/empty_transition_test.go',
