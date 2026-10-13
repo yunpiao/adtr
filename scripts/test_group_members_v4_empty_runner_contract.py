@@ -7,6 +7,9 @@ import hashlib
 from pathlib import Path
 import unittest
 import test_auth_e2e as runner
+from test_group_members_v4_pagination_runner_contract import (
+    restore_workflow as restore_pagination_workflow, restore_runner as restore_pagination_runner,
+)
 
 BASE_WORKFLOW_SHA256 = 'f07de954603cc02cd0d6abe8924ac345b5cef0845c0cd151d106a0068a39ce35'
 BASE_RUNNER_SHA256 = 'f4d91b748962c57dc5c5d4ef3cf1af66280f31175dbfceb2b264ba013120afac'
@@ -43,10 +46,12 @@ def remove_exact(text, addition, count=1):
 
 
 def restore_workflow(text):
+    text = restore_pagination_workflow(text)
     return remove_exact(remove_exact(text, ENTRY), WORKFLOW_BLOCK)
 
 
 def restore_runner(text):
+    text = restore_pagination_runner(text)
     text = remove_exact(text, VALIDATE)
     text = remove_exact(text, ', "group-members-v4-empty"', 3)
     return remove_exact(text, ' or args.suite == "group-members-v4-empty"')

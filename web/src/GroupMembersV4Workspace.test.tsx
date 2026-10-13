@@ -274,6 +274,98 @@ describe("isolated dictionary4 membership consumer", () => {
       ),
     ).toBe(false);
   });
+  it("preserves exact 25+1 GUID order, second-page member pins and clears details on return and page-size changes", async () => {
+    const witness = [
+      "CN=page-two-only",
+      "CN=raw\u0000\n😀\u202e<script>",
+      "\\u0000",
+      "CN=page-two-last",
+    ];
+    override = (url) => {
+      if (url.startsWith(detailPath)) {
+        const value = detail(witness);
+        value.object = row(26, witness);
+        return response(value);
+      }
+    };
+    await open();
+    const guids = () =>
+      within(screen.getByRole("list", { name: "本次观测的组" }))
+        .getAllByRole("listitem")
+        .map((item) => item.querySelectorAll("span")[1].textContent);
+    expect(guids()).toEqual(
+      Array.from({ length: 25 }, (_, i) => row(i + 1).objectGUID),
+    );
+    expect(screen.getByRole("button", { name: "上一页" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "下一页" })).toBeEnabled();
+    click("下一页");
+    await screen.findByText("group-26");
+    expect(guids()).toEqual([row(26).objectGUID]);
+    expect(params(listPath)).toEqual({
+      domainId: choice.domainId,
+      kind: "group",
+      pageIdx: "2",
+      pageSize: "25",
+      observationId: q.observationId,
+    });
+    expect(screen.getByRole("button", { name: "上一页" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "下一页" })).toBeDisabled();
+    await expand();
+    expect(params(detailPath)).toEqual({
+      ...q,
+      objectGUID: row(26).objectGUID,
+    });
+    expect(
+      within(
+        screen.getByRole("list", { name: "原始 member 值（可逆展示转义）" }),
+      )
+        .getAllByRole("listitem")
+        .map((item) => item.textContent),
+    ).toEqual([
+      "CN=page-two-only",
+      "CN=raw\\u0000\\u000a😀\\u202e<script>",
+      "\\\\u0000",
+      "CN=page-two-last",
+    ]);
+    click("上一页");
+    await screen.findByText("group-1");
+    expect(guids()).toEqual(
+      Array.from({ length: 25 }, (_, i) => row(i + 1).objectGUID),
+    );
+    expect(screen.queryByRole("region", { name: "组原始成员详情" })).toBeNull();
+    fireEvent.change(screen.getByLabelText("每页组数"), {
+      target: { value: "50" },
+    });
+    await screen.findByText("group-26");
+    expect(guids()).toEqual(
+      Array.from({ length: 26 }, (_, i) => row(i + 1).objectGUID),
+    );
+    expect(params(listPath)).toMatchObject({
+      pageIdx: "1",
+      pageSize: "50",
+      observationId: q.observationId,
+    });
+    expect(screen.getByRole("button", { name: "上一页" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "下一页" })).toBeDisabled();
+    fireEvent.change(screen.getByLabelText("每页组数"), {
+      target: { value: "25" },
+    });
+    await waitFor(() => expect(guids()).toHaveLength(25));
+    expect(params(listPath)).toMatchObject({
+      pageIdx: "1",
+      pageSize: "25",
+      observationId: q.observationId,
+    });
+    expect(screen.queryByText("group-26")).toBeNull();
+    click("重读原观测");
+    await screen.findByText("group-1");
+    expect(params(listPath)).toMatchObject({
+      pageIdx: "1",
+      pageSize: "25",
+      observationId: q.observationId,
+    });
+    expect(calls(detailPath)).toHaveLength(1);
+  });
   it.each([null, []] as (string[] | null)[])(
     "distinguishes missing and returned empty %j",
     async (members) => {
