@@ -349,6 +349,28 @@ func (e *Engine) Finish(ctx context.Context, l Lease, o Outcome) (Task, error) {
 				return problem(400, "invalid_partial_result")
 			}
 		}
+		if state == Succeeded && k.ValidateSuccess != nil {
+			gateCode, gateErr := k.ValidateSuccess(ctx, executorTx{tx}, t, result)
+			if gateErr != nil {
+				return gateErr
+			}
+			if gateCode != "" {
+				if !safeCode.MatchString(gateCode) {
+					return problem(500, "invalid_success_gate")
+				}
+				state, code, result = Failed, gateCode, json.RawMessage(`{}`)
+				o.Retryable = false
+			}
+			// Locks cover stored grants; the clock can cross a validity boundary.
+			_, _, _, gateAuthErr, gateLockErr := e.workerLock(ctx, tx, l)
+			if gateLockErr != nil {
+				return gateLockErr
+			}
+			if gateAuthErr != nil {
+				state, code, result = Failed, "authorization_revoked", json.RawMessage(`{}`)
+				authErr = gateAuthErr
+			}
+		}
 		canRetry := state == Failed && authErr == nil && t.Error != "authorization_revoked" && o.Retryable && (k.retry(code) || code == "worker_interrupted" && k.ReplaySafe) && t.State != CancelRequested
 		if canRetry && t.Attempt < t.MaxAttempts {
 			out, err = scanFencedTask(tx.QueryRow(ctx, `UPDATE adtr.tasks SET state='retry_wait',error_code=$2,result=$3,result_version=result_version+1,lease_owner='',lease_until=NULL,next_attempt_at=clock_timestamp()+($4::bigint*interval '1 millisecond'),updated_at=clock_timestamp() WHERE task_id=$1 AND lease_owner=$5 AND fencing_token=$6 AND lease_until>clock_timestamp() AND result_version=$7 RETURNING `+taskColumns, t.ID, code, result, k.delay(t.Attempt).Milliseconds(), l.Owner, l.Token, t.ResultVersion))

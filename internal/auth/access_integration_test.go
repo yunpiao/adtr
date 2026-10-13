@@ -194,7 +194,7 @@ func TestAccessDurableLifecycleAndFilters(t *testing.T) {
 		"users": true, "roles": true, "permissions": true, "tasks": true,
 		"audit": true, "audit_exports": true, "system": true, "schedules": true,
 		"task_archive": true, "domains": true, "operation_accounts": true,
-		"system_logs": true, "directory_assets": true,
+		"system_logs": true, "directory_assets": true, "user_asset_exports": true,
 	}
 	permissions := roleInfo["permissions"].([]any)
 	if len(permissions) != len(wantMarks) {

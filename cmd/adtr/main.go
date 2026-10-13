@@ -89,7 +89,7 @@ func run() (runErr error) {
 		if err != nil {
 			return fmt.Errorf("system health configuration failed")
 		}
-		taskEngine, err = tasks.New(cfg.Database, tasks.ProductionRegistry(audit.Kind(), domainStore.Kind(), domainStore.AccountKind(), domainStore.DirectoryKind(), domainStore.DirectoryV2Kind(), domainStore.DirectoryV3Kind(), domainStore.DirectoryV4Kind(), operationallogs.Kind()), auth.NewTaskAuthorizer(), store.SchemaVersion)
+		taskEngine, err = tasks.New(cfg.Database, tasks.ProductionRegistry(domainStore.UserAssetExportV3Kind(), audit.Kind(), domainStore.Kind(), domainStore.AccountKind(), domainStore.DirectoryKind(), domainStore.DirectoryV2Kind(), domainStore.DirectoryV3Kind(), domainStore.DirectoryV4Kind(), operationallogs.Kind()), auth.NewTaskAuthorizer(), store.SchemaVersion)
 		if err != nil {
 			return fmt.Errorf("task engine configuration failed")
 		}
@@ -210,6 +210,9 @@ func run() (runErr error) {
 			groupMembersV4Handler := authentication.GroupMembersV4Handler(domainStore)
 			mux.Handle("/api/group-assets/v4/members", groupMembersV4Handler)
 			mux.Handle("/api/group-assets/v4/members/", groupMembersV4Handler)
+			userAssetExportV3Handler := authentication.UserAssetExportV3Handler(domainStore, taskEngine)
+			mux.Handle("/api/user-assets/v3/exports", userAssetExportV3Handler)
+			mux.Handle("/api/user-assets/v3/exports/", userAssetExportV3Handler)
 			userAssetsV3Handler := authentication.UserAssetV3Handler(domainStore)
 			mux.Handle("/api/user-assets/v3", userAssetsV3Handler)
 			mux.Handle("/api/user-assets/v3/", userAssetsV3Handler)

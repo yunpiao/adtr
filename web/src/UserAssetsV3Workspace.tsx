@@ -1,3 +1,4 @@
+import UserAssetExportV3 from "./UserAssetExportV3";
 import { directoryV3DisplaySPN } from "./directory-v3-facts";
 import AssetDictionaryNavigation from "./AssetDictionaryNavigation";
 import {
@@ -207,6 +208,7 @@ function Workspace({ profile, sessionChanged }: Props) {
                 profile={profile}
                 source={source}
                 canDetail={gate.data?.checks[1] === true}
+                canExport={!!readable("user_asset_exports") && !!readable("tasks")}
                 failure={(error) => {
                   clearSource();
                   setNotice(userAssetsV3Error(error));
@@ -340,11 +342,13 @@ function Assets({
   profile,
   source,
   canDetail,
+  canExport,
   failure,
 }: {
   profile: Profile;
   source: ResolvedSource;
   canDetail: boolean;
+  canExport: boolean;
   failure: (error: unknown) => void;
 }) {
   const initial: UserAssetsV3Query = {
@@ -773,6 +777,9 @@ function Assets({
       )}
       {dirty && (
         <p role="status">筛选已编辑，尚未应用；请提交搜索后查看详情或翻页。</p>
+      )}
+      {canExport && (
+        <UserAssetExportV3 profile={profile} query={query} disabled={dirty || busy || stale || !list?.available} failure={failure} />
       )}
       <ErrorNotice error={transferError || inputError || error} />
       {error && !stale && (

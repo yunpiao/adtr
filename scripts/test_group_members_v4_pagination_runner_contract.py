@@ -8,6 +8,7 @@ import re
 from pathlib import Path
 import unittest
 import test_auth_e2e as runner
+from test_user_asset_export_v3_runner_contract import restore_workflow as restore_export_workflow
 from test_group_members_v4_refresh_runner_contract import (
     restore_workflow as restore_refresh_workflow, restore_runner as restore_refresh_runner,
 )
@@ -81,7 +82,7 @@ class PaginationGroupMembersRunnerContract(unittest.TestCase):
         self.assertNotIn('include-hidden-files', WORKFLOW_BLOCK)
 
     def test_intended_59_jobs_and_existing_parallelism(self):
-        workflow = Path('.github/workflows/ci.yml').read_text()
+        workflow = restore_export_workflow(Path('.github/workflows/ci.yml').read_text())
         jobs = workflow.split('jobs:\n', 1)[1]
         blocks = dict(re.findall(r'^  ([a-z][a-z-]*):\n(.*?)(?=^  [a-z][a-z-]*:|\Z)', jobs, re.M | re.S))
         self.assertEqual(set(blocks), {'prepare-postgres', 'contracts', 'auth-integration',

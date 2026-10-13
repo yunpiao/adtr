@@ -46,22 +46,43 @@ func (s *Store) UserAssetsV3ListTx(ctx context.Context, tx pgx.Tx, tenant string
 }
 
 func userAssetsV3Page(ctx context.Context, selection UserAssetsV2Selection, id string, o ldapconnection.DirectoryV3Observation, f UserAssetsV2Filter) (UserAssetsV3List, error) {
+	rows, err := userAssetsV3Rows(ctx, o, f)
+	if err != nil {
+		return UserAssetsV3List{}, err
+	}
+	out := UserAssetsV3List{DictionaryVersion: 3, Selection: selection, Available: true, ObservationID: id, Source: &o.Source, List: []directoryassets.PublicObjectV3{}, Page: Page{Index: f.PageIdx, Size: f.PageSize, Total: len(rows)}}
+	if len(rows) > 0 {
+		out.Page.Pages = (len(rows) + f.PageSize - 1) / f.PageSize
+	}
+	start := (f.PageIdx - 1) * f.PageSize
+	if start < len(rows) {
+		out.List = append(out.List, rows[start:min(start+f.PageSize, len(rows))]...)
+	}
+	if err := validateUserAssetV3Response(ctx, out); err != nil {
+		return UserAssetsV3List{}, err
+	}
+	return out, nil
+}
+
+// One predicate and ordering implementation for pages and whole-observation exports.
+// The caller has already validated every stored object, including excluded ones.
+func userAssetsV3Rows(ctx context.Context, o ldapconnection.DirectoryV3Observation, f UserAssetsV2Filter) ([]directoryassets.PublicObjectV3, error) {
 	rows := make([]directoryassets.PublicObjectV3, 0)
 	search := strings.ToLower(f.Search)
 	rangeStart, rangeEnd, err := userAssetsV2TimeRange(f)
 	if err != nil {
-		return UserAssetsV3List{}, err
+		return nil, err
 	}
 	for _, stored := range o.Objects {
 		if err := ctx.Err(); err != nil {
-			return UserAssetsV3List{}, err
+			return nil, err
 		}
 		if stored.Base.Kind != directoryassets.User {
 			continue
 		}
 		object, err := directoryassets.ProjectV3(stored)
 		if err != nil {
-			return UserAssetsV3List{}, problem(409, "directory_observation_unavailable")
+			return nil, problem(409, "directory_observation_unavailable")
 		}
 		if !userAssetsV2Match(object.PublicObjectV2, search) || f.SAMAccountName != "" && (object.SAMAccountName == nil || *object.SAMAccountName != f.SAMAccountName) {
 			continue
@@ -72,7 +93,7 @@ func userAssetsV3Page(ctx context.Context, selection UserAssetsV2Selection, id s
 			}
 			created, err := time.Parse(time.RFC3339, *object.WhenCreated)
 			if err != nil {
-				return UserAssetsV3List{}, problem(409, "directory_observation_unavailable")
+				return nil, problem(409, "directory_observation_unavailable")
 			}
 			if created.Before(rangeStart) || !created.Before(rangeEnd) {
 				continue
@@ -100,16 +121,5 @@ func userAssetsV3Page(ctx context.Context, selection UserAssetsV2Selection, id s
 		}
 		return rows[i].GUID < rows[j].GUID
 	})
-	out := UserAssetsV3List{DictionaryVersion: 3, Selection: selection, Available: true, ObservationID: id, Source: &o.Source, List: []directoryassets.PublicObjectV3{}, Page: Page{Index: f.PageIdx, Size: f.PageSize, Total: len(rows)}}
-	if len(rows) > 0 {
-		out.Page.Pages = (len(rows) + f.PageSize - 1) / f.PageSize
-	}
-	start := (f.PageIdx - 1) * f.PageSize
-	if start < len(rows) {
-		out.List = append(out.List, rows[start:min(start+f.PageSize, len(rows))]...)
-	}
-	if err := validateUserAssetV3Response(ctx, out); err != nil {
-		return UserAssetsV3List{}, err
-	}
-	return out, nil
+	return rows, nil
 }

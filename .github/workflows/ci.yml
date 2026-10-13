@@ -171,7 +171,7 @@ jobs:
   browser:
     needs: [prepare-postgres]
     env:
-      ADTR_E2E_NATIVE_STREAM_MODE: ${{ (matrix.name == 'user-assets-v2' || matrix.name == 'user-assets-v2-readers' || matrix.name == 'user-assets-v3' || matrix.name == 'computer-assets-v3' || matrix.name == 'computer-assets-v3-readers' || matrix.name == 'group-assets-v3' || matrix.name == 'group-assets-v3-readers') && 'stable-body' || 'native-finish' }}
+      ADTR_E2E_NATIVE_STREAM_MODE: ${{ (matrix.name == 'user-asset-export-v3' || matrix.name == 'user-assets-v2' || matrix.name == 'user-assets-v2-readers' || matrix.name == 'user-assets-v3' || matrix.name == 'computer-assets-v3' || matrix.name == 'computer-assets-v3-readers' || matrix.name == 'group-assets-v3' || matrix.name == 'group-assets-v3-readers') && 'stable-body' || 'native-finish' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
@@ -189,6 +189,8 @@ jobs:
             command: python3 scripts/test_auth_e2e.py --suite user-assets-v2
           - name: user-assets-v2-readers
             command: python3 scripts/test_auth_e2e.py --suite user-assets-v2-readers
+          - name: user-asset-export-v3
+            command: python3 scripts/test_auth_e2e.py --suite user-asset-export-v3
           - name: user-assets-v3
             command: python3 scripts/test_auth_e2e.py --suite user-assets-v3
           - name: computer-assets-v3
@@ -399,6 +401,25 @@ jobs:
           # Strict success validation above requires JSON and all 14 step/viewport PNGs.
           # Keep partial failure evidence without masking the browser error.
           if-no-files-found: warn
+          retention-days: 14
+      - name: Validate user asset export dictionary3 browser evidence
+        id: user-export-evidence
+        if: ${{ success() && matrix.name == 'user-asset-export-v3' }}
+        run: python3 scripts/user_asset_export_v3_ci.py validate
+      - name: Retain validated user asset export dictionary3 browser evidence
+        if: ${{ success() && matrix.name == 'user-asset-export-v3' && steps.user-export-evidence.outcome == 'success' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: user-asset-export-v3-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            web/playwright-report/user-export-validated/user-asset-export-v3-provenance.json
+            web/playwright-report/user-export-validated/user-asset-export-v3-evidence.json
+            web/playwright-report/user-export-validated/user-assets-v3-*.xlsx
+            web/playwright-report/user-export-validated/allMatched-ready.png
+            web/playwright-report/user-export-validated/empty-ready.png
+          # No trace, videos, logs, storage state, credentials or raw failures.
+          # Only independently validated synthetic JSON, XLSX and safe PNGs.
+          if-no-files-found: error
           retention-days: 14
       - name: Validate refreshed group membership dictionary4 browser evidence
         if: ${{ success() && matrix.name == 'group-members-v4-refresh' }}

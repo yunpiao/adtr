@@ -353,7 +353,8 @@ class WorkflowImageGateContract(unittest.TestCase):
                     self.assertNotEqual(subprocess.run(['bash', '-c', command], env=dict(valid, **{key: value})).returncode, 0)
 
     def test_all_59_jobs_preserve_their_gates_and_bounded_parallelism(self):
-        text = Path('.github/workflows/ci.yml').read_text()
+        from test_user_asset_export_v3_runner_contract import restore_workflow
+        text = restore_workflow(Path('.github/workflows/ci.yml').read_text())
         matches = list(re.finditer(r'^  ([a-z][a-z-]*):\n', text.split('jobs:\n', 1)[1], re.MULTILINE))
         jobs_text = text.split('jobs:\n', 1)[1]
         jobs = {match[1]: jobs_text[match.start():matches[i + 1].start() if i + 1 < len(matches) else len(jobs_text)]
