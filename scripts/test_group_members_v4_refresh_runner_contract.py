@@ -8,6 +8,7 @@ import re
 from pathlib import Path
 import unittest
 import test_auth_e2e as runner
+from test_user_asset_export_v3_runner_contract import restore_workflow as restore_export_workflow, restore_runner as restore_export_runner
 
 BASE_WORKFLOW_SHA256 = 'd2644589c12d6e3a2f73725a7842d03201b13d70e6dd43cf67c25b123174a5ac'
 BASE_RUNNER_SHA256 = 'b3d15dbb4ca5932589fbdda2ddccfad7d57b9a7be69a1fa654683069a7c74de3'
@@ -46,10 +47,12 @@ def remove_exact(text, addition, count=1):
 
 
 def restore_workflow(text):
+    text = restore_export_workflow(text)
     return remove_exact(remove_exact(text, ENTRY), WORKFLOW_BLOCK)
 
 
 def restore_runner(text):
+    text = restore_export_runner(text)
     text = remove_exact(text, VALIDATE)
     text = remove_exact(text, ', "group-members-v4-refresh"', 3)
     text = remove_exact(text, ' or args.suite == "group-members-v4-refresh"')
@@ -66,7 +69,7 @@ class RefreshGroupMembersRunnerContract(unittest.TestCase):
         self.assertNotIn('include-hidden-files', WORKFLOW_BLOCK)
 
     def test_intended_59_jobs_and_existing_parallelism(self):
-        workflow = Path('.github/workflows/ci.yml').read_text()
+        workflow = restore_export_workflow(Path('.github/workflows/ci.yml').read_text())
         jobs = workflow.split('jobs:\n', 1)[1]
         blocks = dict(re.findall(r'^  ([a-z][a-z-]*):\n(.*?)(?=^  [a-z][a-z-]*:|\Z)', jobs, re.M | re.S))
         self.assertEqual(set(blocks), {'prepare-postgres', 'contracts', 'auth-integration',

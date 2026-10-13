@@ -65,6 +65,23 @@ def specimen():
 
 
 class GroupMembershipEvidence(unittest.TestCase):
+    def test_user_export_mark_is_explicitly_denied(self):
+        data, shots = specimen()
+        permission = next(p for p in data['reader']['permissions'] if p['mark'] == 'user_asset_exports')
+        self.assertEqual(permission['auth'], {'readable': False, 'writeable': False})
+        self.assertEqual(len(data['reader']['permissions']), 14)
+        # Registration expands the exact catalog, never this reader's authority.
+        for field in ('readable', 'writeable'):
+            for value in (True, 1):
+                altered = copy.deepcopy(data)
+                next(p for p in altered['reader']['permissions'] if p['mark'] == 'user_asset_exports')['auth'][field] = value
+                with self.subTest(field=field, value=value), self.assertRaises(ValueError):
+                    v.validate(altered, altered['backend']['provenance'], altered['uiProvenance'], shots.__getitem__)
+        altered = copy.deepcopy(data)
+        altered['reader']['permissions'] = [p for p in altered['reader']['permissions'] if p['mark'] != 'user_asset_exports']
+        with self.assertRaises(ValueError):
+            v.validate(altered, altered['backend']['provenance'], altered['uiProvenance'], shots.__getitem__)
+
     def test_valid_contract_specimen(self):
         data, shots = specimen()
         v.validate(data, data['backend']['provenance'], data['uiProvenance'], shots.__getitem__)

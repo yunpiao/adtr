@@ -218,6 +218,15 @@ func migrateTo(ctx context.Context, config *pgx.ConnConfig, target int) error {
 		}
 		version = 20
 	}
+	if version < 21 && target >= 21 {
+		if err := requireUserAssetExportV3Baseline(ctx, tx); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, auth.UserAssetExportV3PermissionSchema+domains.UserAssetExportV3Schema); err != nil {
+			return errors.New("user asset export v3 migration failed")
+		}
+		version = 21
+	}
 	if _, err := tx.Exec(ctx, "UPDATE adtr.schema_version SET version=$1 WHERE singleton=true", version); err != nil {
 		return errors.New("schema version update failed")
 	}

@@ -201,10 +201,11 @@ type Kind struct {
 	// It must never be used to conceal an already completed external effect.
 	CancelDiscardsResult bool
 	// OwnerScoped protects private artifacts on every generic task API.
-	OwnerScoped bool
-	Schedulable bool
-	Validate    func(json.RawMessage) (json.RawMessage, error)
-	Execute     Executor
+	OwnerScoped     bool
+	Schedulable     bool
+	ValidateSuccess func(context.Context, pgx.Tx, Task, json.RawMessage) (string, error)
+	Validate        func(json.RawMessage) (json.RawMessage, error)
+	Execute         Executor
 	// OnQuiesced acknowledges only that this exact started executor returned,
 	// including all of its defers. It must be idempotent, honor its bounded context,
 	// and must not manage the transaction, resolve secrets, or publish task results.

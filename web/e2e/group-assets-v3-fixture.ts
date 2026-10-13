@@ -27,11 +27,12 @@ type DirectoryObject = {
   whenCreated: string | null;
 };
 
-// Run only through group-assets-v3 / group-assets-v3-readers on the owned disposable database, real
+// Run only through group-assets-v3 / group-assets-v3-readers, or the explicit
+// user-asset-export-v3 option on the owned disposable database, real
 // worker and TLS LDAPFixture(directory_enabled=True, directory_v3=True). The fixture has 30 objects
 // on two wire pages; it must never resolve or contact a real AD server.
 // A missing fixture is a failed acceptance run, never a skipped/passing test.
-function requireFixture() {
+function requireFixture(userAssetExport = false) {
   const names = [
     "ADTR_E2E_BASE_URL",
     "ADTR_E2E_USERNAME",
@@ -44,10 +45,17 @@ function requireFixture() {
     names.some((name) => !process.env[name]) ||
     process.env.ADTR_E2E_LDAP_DIRECTORY_MODE !== "true" ||
     process.env.ADTR_E2E_LDAP_DIRECTORY_V3 !== "true" ||
-    process.env.ADTR_E2E_LDAP_DIRECTORY_GROUP_ASSETS_V3 !== "true"
+    (userAssetExport
+      ? process.env.ADTR_E2E_USER_ASSET_EXPORT_V3 !== "true" ||
+        ["GROUP_ASSETS_V3", "COMPUTER_ASSETS_V3", "V2", "V4", "EMPTY", "SLOW", "USER_ASSETS_V2", "GROUP_MEMBERS_V4_REFRESH", "GROUP_MEMBERS_V4_PAGINATION"].some(
+          (mode) => ![undefined, "false"].includes(process.env[`ADTR_E2E_LDAP_DIRECTORY_${mode}`]),
+        ) || Boolean(process.env.ADTR_E2E_LDAP_EMPTY_TRANSITION_DIR)
+      : process.env.ADTR_E2E_LDAP_DIRECTORY_GROUP_ASSETS_V3 !== "true")
   )
     throw new Error(
-      "Directory acceptance requires scripts/test_auth_e2e.py --suite group-assets-v3 or group-assets-v3-readers: an isolated fresh database, real worker, synthetic paged TLS LDAP fixture, ADTR_E2E_LDAP_DIRECTORY_MODE=true, ADTR_E2E_LDAP_DIRECTORY_V3=true and all ADTR_E2E auth/LDAP variables. No fixture means acceptance is blocked, not skipped.",
+      userAssetExport
+        ? "User export acceptance requires its dedicated isolated runner, default dictionary 3, real Worker, PostgreSQL and synthetic TLS LDAP; conflicting fixture modes are forbidden."
+        : "Directory acceptance requires scripts/test_auth_e2e.py --suite group-assets-v3 or group-assets-v3-readers: an isolated fresh database, real worker, synthetic paged TLS LDAP fixture, ADTR_E2E_LDAP_DIRECTORY_MODE=true, ADTR_E2E_LDAP_DIRECTORY_V3=true and all ADTR_E2E auth/LDAP variables. No fixture means acceptance is blocked, not skipped.",
     );
   const base = new URL(process.env.ADTR_E2E_BASE_URL!);
   if (
@@ -241,13 +249,15 @@ async function storedEvidence(taskUUID: string) {
 export async function setupGroupFixture(
   page: Page,
   context: BrowserContext,
-  options: { emptyRefresh?: boolean } = {},
+  options: { emptyRefresh?: boolean; userAssetExport?: boolean } = {},
 ) {
   if (options.emptyRefresh && !process.env.ADTR_E2E_LDAP_EMPTY_TRANSITION_DIR)
     throw new Error(
       "Empty refresh setup requires its isolated transition fixture",
     );
-  requireFixture();
+  if (options.emptyRefresh && options.userAssetExport)
+    throw new Error("Export fixture cannot use group empty-refresh mode");
+  requireFixture(options.userAssetExport);
   let username = process.env.ADTR_E2E_USERNAME!;
   const initialPassword = process.env.ADTR_E2E_PASSWORD!;
   let password = "Changed Directory Password 123";

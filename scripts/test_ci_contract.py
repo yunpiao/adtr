@@ -54,7 +54,7 @@ class CIEventContract(unittest.TestCase):
         self.assertIn('engine_fix=62473ad0f747e245e514c93e741bb8e168a2a207', fixed)
         self.assertIn('${{ runner.temp }}/adtr-native-fixed/provenance.txt', fixed)
         self.assertIn('ADTR_E2E_NATIVE_STREAM_MODE: stable-body', baseline)
-        self.assertIn("ADTR_E2E_NATIVE_STREAM_MODE: ${{ (matrix.name == 'user-assets-v2' || matrix.name == 'user-assets-v2-readers' || matrix.name == 'user-assets-v3' || matrix.name == 'computer-assets-v3' || matrix.name == 'computer-assets-v3-readers' || matrix.name == 'group-assets-v3' || matrix.name == 'group-assets-v3-readers') && 'stable-body' || 'native-finish' }}", browser)
+        self.assertIn("ADTR_E2E_NATIVE_STREAM_MODE: ${{ (matrix.name == 'user-asset-export-v3' || matrix.name == 'user-assets-v2' || matrix.name == 'user-assets-v2-readers' || matrix.name == 'user-assets-v3' || matrix.name == 'computer-assets-v3' || matrix.name == 'computer-assets-v3-readers' || matrix.name == 'group-assets-v3' || matrix.name == 'group-assets-v3-readers') && 'stable-body' || 'native-finish' }}", browser)
         self.assertNotIn('ADTR_E2E_NATIVE_STREAM_MODE: stable-body', browser)
         self.assertIn('name: Require complete application reads and record native outcomes', baseline)
         self.assertNotIn('name: Require native no-store stream completion', baseline)

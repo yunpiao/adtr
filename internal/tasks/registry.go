@@ -25,6 +25,9 @@ func NewRegistry(kinds ...Kind) (*Registry, error) {
 		if !kindName.MatchString(k.Name) || k.Version < 1 || k.MaxAttempts < 1 || k.MaxAttempts > 5 || k.Validate == nil || k.Execute == nil || !(k.ReplaySafe || k.SingleAttemptOnly) || k.Lease < 100*time.Millisecond || k.Lease > 5*time.Minute || k.Heartbeat < 10*time.Millisecond || k.Heartbeat > k.Lease/3 || k.Timeout < 10*time.Millisecond || k.Timeout > time.Hour || k.RetryBase < 10*time.Millisecond || k.RetryCap < k.RetryBase || k.RetryCap > time.Minute {
 			return nil, fmt.Errorf("invalid task kind policy: %s", k.Name)
 		}
+		if k.ValidateSuccess != nil && (!k.OwnerScoped || !k.ReplaySafe || !k.CancelDiscardsResult || k.Schedulable) {
+			return nil, fmt.Errorf("success gate requires private replay-safe artifact kind")
+		}
 		if k.SingleAttemptOnly && (k.ReplaySafe || k.MaxAttempts != 1 || len(k.RetryCodes) != 0 || k.Schedulable) {
 			return nil, fmt.Errorf("invalid single-attempt task policy")
 		}

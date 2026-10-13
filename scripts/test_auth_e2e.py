@@ -15,6 +15,7 @@ import urllib.error
 import urllib.request
 import uuid
 
+from user_asset_export_v3_ci import configure as configure_user_export, capture as capture_user_export, validate as validate_user_export
 from ci_postgres_image import postgres_image_args
 from test_integration import IMAGE
 from ldap_e2e_fixture import LDAPFixture
@@ -30,7 +31,7 @@ DIRECTORY_V2_SUITES = {"directory-v2", "directory-v2-controls", "directory-v2-re
 COMPUTER_ASSETS_V3_SUITES = {"computer-assets-v3", "computer-assets-v3-readers"}
 GROUP_ASSETS_V3_SUITES = {"group-assets-v3", "group-assets-v3-readers"}
 EMPTY_TRANSITION_SUITES = {"group-assets-v3", "computer-assets-v3"}
-DIRECTORY_V3_SUITES = {"directory-v3-backend", "user-assets-v3", "directory-v3", "directory-v3-controls", "directory-v3-readers"} | COMPUTER_ASSETS_V3_SUITES | GROUP_ASSETS_V3_SUITES
+DIRECTORY_V3_SUITES = {"user-asset-export-v3", "directory-v3-backend", "user-assets-v3", "directory-v3", "directory-v3-controls", "directory-v3-readers"} | COMPUTER_ASSETS_V3_SUITES | GROUP_ASSETS_V3_SUITES
 DIRECTORY_V4_SUITES = {"directory-v4-backend", "group-members-v4", "group-members-v4-empty", "group-members-v4-pagination", "group-members-v4-refresh"}
 DIRECTORY_SUITES = DIRECTORY_V4_SUITES | DIRECTORY_V3_SUITES | {"directory", "directory-controls", "directory-readers"} | DIRECTORY_V2_SUITES
 EMPTY_DIRECTORY_SUITES = {"directory-controls", "directory-readers", "directory-v2-controls", "directory-v2-readers", "directory-v3-controls", "directory-v3-readers"}
@@ -67,7 +68,7 @@ def validate_asset_refresh_evidence(suite):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--suite", choices=["auth", "access", "resource", "tasks", "messages", "messages-bulk", "audit", "system", "maintenance", "domains", "operations", "profile", "credential-use", "account-references", "operational-logs", "session-invalidation", "account-reference-barrier", "directory", "directory-controls", "directory-readers", "directory-v2", "directory-v2-controls", "directory-v2-readers", "directory-v3-backend", "directory-v4-backend", "group-members-v4", "group-members-v4-empty", "group-members-v4-pagination", "group-members-v4-refresh", "user-assets-v3", "computer-assets-v3", "computer-assets-v3-readers", "group-assets-v3", "group-assets-v3-readers", "directory-v3", "directory-v3-controls", "directory-v3-readers", "user-assets-v2", "user-assets-v2-readers"], default="auth")
+    parser.add_argument("--suite", choices=["user-asset-export-v3", "auth", "access", "resource", "tasks", "messages", "messages-bulk", "audit", "system", "maintenance", "domains", "operations", "profile", "credential-use", "account-references", "operational-logs", "session-invalidation", "account-reference-barrier", "directory", "directory-controls", "directory-readers", "directory-v2", "directory-v2-controls", "directory-v2-readers", "directory-v3-backend", "directory-v4-backend", "group-members-v4", "group-members-v4-empty", "group-members-v4-pagination", "group-members-v4-refresh", "user-assets-v3", "computer-assets-v3", "computer-assets-v3-readers", "group-assets-v3", "group-assets-v3-readers", "directory-v3", "directory-v3-controls", "directory-v3-readers", "user-assets-v2", "user-assets-v2-readers"], default="auth")
     parser.add_argument("--expired", action="store_true")
     args = parser.parse_args()
     # Check display support before creating a disposable database or fixtures.
@@ -89,6 +90,9 @@ def main():
         (diagnostic_dir / filename).unlink(missing_ok=True)
     env["ADTR_E2E_SAFE_DIAGNOSTICS"] = str((diagnostic_dir / "browser.json").resolve())
     diagnostics.phase("setup")
+    if args.suite == "user-asset-export-v3":
+        configure_user_export(env)
+        capture_user_export()
     logs = tempfile.TemporaryFile(mode="w+")
     try:
         creation_attempted = True
@@ -239,7 +243,9 @@ def main():
         # enter an error-context prompt; explicit safe screenshots remain intact.
         env["PLAYWRIGHT_NO_COPY_PROMPT"] = "1"
         diagnostics.phase("browser-start")
-        subprocess.run(command, env=env, check=True, timeout=660 if args.suite == "account-references" else 930 if args.suite in EMPTY_DIRECTORY_SUITES | USER_ASSETS_V2_SUITES | {"user-assets-v3"} | COMPUTER_ASSETS_V3_SUITES | GROUP_ASSETS_V3_SUITES else 660 if args.suite in {"directory", "directory-v2", "directory-v3-backend", "directory-v4-backend", "group-members-v4", "group-members-v4-empty", "group-members-v4-pagination", "group-members-v4-refresh", "directory-v3"} else 600 if args.suite == "audit" else 540 if args.suite in {"maintenance", "domains", "operations", "credential-use", "account-references", "operational-logs", "account-reference-barrier"} else 480 if args.suite == "system" else 420)
+        subprocess.run(command, env=env, check=True, timeout=930 if args.suite == "user-asset-export-v3" else 660 if args.suite == "account-references" else 930 if args.suite in EMPTY_DIRECTORY_SUITES | USER_ASSETS_V2_SUITES | {"user-assets-v3"} | COMPUTER_ASSETS_V3_SUITES | GROUP_ASSETS_V3_SUITES else 660 if args.suite in {"directory", "directory-v2", "directory-v3-backend", "directory-v4-backend", "group-members-v4", "group-members-v4-empty", "group-members-v4-pagination", "group-members-v4-refresh", "directory-v3"} else 600 if args.suite == "audit" else 540 if args.suite in {"maintenance", "domains", "operations", "credential-use", "account-references", "operational-logs", "account-reference-barrier"} else 480 if args.suite == "system" else 420)
+        if args.suite == "user-asset-export-v3":
+            validate_user_export()
         validate_asset_refresh_evidence(args.suite)
         if args.suite == "group-members-v4":
             subprocess.run([sys.executable, "scripts/validate_group_members_v4_evidence.py",

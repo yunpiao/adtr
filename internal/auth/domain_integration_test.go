@@ -40,7 +40,7 @@ type domainFixture struct {
 func newDomainFixture(t *testing.T) *domainFixture {
 	t.Helper()
 	f := newTaskFixture(t)
-	f.exec(audit.Schema + DomainPermissionSchema + domains.Schema + OperationAccountPermissionSchema + operationaccounts.Schema + credentialuse.Schema + domains.AccountReferenceSchema + OperationalLogPermissionMarks + DirectoryPermissionMarks)
+	f.exec(audit.Schema + DomainPermissionSchema + domains.Schema + OperationAccountPermissionSchema + operationaccounts.Schema + credentialuse.Schema + domains.AccountReferenceSchema + OperationalLogPermissionMarks + DirectoryPermissionMarks + UserAssetExportV3PermissionMarks)
 	f.exec("UPDATE adtr.schema_version SET version=$1", schemaversion.Current)
 	f.exec("INSERT INTO adtr.access_permissions(tenant_id,role_id,mark,readable,writeable) VALUES('one',$1,'domains',true,true)", narrowResourceRole)
 	runtime := domainTestRuntime(t)
