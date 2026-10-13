@@ -58,7 +58,7 @@ func TestUnknownPurposesNeverReachSQL(t *testing.T) {
 	ctx := context.Background()
 	s := New()
 	p := tasks.Principal{TenantID: "tenant", ActorID: 1}
-	for _, purpose := range []string{"", "domain.directory_read ", "DOMAIN.DIRECTORY_READ", "domain.directory_read.v1", "domain.directory_read.v02", "domain.directory_read.v2 ", "DOMAIN.DIRECTORY_READ.V2", "domain.directory_read.v2\x00", "domain.directory_read.v5", "domain.install", "domain.connection_test\x00"} {
+	for _, purpose := range []string{"", "domain.directory_read ", "DOMAIN.DIRECTORY_READ", "domain.directory_read.v1", "domain.directory_read.v02", "domain.directory_read.v2 ", "DOMAIN.DIRECTORY_READ.V2", "domain.directory_read.v2\x00", "domain.directory_read.v5", "domain.directory_read.unsupported", "domain.install", "domain.connection_test\x00"} {
 		t.Run(purpose, func(t *testing.T) {
 			in := validInput()
 			in.Purpose = purpose
@@ -128,7 +128,7 @@ func TestDirectoryV2RegisteredCapabilityKeepsExactPurposeBoundary(t *testing.T) 
 			t.Fatal("exact directory purpose not recognized")
 		}
 	}
-	for _, purpose := range []string{Purpose, "", "domain.directory_read.v5", "domain.directory_read.v2 "} {
+	for _, purpose := range []string{Purpose, "", "domain.directory_read.v5", "domain.directory_read.unsupported", "domain.directory_read.v2 "} {
 		if isDirectoryPurpose(purpose) {
 			t.Fatal("non-directory or unknown purpose selected directory eligibility")
 		}

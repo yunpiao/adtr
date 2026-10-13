@@ -10,7 +10,7 @@ import (
 	"github.com/yunpiao/adtr/internal/credentialuse"
 )
 
-// Ordinary v2 governance behavior uses the complete production migration16.
+// Ordinary v2 governance behavior uses the current complete production migrations.
 // The explicit history/rollback test below keeps its real schema15 fixture.
 func newDirectoryV2Fixture(t *testing.T) *governanceFixture {
 	t.Helper()
@@ -161,12 +161,19 @@ func TestDirectoryV2PurposeDefaultDenyAndEligibility(t *testing.T) {
 		{credentialuse.DirectoryV2Purpose, directoryRole, "domain-two", false},
 		{credentialuse.DirectoryV2Purpose, "viewer", "domain-one", false},
 		{credentialuse.DirectoryV2Purpose, "missing-role", "domain-one", false},
+		{credentialuse.DirectoryV4Purpose, directoryRole, "domain-one", true},
+		{credentialuse.DirectoryV4Purpose, cuRole, "domain-one", false},
+		{credentialuse.DirectoryV4Purpose, "platform_admin", "domain-one", true},
+		{credentialuse.DirectoryV4Purpose, "platform_admin", "domain-two", false},
+		{credentialuse.DirectoryV4Purpose, directoryRole, "domain-two", false},
+		{credentialuse.DirectoryV4Purpose, "viewer", "domain-one", false},
+		{credentialuse.DirectoryV4Purpose, "missing-role", "domain-one", false},
 		{nil, "platform_admin", "domain-one", false},
 		{"", "platform_admin", "domain-one", false},
 		{"domain.directory_read.v1", "platform_admin", "domain-one", false},
 		{"domain.directory_read.v02", "platform_admin", "domain-one", false},
 		{"domain.directory_read.v2 ", "platform_admin", "domain-one", false},
-		{"domain.directory_read.v4", "platform_admin", "domain-one", false},
+		{"domain.directory_read.unsupported", "platform_admin", "domain-one", false},
 	} {
 		var got bool
 		if err = tx.QueryRow(f.ctx, `SELECT adtr.credential_use_role_eligible_for_purpose($1,$2,$3,$4)`, cuTenant, tc.domain, tc.role, tc.purpose).Scan(&got); err != nil || got != tc.want {
@@ -191,6 +198,33 @@ func TestDirectoryV2PurposeGrantReceiptAndReplayIsolation(t *testing.T) {
 		{credentialuse.DirectoryPurpose, "v1-allow", v1},
 		{credentialuse.DirectoryV2Purpose, "v2-allow", v2},
 	}
+	// The current production schema supports v3/v4, but old grants and even
+	// administrator eligibility must not imply an explicit v4 grant.
+	for _, purpose := range []string{credentialuse.DirectoryV3Purpose, credentialuse.DirectoryV4Purpose} {
+		for _, who := range []struct{ name, role string }{{"admin", "platform_admin"}, {"member", cuRole}} {
+			got, err := s.EffectiveForPurposeTx(f.ctx, tx, f.principal(who.name), who.role, cuAccount, []string{"domain-one"}, purpose)
+			if err != nil || got.ExplicitlyGranted || got.Eligible || got.GrantRevision != "0" || got.Purpose != purpose {
+				t.Fatal("old grants or administrator status implied new directory authority", got, err)
+			}
+		}
+		f.context(t, tx, "admin", credentialuse.GrantUse)
+		key := "exact-" + purpose
+		in := directoryInput(cuRole, key)
+		in.Purpose = purpose
+		receipt, err := s.MutateForPurposeTx(f.ctx, tx, f.principal("admin"), "/grant", in, []string{"domain-one"}, purpose)
+		if err != nil || !receipt.Allowed || receipt.Purpose != purpose {
+			t.Fatal("explicit current directory purpose grant failed", receipt, err)
+		}
+		grants = append(grants, struct {
+			purpose, key string
+			receipt      credentialuse.Receipt
+		}{purpose, key, receipt})
+	}
+	if err := tx.Commit(f.ctx); err != nil {
+		t.Fatal("commit exact directory grants", err)
+	}
+	tx = f.begin(t)
+	defer tx.Rollback(context.Background())
 	for _, saved := range grants {
 		got, err := s.GrantsForPurposeTx(f.ctx, tx, cuTenant, cuAccount, []string{"domain-one"}, saved.purpose)
 		if err != nil || len(got.Grants) != 1 || got.Grants[0].Purpose != saved.purpose || got.Grants[0].GrantRevision != saved.receipt.GrantRevision {
@@ -221,7 +255,7 @@ func TestDirectoryV2PurposeGrantReceiptAndReplayIsolation(t *testing.T) {
 			}
 		}
 	}
-	for _, purpose := range []string{credentialuse.DirectoryPurpose, credentialuse.DirectoryV2Purpose} {
+	for _, purpose := range []string{credentialuse.DirectoryPurpose, credentialuse.DirectoryV2Purpose, credentialuse.DirectoryV3Purpose, credentialuse.DirectoryV4Purpose} {
 		in := directoryInput(cuRole, "wrong-legacy-route")
 		in.Purpose = purpose
 		_, err := s.MutateTx(f.ctx, tx, f.principal("admin"), "/grant", in, []string{"domain-one"})
@@ -232,9 +266,9 @@ func TestDirectoryV2PurposeGrantReceiptAndReplayIsolation(t *testing.T) {
 	_, err = s.EffectiveForPurposeTx(f.ctx, tx, f.principal("member"), cuRole, cuAccount, []string{"domain-two"}, credentialuse.DirectoryV2Purpose)
 	requireCredentialError(t, err, 404, "not_found")
 	var unchanged bool
-	if err = tx.QueryRow(f.ctx, `SELECT (SELECT count(*)=3 FROM adtr.operation_account_use_grants)
- AND (SELECT count(*)=3 FROM adtr.operation_account_use_mutations)
- AND (SELECT count(*)=3 FROM adtr.operation_account_use_audit)`).Scan(&unchanged); err != nil || !unchanged {
+	if err = tx.QueryRow(f.ctx, `SELECT (SELECT count(*)=5 FROM adtr.operation_account_use_grants)
+ AND (SELECT count(*)=5 FROM adtr.operation_account_use_mutations)
+ AND (SELECT count(*)=5 FROM adtr.operation_account_use_audit)`).Scan(&unchanged); err != nil || !unchanged {
 		t.Fatal("receipt replay or collision changed authority/history", err)
 	}
 }
@@ -317,14 +351,15 @@ func TestDirectoryV2PurposeSQLGuardsRemainExact(t *testing.T) {
 		args        []any
 		state       string
 	}{
-		{"unknown-grant", `INSERT INTO adtr.operation_account_use_grants(tenant_id,domain_id,account_id,purpose,role_id,account_credential_revision,allowed,updated_by) VALUES($1,'domain-one',$2,'domain.directory_read.v4','platform_admin',1,true,$3)`, []any{cuTenant, cuAccount, f.users["admin"]}, "42501"},
+		{"unknown-grant", `INSERT INTO adtr.operation_account_use_grants(tenant_id,domain_id,account_id,purpose,role_id,account_credential_revision,allowed,updated_by) VALUES($1,'domain-one',$2,'domain.directory_read.unsupported','platform_admin',1,true,$3)`, []any{cuTenant, cuAccount, f.users["admin"]}, "42501"},
 		{"stale-pair", `INSERT INTO adtr.operation_account_use_grants(tenant_id,domain_id,account_id,purpose,role_id,account_credential_revision,allowed,updated_by) VALUES($1,'domain-one',$2,'domain.directory_read.v2','platform_admin',2,true,$3)`, []any{cuTenant, cuAccount, f.users["admin"]}, "42501"},
 		{"wrong-actor", insert, []any{cuTenant, cuAccount, f.users["member"]}, "42501"},
 		{"missing-admin-domain-scope", `INSERT INTO adtr.operation_account_use_grants(tenant_id,domain_id,account_id,purpose,role_id,account_credential_revision,allowed,updated_by) VALUES($1,'domain-two',$2,'domain.directory_read.v2','platform_admin',1,true,$3)`, []any{cuTenant, cuOtherAccount, f.users["admin"]}, "42501"},
 		{"v1-incarnation-cannot-authorize-v2-receipt", `INSERT INTO adtr.operation_account_use_mutations(tenant_id,actor_id,idempotency_key,operation,fingerprint,domain_id,account_id,role_id,purpose,grant_revision,account_credential_revision,allowed) VALUES($1,$2,'forged-v2','grant',repeat('a',64),'domain-one',$3,$4,'domain.directory_read.v2',$5,1,true)`, []any{cuTenant, f.users["admin"], cuAccount, cuRole, v1.GrantRevision}, "42501"},
 		{"v2-incarnation-cannot-authorize-v1-receipt", `INSERT INTO adtr.operation_account_use_mutations(tenant_id,actor_id,idempotency_key,operation,fingerprint,domain_id,account_id,role_id,purpose,grant_revision,account_credential_revision,allowed) VALUES($1,$2,'forged-v1','grant',repeat('a',64),'domain-one',$3,$4,'domain.directory_read',$5,1,true)`, []any{cuTenant, f.users["admin"], cuAccount, cuRole, v2.GrantRevision}, "42501"},
-		{"unknown-mutation", `INSERT INTO adtr.operation_account_use_mutations(tenant_id,actor_id,idempotency_key,operation,fingerprint,domain_id,account_id,role_id,purpose,grant_revision,account_credential_revision,allowed) VALUES($1,$2,'forged-unknown','grant',repeat('a',64),'domain-one',$3,$4,'domain.directory_read.v4',$5,1,true)`, []any{cuTenant, f.users["admin"], cuAccount, cuRole, v2.GrantRevision}, "42501"},
-		{"unknown-audit", `INSERT INTO adtr.operation_account_use_audit(tenant_id,actor_id,domain_id,account_id,role_id,purpose,action,old_grant_revision,new_grant_revision,account_credential_revision,allowed,result) VALUES($1,$2,'domain-one',$3,$4,'domain.directory_read.v4','credential_use_grant',0,1,1,true,'saved')`, []any{cuTenant, f.users["admin"], cuAccount, cuRole}, "23514"},
+		{"v2-incarnation-cannot-authorize-v4-receipt", `INSERT INTO adtr.operation_account_use_mutations(tenant_id,actor_id,idempotency_key,operation,fingerprint,domain_id,account_id,role_id,purpose,grant_revision,account_credential_revision,allowed) VALUES($1,$2,'forged-v4','grant',repeat('a',64),'domain-one',$3,$4,'domain.directory_read.v4',$5,1,true)`, []any{cuTenant, f.users["admin"], cuAccount, cuRole, v2.GrantRevision}, "42501"},
+		{"unknown-mutation", `INSERT INTO adtr.operation_account_use_mutations(tenant_id,actor_id,idempotency_key,operation,fingerprint,domain_id,account_id,role_id,purpose,grant_revision,account_credential_revision,allowed) VALUES($1,$2,'forged-unknown','grant',repeat('a',64),'domain-one',$3,$4,'domain.directory_read.unsupported',$5,1,true)`, []any{cuTenant, f.users["admin"], cuAccount, cuRole, v2.GrantRevision}, "42501"},
+		{"unknown-audit", `INSERT INTO adtr.operation_account_use_audit(tenant_id,actor_id,domain_id,account_id,role_id,purpose,action,old_grant_revision,new_grant_revision,account_credential_revision,allowed,result) VALUES($1,$2,'domain-one',$3,$4,'domain.directory_read.unsupported','credential_use_grant',0,1,1,true,'saved')`, []any{cuTenant, f.users["admin"], cuAccount, cuRole}, "23514"},
 		{"immutable-purpose", `UPDATE adtr.operation_account_use_grants SET purpose='domain.directory_read' WHERE purpose='domain.directory_read.v2'`, nil, "42501"},
 		{"immutable-incarnation", `UPDATE adtr.operation_account_use_grants SET grant_revision=grant_revision+1 WHERE purpose='domain.directory_read.v2'`, nil, "42501"},
 		{"immutable-receipt", `DELETE FROM adtr.operation_account_use_mutations WHERE purpose='domain.directory_read.v2'`, nil, "P0001"},
