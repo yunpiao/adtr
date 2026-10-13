@@ -8,7 +8,7 @@ import uuid
 from ci_postgres_image import postgres_image_args
 from run_integration import parse_args, run_tests
 
-IMAGE = "public.ecr.aws/docker/library/postgres:17.6-alpine@sha256:ef257d85f76e48da1c64832459b59fcaba1a4dac97bf5d7450c77753542eee94"
+IMAGE = "docker.io/library/postgres:17.6-alpine@sha256:ef257d85f76e48da1c64832459b59fcaba1a4dac97bf5d7450c77753542eee94"
 
 
 def main():

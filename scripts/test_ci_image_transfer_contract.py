@@ -147,7 +147,18 @@ class ImageTransferContract(unittest.TestCase):
                 self.metadata[field] = copy.deepcopy(CURRENT[field])
 
     def test_metadata_source_platform_id_attempt_and_archive_are_not_trusted(self):
-        changes = [('reference', transfer.REFERENCE.replace('public.ecr.aws', 'other.invalid')),
+        # INDEX_DIGEST is patched to the synthetic fixture chain in setUp;
+        # use the reference's own digest so these mutations isolate source only.
+        fixed_digest = transfer.REFERENCE.split('@')[1]
+        foreign = 'other.invalid/library/postgres:17.6-alpine@' + fixed_digest
+        old_source = 'public.ecr.aws/docker/library/postgres:17.6-alpine@' + fixed_digest
+        self.assertNotEqual(foreign, transfer.REFERENCE)
+        self.assertNotEqual(old_source, transfer.REFERENCE)
+        for changed in [foreign, old_source]:
+            self.assertEqual(changed.split('@')[1], transfer.REFERENCE.split('@')[1])
+            self.assertEqual(changed.split('@')[0].rsplit(':', 1)[1],
+                             transfer.REFERENCE.split('@')[0].rsplit(':', 1)[1])
+        changes = [('reference', foreign), ('reference', old_source),
                    ('platform', 'linux/arm64'), ('image_id', 'sha256:' + 'e' * 64),
                    ('producer_attempt', '2'), ('archive_sha256', 'f' * 64), ('archive_bytes', 1),
                    ('schema', 2)]

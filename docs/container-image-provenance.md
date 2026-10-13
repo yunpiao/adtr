@@ -88,3 +88,50 @@ Compose 构建读取 Go 基镜像 manifest 时收到 ECR `429 / Data limit excee
 离线契约仅验证固定源、字节处理和拒绝边界。当前本地没有 Docker，候选仍须独立
 实际 diff 复审和新精确 head 的真实拉取、完整 Compose 生命周期及所有必需 CI。
 不更改既有身份/权限/证书校验、超时和产品验收门禁，产品验收保持 0/209。
+
+## PostgreSQL 固定源修复（2026-10-13，PR #153 后续候选）
+
+本节记录当前 PostgreSQL 来源策略；上文保留 2026-10-09 ECR 调整与历史字节复核。
+本次将集成、浏览器/LDAP 夹具、Compose 和共享镜像 producer 的唯一固定来源改为
+`docker.io/library/postgres:17.6-alpine@sha256:ef257d85f76e48da1c64832459b59fcaba1a4dac97bf5d7450c77753542eee94`。
+index、`linux/amd64` manifest `747d5ed1fdeeb124b880fbe3d7c6557d2c4064ae41d6b6297d417882effce4be`
+与 config/image ID `d741b376874687de90374fd34f55c6b2760e8f7bd7e4ae5cd47f50757fc08cf8`
+均不变。没有动态源选择、fallback、登录、token 或权限变更。
+
+触发证据为 [PR #153](https://github.com/yunpiao/adtr/pull/153) 精确 head
+`4a6b5ff9c7b96d394ae04083c0c090c60a9e1744` 的
+[run 38387145178 attempt 1](https://github.com/yunpiao/adtr/actions/runs/38387145178)：
+[prepare-postgres job 115261627290](https://github.com/yunpiao/adtr/actions/runs/38387145178/job/115261627290)
+在 10:59:48、10:59:58、11:00:28 UTC 三次固定 ECR pull 均收到
+`toomanyrequests: Data limit exceeded`。原有 10s/30s 有界重试耗尽；日志未给出
+额度恢复时间或 Retry-After。该轮 group-members-v4 未运行，没有实际 UI/截图证据；
+这次基础设施失败保留，不能记为 UI 断言失败或通过，也未再盲目重跑。
+
+[PR #84 历史记录](https://github.com/yunpiao/adtr/pull/84) 中的同 digest Docker Hub/ECR
+原始 index、amd64 manifest/config 和 PostgreSQL 10 层等价复核仍是 2026-10-09 的
+历史证据。记录的审计 SHA256 为
+`c72cd1c97ac6f8ca8972d743bb158c361077ce0e7af4d7c0d79b99f630af1151`，独立来源复核为
+`5f571af182a1703048f5ec9ae03f690974ed013e182f9e1539363c43dbf2e7bf`。
+本次没有重新获取两侧完整层字节；今日 Hub tag API 未经可用工具成功读到，因此不声称
+当前 Hub 可达、今日原始字节重验或永久免限流。Hub 曾有匿名限流，改固定官方等价源仍有
+网络/配额风险；只有新精确 head 的实际 CI 才能证明本次链路可执行。
+
+Docker 可把完整仓库名规范为短名。`prepare_ci_image.py` 仅接受固定 digest 对应的
+`docker.io/library/postgres@sha256:...` 和 `postgres@sha256:...` 两个精确 RepoDigest
+标识；列表必须非空且每项均属于这两个标识。旧 ECR、其他仓库、额外未知标识、错误
+index digest/config/platform 均拒绝。这解决合法 Docker 短名导致的误拒绝，属于身份
+规范化，不增加拉取源；去掉短名支持会使正确镜像在部分 Docker 输出下失败，放宽为任意
+同 digest 仓库则会失去当前固定来源策略。含额外未知 RepoDigest 的已有缓存会被拒绝，
+而不是静默视为当前来源；CI 仍必须明确验证其拉取/缓存身份。
+
+现有 `ci_postgres_image.py` 原始 index/manifest 哈希与长度验证、固定 config 和十层
+描述、实际拉取后身份检查、同 run/event/head/base/producer-attempt 的 archive 校验及
+消费者 `--pull=never`/Compose `pull_policy: never` 全部保留。工作流、预期 56 jobs、
+八个 auth shards、两个 workflow hash、超时、重试与权限不变。该 producer 已是所有
+数据库消费者的前置门禁，无需新增工作流步骤或第二套镜像验证器。
+
+离线回归分别验证两合法 alias、旧 ECR/异仓/错误 digest/config/platform 拒绝，明确不同
+且断言不等的 source mutation 在 Docker 调用前拒绝，并以独立固定常量检查 prepare、
+transfer、runtime/LDAP/browser 和 Compose 的一致性。离线/mock 检查不代表 Docker
+实际成功；发布前仍需独立实际 diff 复审，发布后需新精确 head 的共享镜像真实身份产物、
+完整 CI、真实 group-members-v4 JSON/六张 PNG 与内容核验。产品验收维持 0/209。

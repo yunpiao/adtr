@@ -1,7 +1,7 @@
 """Same-run PostgreSQL image transfer with a fixed content-addressed trust root.
 
-The registry source, tag and index digest remain unchanged. Docker save/load may
-lose RepoDigests; consumers execute only the verified config/image ID, without a
+The reviewed source is fixed Docker Hub; tag and index identity remain pinned.
+Docker save/load may lose RepoDigests; consumers execute only the verified config/image ID, without a
 pull fallback. This is test infrastructure, never a production image publisher.
 """
 import argparse
@@ -18,7 +18,7 @@ import sys
 import tempfile
 import time
 
-REFERENCE = ('public.ecr.aws/docker/library/postgres:17.6-alpine@sha256:'
+REFERENCE = ('docker.io/library/postgres:17.6-alpine@sha256:'
              'ef257d85f76e48da1c64832459b59fcaba1a4dac97bf5d7450c77753542eee94')
 INDEX_DIGEST = REFERENCE.split('@')[1]
 MANIFEST_DIGEST = 'sha256:747d5ed1fdeeb124b880fbe3d7c6557d2c4064ae41d6b6297d417882effce4be'

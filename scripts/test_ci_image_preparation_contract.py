@@ -9,11 +9,11 @@ from unittest.mock import patch
 import prepare_ci_image as prepare
 
 
-REFERENCE = ('public.ecr.aws/docker/library/postgres:17.6-alpine@sha256:'
+REFERENCE = ('docker.io/library/postgres:17.6-alpine@sha256:'
              'ef257d85f76e48da1c64832459b59fcaba1a4dac97bf5d7450c77753542eee94')
 IMAGE = {'Id': 'sha256:d741b376874687de90374fd34f55c6b2760e8f7bd7e4ae5cd47f50757fc08cf8',
          'Os': 'linux', 'Architecture': 'amd64',
-         'RepoDigests': ['public.ecr.aws/docker/library/postgres@sha256:'
+         'RepoDigests': ['docker.io/library/postgres@sha256:'
                          'ef257d85f76e48da1c64832459b59fcaba1a4dac97bf5d7450c77753542eee94']}
 
 
@@ -55,6 +55,18 @@ class ImagePreparationContract(unittest.TestCase):
         docker = Docker([found()])
         self.assertEqual(docker.prepare(), IMAGE)
         self.assertEqual(docker.pulls, [])
+
+    def test_only_fixed_hub_repository_aliases_are_accepted(self):
+        digest = REFERENCE.split('@')[1]
+        aliases = ['docker.io/library/postgres@' + digest, 'postgres@' + digest]
+        for digests in [[aliases[0]], [aliases[1]], aliases]:
+            image = copy.deepcopy(IMAGE)
+            image['RepoDigests'] = digests
+            for outcomes in [[found(image)], [missing(), response(), found(image)]]:
+                with self.subTest(digests=digests, calls=len(outcomes)):
+                    docker = Docker(outcomes)
+                    self.assertEqual(docker.prepare(), image)
+                    self.assertEqual(docker.delays, [])
 
     def test_pull_retains_exact_source_tag_digest_and_platform(self):
         docker = Docker([missing(), response(), found()])
@@ -127,11 +139,18 @@ class ImagePreparationContract(unittest.TestCase):
             self.assertEqual(docker.pulls, [])
 
     def test_source_policy_change_fails_before_any_docker_call(self):
-        docker = Docker([])
-        with patch.object(prepare, 'IMAGE', REFERENCE.replace('public.ecr.aws/', 'other.example/')):
-            with self.assertRaisesRegex(prepare.ImagePreparationError, 'source/tag/digest changed'):
-                docker.prepare()
-        self.assertEqual(docker.calls, [])
+        digest = REFERENCE.split('@')[1]
+        for changed in ['other.example/library/postgres:17.6-alpine@' + digest,
+                        'public.ecr.aws/docker/library/postgres:17.6-alpine@' + digest,
+                        'docker.io/library/postgres:17.7-alpine@' + digest,
+                        'docker.io/library/postgres:17.6-alpine@sha256:' + 'f' * 64]:
+            self.assertNotEqual(changed, REFERENCE)
+            with self.subTest(reference=changed):
+                docker = Docker([])
+                with patch.object(prepare, 'IMAGE', changed):
+                    with self.assertRaisesRegex(prepare.ImagePreparationError, 'source/tag/digest changed'):
+                        docker.prepare()
+                self.assertEqual(docker.calls, [])
 
     def test_success_without_inspectable_fixed_image_fails(self):
         docker = Docker([missing(), response(), missing()])
@@ -142,7 +161,15 @@ class ImagePreparationContract(unittest.TestCase):
     def test_mismatched_identity_is_never_retried(self):
         mutations = [('Id', 'sha256:' + 'a' * 64), ('Os', 'windows'), ('Architecture', 'arm64'),
                      ('RepoDigests', []), ('RepoDigests', None),
-                     ('RepoDigests', ['other.example/postgres@' + REFERENCE.split('@')[1]])]
+                     ('RepoDigests', 'postgres@' + REFERENCE.split('@')[1]),
+                     ('RepoDigests', [None]), ('RepoDigests', [{}]),
+                     ('RepoDigests', ['other.example/postgres@' + REFERENCE.split('@')[1]]),
+                     ('RepoDigests', ['public.ecr.aws/docker/library/postgres@' + REFERENCE.split('@')[1]]),
+                     ('RepoDigests', ['docker.io/library/other@' + REFERENCE.split('@')[1]]),
+                     ('RepoDigests', ['library/postgres@' + REFERENCE.split('@')[1]]),
+                     ('RepoDigests', ['postgres@sha256:' + 'f' * 64]),
+                     ('RepoDigests', ['docker.io/library/postgres@sha256:' + 'f' * 64]),
+                     ('RepoDigests', [IMAGE['RepoDigests'][0], 'other.example/postgres@' + REFERENCE.split('@')[1]])]
         for field, value in mutations:
             with self.subTest(field=field, value=value):
                 image = copy.deepcopy(IMAGE)
