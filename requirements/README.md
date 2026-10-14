@@ -16,7 +16,7 @@ Statuses are deliberately distinct:
   items; this is not the same as a PR, merge or deploy status
 
 Current product acceptance remains **0/209**: **19 implemented_verified_slice**
-requirements, **34 in_progress**, and **156 not_started**. These are requirement
+requirements, **35 in_progress**, and **155 not_started**. These are requirement
 status counts, not PR counts or 19 fully accepted features. AD-F-042 is now
 in_progress for [the bounded raw-group workspace](../docs/group-assets-v3-contract.md);
 its classification fields, source compatibility and real acceptance remain open.
@@ -106,3 +106,10 @@ PR163 subsequently completed its user snapshot-stage slice: final head
 69/69 and fresh main CI38588506730 attempt1 69/69; both current artifact sets
 were independently reviewed. Historical failed attempts remain in the delivery
 ledger. This closes that user engineering checkpoint, not full product acceptance.
+
+AD-F-052 is now `in_progress` for the candidate
+[bounded observed-count slice](../docs/directory-v3-contract.md), FLD-0586/0588/0590.
+Counts describe one validated dictionary3 observation before kind/page filters;
+unavailable null and successful empty zero counts stay distinct. Legacy asset
+total parity, risk/security summaries, charts and full source acceptance remain
+open. Candidate runtime CI and independent review are pending; product0/209.

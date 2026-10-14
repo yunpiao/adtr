@@ -34,9 +34,15 @@ export interface DirectoryV3Source {
   elapsed_milliseconds: number;
   pages: number;
 }
+export interface DirectoryV3ObservedCounts {
+  user: number;
+  group: number;
+  computer: number;
+}
 export interface DirectoryV3Observation {
   dictionaryVersion: 3;
   available: boolean;
+  observedCounts: DirectoryV3ObservedCounts | null;
   observationId?: string;
   source?: DirectoryV3Source;
   list: DirectoryV3Object[];
@@ -122,10 +128,11 @@ export function parseDirectoryV3Observation(
             "available",
             "observationId",
             "source",
+            "observedCounts",
             "list",
             "page",
           ]
-        : ["dictionaryVersion", "available", "list", "page"],
+        : ["dictionaryVersion", "available", "observedCounts", "list", "page"],
     ) ||
     !object(v.page) ||
     !exact(v.page, ["pageIdx", "pageSize", "total", "totalPage"]) ||
@@ -144,12 +151,30 @@ export function parseDirectoryV3Observation(
   )
     return invalid();
   if (!v.available) {
-    if (q.observationId || v.list.length || v.page.total !== 0)
+    if (
+      q.observationId ||
+      v.observedCounts !== null ||
+      v.list.length ||
+      v.page.total !== 0
+    )
       return invalid();
   } else {
     if (
       !validDomainID(v.observationId) ||
       !validSource(v.source) ||
+      !object(v.observedCounts) ||
+      !exact(v.observedCounts, ["user", "group", "computer"]) ||
+      !integer(v.observedCounts.user, 0, 10000) ||
+      !integer(v.observedCounts.group, 0, 10000) ||
+      !integer(v.observedCounts.computer, 0, 10000) ||
+      v.observedCounts.user + v.observedCounts.group + v.observedCounts.computer >
+        10000 ||
+      v.page.total !==
+        (q.kind
+          ? v.observedCounts[q.kind]
+          : v.observedCounts.user +
+            v.observedCounts.group +
+            v.observedCounts.computer) ||
       (q.observationId && q.observationId !== v.observationId)
     )
       return invalid();
@@ -163,6 +188,14 @@ export function parseDirectoryV3Observation(
     )
   )
     return invalid();
+  if (v.available) {
+    const counts = v.observedCounts as unknown as DirectoryV3ObservedCounts;
+    // Even an all-kind partial page cannot contain more of a kind than the
+    // validated full observation reports.
+    for (const kind of ["user", "group", "computer"] as const)
+      if (rows.filter((r) => r.kind === kind).length > counts[kind])
+        return invalid();
+  }
   return v as unknown as DirectoryV3Observation;
 }
 export function parseDirectoryV3Task(

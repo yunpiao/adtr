@@ -934,6 +934,7 @@ test("real dictionary-v3 UI → authenticated API → worker → paged synthetic
   expect(initial.value).toEqual({
     dictionaryVersion: 3,
     available: false,
+    observedCounts: null,
     list: [],
     page: { pageIdx: 1, pageSize: 50, total: 0, totalPage: 0 },
   });
@@ -1200,6 +1201,7 @@ test("real dictionary-v3 UI → authenticated API → worker → paged synthetic
   expect(refreshed.value).toMatchObject({
     dictionaryVersion: 3,
     available: true,
+    observedCounts: { user: 12, group: 12, computer: 6 },
     observationId: taskUUID,
     page: { pageIdx: 1, pageSize: 50, total: 30, totalPage: 1 },
     source: {
@@ -1211,6 +1213,15 @@ test("real dictionary-v3 UI → authenticated API → worker → paged synthetic
     },
   });
   expect(refreshed.value.list).toEqual(expected);
+  // Computers inherit objectClass=user; count validated kind exactly once.
+  expect(
+    expected.filter((object) => object.objectClass.includes("user")),
+  ).toHaveLength(18);
+  const observedCounts = { user: 12, group: 12, computer: 6 };
+  const countsView = page.getByLabel("本次观测中的对象数量", { exact: true });
+  await expect(countsView).toHaveText(
+    "本次观测中的对象数量：用户 12 · 组 12 · 计算机 6",
+  );
   expect(
     Date.parse(refreshed.value.source.completed_at),
   ).toBeGreaterThanOrEqual(Date.parse(refreshed.value.source.started_at));
@@ -1266,6 +1277,8 @@ test("real dictionary-v3 UI → authenticated API → worker → paged synthetic
   const firstPage = await observationAction(page, () =>
     page.getByLabel("目录每页条数", { exact: true }).selectOption("25"),
   );
+  expect(firstPage.value.observedCounts).toEqual(observedCounts);
+  expect(firstPage.value.observationId).toBe(taskUUID);
   expect(firstPage.value.list).toEqual(expected.slice(0, 25));
   expect(firstPage.value.page).toEqual({
     pageIdx: 1,
@@ -1280,6 +1293,11 @@ test("real dictionary-v3 UI → authenticated API → worker → paged synthetic
   );
   expect(secondPage.query.get("observationId")).toBe(taskUUID);
   expect(secondPage.query.get("pageIdx")).toBe("2");
+  expect(secondPage.value.observedCounts).toEqual(observedCounts);
+  expect(secondPage.value.observationId).toBe(taskUUID);
+  await expect(countsView).toHaveText(
+    "本次观测中的对象数量：用户 12 · 组 12 · 计算机 6",
+  );
   expect(secondPage.value.list).toEqual(expected.slice(25));
   await expect(table.locator("tbody tr")).toHaveCount(5);
   await expect(
@@ -1297,6 +1315,11 @@ test("real dictionary-v3 UI → authenticated API → worker → paged synthetic
     expect(filtered.query.get("kind")).toBe(kind);
     expect(filtered.query.get("pageIdx")).toBe("1");
     expect(filtered.query.has("observationId")).toBe(false);
+    expect(filtered.value.observedCounts).toEqual(observedCounts);
+    expect(filtered.value.observationId).toBe(taskUUID);
+    await expect(countsView).toHaveText(
+      "本次观测中的对象数量：用户 12 · 组 12 · 计算机 6",
+    );
     expect(filtered.value.list).toEqual(
       expected.filter((object) => object.kind === kind),
     );
@@ -1319,6 +1342,7 @@ test("real dictionary-v3 UI → authenticated API → worker → paged synthetic
   expect(emptyPage).toMatchObject({
     dictionaryVersion: 3,
     available: true,
+    observedCounts: { user: 12, group: 12, computer: 6 },
     observationId: taskUUID,
     list: [],
     page: { pageIdx: 2, pageSize: 25, total: 12, totalPage: 1 },
@@ -1371,6 +1395,7 @@ test("real dictionary-v3 UI → authenticated API → worker → paged synthetic
   expect(afterReload.value).toMatchObject({
     dictionaryVersion: 3,
     available: true,
+    observedCounts: { user: 12, group: 12, computer: 6 },
     observationId: taskUUID,
     list: expected,
   });
@@ -1398,6 +1423,14 @@ test("real dictionary-v3 UI → authenticated API → worker → paged synthetic
   const stored = JSON.parse(bytes.toString("utf8"));
   expect(stored.dictionaryVersion).toBe(3);
   expect(stored.objects).toHaveLength(expected.length);
+  const storedCounts = { user: 0, group: 0, computer: 0 };
+  for (const object of stored.objects) {
+    const kind = object.base.kind as keyof typeof storedCounts;
+    expect(["user", "group", "computer"]).toContain(kind);
+    storedCounts[kind]++;
+  }
+  expect(storedCounts).toEqual(observedCounts);
+  expect(afterReload.value.observedCounts).toEqual(storedCounts);
   for (let i = 0; i < expected.length; i++) {
     const raw = stored.objects[i].identity;
     expect(
@@ -1676,6 +1709,7 @@ test("real dictionary-v3 UI → authenticated API → worker → paged synthetic
     "原目录观察已不可用。请明确刷新目录观察，从第一页重新读取。",
   );
   await expect(table).toHaveCount(0);
+  await expect(countsView).toHaveCount(0);
   const currentSource = await observationAction(page, () =>
     page.getByRole("button", { name: "刷新目录观察", exact: true }).click(),
   );
@@ -1684,6 +1718,7 @@ test("real dictionary-v3 UI → authenticated API → worker → paged synthetic
   expect(currentSource.value).toEqual({
     dictionaryVersion: 3,
     available: false,
+    observedCounts: null,
     list: [],
     page: { pageIdx: 1, pageSize: 25, total: 0, totalPage: 0 },
   });
@@ -1692,6 +1727,14 @@ test("real dictionary-v3 UI → authenticated API → worker → paged synthetic
       hasText: "尚无当前配置的成功目录观察。此状态不表示目录为空。",
     }),
   ).toBeVisible();
+  await expect(
+    page.getByText("本次观测中的对象数量：暂无可用观测", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("本次观测中的对象数量：用户 12 · 组 12 · 计算机 6", {
+      exact: true,
+    }),
+  ).toHaveCount(0);
   expect(syncPosts).toBe(2);
   const storage = await page.evaluate(() => ({
     local: { ...localStorage },

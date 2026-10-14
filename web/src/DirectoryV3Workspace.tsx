@@ -266,12 +266,21 @@ function Observation({
       <ErrorNotice error={read.error} />
       {read.busy && <p role="status">正在读取目录观察…</p>}
       {data && !data.available && (
-        <p role="status">尚无当前配置的成功目录观察。此状态不表示目录为空。</p>
+        <>
+          <p role="status">尚无当前配置的成功目录观察。此状态不表示目录为空。</p>
+          <p aria-label="本次观测中的对象数量">
+            本次观测中的对象数量：暂无可用观测
+          </p>
+        </>
       )}
       {data?.available && (
         <>
           <p>
             字段字典：{data.dictionaryVersion} · 观察编号：{data.observationId}
+          </p>
+          <p aria-label="本次观测中的对象数量">
+            本次观测中的对象数量：用户 {data.observedCounts!.user} · 组{" "}
+            {data.observedCounts!.group} · 计算机 {data.observedCounts!.computer}
           </p>
           <p>服务器名称：{directoryV2DisplayText(data.source!.server_name)}</p>
           <p>

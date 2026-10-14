@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"github.com/yunpiao/adtr/internal/credentialuse"
 	"github.com/yunpiao/adtr/internal/directoryassets"
 	"github.com/yunpiao/adtr/internal/ldapconnection"
@@ -117,5 +118,73 @@ func TestDirectoryV3PublicPageIdentityAndFullEnvelopeBudget(t *testing.T) {
 	o.Objects = append(o.Objects, bad)
 	if page, err := directoryV3Page("observed", o, DirectoryFilter{PageIdx: 1, PageSize: 25}); err == nil || !reflect.DeepEqual(page, DirectoryV3List{}) {
 		t.Fatal("malformed page partially exposed")
+	}
+}
+
+func TestDirectoryV3ObservedCountsPrecedeKindAndPagination(t *testing.T) {
+	o := sampleDirectoryV3Observation()
+	defer o.Discard()
+	base := o.Objects[0]
+	o.Objects = nil
+	for i, kind := range []directoryassets.Kind{directoryassets.User, directoryassets.User, directoryassets.Group, directoryassets.Computer} {
+		object := base
+		object.Base.GUID = fmt.Sprintf("%08x-4455-6677-8899-aabbccddeeff", i+1)
+		object.Base.Kind = kind
+		object.Base.Classes = []string{"top", "user"}
+		if kind == directoryassets.Group {
+			object.Base.Classes = []string{"group", "top"}
+		}
+		if kind == directoryassets.Computer {
+			object.Base.Classes = []string{"computer", "top", "user"}
+		}
+		o.Objects = append(o.Objects, object)
+	}
+	// Exercise the same canonical full-body validator used by stored reads.
+	raw, err := encodeDirectoryObservationV3(o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer clear(raw)
+	sum := sha256.Sum256(raw)
+	validated, err := decodeDirectoryObservationV3(raw, hex.EncodeToString(sum[:]), 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer validated.Discard()
+	want := DirectoryV3ObservedCounts{User: 2, Group: 1, Computer: 1}
+	for _, kind := range []directoryassets.Kind{"", directoryassets.User, directoryassets.Group, directoryassets.Computer} {
+		for _, page := range []int{1, 2, 100} {
+			out, err := directoryV3Page("observed", validated, DirectoryFilter{Kind: kind, PageIdx: page, PageSize: 1})
+			if err != nil || out.ObservedCounts == nil || *out.ObservedCounts != want {
+				t.Fatal("counts changed with filter/page", kind, page, out.ObservedCounts, err)
+			}
+			if out.ObservationID != "observed" || !reflect.DeepEqual(*out.Source, o.Source) {
+				t.Fatal("count source changed")
+			}
+			total := map[directoryassets.Kind]int{"": 4, directoryassets.User: 2, directoryassets.Group: 1, directoryassets.Computer: 1}[kind]
+			if out.Page.Total != total {
+				t.Fatal("filtered total changed")
+			}
+		}
+	}
+}
+
+func TestDirectoryV3ObservedCountsEmptyAndUnavailableJSON(t *testing.T) {
+	o := sampleDirectoryV3Observation()
+	defer o.Discard()
+	directoryassets.ClearStoredObjectsV3(o.Objects)
+	o.Objects = nil
+	empty, err := directoryV3Page("empty", o, DirectoryFilter{PageIdx: 1, PageSize: 25})
+	if err != nil || empty.ObservedCounts == nil || *empty.ObservedCounts != (DirectoryV3ObservedCounts{}) {
+		t.Fatal("empty observation lacks explicit zero counts", err)
+	}
+	for _, tc := range []struct {
+		value DirectoryV3List
+		want  string
+	}{{DirectoryV3List{}, `"observedCounts":null`}, {empty, `"observedCounts":{"user":0,"group":0,"computer":0}`}} {
+		raw, err := json.Marshal(tc.value)
+		if err != nil || !bytes.Contains(raw, []byte(tc.want)) {
+			t.Fatal("required count shape missing", string(raw), err)
+		}
 	}
 }

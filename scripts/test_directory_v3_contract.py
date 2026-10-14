@@ -25,3 +25,22 @@ class DirectoryV3Contract(unittest.TestCase):
         for forbidden in ['.fulfill(', 'INSERT INTO adtr.', 'UPDATE adtr.', 'DELETE FROM adtr.']:
             self.assertNotIn(forbidden,code)
         self.assertIn('trace: "off"',code)
+
+    def test_observed_counts_existing_real_gates(self):
+        # Static wiring only. The existing real CI suites must establish runtime evidence.
+        mixed = Path('web/e2e/directory-v3.spec.ts').read_text()
+        for required in ['observedCounts: null', '{ user: 12, group: 12, computer: 6 }',
+                         'firstPage.value.observedCounts', 'secondPage.value.observedCounts',
+                         'filtered.value.observedCounts', 'filtered.value.observationId',
+                         'storedCounts[kind]++', 'afterReload.value.observedCounts',
+                         'object.objectClass.includes("user")', 'toHaveLength(18)',
+                         '本次观测中的对象数量：暂无可用观测', 'await expect(countsView).toHaveCount(0)']:
+            self.assertIn(required, mixed)
+        readers = Path('web/e2e/directory-v3-readers.spec.ts').read_text()
+        for required in ['observedCounts: null', '{ user: 0, group: 0, computer: 0 }',
+                         '本次观测中的对象数量：用户 0 · 组 0 · 计算机 0',
+                         'expect(denied.status()).toBe(404)', 'expect(staleSession.status()).toBe(401)',
+                         'expect(afterRevoke.value).toEqual(observation)']:
+            self.assertIn(required, readers)
+        self.assertNotIn('.fulfill(', mixed)
+        self.assertEqual(readers.count('.fulfill('), 1)

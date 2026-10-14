@@ -3077,9 +3077,18 @@
         "FLD-0597"
       ],
       "ui_records": [],
-      "status": "not_started",
+      "status": "in_progress",
       "product_accepted": false,
-      "evidence": null
+      "evidence": {
+        "contract": "docs/directory-v3-contract.md",
+        "scope": "Candidate bounded observed counts for FLD-0586/0588/0590 from one fully validated dictionary3 observation, before kind/page filtering; unavailable null differs from successful zero counts.",
+        "verification_status": "Candidate only; exact-head CI, independent review, merge and post-main verification pending.",
+        "remaining": [
+          "Legacy asset-total semantics and full field compatibility are unverified.",
+          "Security/risk overview, differences, charts, real AD and Windows compatibility remain open.",
+          "Issue30 remains open; product acceptance stays 0/209."
+        ]
+      }
     },
     {
       "id": "AD-F-053",

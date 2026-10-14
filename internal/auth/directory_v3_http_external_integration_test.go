@@ -22,6 +22,7 @@ import (
 
 	"github.com/yunpiao/adtr/internal/auth"
 	"github.com/yunpiao/adtr/internal/credentialuse"
+	"github.com/yunpiao/adtr/internal/directoryassets"
 	"github.com/yunpiao/adtr/internal/domainconfig"
 	"github.com/yunpiao/adtr/internal/domains"
 	"github.com/yunpiao/adtr/internal/schemaversion"
@@ -156,8 +157,12 @@ func (f *directoryV3HTTPFixture) submitV3(actor, key string) tasks.Task {
 func (f *directoryV3HTTPFixture) unavailableV3(pin string) {
 	f.t.Helper()
 	path := directoryV3HTTPPrefix + "/observation?domainId=domain-one"
-	out := operationalDecode[domains.DirectoryV3List](f.t, f.request("directory-http-reader", path, nil, 200).Body.Bytes())
-	if out.DictionaryVersion != 3 || out.Available || out.List == nil || len(out.List) != 0 || out.Source != nil || out.ObservationID != "" {
+	raw := f.request("directory-http-reader", path, nil, 200).Body.Bytes()
+	if !bytes.Contains(raw, []byte(`"observedCounts":null`)) {
+		f.t.Fatal("unavailable response omitted explicit null counts")
+	}
+	out := operationalDecode[domains.DirectoryV3List](f.t, raw)
+	if out.DictionaryVersion != 3 || out.Available || out.List == nil || len(out.List) != 0 || out.Source != nil || out.ObservedCounts != nil || out.ObservationID != "" {
 		f.t.Fatal("v3 unavailable response lost its version or disclosed staged rows")
 	}
 	if pin != "" {
@@ -362,4 +367,55 @@ func TestDirectoryV3MigratedHTTPProofReceiptsAndGenericControls(t *testing.T) {
 	if result.Task.State != tasks.Cancelled || f.count(`SELECT count(*) FROM adtr.domain_audit WHERE task_id=$1 AND action='domain_directory_v3_cancel'`, v3.ID) != 1 {
 		t.Fatal("dedicated v3 cancel failed to commit its outcome/audit")
 	}
+}
+
+func TestDirectoryV3HTTPObservedCountsPinnedFullSnapshotAndReadOnlyAuthority(t *testing.T) {
+	f := newDirectoryV3HTTPFixture(t)
+	f.bind()
+	grant := f.grantV3("directory-grant", "platform_admin", "counts-grant")
+	path := directoryV3HTTPPrefix + "/observation?domainId=domain-one&pageSize=25"
+	f.unavailableV3("")
+	observation := directoryV3HTTPObservation(30)
+	defer observation.Discard()
+	observation.Objects = append(observation.Objects,
+		directoryassets.StoredObjectV3{Base: directoryassets.Object{GUID: "10000000-0000-0000-0000-000000000001", DN: "CN=Group,DC=one,DC=invalid", Kind: directoryassets.Group, Classes: []string{"group", "top"}}},
+		directoryassets.StoredObjectV3{Base: directoryassets.Object{GUID: "20000000-0000-0000-0000-000000000001", DN: "CN=Computer,DC=one,DC=invalid", Kind: directoryassets.Computer, Classes: []string{"computer", "top", "user"}}})
+	first := f.submitV3("directory-submit-one", "counts-mixed")
+	f.finishV3(f.stageV3(observation), first, tasks.Succeeded)
+	want := domains.DirectoryV3ObservedCounts{User: 30, Group: 1, Computer: 1}
+	for _, tc := range []struct {
+		query       string
+		total, rows int
+	}{
+		{"", 32, 25}, {"&pageIdx=2", 32, 7}, {"&kind=user", 30, 25}, {"&kind=user&pageIdx=2", 30, 5}, {"&kind=group", 1, 1}, {"&kind=computer", 1, 1}, {"&pageIdx=10000", 32, 0},
+	} {
+		out := operationalDecode[domains.DirectoryV3List](t, f.request("directory-http-reader", path+"&observationId="+first.ID+tc.query, nil, 200).Body.Bytes())
+		if out.ObservedCounts == nil || *out.ObservedCounts != want || out.Page.Total != tc.total || len(out.List) != tc.rows || out.ObservationID != first.ID || !reflect.DeepEqual(*out.Source, observation.Source) {
+			t.Fatal("counts did not follow complete pinned source", tc.query, out)
+		}
+	}
+	newer := f.submitV3("directory-submit-two", "counts-empty")
+	f.finishV3(f.stageV3(directoryV3HTTPObservation(0)), newer, tasks.Succeeded)
+	latest := operationalDecode[domains.DirectoryV3List](t, f.request("directory-http-reader", path, nil, 200).Body.Bytes())
+	if !latest.Available || latest.ObservationID != newer.ID || latest.ObservedCounts == nil || *latest.ObservedCounts != (domains.DirectoryV3ObservedCounts{}) || latest.Page.Total != 0 {
+		t.Fatal("new empty observation retained old counts", latest)
+	}
+	f.installV3(f.runtimeWithGates(false, false), nil)
+	f.request("directory-revoke", directoryV3HTTPUsePrefix+"/revoke", f.proof("directory-revoke", directoryV3HTTPGrantBody("platform_admin", grant, "counts-revoke-producer")), 200)
+	tasksBefore, usesBefore := f.count(`SELECT count(*) FROM adtr.tasks`), f.count(`SELECT count(*) FROM adtr.domain_directory_task_uses`)
+	pinned := operationalDecode[domains.DirectoryV3List](t, f.request("directory-http-reader", path+"&observationId="+first.ID+"&pageIdx=2", nil, 200).Body.Bytes())
+	if pinned.ObservedCounts == nil || *pinned.ObservedCounts != want || pinned.ObservationID != first.ID {
+		t.Fatal("producer grant/gates changed stored count authority", pinned)
+	}
+	for _, actor := range []string{"directory-http-no-assets", "directory-http-no-domains"} {
+		f.request(actor, path, nil, 403)
+	}
+	for _, actor := range []string{"directory-http-no-scope", "directory-foreign"} {
+		f.request(actor, path, nil, 404)
+	}
+	if f.count(`SELECT count(*) FROM adtr.tasks`) != tasksBefore || f.count(`SELECT count(*) FROM adtr.domain_directory_task_uses`) != usesBefore {
+		t.Fatal("count reads mutated producer ledger")
+	}
+	f.exec(`DELETE FROM adtr.resource_role_groups WHERE tenant_id=$1 AND role_id=$2`, governanceHTTPTenant, directoryHTTPReaderRole)
+	f.request("directory-http-reader", path+"&observationId="+first.ID, nil, 404)
 }

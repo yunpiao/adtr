@@ -606,6 +606,7 @@ test("real empty dictionary-v3 observation and cancellation during paged I/O", a
   expect(initial.value).toEqual({
     dictionaryVersion: 3,
     available: false,
+    observedCounts: null,
     list: [],
     page: { pageIdx: 1, pageSize: 50, total: 0, totalPage: 0 },
   });
@@ -752,6 +753,7 @@ test("real empty dictionary-v3 observation and cancellation during paged I/O", a
   expect(refreshed.value).toMatchObject({
     dictionaryVersion: 3,
     available: true,
+    observedCounts: { user: 0, group: 0, computer: 0 },
     observationId: successfulUUID,
     list: [],
     page: { pageIdx: 1, pageSize: 50, total: 0, totalPage: 0 },

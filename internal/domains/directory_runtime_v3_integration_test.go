@@ -157,7 +157,7 @@ func TestDirectoryV3RuntimePurposeAdmissionReceiptCancellationAndGates(t *testin
 			t.Fatal("a missing gate admitted collection", flags, err)
 		}
 		page, err := directoryV3RuntimeList(f, disabled, "", 1)
-		if err != nil || page.Available || page.DictionaryVersion != 3 || page.List == nil {
+		if err != nil || page.Available || page.ObservedCounts != nil || page.DictionaryVersion != 3 || page.List == nil {
 			t.Fatal("disabled collector blocked authorized empty read", err)
 		}
 		f.tx(func(ctx context.Context, tx pgx.Tx) error {
@@ -198,14 +198,14 @@ func TestDirectoryV3RuntimeCanonicalLosslessPublicationAndCurrentSourceRead(t *t
 	kind.Execute = domains.PublishDirectoryV3ObservationForTest(f.store, o)
 	installDirectoryV3RuntimeKind(t, f, kind)
 	task := submitDirectoryV3Runtime(f, "lossless-snapshot")
-	if page, err := directoryV3RuntimeList(f, f.store, "", 1); err != nil || page.Available {
+	if page, err := directoryV3RuntimeList(f, f.store, "", 1); err != nil || page.Available || page.ObservedCounts != nil {
 		t.Fatal("queued task became an observation", err)
 	}
 	if _, err := f.engine.RunOne(context.Background(), "v3-publisher"); err != nil {
 		t.Fatal(err)
 	}
 	page, err := directoryV3RuntimeList(f, f.store, "", 1)
-	if err != nil || !page.Available || page.DictionaryVersion != 3 || page.ObservationID != task.ID || page.Page.Total != 30 || len(page.List) != 25 {
+	if err != nil || !page.Available || page.DictionaryVersion != 3 || page.ObservationID != task.ID || page.ObservedCounts == nil || *page.ObservedCounts != (domains.DirectoryV3ObservedCounts{User: 30}) || page.Page.Total != 30 || len(page.List) != 25 {
 		t.Fatal("published snapshot unavailable", page.Page, err)
 	}
 	for i, object := range page.List {
@@ -217,7 +217,7 @@ func TestDirectoryV3RuntimeCanonicalLosslessPublicationAndCurrentSourceRead(t *t
 		}
 	}
 	second, err := directoryV3RuntimeList(f, f.store, task.ID, 2)
-	if err != nil || len(second.List) != 5 || second.List[0].GUID <= page.List[24].GUID {
+	if err != nil || second.ObservedCounts == nil || *second.ObservedCounts != *page.ObservedCounts || len(second.List) != 5 || second.List[0].GUID <= page.List[24].GUID {
 		t.Fatal("snapshot continuation order changed", err)
 	}
 	var body []byte
@@ -249,7 +249,7 @@ func TestDirectoryV3RuntimeCanonicalLosslessPublicationAndCurrentSourceRead(t *t
 		t.Fatal("disabled collection hid stored data", err)
 	}
 	f.detach()
-	if page, err := directoryV3RuntimeList(f, f.store, "", 1); err != nil || page.Available {
+	if page, err := directoryV3RuntimeList(f, f.store, "", 1); err != nil || page.Available || page.ObservedCounts != nil {
 		t.Fatal("old-binding snapshot stayed current", err)
 	}
 	var failure *domains.Error
@@ -259,12 +259,20 @@ func TestDirectoryV3RuntimeCanonicalLosslessPublicationAndCurrentSourceRead(t *t
 }
 
 func TestDirectoryV3RuntimeMalformedStoredObservationFailsClosed(t *testing.T) {
-	for _, mode := range []string{"digest", "count", "dictionary", "noncanonical", "wrong-source", "bad-base64", "failed-task"} {
+	for _, mode := range []string{"digest", "count", "dictionary", "noncanonical", "wrong-source", "bad-base64", "off-page-kind", "failed-task"} {
 		t.Run(mode, func(t *testing.T) {
 			f := directoryV3RuntimeFixture(t)
 			grantDirectoryV3(f)
 			o := directoryV3RuntimeObservation()
 			defer o.Discard()
+			if mode == "off-page-kind" {
+				for i := 1; i <= 25; i++ {
+					object := o.Objects[0]
+					object.Base.GUID = fmt.Sprintf("%08x-4455-6677-8899-aabbccddeeff", i)
+					o.Objects = append(o.Objects, object)
+				}
+				o.Objects[0].Base.GUID = "ffffffff-4455-6677-8899-aabbccddeeff"
+			}
 			kind := f.store.DirectoryV3Kind()
 			kind.Execute = domains.PublishDirectoryV3ObservationForTest(f.store, o)
 			installDirectoryV3RuntimeKind(t, f, kind)
@@ -274,7 +282,7 @@ func TestDirectoryV3RuntimeMalformedStoredObservationFailsClosed(t *testing.T) {
 			}
 			var body []byte
 			var digest string
-			count, version := 1, 3
+			count, version := len(o.Objects), 3
 			if err := f.conn.QueryRow(context.Background(), `SELECT body,sha256 FROM adtr.domain_directory_observations WHERE task_id=$1`, task.ID).Scan(&body, &digest); err != nil {
 				t.Fatal(err)
 			}
@@ -291,6 +299,8 @@ func TestDirectoryV3RuntimeMalformedStoredObservationFailsClosed(t *testing.T) {
 				body = bytes.ReplaceAll(body, []byte("dc1.example.test"), []byte("dc2.example.test"))
 			case "bad-base64":
 				body = bytes.Replace(body, []byte(`"objectSidBytes":"AQE`), []byte(`"objectSidBytes":"@@@`), 1)
+			case "off-page-kind":
+				body = bytes.Replace(body, []byte(`"kind":"user"`), []byte(`"kind":"invalid"`), 1)
 			case "failed-task":
 				f.exec(`UPDATE adtr.tasks SET state='failed' WHERE task_id=$1`, task.ID)
 			}
@@ -306,8 +316,18 @@ func TestDirectoryV3RuntimeMalformedStoredObservationFailsClosed(t *testing.T) {
 			clear(body)
 			page, err := directoryV3RuntimeList(f, f.store, task.ID, 1)
 			var failure *domains.Error
-			if !errors.As(err, &failure) || failure.Code != "directory_observation_unavailable" || page.List != nil || page.Available {
+			if !errors.As(err, &failure) || failure.Code != "directory_observation_unavailable" || page.List != nil || page.Available || page.ObservedCounts != nil {
 				t.Fatal("corrupt or unsuccessful snapshot returned partial rows", err)
+			}
+			if mode == "off-page-kind" {
+				err := f.attempt(func(ctx context.Context, tx pgx.Tx) error {
+					var err error
+					page, err = f.store.DirectoryV3ListTx(ctx, tx, f.p.TenantID, []string{f.id}, domains.DirectoryFilter{DomainID: f.id, ObservationID: task.ID, Kind: directoryassets.Group, PageIdx: 1, PageSize: 25})
+					return err
+				})
+				if !errors.As(err, &failure) || failure.Code != "directory_observation_unavailable" || page.ObservedCounts != nil || page.List != nil {
+					t.Fatal("kind filter bypassed complete observation validation", err)
+				}
 			}
 		})
 	}
@@ -366,7 +386,7 @@ func TestDirectoryV3RuntimeObservedEmptyRemainsAvailable(t *testing.T) {
 		t.Fatal(err)
 	}
 	page, err := directoryV3RuntimeList(f, f.store, task.ID, 1)
-	if err != nil || !page.Available || page.DictionaryVersion != 3 || page.List == nil || len(page.List) != 0 || page.Page.Total != 0 || page.ObservationID != task.ID {
+	if err != nil || !page.Available || page.DictionaryVersion != 3 || page.List == nil || len(page.List) != 0 || page.Page.Total != 0 || page.ObservedCounts == nil || *page.ObservedCounts != (domains.DirectoryV3ObservedCounts{}) || page.ObservationID != task.ID {
 		t.Fatal("successful empty collection became unavailable", err)
 	}
 }
@@ -383,7 +403,7 @@ func TestDirectoryV3RuntimeStagedCancellationNeverBecomesVisible(t *testing.T) {
 		if out.State != tasks.Succeeded {
 			t.Fatal("synthetic staging failed", out)
 		}
-		if page, err := directoryV3RuntimeList(f, f.store, "", 1); err != nil || page.Available {
+		if page, err := directoryV3RuntimeList(f, f.store, "", 1); err != nil || page.Available || page.ObservedCounts != nil {
 			t.Fatal("staged observation visible before Finish", err)
 		}
 		f.tx(func(ctx context.Context, tx pgx.Tx) error {
@@ -402,7 +422,7 @@ func TestDirectoryV3RuntimeStagedCancellationNeverBecomesVisible(t *testing.T) {
 		t.Fatal("cancellation or original cleanup failed", state, use, err)
 	}
 	page, err := directoryV3RuntimeList(f, f.store, "", 1)
-	if err != nil || page.Available {
+	if err != nil || page.Available || page.ObservedCounts != nil {
 		t.Fatal("cancelled task exposed staged rows", err)
 	}
 	var failure *domains.Error
