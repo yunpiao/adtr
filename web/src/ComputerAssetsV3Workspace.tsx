@@ -1,3 +1,5 @@
+import ComputerAssetExportV3 from "./ComputerAssetExportV3";
+import { readExportRecovery } from "./computer-asset-export-v3-recovery";
 import { directoryV3DisplaySPN } from "./directory-v3-facts";
 import {
   useLayoutEffect,
@@ -58,6 +60,7 @@ export default function ComputerAssetsV3Workspace(props: Props) {
   );
 }
 function Workspace({ profile, sessionChanged }: Props) {
+  const recovery = readExportRecovery(profile.ID);
   const [source, setSource] = useState<ResolvedSource | null>(null);
   const [sourceGeneration, setSourceGeneration] = useState(0);
   const [pickerGeneration, setPickerGeneration] = useState(0);
@@ -109,6 +112,7 @@ function Workspace({ profile, sessionChanged }: Props) {
     readable("domains") &&
     readable("directory_assets") &&
     gate.data?.checks[0] === true;
+  const canExport = !!readable("computer_asset_exports") && !!readable("tasks");
   return (
     <section
       className="user-assets-workspace"
@@ -186,6 +190,14 @@ function Workspace({ profile, sessionChanged }: Props) {
           ) : (
             <p role="status">当前账户无权选择已配置域。</p>
           )}
+          {!source && recovery && canExport && (
+            <ComputerAssetExportV3
+              profile={profile}
+              query={{ domainId: recovery.domainId, expectedRevision: "", expectedCredentialRevision: "", search: "", pageIdx: 1, pageSize: 10 }}
+              disabled={true}
+              failure={lost}
+            />
+          )}
           {source && (
             <>
               <p className="asset-source-revisions">
@@ -197,6 +209,7 @@ function Workspace({ profile, sessionChanged }: Props) {
                 key={sourceGeneration}
                 profile={profile}
                 source={source}
+                canExport={canExport}
                 failure={(error) => {
                   clearSource();
                   setNotice(computerAssetsV3Error(error));
@@ -330,9 +343,11 @@ function Assets({
   profile,
   source,
   failure,
+  canExport,
 }: {
   profile: Profile;
   source: ResolvedSource;
+  canExport: boolean;
   failure: (error: unknown) => void;
 }) {
   const initial: ComputerAssetsV3Query = {
@@ -583,6 +598,9 @@ function Assets({
       {stale && <p role="status">原观测已不可用，请明确刷新观测。</p>}
       {list && !list.available && (
         <p role="status">暂无可读取的已完成观测，尚不能确定计算机数量。</p>
+      )}
+      {canExport && (
+        <ComputerAssetExportV3 profile={profile} query={query} disabled={dirty || busy || stale || !list?.available} failure={failure} />
       )}
       {list?.available && (
         <>

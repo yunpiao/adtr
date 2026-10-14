@@ -64,62 +64,10 @@ func (s *Store) ComputerAssetsV3ListTx(ctx context.Context, tx pgx.Tx, tenant st
 }
 
 func computerAssetsV3Page(ctx context.Context, selection UserAssetsV2Selection, id string, o ldapconnection.DirectoryV3Observation, f ComputerAssetsV3Filter) (ComputerAssetsV3List, error) {
-	rows := make([]directoryassets.PublicObjectV3, 0)
-	observedComputerCount := 0
-	search := strings.ToLower(f.Search)
-	rangeStart, rangeEnd, err := userAssetsV2TimeRange(computerAssetsV3BaseFilter(f))
+	rows, observedComputerCount, err := computerAssetsV3Rows(ctx, o, f)
 	if err != nil {
 		return ComputerAssetsV3List{}, err
 	}
-	for _, stored := range o.Objects {
-		if err := ctx.Err(); err != nil {
-			return ComputerAssetsV3List{}, err
-		}
-		if stored.Base.Kind != directoryassets.Computer {
-			continue
-		}
-		observedComputerCount++
-		object, err := directoryassets.ProjectV3(stored)
-		if err != nil {
-			return ComputerAssetsV3List{}, problem(409, "directory_observation_unavailable")
-		}
-		if !computerAssetsV3Match(object, search) {
-			continue
-		}
-		if f.StartTm != "" {
-			if object.WhenCreated == nil {
-				continue
-			}
-			created, err := time.Parse(time.RFC3339, *object.WhenCreated)
-			if err != nil {
-				return ComputerAssetsV3List{}, problem(409, "directory_observation_unavailable")
-			}
-			if created.Before(rangeStart) || !created.Before(rangeEnd) {
-				continue
-			}
-		}
-		rows = append(rows, object)
-	}
-	sort.Slice(rows, func(i, j int) bool {
-		if f.CreatTm != "" {
-			a, b := rows[i].WhenCreated, rows[j].WhenCreated
-			if a == nil && b != nil {
-				return false
-			}
-			if a != nil && b == nil {
-				return true
-			}
-			// The v3 supplemental projection retains fixed v2 guarantees: fixed-width UTC whole seconds; text order is
-			// chronological, including year 0001 (which is not a missing value).
-			if a != nil && b != nil && *a != *b {
-				if f.CreatTm == "desc" {
-					return *a > *b
-				}
-				return *a < *b
-			}
-		}
-		return rows[i].GUID < rows[j].GUID
-	})
 	out := ComputerAssetsV3List{DictionaryVersion: 3, Selection: selection, Available: true, ObservedComputerCount: &observedComputerCount, ObservationID: id, Source: &o.Source, List: []directoryassets.PublicObjectV3{}, Page: Page{Index: f.PageIdx, Size: f.PageSize, Total: len(rows)}}
 	if len(rows) > 0 {
 		out.Page.Pages = (len(rows) + f.PageSize - 1) / f.PageSize
@@ -156,4 +104,65 @@ func validateComputerAssetsV3Response(ctx context.Context, out ComputerAssetsV3L
 		return problem(422, "directory_limit_exceeded")
 	}
 	return ctx.Err()
+}
+
+// computerAssetsV3Rows is the shared list/export predicate and ordering path.
+func computerAssetsV3Rows(ctx context.Context, o ldapconnection.DirectoryV3Observation, f ComputerAssetsV3Filter) ([]directoryassets.PublicObjectV3, int, error) {
+	rows := make([]directoryassets.PublicObjectV3, 0)
+	observedComputerCount := 0
+	search := strings.ToLower(f.Search)
+	rangeStart, rangeEnd, err := userAssetsV2TimeRange(computerAssetsV3BaseFilter(f))
+	if err != nil {
+		return nil, 0, err
+	}
+	for _, stored := range o.Objects {
+		if err := ctx.Err(); err != nil {
+			return nil, 0, err
+		}
+		if stored.Base.Kind != directoryassets.Computer {
+			continue
+		}
+		observedComputerCount++
+		object, err := directoryassets.ProjectV3(stored)
+		if err != nil {
+			return nil, 0, problem(409, "directory_observation_unavailable")
+		}
+		if !computerAssetsV3Match(object, search) {
+			continue
+		}
+		if f.StartTm != "" {
+			if object.WhenCreated == nil {
+				continue
+			}
+			created, err := time.Parse(time.RFC3339, *object.WhenCreated)
+			if err != nil {
+				return nil, 0, problem(409, "directory_observation_unavailable")
+			}
+			if created.Before(rangeStart) || !created.Before(rangeEnd) {
+				continue
+			}
+		}
+		rows = append(rows, object)
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		if f.CreatTm != "" {
+			a, b := rows[i].WhenCreated, rows[j].WhenCreated
+			if a == nil && b != nil {
+				return false
+			}
+			if a != nil && b == nil {
+				return true
+			}
+			// The v3 supplemental projection retains fixed v2 guarantees: fixed-width UTC whole seconds; text order is
+			// chronological, including year 0001 (which is not a missing value).
+			if a != nil && b != nil && *a != *b {
+				if f.CreatTm == "desc" {
+					return *a > *b
+				}
+				return *a < *b
+			}
+		}
+		return rows[i].GUID < rows[j].GUID
+	})
+	return rows, observedComputerCount, nil
 }

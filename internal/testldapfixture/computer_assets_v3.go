@@ -9,7 +9,13 @@ import (
 
 // Dedicated immutable thirty-row mode: 23 computers, three users, four groups.
 // Computers deliberately also inherit user. Existing modes are unchanged.
+const computerExportFailureV3SAM = "computer-invalid\ufffe"
+
 func computerAssetsV3Entry(id, row int) []byte {
+	return computerAssetsV3EntryWithExportFailure(id, row, false)
+}
+
+func computerAssetsV3EntryWithExportFailure(id, row int, exportFailure bool) []byte {
 	kind, ou := "computer", "Computers"
 	classes := []string{"top", "person", "organizationalPerson", "user", "computer"}
 	if row > 23 {
@@ -27,6 +33,9 @@ func computerAssetsV3Entry(id, row int) []byte {
 		sam := name
 		if kind == "computer" {
 			sam += "$"
+		}
+		if exportFailure && row == 1 {
+			sam = computerExportFailureV3SAM
 		}
 		attrs = append(attrs, directoryAttribute("sAMAccountName", sam)...)
 	}

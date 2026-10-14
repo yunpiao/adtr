@@ -3,6 +3,7 @@ import hashlib
 from pathlib import Path
 import re
 import unittest
+from test_computer_asset_export_v3_runner_contract import restore as restore_computer
 
 CHANGES = {'.github/workflows/ci.yml': ('d6e51571d5a783650a4c142993f7bb28d00e986c0d7981c114bb43faaf5995f9',
                               [("${{ (matrix.name == 'user-asset-export-v3-failure'",
@@ -316,13 +317,16 @@ CHANGES = {'.github/workflows/ci.yml': ('d6e51571d5a783650a4c142993f7bb28d00e986
                                 '        if args.suite in GROUP_EXPORT_TERMINAL_SUITES:\n'
                                 '            validate_group_terminal(args.suite)')])}
 
-def restore(text, name):
+def restore_group_only(text, name):
     for old, new in reversed(CHANGES[name][1]):
         expected = 2 if new == 'if args.suite in {"user-asset-export-v3-cancel", "group-asset-export-v3-cancel"}:' else 1
         if text.count(new) != expected:
             raise ValueError('group export addition absent or altered: ' + name)
         text = text.replace(new, old)
     return text
+
+def restore(text, name):
+    return restore_group_only(restore_computer(text, name), name)
 
 def restore_runner(text):
     return restore(text, 'scripts/test_auth_e2e.py')
@@ -335,7 +339,7 @@ class GroupExportRunnerContract(unittest.TestCase):
         for name, (digest, _) in CHANGES.items():
             self.assertEqual(hashlib.sha256(restore(Path(name).read_text(), name).encode()).hexdigest(), digest)
     def test_65_jobs_and_limits(self):
-        source = Path('.github/workflows/ci.yml').read_text()
+        source = restore_computer(Path('.github/workflows/ci.yml').read_text(), '.github/workflows/ci.yml')
         names = re.findall(r'^          - name: ([a-z0-9-]+)$', source, re.M)
         self.assertEqual(len(names), 45)
         self.assertEqual(len(names) + 8 + 7 + 5, 65)
@@ -345,9 +349,9 @@ class GroupExportRunnerContract(unittest.TestCase):
             self.assertEqual(names.count('group-asset-export-v3' + suffix), 1)
     def test_modified_or_duplicate_delta_fails(self):
         for name, (_, changes) in CHANGES.items():
-            source = Path(name).read_text()
+            source = restore_computer(Path(name).read_text(), name)
             for _, new in changes:
-                with self.assertRaises(ValueError): restore(source + new, name)
-                with self.assertRaises(ValueError): restore(source.replace(new, '!' + new[1:]), name)
+                with self.assertRaises(ValueError): restore_group_only(source + new, name)
+                with self.assertRaises(ValueError): restore_group_only(source.replace(new, '!' + new[1:]), name)
 
 if __name__ == '__main__': unittest.main()

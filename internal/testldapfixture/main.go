@@ -28,6 +28,7 @@ type configuration struct {
 	directoryV3                              bool
 	userExportFailureV3                      bool
 	groupExportFailureV3                     bool
+	computerExportFailureV3                  bool
 	directoryV4                              bool
 	groupMembersV4Pagination                 bool
 	groupMembersV4Refresh                    bool
@@ -51,6 +52,7 @@ func readConfiguration(args []string, getenv func(string) string) (configuration
 	flags.BoolVar(&cfg.directoryV4, "directory-v4", false, "select the fixed eleven-attribute dictionary; requires exclusive directory mode")
 	flags.BoolVar(&cfg.groupMembersV4Refresh, "group-members-v4-refresh", false, "enable private empty transition; requires exclusive nonempty fast dictionary4 mode")
 	flags.BoolVar(&cfg.groupMembersV4Pagination, "group-members-v4-pagination", false, "select 26 synthetic groups and four non-groups; requires exclusive nonempty fast dictionary4 mode")
+	flags.BoolVar(&cfg.computerExportFailureV3, "computer-export-failure-v3", false, "select one XML-invalid synthetic computer SAM; requires exclusive computer dictionary3 mode")
 	flags.BoolVar(&cfg.groupExportFailureV3, "group-export-failure-v3", false, "select one XML-invalid synthetic group SAM; requires exclusive group dictionary3 mode")
 	flags.BoolVar(&cfg.userExportFailureV3, "user-export-failure-v3", false, "select one XML-invalid synthetic mail; requires exclusive nonempty fast dictionary3 mode")
 	flags.BoolVar(&cfg.directoryV3, "directory-v3", false, "select the fixed ten-attribute dictionary; requires directory mode")
@@ -68,6 +70,7 @@ func readConfiguration(args []string, getenv func(string) string) (configuration
 		(cfg.groupMembersV4Refresh && (!cfg.directoryMode || !cfg.directoryV4 || cfg.emptyTransitionDir == "" || cfg.directoryEmpty || cfg.directorySlow || cfg.groupMembersV4Pagination)) ||
 		(cfg.groupMembersV4Pagination && (!cfg.directoryMode || !cfg.directoryV4 || cfg.directoryEmpty || cfg.directorySlow)) ||
 		(cfg.directoryV3 && (cfg.directoryV2 || cfg.userAssetsV2)) ||
+		(cfg.computerExportFailureV3 && (!cfg.directoryMode || !cfg.directoryV3 || !cfg.computerAssetsV3 || cfg.groupExportFailureV3 || cfg.userExportFailureV3 || cfg.directoryV2 || cfg.directoryV4 || cfg.userAssetsV2 || cfg.groupAssetsV3 || cfg.groupMembersV4Pagination || cfg.groupMembersV4Refresh || cfg.directoryEmpty || cfg.directorySlow || cfg.controlDir != "" || cfg.emptyTransitionDir != "")) ||
 		(cfg.groupExportFailureV3 && (!cfg.directoryMode || !cfg.directoryV3 || !cfg.groupAssetsV3 || cfg.userExportFailureV3 || cfg.directoryV2 || cfg.directoryV4 || cfg.userAssetsV2 || cfg.computerAssetsV3 || cfg.groupMembersV4Pagination || cfg.groupMembersV4Refresh || cfg.directoryEmpty || cfg.directorySlow || cfg.controlDir != "" || cfg.emptyTransitionDir != "")) ||
 		(cfg.userExportFailureV3 && (!cfg.directoryMode || !cfg.directoryV3 || cfg.directoryV2 || cfg.directoryV4 || cfg.userAssetsV2 || cfg.computerAssetsV3 || cfg.groupAssetsV3 || cfg.groupMembersV4Pagination || cfg.groupMembersV4Refresh || cfg.directoryEmpty || cfg.directorySlow || cfg.controlDir != "" || cfg.emptyTransitionDir != "")) ||
 		(cfg.userAssetsV2 && (!cfg.directoryMode || !cfg.directoryV2 || cfg.directoryEmpty || cfg.directorySlow)) ||
@@ -150,6 +153,7 @@ func run(ctx context.Context, args []string, getenv func(string) string, output 
 		directoryV3:              cfg.directoryV3,
 		userExportFailureV3:      cfg.userExportFailureV3,
 		groupExportFailureV3:     cfg.groupExportFailureV3,
+		computerExportFailureV3:  cfg.computerExportFailureV3,
 		directoryV4:              cfg.directoryV4,
 		groupMembersV4Pagination: cfg.groupMembersV4Pagination,
 		userAssetsV2:             cfg.userAssetsV2,

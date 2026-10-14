@@ -171,7 +171,7 @@ jobs:
   browser:
     needs: [prepare-postgres]
     env:
-      ADTR_E2E_NATIVE_STREAM_MODE: ${{ (matrix.name == 'group-asset-export-v3' || matrix.name == 'group-asset-export-v3-failure' || matrix.name == 'group-asset-export-v3-cancel' || matrix.name == 'user-asset-export-v3-failure' || matrix.name == 'user-asset-export-v3-cancel' || matrix.name == 'user-asset-export-v3' || matrix.name == 'user-assets-v2' || matrix.name == 'user-assets-v2-readers' || matrix.name == 'user-assets-v3' || matrix.name == 'computer-assets-v3' || matrix.name == 'computer-assets-v3-readers' || matrix.name == 'group-assets-v3' || matrix.name == 'group-assets-v3-readers') && 'stable-body' || 'native-finish' }}
+      ADTR_E2E_NATIVE_STREAM_MODE: ${{ (matrix.name == 'computer-asset-export-v3' || matrix.name == 'computer-asset-export-v3-failure' || matrix.name == 'computer-asset-export-v3-cancel' || matrix.name == 'group-asset-export-v3' || matrix.name == 'group-asset-export-v3-failure' || matrix.name == 'group-asset-export-v3-cancel' || matrix.name == 'user-asset-export-v3-failure' || matrix.name == 'user-asset-export-v3-cancel' || matrix.name == 'user-asset-export-v3' || matrix.name == 'user-assets-v2' || matrix.name == 'user-assets-v2-readers' || matrix.name == 'user-assets-v3' || matrix.name == 'computer-assets-v3' || matrix.name == 'computer-assets-v3-readers' || matrix.name == 'group-assets-v3' || matrix.name == 'group-assets-v3-readers') && 'stable-body' || 'native-finish' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
@@ -189,6 +189,12 @@ jobs:
             command: python3 scripts/test_auth_e2e.py --suite user-assets-v2
           - name: user-assets-v2-readers
             command: python3 scripts/test_auth_e2e.py --suite user-assets-v2-readers
+          - name: computer-asset-export-v3
+            command: python3 scripts/test_auth_e2e.py --suite computer-asset-export-v3
+          - name: computer-asset-export-v3-failure
+            command: python3 scripts/test_auth_e2e.py --suite computer-asset-export-v3-failure
+          - name: computer-asset-export-v3-cancel
+            command: python3 scripts/test_auth_e2e.py --suite computer-asset-export-v3-cancel
           - name: group-asset-export-v3
             command: python3 scripts/test_auth_e2e.py --suite group-asset-export-v3
           - name: group-asset-export-v3-failure
@@ -411,6 +417,60 @@ jobs:
           # Strict success validation above requires JSON and all 14 step/viewport PNGs.
           # Keep partial failure evidence without masking the browser error.
           if-no-files-found: warn
+          retention-days: 14
+      - name: Validate computer export failure browser evidence
+        id: computer-export-failure-evidence
+        if: ${{ success() && matrix.name == 'computer-asset-export-v3-failure' }}
+        run: python3 scripts/computer_asset_export_v3_terminal_ci.py validate --suite computer-asset-export-v3-failure
+      - name: Retain validated computer export failure browser evidence
+        if: ${{ success() && matrix.name == 'computer-asset-export-v3-failure' && steps.computer-export-failure-evidence.outcome == 'success' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: computer-asset-export-v3-failure-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            web/playwright-report/computer-asset-export-v3-failure-validated/computer-asset-export-v3-failure-provenance.json
+            web/playwright-report/computer-asset-export-v3-failure-validated/computer-asset-export-v3-failure-evidence.json
+            web/playwright-report/computer-asset-export-v3-failure-validated/failed-terminal.png
+            web/playwright-report/computer-asset-export-v3-failure-validated/recovery-ready.png
+            web/playwright-report/computer-asset-export-v3-failure-validated/computer-assets-v3-*.xlsx
+          # Only validated synthetic JSON, explicit safe PNGs and actual recovery XLSX.
+          if-no-files-found: error
+          retention-days: 14
+      - name: Validate computer export cancel browser evidence
+        id: computer-export-cancel-evidence
+        if: ${{ success() && matrix.name == 'computer-asset-export-v3-cancel' }}
+        run: python3 scripts/computer_asset_export_v3_terminal_ci.py validate --suite computer-asset-export-v3-cancel
+      - name: Retain validated computer export cancel browser evidence
+        if: ${{ success() && matrix.name == 'computer-asset-export-v3-cancel' && steps.computer-export-cancel-evidence.outcome == 'success' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: computer-asset-export-v3-cancel-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            web/playwright-report/computer-asset-export-v3-cancel-validated/computer-asset-export-v3-cancel-provenance.json
+            web/playwright-report/computer-asset-export-v3-cancel-validated/computer-asset-export-v3-cancel-evidence.json
+            web/playwright-report/computer-asset-export-v3-cancel-validated/cancelled-terminal.png
+          # Only validated synthetic JSON, explicit safe PNGs and actual recovery XLSX.
+          if-no-files-found: error
+          retention-days: 14
+      - name: Validate computer asset export dictionary3 browser evidence
+        id: computer-export-evidence
+        if: ${{ success() && matrix.name == 'computer-asset-export-v3' }}
+        run: python3 scripts/computer_asset_export_v3_ci.py validate
+      - name: Retain validated computer asset export dictionary3 browser evidence
+        if: ${{ success() && matrix.name == 'computer-asset-export-v3' && steps.computer-export-evidence.outcome == 'success' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: computer-asset-export-v3-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            web/playwright-report/computer-export-validated/computer-asset-export-v3-provenance.json
+            web/playwright-report/computer-export-validated/computer-asset-export-v3-evidence.json
+            web/playwright-report/computer-export-validated/computer-assets-v3-*.xlsx
+            web/playwright-report/computer-export-validated/default-ready.png
+            web/playwright-report/computer-export-validated/allMatched-ready.png
+            web/playwright-report/computer-export-validated/empty-ready.png
+          # No trace, videos, logs, storage state, credentials or raw failures.
+          # Only independently validated synthetic JSON, XLSX and safe PNGs.
+          if-no-files-found: error
           retention-days: 14
       - name: Validate group export failure browser evidence
         id: group-export-failure-evidence

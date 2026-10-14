@@ -37,6 +37,7 @@ type directorySession struct {
 	v3                       bool
 	userExportFailureV3      bool
 	groupExportFailureV3     bool
+	computerExportFailureV3  bool
 	v4                       bool
 	groupMembersV4Pagination bool
 	v2                       bool
@@ -159,7 +160,7 @@ func (d *directorySession) writePage(ctx context.Context, conn io.Writer, id int
 			entry = groupMembersV4PaginationEntry(id, row)
 		}
 		if d.computerAssetsV3 {
-			entry = computerAssetsV3Entry(id, row)
+			entry = computerAssetsV3EntryWithExportFailure(id, row, d.computerExportFailureV3)
 		}
 		if d.groupAssetsV3 {
 			entry = groupAssetsV3EntryWithExportFailure(id, row, d.groupExportFailureV3)

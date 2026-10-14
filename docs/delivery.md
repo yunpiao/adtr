@@ -5,6 +5,24 @@
 
 ## 当前组合状态（2026-10-11，核对至 main 6f7f44a）
 
+### 2026-10-14 EXP-007候选补充（尚未通过候选验收）
+
+计算机导出候选以main `7ed455aecee1352f0261e7064253891af1c31c79`、tree
+`bdfc54e0982cb07a4679c5fa022f9324da31832a` 为基线，保留既有65项检查，
+计划增加正常/空结果、失败恢复、queued取消三项真实浏览器任务，预期68项。
+仅五个dictionary3 scalar事实、固定单域观测、共享search/时间范围/creatTm
+及全部匹配行；独立computer_asset_exports权限、computer_assets.v3.export任务
+与schema23三表。详见[冻结契约](computer-asset-export-v3-contract.md)。
+
+候选实现整合、独立实际diff审查、精确head CI和XLSX/PNG/数据库证据均待完成。
+本地仅做静态、gofmt及明确白名单的无子进程/网络Python检查，不声称本地
+Go/Node/PostgreSQL/浏览器/build通过。后续发布必须另记实际候选head、PR检查、
+合并tree/父提交及main-push结果；历史成功不能作为新候选成功。
+AD-F-053继续in_progress，Issue30/151保持open，产品验收0/209；完整旧字段、
+DNS/IP、真实AD/八版本Windows、容量和生产门禁未由本候选完成。
+
+### 2026-10-11历史组合状态
+
 当前已合并基线 `6f7f44a4997f78b6a50eab1ba657ffcc15769c1a` 为schema18，
 [main-push CI 38154440236](https://github.com/yunpiao/adtr/actions/runs/38154440236)
 attempt1逐项36/36成功。全部209项产品验收仍为 **0/209**；机器台账为
