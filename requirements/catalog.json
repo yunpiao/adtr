@@ -3301,6 +3301,31 @@
             }
           ]
         },
+        "kind_running_cancel_candidate": {
+          "status": "candidate_not_runtime_verified",
+          "base_commit": "ec0da2018cc5914b8d0ca345c1c2c4cd5078d177",
+          "base_tree": "ec801e6ffc0bce09cd89714bb1be3586d2781fad",
+          "base_main_ci": "https://github.com/yunpiao/adtr/actions/runs/38588506730",
+          "base_main_ci_result": "69/69 jobs success; historical baseline only",
+          "suites": ["group-asset-export-v3-running-cancel", "computer-asset-export-v3-running-cancel"],
+          "contracts": ["docs/group-asset-export-v3-contract.md", "docs/computer-asset-export-v3-contract.md"],
+          "scope": "Test-only snapshot/progress10 running to cancel_requested to cancelled; fixed kind/source and owned Worker; prior69 jobs preserved,71 expected; exact-head CI/artifacts pending.",
+          "remaining": "Chunk-stage cancellation, fencing races, legacy parity/capacity, real AD/Windows and production acceptance remain open."
+        },
+        "user_running_cancel_verified_slice": {
+          "pr": "https://github.com/yunpiao/adtr/pull/163",
+          "head": "4d5bdcc4e29351ee49cc3f3d2d2ee8ad8e29462f",
+          "merge_commit": "ec0da2018cc5914b8d0ca345c1c2c4cd5078d177",
+          "tree": "ec801e6ffc0bce09cd89714bb1be3586d2781fad",
+          "pr_ci": "https://github.com/yunpiao/adtr/actions/runs/38579256706",
+          "pr_ci_result": "attempt2 69/69; attempt1 directory GET effective socket_hang_up retained, cause unestablished",
+          "main_ci": "https://github.com/yunpiao/adtr/actions/runs/38588506730",
+          "main_ci_result": "attempt1 69/69",
+          "pr_artifact": "11902942969; sha256 1956d254dfe0fd16911e473c52ca8f9fb728d78fcc225590edf99694ec0bec4e",
+          "main_artifact": "11907692240; sha256 bc5aefae6611c54291f4d1c8973d1ca87018031fbe51e57dd8075e1911417baf",
+          "verification": "Independent current PR/main evidence review passed; user snapshot-stage running cancellation only; prior candidate and failed attempts retained in delivery ledger.",
+          "remaining": "Group/computer candidate CI, chunk-stage cancellation, fencing races, full parity/capacity, real AD/Windows and product acceptance remain open."
+        },
         "running_cancel_candidate": {
           "contract": "docs/user-asset-export-v3-contract.md",
           "status": "candidate_not_runtime_verified",

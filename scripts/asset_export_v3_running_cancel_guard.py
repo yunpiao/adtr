@@ -1,4 +1,4 @@
-"""CI-only, first-user-export checkpoint barrier. Never imported by production.
+"""CI-only, first-asset-export checkpoint barrier. Never imported by production.
 
 Only SELECT FOR UPDATE of the pre-existing owned queue activity row mutates
 lock state. Persistent psql sessions avoid docker startup in the 2s callback.
@@ -18,6 +18,7 @@ import subprocess
 import threading
 import time
 from urllib.parse import parse_qsl, urlsplit
+from types import MappingProxyType
 
 from user_asset_export_v3_worker_guard import OwnedExportWorkerGuard
 
@@ -32,6 +33,23 @@ GATE_SQL = 'SELECT pg_advisory_xact_lock_shared($1::bigint)'
 RELATIONS = {'adtr.schema_version', 'adtr.schema_version_pkey',
              'adtr.system_worker_activity', 'adtr.system_worker_activity_pkey',
              'adtr.system_worker_activity_recent'}
+
+
+# Runner-only selection. Never accept task kinds, table names or SQL via HTTP.
+EXPORT_KINDS = MappingProxyType({
+    'user': ('user_assets.v3.export', 'adtr.user_asset_export_snapshots',
+             'adtr.user_asset_export_manifests', 'adtr.user_asset_export_chunks'),
+    'group': ('group_assets.v3.export', 'adtr.group_asset_export_snapshots',
+              'adtr.group_asset_export_manifests', 'adtr.group_asset_export_chunks'),
+    'computer': ('computer_assets.v3.export', 'adtr.computer_asset_export_snapshots',
+                 'adtr.computer_asset_export_manifests', 'adtr.computer_asset_export_chunks'),
+})
+
+
+def export_kind(asset_kind):
+    require(isinstance(asset_kind, str) and asset_kind in EXPORT_KINDS,
+            'unsupported export asset kind')
+    return EXPORT_KINDS[asset_kind]
 
 
 def require(value, message):
@@ -161,8 +179,9 @@ def validate_sessions(sessions, lock_pid):
     return safe, blocked, transactions
 
 
-def validate_checkpoint(row, task_id, worker_id):
-    require(row and row['taskID'] == task_id and row['kind'] == 'user_assets.v3.export', 'wrong exporter checkpoint')
+def validate_checkpoint(row, task_id, worker_id, asset_kind='user'):
+    task_kind = export_kind(asset_kind)[0]
+    require(row and row['taskID'] == task_id and row['kind'] == task_kind, 'wrong exporter checkpoint')
     require(row['state'] == 'running' and row['attempt'] == 1 and row['progress'] == 10,
             'exporter did not enter first fenced transaction')
     require(row['snapshotCount'] == 1 and row['manifestCount'] == 0 and row['chunkCount'] == 0,
@@ -178,7 +197,9 @@ def validate_checkpoint(row, task_id, worker_id):
 class RunningExportCancelGuard:
     MAX_RUNNING_STOP_SECONDS = 10.0
 
-    def __init__(self, process, nonce, binary, database_container, application_name, database_url, proc_root=Path('/proc')):
+    def __init__(self, process, nonce, binary, database_container, application_name, database_url, proc_root=Path('/proc'), *, asset_kind='user'):
+        export_kind(asset_kind)  # Reject invalid selectors before creating any guard resources.
+        self.asset_kind = asset_kind
         self.owned = OwnedExportWorkerGuard(process, nonce, binary, proc_root)
         require(application_name == 'adtr-user-export-' + nonce and re.fullmatch('[0-9a-f]{32}', nonce), 'invalid application identity')
         self.application_name, self.container = application_name, database_container
@@ -215,14 +236,16 @@ class RunningExportCancelGuard:
         return states
 
     def observe_sql(self, task_id):
+        identifier(task_id)
+        _, snapshots, manifests, chunks = export_kind(self.asset_kind)
         return f"""SELECT jsonb_build_object('task', (SELECT jsonb_build_object(
  'taskID',t.task_id,'kind',t.kind,'state',t.state,'attempt',t.attempt,'progress',t.progress,
  'fencingToken',t.fencing_token,'leaseOwner',t.lease_owner,
  'databaseClock',extract(epoch FROM n.at),'leaseUntilEpoch',extract(epoch FROM t.lease_until),
  'leaseRemainingSeconds',extract(epoch FROM t.lease_until-n.at),
- 'snapshotCount',(SELECT count(*) FROM adtr.user_asset_export_snapshots WHERE task_id=t.task_id),
- 'manifestCount',(SELECT count(*) FROM adtr.user_asset_export_manifests WHERE task_id=t.task_id),
- 'chunkCount',(SELECT count(*) FROM adtr.user_asset_export_chunks WHERE task_id=t.task_id))
+ 'snapshotCount',(SELECT count(*) FROM {snapshots} WHERE task_id=t.task_id),
+ 'manifestCount',(SELECT count(*) FROM {manifests} WHERE task_id=t.task_id),
+ 'chunkCount',(SELECT count(*) FROM {chunks} WHERE task_id=t.task_id))
  FROM adtr.tasks t CROSS JOIN (SELECT clock_timestamp() AS at) n
  WHERE tenant_id='default' AND task_id='{task_id}'),
  'sessions',COALESCE((SELECT jsonb_agg(jsonb_build_object('pid',a.pid,'transaction',a.xact_start IS NOT NULL,
@@ -242,7 +265,7 @@ class RunningExportCancelGuard:
             observer = Psql(self.container, True)
             # Persistent observer exists AND successfully sampled before CONT.
             initial = observer.query(self.observe_sql(task_id))
-            require(initial['task'] and initial['task']['state'] == 'queued' and initial['task']['attempt'] == 0
+            require(initial['task'] and initial['task']['kind'] == export_kind(self.asset_kind)[0] and initial['task']['state'] == 'queued' and initial['task']['attempt'] == 0
                     and initial['task']['snapshotCount'] == 0 and
                     all(not s['transaction'] for s in initial['sessions']), 'initial queued transaction-free boundary missed')
             lock = Psql(self.container, False)
@@ -274,7 +297,7 @@ class RunningExportCancelGuard:
                 time.sleep(.002)
             require(all(s == 'T' for s in states), 'not all owned threads stopped')
             sample = observer.query(self.observe_sql(task_id), timeout=.5)
-            task = validate_checkpoint(sample['task'], task_id, worker_id)
+            task = validate_checkpoint(sample['task'], task_id, worker_id, self.asset_kind)
             sessions, blocked, txs = validate_sessions(sample['sessions'], lock.pid)
             require(time.monotonic() < deadline, 'activity checkpoint exceeded safe callback window')
             released = lock.query("ROLLBACK; SELECT to_json(true)", timeout=.5)

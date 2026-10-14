@@ -3,6 +3,7 @@ import hashlib
 from pathlib import Path
 import re
 import unittest
+from test_kind_asset_export_v3_running_cancel_runner_contract import restore as restore_kind_running_cancel
 
 CHANGES = {'scripts/test_auth_e2e.py': ('1a2bfa9b04c97aa93fc53189302595be14d6eeb3ef0f4be61fc0c453fa41f6db',
                               [('from user_asset_export_v3_worker_guard import OwnedExportWorkerGuard\n',
@@ -112,12 +113,15 @@ CHANGES = {'scripts/test_auth_e2e.py': ('1a2bfa9b04c97aa93fc53189302595be14d6eeb
                                 '      - name: Validate user asset export dictionary3 browser evidence\n',
                                 1)])}
 
-def restore(text, name):
+def restore_user_only(text, name):
     for old, new, count in reversed(CHANGES[name][1]):
         if text.count(new) != count:
             raise ValueError('running cancel addition absent or altered: ' + name)
         text = text.replace(new, old)
     return text
+
+def restore(text, name):
+    return restore_user_only(restore_kind_running_cancel(text, name), name)
 
 def restore_runner(text):
     return restore(text, 'scripts/test_auth_e2e.py')
@@ -131,7 +135,7 @@ class RunningCancelRunnerContract(unittest.TestCase):
             self.assertEqual(hashlib.sha256(restore(Path(name).read_text(), name).encode()).hexdigest(), digest)
 
     def test_69_jobs_with_one_new_slice(self):
-        source = Path('.github/workflows/ci.yml').read_text()
+        source = restore_kind_running_cancel(Path('.github/workflows/ci.yml').read_text(), '.github/workflows/ci.yml')
         names = re.findall(r'^          - name: ([a-z0-9-]+)$', source, re.M)
         self.assertEqual(len(names), 49)
         self.assertEqual(len(names) + 8 + 7 + 5, 69)
@@ -141,12 +145,12 @@ class RunningCancelRunnerContract(unittest.TestCase):
 
     def test_mutations_and_duplicates_fail(self):
         for name, (_, changes) in CHANGES.items():
-            source = Path(name).read_text()
+            source = restore_kind_running_cancel(Path(name).read_text(), name)
             for _, new, _ in changes:
                 with self.assertRaises(ValueError):
-                    restore(source + new, name)
+                    restore_user_only(source + new, name)
                 with self.assertRaises(ValueError):
-                    restore(source.replace(new, '!' + new[1:]), name)
+                    restore_user_only(source.replace(new, '!' + new[1:]), name)
 
 if __name__ == '__main__':
     unittest.main()

@@ -171,7 +171,7 @@ jobs:
   browser:
     needs: [prepare-postgres]
     env:
-      ADTR_E2E_NATIVE_STREAM_MODE: ${{ (matrix.name == 'user-asset-export-v3-running-cancel' || matrix.name == 'computer-asset-export-v3' || matrix.name == 'computer-asset-export-v3-failure' || matrix.name == 'computer-asset-export-v3-cancel' || matrix.name == 'group-asset-export-v3' || matrix.name == 'group-asset-export-v3-failure' || matrix.name == 'group-asset-export-v3-cancel' || matrix.name == 'user-asset-export-v3-failure' || matrix.name == 'user-asset-export-v3-cancel' || matrix.name == 'user-asset-export-v3' || matrix.name == 'user-assets-v2' || matrix.name == 'user-assets-v2-readers' || matrix.name == 'user-assets-v3' || matrix.name == 'computer-assets-v3' || matrix.name == 'computer-assets-v3-readers' || matrix.name == 'group-assets-v3' || matrix.name == 'group-assets-v3-readers') && 'stable-body' || 'native-finish' }}
+      ADTR_E2E_NATIVE_STREAM_MODE: ${{ (matrix.name == 'group-asset-export-v3-running-cancel' || matrix.name == 'computer-asset-export-v3-running-cancel' || matrix.name == 'user-asset-export-v3-running-cancel' || matrix.name == 'computer-asset-export-v3' || matrix.name == 'computer-asset-export-v3-failure' || matrix.name == 'computer-asset-export-v3-cancel' || matrix.name == 'group-asset-export-v3' || matrix.name == 'group-asset-export-v3-failure' || matrix.name == 'group-asset-export-v3-cancel' || matrix.name == 'user-asset-export-v3-failure' || matrix.name == 'user-asset-export-v3-cancel' || matrix.name == 'user-asset-export-v3' || matrix.name == 'user-assets-v2' || matrix.name == 'user-assets-v2-readers' || matrix.name == 'user-assets-v3' || matrix.name == 'computer-assets-v3' || matrix.name == 'computer-assets-v3-readers' || matrix.name == 'group-assets-v3' || matrix.name == 'group-assets-v3-readers') && 'stable-body' || 'native-finish' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
@@ -205,6 +205,10 @@ jobs:
             command: python3 scripts/test_auth_e2e.py --suite user-asset-export-v3-failure
           - name: user-asset-export-v3-cancel
             command: python3 scripts/test_auth_e2e.py --suite user-asset-export-v3-cancel
+          - name: group-asset-export-v3-running-cancel
+            command: python3 scripts/test_auth_e2e.py --suite group-asset-export-v3-running-cancel
+          - name: computer-asset-export-v3-running-cancel
+            command: python3 scripts/test_auth_e2e.py --suite computer-asset-export-v3-running-cancel
           - name: user-asset-export-v3-running-cancel
             command: python3 scripts/test_auth_e2e.py --suite user-asset-export-v3-running-cancel
           - name: user-asset-export-v3
@@ -560,6 +564,42 @@ jobs:
             web/playwright-report/user-asset-export-v3-cancel-validated/user-asset-export-v3-cancel-evidence.json
             web/playwright-report/user-asset-export-v3-cancel-validated/cancelled-terminal.png
           # Only validated synthetic JSON, explicit safe PNGs and actual recovery XLSX.
+          if-no-files-found: error
+          retention-days: 14
+      - name: Validate running group export cancellation evidence
+        id: group-export-running-cancel-evidence
+        if: ${{ success() && matrix.name == 'group-asset-export-v3-running-cancel' }}
+        run: python3 scripts/group_asset_export_v3_running_cancel_ci.py validate
+      - name: Retain validated running group export cancellation evidence
+        if: ${{ success() && matrix.name == 'group-asset-export-v3-running-cancel' && steps.group-export-running-cancel-evidence.outcome == 'success' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: group-asset-export-v3-running-cancel-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            web/playwright-report/group-asset-export-v3-running-cancel-validated/group-asset-export-v3-running-cancel-provenance.json
+            web/playwright-report/group-asset-export-v3-running-cancel-validated/group-asset-export-v3-running-cancel-evidence.json
+            web/playwright-report/group-asset-export-v3-running-cancel-validated/running-checkpoint.png
+            web/playwright-report/group-asset-export-v3-running-cancel-validated/cancel-requested.png
+            web/playwright-report/group-asset-export-v3-running-cancel-validated/cancelled-terminal.png
+          # Exact independently validated synthetic evidence allowlist; no XLSX, trace or proof inputs.
+          if-no-files-found: error
+          retention-days: 14
+      - name: Validate running computer export cancellation evidence
+        id: computer-export-running-cancel-evidence
+        if: ${{ success() && matrix.name == 'computer-asset-export-v3-running-cancel' }}
+        run: python3 scripts/computer_asset_export_v3_running_cancel_ci.py validate
+      - name: Retain validated running computer export cancellation evidence
+        if: ${{ success() && matrix.name == 'computer-asset-export-v3-running-cancel' && steps.computer-export-running-cancel-evidence.outcome == 'success' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: computer-asset-export-v3-running-cancel-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            web/playwright-report/computer-asset-export-v3-running-cancel-validated/computer-asset-export-v3-running-cancel-provenance.json
+            web/playwright-report/computer-asset-export-v3-running-cancel-validated/computer-asset-export-v3-running-cancel-evidence.json
+            web/playwright-report/computer-asset-export-v3-running-cancel-validated/running-checkpoint.png
+            web/playwright-report/computer-asset-export-v3-running-cancel-validated/cancel-requested.png
+            web/playwright-report/computer-asset-export-v3-running-cancel-validated/cancelled-terminal.png
+          # Exact independently validated synthetic evidence allowlist; no XLSX, trace or proof inputs.
           if-no-files-found: error
           retention-days: 14
       - name: Validate running user export cancellation evidence

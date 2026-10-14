@@ -319,7 +319,7 @@ viewports; it does not retrospectively convert old failed evidence into success.
 Running/cancel_requested browser scenarios remain unverified by these artifacts.
 These results apply only to the recorded revisions, not subsequent group exports.
 
-## Candidate: running cancellation after capture (2026-10-14, not runtime verified)
+## Historical candidate: running cancellation after capture (2026-10-14, then not runtime verified)
 
 The new test-only `user-asset-export-v3-running-cancel` slice starts from merged
 PR162 main `94b098d6acf5187e1ecf9aa659f5abed00122ce7`, tree
@@ -379,3 +379,18 @@ Real AD, eight Windows versions, target capacity/peak memory and production gate
 remain open. [Issue30](https://github.com/yunpiao/adtr/issues/30) and
 [Issue151](https://github.com/yunpiao/adtr/issues/151) stay open; product acceptance
 remains **0/209**.
+
+
+## PR163 snapshot-stage verification closure (2026-10-14)
+
+The historical candidate above was merged with head
+`4d5bdcc4e29351ee49cc3f3d2d2ee8ad8e29462f`, main
+`ec0da2018cc5914b8d0ca345c1c2c4cd5078d177`, and shared tree
+`ec801e6ffc0bce09cd89714bb1be3586d2781fad`. Exact-head CI38579256706
+attempt2 and separate main CI38588506730 attempt1 each passed69/69.
+PR artifact11902942969 and fresh main artifact11907692240 were independently
+validated, including actual PNGs and repository/source identities. Historical
+failed attempts and full artifact hashes remain in [delivery](delivery.md).
+These results cover user cancellation after snapshot capture only. New group/computer
+candidates require their own71-job exact-head CI and artifact review; chunk-stage
+cancellation, fencing races and product acceptance remain open.

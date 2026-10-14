@@ -20,6 +20,8 @@ from user_asset_export_v3_terminal_ci import SUITES as EXPORT_TERMINAL_SUITES, c
 from user_asset_export_v3_worker_guard import OwnedExportWorkerGuard
 from asset_export_v3_running_cancel_guard import RunningExportCancelGuard
 from user_asset_export_v3_running_cancel_ci import SUITE as RUNNING_CANCEL_SUITE, configure as configure_running_cancel, capture as capture_running_cancel, validate as validate_running_cancel
+from group_asset_export_v3_running_cancel_ci import SUITE as GROUP_RUNNING_CANCEL_SUITE, configure as configure_group_running_cancel, capture as capture_group_running_cancel, validate as validate_group_running_cancel
+from computer_asset_export_v3_running_cancel_ci import SUITE as COMPUTER_RUNNING_CANCEL_SUITE, configure as configure_computer_running_cancel, capture as capture_computer_running_cancel, validate as validate_computer_running_cancel
 from computer_asset_export_v3_ci import configure as configure_computer_export, capture as capture_computer_export, validate as validate_computer_export
 from computer_asset_export_v3_terminal_ci import SUITES as COMPUTER_EXPORT_TERMINAL_SUITES, configure as configure_computer_terminal, capture as capture_computer_terminal, validate as validate_computer_terminal
 from group_asset_export_v3_ci import configure as configure_group_export, capture as capture_group_export, validate as validate_group_export
@@ -41,7 +43,8 @@ COMPUTER_EXPORT_SUITES = COMPUTER_EXPORT_TERMINAL_SUITES | {"computer-asset-expo
 GROUP_EXPORT_SUITES = GROUP_EXPORT_TERMINAL_SUITES | {"group-asset-export-v3"}
 GROUP_ASSETS_V3_SUITES = {"group-assets-v3", "group-assets-v3-readers"}
 EMPTY_TRANSITION_SUITES = {"group-assets-v3", "computer-assets-v3"}
-DIRECTORY_V3_SUITES = {RUNNING_CANCEL_SUITE} | COMPUTER_EXPORT_SUITES | GROUP_EXPORT_SUITES | EXPORT_TERMINAL_SUITES | {"user-asset-export-v3", "directory-v3-backend", "user-assets-v3", "directory-v3", "directory-v3-controls", "directory-v3-readers"} | COMPUTER_ASSETS_V3_SUITES | GROUP_ASSETS_V3_SUITES
+KIND_RUNNING_CANCEL_SUITES = {GROUP_RUNNING_CANCEL_SUITE, COMPUTER_RUNNING_CANCEL_SUITE}
+DIRECTORY_V3_SUITES = KIND_RUNNING_CANCEL_SUITES | {RUNNING_CANCEL_SUITE} | COMPUTER_EXPORT_SUITES | GROUP_EXPORT_SUITES | EXPORT_TERMINAL_SUITES | {"user-asset-export-v3", "directory-v3-backend", "user-assets-v3", "directory-v3", "directory-v3-controls", "directory-v3-readers"} | COMPUTER_ASSETS_V3_SUITES | GROUP_ASSETS_V3_SUITES
 DIRECTORY_V4_SUITES = {"directory-v4-backend", "group-members-v4", "group-members-v4-empty", "group-members-v4-pagination", "group-members-v4-refresh"}
 DIRECTORY_SUITES = DIRECTORY_V4_SUITES | DIRECTORY_V3_SUITES | {"directory", "directory-controls", "directory-readers"} | DIRECTORY_V2_SUITES
 EMPTY_DIRECTORY_SUITES = {"directory-controls", "directory-readers", "directory-v2-controls", "directory-v2-readers", "directory-v3-controls", "directory-v3-readers"}
@@ -78,7 +81,7 @@ def validate_asset_refresh_evidence(suite):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--suite", choices=["user-asset-export-v3-running-cancel", "computer-asset-export-v3", "computer-asset-export-v3-failure", "computer-asset-export-v3-cancel", "group-asset-export-v3", "group-asset-export-v3-failure", "group-asset-export-v3-cancel", "user-asset-export-v3-failure", "user-asset-export-v3-cancel", "user-asset-export-v3", "auth", "access", "resource", "tasks", "messages", "messages-bulk", "audit", "system", "maintenance", "domains", "operations", "profile", "credential-use", "account-references", "operational-logs", "session-invalidation", "account-reference-barrier", "directory", "directory-controls", "directory-readers", "directory-v2", "directory-v2-controls", "directory-v2-readers", "directory-v3-backend", "directory-v4-backend", "group-members-v4", "group-members-v4-empty", "group-members-v4-pagination", "group-members-v4-refresh", "user-assets-v3", "computer-assets-v3", "computer-assets-v3-readers", "group-assets-v3", "group-assets-v3-readers", "directory-v3", "directory-v3-controls", "directory-v3-readers", "user-assets-v2", "user-assets-v2-readers"], default="auth")
+    parser.add_argument("--suite", choices=["group-asset-export-v3-running-cancel", "computer-asset-export-v3-running-cancel", "user-asset-export-v3-running-cancel", "computer-asset-export-v3", "computer-asset-export-v3-failure", "computer-asset-export-v3-cancel", "group-asset-export-v3", "group-asset-export-v3-failure", "group-asset-export-v3-cancel", "user-asset-export-v3-failure", "user-asset-export-v3-cancel", "user-asset-export-v3", "auth", "access", "resource", "tasks", "messages", "messages-bulk", "audit", "system", "maintenance", "domains", "operations", "profile", "credential-use", "account-references", "operational-logs", "session-invalidation", "account-reference-barrier", "directory", "directory-controls", "directory-readers", "directory-v2", "directory-v2-controls", "directory-v2-readers", "directory-v3-backend", "directory-v4-backend", "group-members-v4", "group-members-v4-empty", "group-members-v4-pagination", "group-members-v4-refresh", "user-assets-v3", "computer-assets-v3", "computer-assets-v3-readers", "group-assets-v3", "group-assets-v3-readers", "directory-v3", "directory-v3-controls", "directory-v3-readers", "user-assets-v2", "user-assets-v2-readers"], default="auth")
     parser.add_argument("--expired", action="store_true")
     args = parser.parse_args()
     # Check display support before creating a disposable database or fixtures.
@@ -123,6 +126,12 @@ def main():
     if args.suite == RUNNING_CANCEL_SUITE:
         configure_running_cancel(env)
         capture_running_cancel()
+    if args.suite == GROUP_RUNNING_CANCEL_SUITE:
+        configure_group_running_cancel(env)
+        capture_group_running_cancel()
+    if args.suite == COMPUTER_RUNNING_CANCEL_SUITE:
+        configure_computer_running_cancel(env)
+        capture_computer_running_cancel()
     logs = tempfile.TemporaryFile(mode="w+")
     try:
         creation_attempted = True
@@ -196,8 +205,8 @@ def main():
                                            directory_v4=args.suite in DIRECTORY_V4_SUITES,
                                            group_members_v4_pagination=args.suite == "group-members-v4-pagination",
                                            group_members_v4_refresh=args.suite == "group-members-v4-refresh",
-                                           computer_assets_v3=args.suite in COMPUTER_ASSETS_V3_SUITES | COMPUTER_EXPORT_SUITES,
-                                           group_assets_v3=args.suite in GROUP_ASSETS_V3_SUITES | GROUP_EXPORT_SUITES,
+                                           computer_assets_v3=args.suite in COMPUTER_ASSETS_V3_SUITES | COMPUTER_EXPORT_SUITES | {COMPUTER_RUNNING_CANCEL_SUITE},
+                                           group_assets_v3=args.suite in GROUP_ASSETS_V3_SUITES | GROUP_EXPORT_SUITES | {GROUP_RUNNING_CANCEL_SUITE},
                                            user_assets_v2=args.suite in USER_ASSETS_V2_SUITES,
                                            user_export_failure_v3=args.suite == "user-asset-export-v3-failure",
                                            group_export_failure_v3=args.suite == "group-asset-export-v3-failure",
@@ -249,7 +258,7 @@ def main():
             if args.suite == "messages-bulk":
                 # Identify only our worker connections for quiescent SIGSTOP tests.
                 worker_env["ADTR_DATABASE_URL"] += "&application_name=adtr-message-bulk-worker"
-            if args.suite in {RUNNING_CANCEL_SUITE, "user-asset-export-v3-cancel", "group-asset-export-v3-cancel", "computer-asset-export-v3-cancel"}:
+            if args.suite in {RUNNING_CANCEL_SUITE, "user-asset-export-v3-cancel", "group-asset-export-v3-cancel", "computer-asset-export-v3-cancel"} | KIND_RUNNING_CANCEL_SUITES:
                 export_worker_nonce = uuid.uuid4().hex
                 export_worker_app = "adtr-user-export-" + export_worker_nonce
                 worker_env["ADTR_E2E_EXPORT_WORKER_NONCE"] = export_worker_nonce
@@ -259,7 +268,7 @@ def main():
                 worker_env.pop(key, None)
             diagnostics.phase("worker-start")
             worker = subprocess.Popen(["./bin/adtr", "-mode", "worker"], env=worker_env, stdout=logs, stderr=logs)
-            if args.suite in {RUNNING_CANCEL_SUITE, "user-asset-export-v3-cancel", "group-asset-export-v3-cancel", "computer-asset-export-v3-cancel"}:
+            if args.suite in {RUNNING_CANCEL_SUITE, "user-asset-export-v3-cancel", "group-asset-export-v3-cancel", "computer-asset-export-v3-cancel"} | KIND_RUNNING_CANCEL_SUITES:
                 export_worker_guard = OwnedExportWorkerGuard(worker, export_worker_nonce, Path("bin/adtr").resolve())
                 export_worker_guard.start()
                 env.update(ADTR_E2E_WORKER_PID=str(worker.pid), ADTR_E2E_HARNESS_PID=str(os.getpid()),
@@ -268,8 +277,9 @@ def main():
                            ADTR_E2E_EXPORT_WORKER_BINARY=str(Path("bin/adtr").resolve()),
                            ADTR_E2E_EXPORT_WORKER_APPLICATION_NAME=export_worker_app,
                            ADTR_E2E_EXPORT_WORKER_READY_URL=f"http://127.0.0.1:{worker_port}/readyz")
-                if args.suite == RUNNING_CANCEL_SUITE:
-                    running_cancel_guard = RunningExportCancelGuard(worker, export_worker_nonce, Path("bin/adtr").resolve(), name, export_worker_app, env["ADTR_DATABASE_URL"])
+                if args.suite in {RUNNING_CANCEL_SUITE} | KIND_RUNNING_CANCEL_SUITES:
+                    asset_kind = {GROUP_RUNNING_CANCEL_SUITE: "group", COMPUTER_RUNNING_CANCEL_SUITE: "computer"}.get(args.suite, "user")
+                    running_cancel_guard = RunningExportCancelGuard(worker, export_worker_nonce, Path("bin/adtr").resolve(), name, export_worker_app, env["ADTR_DATABASE_URL"], asset_kind=asset_kind)
                     running_cancel_guard.start()
                     env.update(ADTR_E2E_RUNNING_CANCEL_GUARD_URL=running_cancel_guard.url,
                                ADTR_E2E_RUNNING_CANCEL_GUARD_TOKEN=running_cancel_guard.token)
@@ -295,14 +305,19 @@ def main():
         # enter an error-context prompt; explicit safe screenshots remain intact.
         env["PLAYWRIGHT_NO_COPY_PROMPT"] = "1"
         diagnostics.phase("browser-start")
-        subprocess.run(command, env=env, check=True, timeout=930 if args.suite == RUNNING_CANCEL_SUITE else 930 if args.suite in COMPUTER_EXPORT_SUITES else 930 if args.suite in GROUP_EXPORT_SUITES else 930 if args.suite in EXPORT_TERMINAL_SUITES else 930 if args.suite == "user-asset-export-v3" else 660 if args.suite == "account-references" else 930 if args.suite in EMPTY_DIRECTORY_SUITES | USER_ASSETS_V2_SUITES | {"user-assets-v3"} | COMPUTER_ASSETS_V3_SUITES | GROUP_ASSETS_V3_SUITES else 660 if args.suite in {"directory", "directory-v2", "directory-v3-backend", "directory-v4-backend", "group-members-v4", "group-members-v4-empty", "group-members-v4-pagination", "group-members-v4-refresh", "directory-v3"} else 600 if args.suite == "audit" else 540 if args.suite in {"maintenance", "domains", "operations", "credential-use", "account-references", "operational-logs", "account-reference-barrier"} else 480 if args.suite == "system" else 420)
+        subprocess.run(command, env=env, check=True, timeout=930 if args.suite in KIND_RUNNING_CANCEL_SUITES else 930 if args.suite == RUNNING_CANCEL_SUITE else 930 if args.suite in COMPUTER_EXPORT_SUITES else 930 if args.suite in GROUP_EXPORT_SUITES else 930 if args.suite in EXPORT_TERMINAL_SUITES else 930 if args.suite == "user-asset-export-v3" else 660 if args.suite == "account-references" else 930 if args.suite in EMPTY_DIRECTORY_SUITES | USER_ASSETS_V2_SUITES | {"user-assets-v3"} | COMPUTER_ASSETS_V3_SUITES | GROUP_ASSETS_V3_SUITES else 660 if args.suite in {"directory", "directory-v2", "directory-v3-backend", "directory-v4-backend", "group-members-v4", "group-members-v4-empty", "group-members-v4-pagination", "group-members-v4-refresh", "directory-v3"} else 600 if args.suite == "audit" else 540 if args.suite in {"maintenance", "domains", "operations", "credential-use", "account-references", "operational-logs", "account-reference-barrier"} else 480 if args.suite == "system" else 420)
         if args.suite == "user-asset-export-v3":
             validate_user_export()
         if export_worker_guard is not None:
             export_worker_guard.check()
         if running_cancel_guard is not None:
             running_cancel_guard.check()
-            validate_running_cancel()
+            if args.suite == GROUP_RUNNING_CANCEL_SUITE:
+                validate_group_running_cancel()
+            elif args.suite == COMPUTER_RUNNING_CANCEL_SUITE:
+                validate_computer_running_cancel()
+            else:
+                validate_running_cancel()
         if args.suite in EXPORT_TERMINAL_SUITES:
             validate_terminal_export(args.suite)
         if args.suite == "group-asset-export-v3":
