@@ -9,10 +9,12 @@ from decimal import Decimal
 import math
 from pathlib import Path
 import re
+import struct
+import zlib
 import json
 import validate_user_asset_export_v3_evidence as base
 import validate_user_asset_export_v3_terminal_evidence as terminal
-from validate_user_asset_export_v3_evidence import require, exact, sha, strict_json, source_rows, no_secrets, validate_png
+from validate_user_asset_export_v3_evidence import require, exact, sha, strict_json, source_rows, no_secrets
 
 SUITE = 'user-asset-export-v3-running-cancel'
 LIVE_KEYS = (terminal.DB_KEYS - {'leaseOwner'}) | {'leaseOwnerSHA256', 'fencingToken', 'sourceSHA256', 'observationID', 'databaseClock', 'leaseUntilEpoch'}
@@ -41,12 +43,63 @@ def digest(value):
     return type(value) is str and re.fullmatch('[0-9a-f]{64}', value) is not None
 
 
+def validate_crop_png(raw, width, height):
+    """Strict RGB/RGBA CSS-pixel crop parser; legacy viewport gate is untouched."""
+    require(raw.startswith(b'\x89PNG\r\n\x1a\n') and len(raw) <= 10 << 20, 'crop PNG signature/size')
+    offset, kinds, compressed, channels = 8, [], bytearray(), None
+    while offset < len(raw):
+        require(offset + 12 <= len(raw), 'crop PNG truncated chunk')
+        size = int.from_bytes(raw[offset:offset+4], 'big')
+        kind = raw[offset+4:offset+8]
+        end = offset + 12 + size
+        require(end <= len(raw), 'crop PNG chunk bounds')
+        require(zlib.crc32(raw[offset+4:end-4]) == int.from_bytes(raw[end-4:end], 'big'), 'crop PNG CRC')
+        body = raw[offset+8:end-4]
+        if not kinds:
+            require(kind == b'IHDR' and size == 13, 'crop PNG header')
+            w,h,depth,color,compression,filter_method,interlace = struct.unpack('>IIBBBBB',body)
+            require((w,h) == (width,height), 'PNG pixels match exact captured CSS rectangle')
+            require(depth == 8 and color in (2,6) and compression == filter_method == interlace == 0, 'bounded noninterlaced truecolor crop')
+            channels = 3 if color == 2 else 4
+        elif kind == b'IDAT':
+            require(kinds[-1] in (b'IHDR',b'IDAT',b'sRGB',b'gAMA',b'cHRM',b'pHYs'), 'contiguous crop PNG image stream')
+            compressed.extend(body)
+        elif kind == b'IEND':
+            require(size == 0 and end == len(raw), 'final empty PNG terminator')
+        else:
+            require(kind in (b'sRGB',b'gAMA',b'cHRM',b'pHYs') and b'IDAT' not in kinds and kind not in kinds, 'only bounded color/density metadata')
+            require(size == {b'sRGB':1,b'gAMA':4,b'cHRM':32,b'pHYs':9}[kind], 'PNG ancillary size')
+        kinds.append(kind)
+        offset=end
+    require(kinds[-1:] == [b'IEND'] and b'IDAT' in kinds and kinds.count(b'IHDR') == kinds.count(b'IEND') == 1, 'complete crop PNG structure')
+    expected = height * (1 + width * channels)
+    decoder = zlib.decompressobj()
+    try:
+        pixels = decoder.decompress(bytes(compressed), expected + 1)
+    except zlib.error as error:
+        raise ValueError('invalid crop compressed image') from error
+    require(len(pixels) == expected and decoder.eof and not decoder.unused_data and not decoder.unconsumed_tail, 'exact bounded decoded crop scanline bytes')
+    stride = 1 + width * channels
+    require(all(pixels[offset] <= 4 for offset in range(0,len(pixels),stride)), 'valid PNG scanline filters')
+
+
 def screenshot(value, filename, task_id, state, read_artifact):
-    exact(value, ['filename','sha256','inputsExcluded','taskID','state'], 'safe screenshot fields')
+    exact(value, ['filename','sha256','inputsExcluded','taskID','state','crop','inputRects'], 'safe screenshot fields')
     require(value['filename'] == filename and value['taskID'] == task_id and value['state'] == state and value['inputsExcluded'] is True, 'genuine state screenshot identity and excluded proof inputs')
+    crop = value['crop']
+    exact(crop,['x','y','width','height','viewportWidth','viewportHeight'],'captured CSS geometry')
+    require(all(integer(n) for n in crop.values()) and crop['width'] > 0 and crop['height'] > 0, 'integer positive captured crop')
+    require(crop['viewportWidth'] == 1440 and crop['viewportHeight'] == 900 and crop['x'] + crop['width'] <= 1440 and crop['y'] + crop['height'] <= 900, 'crop entirely inside actual fixed viewport')
+    require(type(value['inputRects']) is list, 'captured input geometry list')
+    for box in value['inputRects']:
+        exact(box,['x','y','width','height'],'input geometry only, no values')
+        require(all(number(n) for n in box.values()) and box['width'] >= 0 and box['height'] >= 0, 'finite input rectangle')
+        intersects = (box['x'] < crop['x']+crop['width'] and box['x']+box['width'] > crop['x'] and
+                      box['y'] < crop['y']+crop['height'] and box['y']+box['height'] > crop['y'])
+        require(not intersects, 'all captured proof-input rectangles outside screenshot')
     raw = read_artifact(filename)
     require(sha(raw) == value['sha256'], 'screenshot digest')
-    validate_png(raw)
+    validate_crop_png(raw,crop['width'],crop['height'])
 
 
 def response(value, case, state, detail=False):

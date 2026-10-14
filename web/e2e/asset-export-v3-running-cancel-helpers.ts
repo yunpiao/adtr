@@ -23,7 +23,9 @@ export async function runningGuard(path: "checkpoint" | "resume", body: Record<s
 
 type CapturedStatus = {
   bytes: Buffer;
-  metadata: { filename: string; sha256: string; inputsExcluded: true; taskID: string; state: string };
+  metadata: { filename: string; sha256: string; inputsExcluded: true; taskID: string; state: string;
+    crop: { x: number; y: number; width: number; height: number; viewportWidth: number; viewportHeight: number };
+    inputRects: { x: number; y: number; width: number; height: number }[] };
 };
 export async function captureRunningStatus(page: Page, taskID: string, state: "running" | "cancel_requested" | "cancelled", filename: string): Promise<CapturedStatus> {
   const panel = panelFor(page);
@@ -41,15 +43,23 @@ export async function captureRunningStatus(page: Page, taskID: string, state: "r
   const right = Math.ceil(Math.max(...visible.map((box) => box.x + box.width)));
   const bottom = Math.ceil(Math.max(...visible.map((box) => box.y + box.height)));
   const viewport = page.viewportSize();
-  if (!viewport || x < 0 || y < 0 || right > viewport.width || bottom > viewport.height) throw new Error("Status crop must be fully visible");
+  if (!viewport || viewport.width !== 1440 || viewport.height !== 900 ||
+    ![x, y, right, bottom].every(Number.isSafeInteger) || x < 0 || y < 0 || right <= x || bottom <= y ||
+    right > viewport.width || bottom > viewport.height) throw new Error("Status crop must be fully visible in the fixed viewport");
+  const clip = { x, y, width: right - x, height: bottom - y };
   // Check every input, including the plain-text TOTP, before capturing pixels.
   // No DOM mutation, masking, fabricated labels, or proof-bearing page capture.
+  const inputRects: { x: number; y: number; width: number; height: number }[] = [];
   for (const input of await page.locator("input").all()) {
     const box = await input.boundingBox();
-    if (box && box.x < right && box.x + box.width > x && box.y < bottom && box.y + box.height > y) throw new Error("Status crop intersects an input");
+    if (!box) continue;
+    if (![box.x, box.y, box.width, box.height].every(Number.isFinite) || box.width < 0 || box.height < 0) throw new Error("Invalid input geometry");
+    if (box.x < right && box.x + box.width > x && box.y < bottom && box.y + box.height > y) throw new Error("Status crop intersects an input");
+    inputRects.push({ x: box.x, y: box.y, width: box.width, height: box.height });
   }
-  const bytes = await page.screenshot({ clip: { x, y, width: right - x, height: bottom - y }, timeout: 1500 });
-  return { bytes, metadata: { filename, sha256: hash(bytes), inputsExcluded: true, taskID, state } };
+  const bytes = await page.screenshot({ clip, scale: "css", timeout: 1500 });
+  return { bytes, metadata: { filename, sha256: hash(bytes), inputsExcluded: true, taskID, state,
+    crop: { ...clip, viewportWidth: viewport.width, viewportHeight: viewport.height }, inputRects } };
 }
 export async function saveRunningStatus(info: TestInfo, capture: CapturedStatus) {
   await writeFile(info.outputPath(capture.metadata.filename), capture.bytes);

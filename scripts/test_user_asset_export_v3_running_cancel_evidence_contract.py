@@ -1,9 +1,19 @@
 """Offline corruption specimens only; no browser/PG acceptance evidence."""
 import copy
+import struct
+import zlib
 from datetime import datetime, timezone
 import unittest
 import validate_user_asset_export_v3_running_cancel_evidence as v
 import test_user_asset_export_v3_terminal_evidence_contract as old
+
+
+def crop_png(width=640,height=100,color=2,filter_byte=0,extra=b''):
+    def chunk(kind,body):
+        return struct.pack('>I',len(body))+kind+body+struct.pack('>I',zlib.crc32(kind+body))
+    channels=3 if color==2 else 4
+    raw=(bytes([filter_byte])+b'\0'*(width*channels))*height+extra
+    return b'\x89PNG\r\n\x1a\n'+chunk(b'IHDR',struct.pack('>IIBBBBB',width,height,8,color,0,0,0))+chunk(b'IDAT',zlib.compress(raw))+chunk(b'IEND',b'')
 
 
 def specimen():
@@ -33,6 +43,11 @@ def specimen():
         c[key]['task'].update(attempt=1,progress=10)
     c['postResume']={k:copy.deepcopy(c[k]) for k in ('receipt','detail','database','unavailableDownload')}
     c['screenshot'].update(inputsExcluded=True,taskID=task_id,state='cancelled')
+    for image in (c['running']['screenshot'],c['pending']['screenshot'],c['screenshot']):
+        image.update(crop={'x':20,'y':100,'width':640,'height':100,'viewportWidth':1440,'viewportHeight':900},
+                     inputRects=[{'x':20,'y':210,'width':200,'height':25}])
+        files[image['filename']]=crop_png()
+        image['sha256']=v.sha(files[image['filename']])
     pause=data['worker']['pause'];pause['workerIDSHA256']='5'*64;pause.pop('workerID')
     cycles=data['worker'].pop('resume');cycles['workerIDSHA256']='5'*64;cycles.pop('workerID')
     cycles.update(queueSuccessAfterFirst='2003.000000',queueSuccessAfter='2004.000000')
@@ -53,6 +68,19 @@ class RunningEvidenceTests(unittest.TestCase):
 
     def test_positive_independent_specimen(self):
         self.check(*specimen())
+
+    def test_strict_crop_geometry_and_png_decode(self):
+        for change in ({'width':641},{'height':101},{'x':1000},{'y':850},{'width':0},{'height':True},{'viewportWidth':1280}):
+            data,files=specimen();data['cases'][0]['running']['screenshot']['crop'].update(change)
+            with self.assertRaises(ValueError):self.check(data,files)
+        for box in ({'x':30,'y':110,'width':1,'height':1},{'x':10,'y':90,'width':2000,'height':2000},{'x':0,'y':0,'width':float('nan'),'height':1}):
+            data,files=specimen();data['cases'][0]['running']['screenshot']['inputRects']=[box]
+            with self.assertRaises(ValueError):self.check(data,files)
+        for raw in (crop_png(extra=b'x'),crop_png(filter_byte=5),crop_png()[:-1],crop_png()+b'trailing',crop_png()[:40]+b'broken'+crop_png()[46:]):
+            data,files=specimen();image=data['cases'][0]['running']['screenshot'];files[image['filename']]=raw;image['sha256']=v.sha(raw)
+            with self.assertRaises(ValueError):self.check(data,files)
+        data,files=specimen();image=data['cases'][0]['running']['screenshot'];raw=crop_png(color=6);files[image['filename']]=raw;image['sha256']=v.sha(raw)
+        self.check(data,files)
 
     def test_reject_corrupted_checkpoint_lease_and_stop(self):
         changes=[{'attempt':0},{'snapshotCount':0},{'progress':9},{'fencingToken':2},{'leaseRemainingSeconds':20},
