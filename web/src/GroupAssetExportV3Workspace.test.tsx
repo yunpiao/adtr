@@ -100,10 +100,17 @@ it("recovers a newly created locator after source invalidation in the same works
   fireEvent.change(screen.getByLabelText("未使用的认证器验证码"), { target: { value: "123456" } });
   fireEvent.click(screen.getByRole("button", { name: "创建组导出" }));
   await screen.findByRole("button", { name: "下载组 XLSX" });
+  expect(screen.getByRole("region", { name: "已选数据源组资产" })).toBeVisible();
   list.mockRejectedValue(new ApiError("selection_changed", 409));
   fireEvent.click(screen.getByRole("button", { name: "刷新组资产观测" }));
-  fireEvent.click(await screen.findByRole("button", { name: "恢复组导出回执" }));
-  await waitFor(() => expect(receipt).toHaveBeenCalled());
+  // Refresh first removes the observation pin inside Assets. Its intermediate
+  // recovery button is then unmounted when selection_changed clears the source.
+  // Await that lifecycle boundary before clicking the root recovery entry.
+  await waitFor(() => expect(screen.queryByRole("region", { name: "已选数据源组资产" })).not.toBeInTheDocument());
+  expect(screen.getByText("数据源配置或凭据版本已改变，请重新选择数据源。")).toBeVisible();
+  expect(screen.queryByRole("button", { name: "刷新组资产观测" })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "恢复组导出回执" }));
+  await waitFor(() => expect(receipt).toHaveBeenCalledTimes(1));
   expect(receipt).toHaveBeenCalledWith(exportRequest.domainId, create.mock.calls[0][1], 1, expect.any(AbortSignal));
   expect(create).toHaveBeenCalledTimes(1);
 });

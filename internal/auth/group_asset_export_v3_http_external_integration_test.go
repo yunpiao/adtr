@@ -600,17 +600,43 @@ func TestGroupExportCrossKindKeysTasksAndPermissionsStayIsolated(t *testing.T) {
 	f := newGroupExportHTTPFixture(t, false)
 	groupID := f.submit("directory-admin", "same-key", nil)
 	user := operationalDecode[struct {
-		TaskID string `json:"taskID"`
+		TaskID   string                           `json:"taskID"`
+		Task     tasks.Task                       `json:"task"`
+		Request  domains.UserAssetExportV3Payload `json:"request"`
+		Replayed bool                             `json:"replayed"`
 	}](t, f.request("directory-admin", assetExportPath, f.proof("directory-admin", f.body("same-key")), 200).Body.Bytes())
-	if user.TaskID == "" || user.TaskID == groupID {
+	wantUser := domains.UserAssetExportV3Payload{DomainID: "domain-one", ExpectedRevision: "2", ExpectedCredentialRevision: "2", ObservationID: f.observation, ScreenColumns: []string{"guid", "sAMAccountName", "sid", "mail", "dn", "whenCreated"}}
+	if user.TaskID == "" || user.TaskID == groupID || user.TaskID != user.Task.ID || user.Task.Kind != domains.UserAssetExportV3KindName || user.Replayed || !reflect.DeepEqual(user.Request, wantUser) || string(user.Task.Result) != "{}" || string(user.Task.Cursor) != "{}" {
 		t.Fatal("cross-kind key adopted")
 	}
 	for _, tc := range []struct{ path, own, other string }{{groupAssetExportPath, groupID, user.TaskID}, {assetExportPath, user.TaskID, groupID}} {
-		receipt := operationalDecode[struct {
-			TaskID string `json:"taskID"`
-		}](t, f.request("directory-admin", tc.path+"/receipt?domainId=domain-one&idempotencyKey=same-key", nil, 200).Body.Bytes())
-		if receipt.TaskID != tc.own {
-			t.Fatal("receipt crossed kind")
+		raw := f.request("directory-admin", tc.path+"/receipt?domainId=domain-one&idempotencyKey=same-key", nil, 200).Body.Bytes()
+		var receiptID, kind string
+		var task tasks.Task
+		if tc.path == groupAssetExportPath {
+			receipt := operationalDecode[struct {
+				TaskID  string                            `json:"taskID"`
+				Task    tasks.Task                        `json:"task"`
+				Request domains.GroupAssetExportV3Payload `json:"request"`
+			}](t, raw)
+			want := domains.GroupAssetExportV3Payload{DomainID: "domain-one", ExpectedRevision: "2", ExpectedCredentialRevision: "2", ObservationID: f.observation, ScreenColumns: []string{"guid", "sAMAccountName", "sid", "dn", "whenCreated"}}
+			if !reflect.DeepEqual(receipt.Request, want) {
+				t.Fatal("group receipt request crossed kind")
+			}
+			receiptID, task, kind = receipt.TaskID, receipt.Task, domains.GroupAssetExportV3KindName
+		} else {
+			receipt := operationalDecode[struct {
+				TaskID  string                           `json:"taskID"`
+				Task    tasks.Task                       `json:"task"`
+				Request domains.UserAssetExportV3Payload `json:"request"`
+			}](t, raw)
+			if !reflect.DeepEqual(receipt.Request, wantUser) {
+				t.Fatal("user receipt request crossed kind")
+			}
+			receiptID, task, kind = receipt.TaskID, receipt.Task, domains.UserAssetExportV3KindName
+		}
+		if receiptID != tc.own || task.ID != receiptID || task.Kind != kind || string(task.Result) != "{}" || string(task.Cursor) != "{}" {
+			t.Fatal("receipt crossed kind or exposed private metadata")
 		}
 		for _, suffix := range []string{"/detail", "/download"} {
 			f.request("directory-admin", tc.path+suffix+"?taskID="+tc.other, nil, 404)
