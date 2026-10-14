@@ -1,8 +1,8 @@
-# User asset XLSX export v3: proposed first slice
+# User asset XLSX export v3: implemented bounded first slice
 
-Interface/lifecycle freeze, 2026-10-13, following independent contract review.
-Implementation and actual-diff review pending.
-Base: actual remote main `325f28095b9fb5a60c7e43e698ac2013d78d4a59`, tree
+Interface/lifecycle freeze, 2026-10-13; evidence reconciled 2026-10-14.
+PR159 is merged. AD-F-053 is in_progress and product acceptance remains 0/209.
+Original implementation base: actual remote main `325f28095b9fb5a60c7e43e698ac2013d78d4a59`, tree
 `d52cc6084bf765e7d768f1d037ef7c435f5ab3d7`.
 References: [F14 #30](https://github.com/yunpiao/adtr/issues/30), AD-F-053 / EXP-006,
 [F38 #26](https://github.com/yunpiao/adtr/issues/26),
@@ -207,14 +207,14 @@ schema/dependency_unavailable(503). Safe terminal task codes distinguish
 authorization_revoked, export_invalid_text, export_cell_too_long,
 artifact_too_large, directory_observation_unavailable and export_timeout.
 
-## Planned files and verification
+## Implementation files and verification boundaries
 
-Backend owner: internal/domains/user_asset_export_v3*.go and shared
+Backend implementation: internal/domains/user_asset_export_v3*.go and shared
 user_assets_v3.go predicate/order extraction; new internal/userassetxlsx;
 internal/auth/user_asset_export_v3_http*.go, permission schema/catalog/check,
 task_authorization.go, task_public.go sanitization and dedicated route guard; store migration21 and schema gate;
 cmd/adtr wiring; matching unit/HTTP/real-PostgreSQL tests and this contract.
-Frontend owner: new user-asset-export-v3 API/component/tests, v3 workspace integration,
+Frontend implementation: new user-asset-export-v3 API/component/tests, v3 workspace integration,
 browser suite/fixtures/evidence. Coordinate before editing shared CI/config files.
 
 Tests must cover full-vs-current-page equality, all filters/order, empty observation,
@@ -237,5 +237,60 @@ exactly two real exports and one source observation/use are asserted. Independen
 capture clean commit/tree/run/sourceSHA provenance before browser execution;
 validate it afterward. Success artifacts are only validated JSON, two XLSX, two
 PNG and provenance; failure retains only existing sanitized diagnostics. These
-are synthetic evidence gates, not real AD or production acceptance. Local work
-is static/Python only; compilation, PostgreSQL and browser execution await GitHub CI.
+are synthetic evidence gates, not real AD or production acceptance. Local reconciliation is static/Python only. The completed GitHub CI runs below
+provide compilation, PostgreSQL and normal/empty browser evidence for PR159;
+they do not verify later changes or the planned failure/cancellation browser slice.
+
+
+## Recorded implementation evidence (2026-10-14)
+
+[PR159](https://github.com/yunpiao/adtr/pull/159) is merged at
+`370e405b50a23a85a63126c562bb1790dd4eca87`.
+Its final (third) head is `9a8d5b10b1c68b7355604d7eb85274677479421d`.
+[PR CI 38483191968](https://github.com/yunpiao/adtr/actions/runs/38483191968)
+passed 60/60 jobs on attempt 1; the actual PR checkout commit was
+`6aeea9ed7bb0bf03f1faac8f976bd31e03ce283b`, distinct from the head.
+[Post-merge CI 38487379365](https://github.com/yunpiao/adtr/actions/runs/38487379365)
+passed 60/60 jobs on attempt 1 at the merge commit. Both actual checkouts have tree
+`7c768d2649ef741d9ec371e69f49c8f6e3a211c9`.
+These runs are evidence only for those exact revisions, not for this update or
+any later recovery/cancellation implementation.
+
+Each run independently produced and verified two real XLSX downloads and two
+1440x900 PNG ready-state screenshots through synthetic TLS LDAP, the real Worker,
+PostgreSQL, HTTP API and browser. The normal case contains all 12 matching users
+while the first list page contains 10; the zero-match case contains only headings.
+Each artifact set binds observation bytes, task/receipt, database chunks,
+download headers/length/hash, workbook values and source/checkout/run provenance.
+This is synthetic-source end-to-end evidence, not a real AD/Windows experiment.
+
+- PR-run artifact: `user-asset-export-v3-38483191968-1`, ID 11858158563,
+  archive SHA256 `f6ccbfb8e2cf8a7fe57fcd4b89e281673e42bf79cb2130eabed4d745e600dc44`
+- Main-run artifact: `user-asset-export-v3-38487379365-1`, ID 11860810594,
+  archive SHA256 `fb35f43e5cfbf9e232f6ef6e58ec10b153575c04f059ade504abccb28ae87c29`
+- In each run the 12-row workbook is 2751 bytes, SHA256
+  `66dc1925de87c16e2bddda8cee2145b0250834d639c97117a3d1cb9145d1ec73`;
+  the zero-row workbook is 2092 bytes, SHA256
+  `e70eedde7b671cc00f6b749da5dcb8bda486cc9777e5438b49ce980d41b2bf24`
+- PR PNG SHA256: allMatched
+  `82f0b6e489e0b8cfdf9581bbdc76d4d36b17215f3304f839544debf44dc9022b`, empty
+  `bb402582a42886921ce6a7df99ba5b6dc54e6d3ca56b07419f835ab2020eaa55`
+- Main PNG SHA256: allMatched
+  `3fa0cd822cfc9a449a79671cbc538668a0aea3f48d4ae1fac7e6a9b6c4d557f4`, empty
+  `de1310f3311dab4dfb1db475dba18aef3e12f06268098ebe95a049a8fe630fbe`
+
+Named HTTP, real-PostgreSQL and DOM tests cover cancellation/failure behavior.
+Actual browser failure recovery and cancellation were not exercised by the above
+normal/empty artifacts. The next planned slice is failed export followed by an
+explicit new safe two-column submission, plus queued cancellation with persisted
+terminal-state/cleanup checks. Its fixture, browser and CI work is in progress;
+no run or artifact from that plan is claimed as passed here. Record the exact
+future head, run, source and artifacts only after execution and independent review.
+
+AD-F-053 therefore remains `in_progress`, `product_accepted=false`.
+EXP-006 legacy business/default columns and full filter semantics, EXP-007 computer,
+EXP-008 group and EXP-009 DNS/IP exports are not delivered by this bounded slice.
+Real AD, eight Windows versions, target capacity/peak memory and production gates
+remain open. [Issue30](https://github.com/yunpiao/adtr/issues/30) and
+[Issue151](https://github.com/yunpiao/adtr/issues/151) stay open; product acceptance
+remains **0/209**.

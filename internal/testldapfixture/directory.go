@@ -35,6 +35,7 @@ var directorySearchBody = bytes.Join([][]byte{
 
 type directorySession struct {
 	v3                       bool
+	userExportFailureV3      bool
 	v4                       bool
 	groupMembersV4Pagination bool
 	v2                       bool
@@ -148,7 +149,7 @@ func (d *directorySession) writePage(ctx context.Context, conn io.Writer, id int
 	for row := first; row < first+entries; row++ {
 		entry := directoryEntryForDictionary(id, row, d.v2)
 		if d.v3 {
-			entry = directoryV3Entry(id, row)
+			entry = directoryV3EntryWithExportFailure(id, row, d.userExportFailureV3)
 		}
 		if d.v4 {
 			entry = directoryV4Entry(id, row)

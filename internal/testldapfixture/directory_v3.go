@@ -17,7 +17,15 @@ var directoryV3SearchBody = bytes.Join([][]byte{
 		octets("objectSid"), octets("mail"), octets("description"), octets("whenCreated"), octets("primaryGroupID"), octets("servicePrincipalName")),
 }, nil)
 
+// U+0001 is valid UTF-8 and JSON/PostgreSQL storage text but invalid XML 1.0.
+// No NUL or malformed UTF-8 is used: collection must succeed before export fails.
+const userExportFailureV3Mail = "export-invalid\x01@example.test"
+
 func directoryV3Entry(id, row int) []byte {
+	return directoryV3EntryWithExportFailure(id, row, false)
+}
+
+func directoryV3EntryWithExportFailure(id, row int, exportFailure bool) []byte {
 	kind, number, ou := "user", row, "Users"
 	classes := []string{"top", "person", "organizationalPerson", "user"}
 	uac := "512"
@@ -47,7 +55,12 @@ func directoryV3Entry(id, row int) []byte {
 		attributes = append(attributes, directoryAttribute("userAccountControl", uac)...)
 	}
 	if row != 24 {
-		attributes = append(attributes, directoryV2Supplemental(row)...)
+		var mailOverride *string
+		if exportFailure && row == 1 {
+			mail := userExportFailureV3Mail
+			mailOverride = &mail
+		}
+		attributes = append(attributes, directoryV2SupplementalWithMail(row, mailOverride)...)
 	}
 	if row <= 12 && row != 12 || row > 24 {
 		idValue := "513"

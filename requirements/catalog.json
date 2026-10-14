@@ -3158,9 +3158,60 @@
         "UI-0502",
         "UI-0503"
       ],
-      "status": "not_started",
+      "status": "in_progress",
       "product_accepted": false,
-      "evidence": null
+      "evidence": {
+        "contract": "docs/user-asset-export-v3-contract.md",
+        "pr": "https://github.com/yunpiao/adtr/pull/159",
+        "commit": "9a8d5b10b1c68b7355604d7eb85274677479421d",
+        "merge_commit": "370e405b50a23a85a63126c562bb1790dd4eca87",
+        "tree": "7c768d2649ef741d9ec371e69f49c8f6e3a211c9",
+        "implemented_scope": "PR159已合并的EXP-006有界用户异步XLSX：仅dictionary3、单域及固定已发布观测、已采集的guid/sAMAccountName/sid/mail/dn/whenCreated六个scalar列；沿用v3用户列表筛选/排序，导出全部匹配行而非当前页。当前AD-F-053仍未验收。",
+        "ci": [
+          {
+            "url": "https://github.com/yunpiao/adtr/actions/runs/38483191968",
+            "head": "9a8d5b10b1c68b7355604d7eb85274677479421d",
+            "checkout_commit": "6aeea9ed7bb0bf03f1faac8f976bd31e03ce283b",
+            "checkout_tree": "7c768d2649ef741d9ec371e69f49c8f6e3a211c9",
+            "run_attempt": 1,
+            "result": "60/60 jobs success"
+          },
+          {
+            "url": "https://github.com/yunpiao/adtr/actions/runs/38487379365",
+            "head": "370e405b50a23a85a63126c562bb1790dd4eca87",
+            "checkout_commit": "370e405b50a23a85a63126c562bb1790dd4eca87",
+            "checkout_tree": "7c768d2649ef741d9ec371e69f49c8f6e3a211c9",
+            "run_attempt": 1,
+            "result": "60/60 jobs success"
+          }
+        ],
+        "verified": [
+          "两次运行分别验证合成TLS LDAP→实际Worker→PostgreSQL→API→真实浏览器链；每次独立核验正常12行（页面首屏10行）和零匹配仅表头两个XLSX、两个ready截图、来源观测与commit/tree/run/sourceSHA绑定。",
+          "两个运行的实际XLSX均核对下载头/长度/SHA256、数据库chunk与生成行值；12行文件2751 bytes SHA256 66dc1925de87c16e2bddda8cee2145b0250834d639c97117a3d1cb9145d1ec73，零行文件2092 bytes SHA256 e70eedde7b671cc00f6b749da5dcb8bda486cc9777e5438b49ce980d41b2bf24。",
+          "取消/失败已有HTTP、真实PostgreSQL与DOM具名测试；这些测试不替代实际浏览器取消/失败恢复链路。"
+        ],
+        "artifacts": [
+          {
+            "run": "38483191968",
+            "artifact_id": 11858158563,
+            "name": "user-asset-export-v3-38483191968-1",
+            "archive_sha256": "f6ccbfb8e2cf8a7fe57fcd4b89e281673e42bf79cb2130eabed4d745e600dc44"
+          },
+          {
+            "run": "38487379365",
+            "artifact_id": 11860810594,
+            "name": "user-asset-export-v3-38487379365-1",
+            "archive_sha256": "fb35f43e5cfbf9e232f6ef6e58ec10b153575c04f059ade504abccb28ae87c29"
+          }
+        ],
+        "remaining": [
+          "failed→安全两列恢复、queued取消的真实browser/Worker/PG证据为下一slice验证计划，尚未运行，不计通过；running取消等其他边界仍须逐项验收。",
+          "EXP-006完整旧字段、默认业务列、多域、status/overviewType/updateTm/scoreSort及全部源系统筛选语义未达1:1；六scalar列不能替代未采集业务字段。",
+          "EXP-007计算机、EXP-008组、EXP-009 DNS/IP导出未由本slice实现或验收。",
+          "真实AD及八版本Windows、目标容量/峰值内存、生产验收开放；代码上限不代表容量验收。",
+          "Issue30与Issue151保持open；product_accepted=false，产品接受数仍0/209。未来文档或代码提交需独立CI，不继承上述运行通过。"
+        ]
+      }
     },
     {
       "id": "AD-F-054",

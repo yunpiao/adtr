@@ -21,6 +21,11 @@ var directoryV2SearchBody = bytes.Join([][]byte{
 }, nil)
 
 func directoryV2Supplemental(row int) []byte {
+	return directoryV2SupplementalWithMail(row, nil)
+}
+
+// The optional override is confined to the explicit synthetic export-failure mode.
+func directoryV2SupplementalWithMail(row int, mailOverride *string) []byte {
 	// S-1-5-21-1-2-3-(1000+row): authority is big endian, subauthorities
 	// are little endian. These identifiers describe synthetic fixtures only.
 	sid := []byte{1, 5, 0, 0, 0, 0, 0, 5}
@@ -34,6 +39,9 @@ func directoryV2Supplemental(row int) []byte {
 		mail = " Mixed@example.test "
 		description = "Line 1\x00\n\t😀\u202e"
 		created = "00010101000000.0Z"
+	}
+	if mailOverride != nil {
+		mail = *mailOverride
 	}
 	return bytes.Join([][]byte{
 		directoryAttribute("objectSid", string(sid)),

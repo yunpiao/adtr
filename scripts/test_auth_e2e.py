@@ -16,6 +16,8 @@ import urllib.request
 import uuid
 
 from user_asset_export_v3_ci import configure as configure_user_export, capture as capture_user_export, validate as validate_user_export
+from user_asset_export_v3_terminal_ci import SUITES as EXPORT_TERMINAL_SUITES, configure as configure_terminal_export, capture as capture_terminal_export, validate as validate_terminal_export
+from user_asset_export_v3_worker_guard import OwnedExportWorkerGuard
 from ci_postgres_image import postgres_image_args
 from test_integration import IMAGE
 from ldap_e2e_fixture import LDAPFixture
@@ -31,7 +33,7 @@ DIRECTORY_V2_SUITES = {"directory-v2", "directory-v2-controls", "directory-v2-re
 COMPUTER_ASSETS_V3_SUITES = {"computer-assets-v3", "computer-assets-v3-readers"}
 GROUP_ASSETS_V3_SUITES = {"group-assets-v3", "group-assets-v3-readers"}
 EMPTY_TRANSITION_SUITES = {"group-assets-v3", "computer-assets-v3"}
-DIRECTORY_V3_SUITES = {"user-asset-export-v3", "directory-v3-backend", "user-assets-v3", "directory-v3", "directory-v3-controls", "directory-v3-readers"} | COMPUTER_ASSETS_V3_SUITES | GROUP_ASSETS_V3_SUITES
+DIRECTORY_V3_SUITES = EXPORT_TERMINAL_SUITES | {"user-asset-export-v3", "directory-v3-backend", "user-assets-v3", "directory-v3", "directory-v3-controls", "directory-v3-readers"} | COMPUTER_ASSETS_V3_SUITES | GROUP_ASSETS_V3_SUITES
 DIRECTORY_V4_SUITES = {"directory-v4-backend", "group-members-v4", "group-members-v4-empty", "group-members-v4-pagination", "group-members-v4-refresh"}
 DIRECTORY_SUITES = DIRECTORY_V4_SUITES | DIRECTORY_V3_SUITES | {"directory", "directory-controls", "directory-readers"} | DIRECTORY_V2_SUITES
 EMPTY_DIRECTORY_SUITES = {"directory-controls", "directory-readers", "directory-v2-controls", "directory-v2-readers", "directory-v3-controls", "directory-v3-readers"}
@@ -68,7 +70,7 @@ def validate_asset_refresh_evidence(suite):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--suite", choices=["user-asset-export-v3", "auth", "access", "resource", "tasks", "messages", "messages-bulk", "audit", "system", "maintenance", "domains", "operations", "profile", "credential-use", "account-references", "operational-logs", "session-invalidation", "account-reference-barrier", "directory", "directory-controls", "directory-readers", "directory-v2", "directory-v2-controls", "directory-v2-readers", "directory-v3-backend", "directory-v4-backend", "group-members-v4", "group-members-v4-empty", "group-members-v4-pagination", "group-members-v4-refresh", "user-assets-v3", "computer-assets-v3", "computer-assets-v3-readers", "group-assets-v3", "group-assets-v3-readers", "directory-v3", "directory-v3-controls", "directory-v3-readers", "user-assets-v2", "user-assets-v2-readers"], default="auth")
+    parser.add_argument("--suite", choices=["user-asset-export-v3-failure", "user-asset-export-v3-cancel", "user-asset-export-v3", "auth", "access", "resource", "tasks", "messages", "messages-bulk", "audit", "system", "maintenance", "domains", "operations", "profile", "credential-use", "account-references", "operational-logs", "session-invalidation", "account-reference-barrier", "directory", "directory-controls", "directory-readers", "directory-v2", "directory-v2-controls", "directory-v2-readers", "directory-v3-backend", "directory-v4-backend", "group-members-v4", "group-members-v4-empty", "group-members-v4-pagination", "group-members-v4-refresh", "user-assets-v3", "computer-assets-v3", "computer-assets-v3-readers", "group-assets-v3", "group-assets-v3-readers", "directory-v3", "directory-v3-controls", "directory-v3-readers", "user-assets-v2", "user-assets-v2-readers"], default="auth")
     parser.add_argument("--expired", action="store_true")
     args = parser.parse_args()
     # Check display support before creating a disposable database or fixtures.
@@ -80,6 +82,7 @@ def main():
     owner = uuid.uuid4().hex
     server = None
     worker = None
+    export_worker_guard = None
     ldap_fixture = None
     account_barrier = None
     message_fixture = None
@@ -93,6 +96,9 @@ def main():
     if args.suite == "user-asset-export-v3":
         configure_user_export(env)
         capture_user_export()
+    if args.suite in EXPORT_TERMINAL_SUITES:
+        configure_terminal_export(env, args.suite)
+        capture_terminal_export(args.suite)
     logs = tempfile.TemporaryFile(mode="w+")
     try:
         creation_attempted = True
@@ -168,7 +174,8 @@ def main():
                                            group_members_v4_refresh=args.suite == "group-members-v4-refresh",
                                            computer_assets_v3=args.suite in COMPUTER_ASSETS_V3_SUITES,
                                            group_assets_v3=args.suite in GROUP_ASSETS_V3_SUITES,
-                                           user_assets_v2=args.suite in USER_ASSETS_V2_SUITES)
+                                           user_assets_v2=args.suite in USER_ASSETS_V2_SUITES,
+                                           user_export_failure_v3=args.suite == "user-asset-export-v3-failure")
                 ldap_fixture.start(env)
                 if args.suite in DIRECTORY_SUITES:
                     env["ADTR_DIRECTORY_READ_ENABLED"] = "true"
@@ -216,11 +223,25 @@ def main():
             if args.suite == "messages-bulk":
                 # Identify only our worker connections for quiescent SIGSTOP tests.
                 worker_env["ADTR_DATABASE_URL"] += "&application_name=adtr-message-bulk-worker"
+            if args.suite == "user-asset-export-v3-cancel":
+                export_worker_nonce = uuid.uuid4().hex
+                export_worker_app = "adtr-user-export-" + export_worker_nonce
+                worker_env["ADTR_E2E_EXPORT_WORKER_NONCE"] = export_worker_nonce
+                worker_env["ADTR_DATABASE_URL"] += "&application_name=" + export_worker_app
             # Execution authorization needs persisted actors, not browser secrets.
             for key in ["ADTR_AUTH_KEY", "ADTR_ORIGIN", "ADTR_WEB_DIR"]:
                 worker_env.pop(key, None)
             diagnostics.phase("worker-start")
             worker = subprocess.Popen(["./bin/adtr", "-mode", "worker"], env=worker_env, stdout=logs, stderr=logs)
+            if args.suite == "user-asset-export-v3-cancel":
+                export_worker_guard = OwnedExportWorkerGuard(worker, export_worker_nonce, Path("bin/adtr").resolve())
+                export_worker_guard.start()
+                env.update(ADTR_E2E_WORKER_PID=str(worker.pid), ADTR_E2E_HARNESS_PID=str(os.getpid()),
+                           ADTR_E2E_EXPORT_WORKER_STARTTIME=export_worker_guard.starttime,
+                           ADTR_E2E_EXPORT_WORKER_NONCE=export_worker_nonce,
+                           ADTR_E2E_EXPORT_WORKER_BINARY=str(Path("bin/adtr").resolve()),
+                           ADTR_E2E_EXPORT_WORKER_APPLICATION_NAME=export_worker_app,
+                           ADTR_E2E_EXPORT_WORKER_READY_URL=f"http://127.0.0.1:{worker_port}/readyz")
             for _ in range(100):
                 if worker.poll() is not None:
                     raise RuntimeError("task worker exited during startup")
@@ -243,9 +264,13 @@ def main():
         # enter an error-context prompt; explicit safe screenshots remain intact.
         env["PLAYWRIGHT_NO_COPY_PROMPT"] = "1"
         diagnostics.phase("browser-start")
-        subprocess.run(command, env=env, check=True, timeout=930 if args.suite == "user-asset-export-v3" else 660 if args.suite == "account-references" else 930 if args.suite in EMPTY_DIRECTORY_SUITES | USER_ASSETS_V2_SUITES | {"user-assets-v3"} | COMPUTER_ASSETS_V3_SUITES | GROUP_ASSETS_V3_SUITES else 660 if args.suite in {"directory", "directory-v2", "directory-v3-backend", "directory-v4-backend", "group-members-v4", "group-members-v4-empty", "group-members-v4-pagination", "group-members-v4-refresh", "directory-v3"} else 600 if args.suite == "audit" else 540 if args.suite in {"maintenance", "domains", "operations", "credential-use", "account-references", "operational-logs", "account-reference-barrier"} else 480 if args.suite == "system" else 420)
+        subprocess.run(command, env=env, check=True, timeout=930 if args.suite in EXPORT_TERMINAL_SUITES else 930 if args.suite == "user-asset-export-v3" else 660 if args.suite == "account-references" else 930 if args.suite in EMPTY_DIRECTORY_SUITES | USER_ASSETS_V2_SUITES | {"user-assets-v3"} | COMPUTER_ASSETS_V3_SUITES | GROUP_ASSETS_V3_SUITES else 660 if args.suite in {"directory", "directory-v2", "directory-v3-backend", "directory-v4-backend", "group-members-v4", "group-members-v4-empty", "group-members-v4-pagination", "group-members-v4-refresh", "directory-v3"} else 600 if args.suite == "audit" else 540 if args.suite in {"maintenance", "domains", "operations", "credential-use", "account-references", "operational-logs", "account-reference-barrier"} else 480 if args.suite == "system" else 420)
         if args.suite == "user-asset-export-v3":
             validate_user_export()
+        if export_worker_guard is not None:
+            export_worker_guard.check()
+        if args.suite in EXPORT_TERMINAL_SUITES:
+            validate_terminal_export(args.suite)
         validate_asset_refresh_evidence(args.suite)
         if args.suite == "group-members-v4":
             subprocess.run([sys.executable, "scripts/validate_group_members_v4_evidence.py",
@@ -270,6 +295,11 @@ def main():
             diagnostics.report["collection_errors"].append("snapshot")
         try:
             shutdown_error = None
+            if export_worker_guard is not None:
+                try:
+                    export_worker_guard.close()
+                except (OSError, RuntimeError):
+                    shutdown_error = RuntimeError("owned export worker cleanup failed")
             if account_barrier is not None:
                 try:
                     account_barrier.close()

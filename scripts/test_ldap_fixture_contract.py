@@ -27,7 +27,7 @@ class LDAPFixtureContract(unittest.TestCase):
     def started_fixture(self, *, inherited_transition="/unowned/inherited/path", **modes):
         fixture = ldap_e2e_fixture.LDAPFixture(**modes)
         env = {"ADTR_E2E_LDAP_DIRECTORY_" + suffix: "inherited"
-               for suffix in ("MODE", "EMPTY", "SLOW", "V2", "USER_ASSETS_V2", "V3", "V4", "COMPUTER_ASSETS_V3", "GROUP_ASSETS_V3")}
+               for suffix in ("USER_EXPORT_FAILURE_V3", "MODE", "EMPTY", "SLOW", "V2", "USER_ASSETS_V2", "V3", "V4", "COMPUTER_ASSETS_V3", "GROUP_ASSETS_V3")}
         env["ADTR_E2E_LDAP_EMPTY_TRANSITION_DIR"] = inherited_transition
 
         with patch.object(ldap_e2e_fixture.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)) as run, \
@@ -37,6 +37,35 @@ class LDAPFixtureContract(unittest.TestCase):
                 yield fixture, env, run
             finally:
                 fixture.close()
+
+    def test_user_export_failure_requires_exact_mode_before_allocation(self):
+        base = dict(directory_enabled=True, directory_v3=True, user_export_failure_v3=True)
+        invalid = [dict(base, **{name: True}) for name in (
+            "control_enabled", "directory_empty", "directory_slow", "directory_v2",
+            "user_assets_v2", "directory_v4", "computer_assets_v3", "group_assets_v3",
+            "empty_transition", "group_members_v4_pagination", "group_members_v4_refresh")]
+        invalid += [dict(base, **{name: False}) for name in ("directory_enabled", "directory_v3")]
+        for modes in invalid:
+            with self.subTest(modes=modes), patch.object(ldap_e2e_fixture.tempfile, "TemporaryDirectory") as allocate:
+                with self.assertRaisesRegex(ValueError, "export failure requires exclusive"):
+                    ldap_e2e_fixture.LDAPFixture(**modes)
+                allocate.assert_not_called()
+
+    def test_user_export_failure_exact_launch_and_stale_marker_removal(self):
+        for enabled in (False, True):
+            with self.subTest(enabled=enabled), self.started_fixture(
+                    directory_enabled=True, directory_v3=True,
+                    user_export_failure_v3=enabled) as (fixture, env, run):
+                command = next(call.args[0] for call in run.call_args_list if call.args[0][:2] == ["docker", "run"])
+                self.assertEqual(command.count("-user-export-failure-v3"), int(enabled))
+                self.assertIn("-directory-v3", command)
+                key = "ADTR_E2E_LDAP_DIRECTORY_USER_EXPORT_FAILURE_V3"
+                if enabled:
+                    self.assertEqual(env[key], "true")
+                else:
+                    self.assertNotIn(key, env)
+                self.assertIsNone(fixture.control_path)
+                self.assertIsNone(fixture.empty_transition_path)
 
     def test_directory_v2_is_keyword_only_and_default_false(self):
         fixture = ldap_e2e_fixture.LDAPFixture()
@@ -49,7 +78,7 @@ class LDAPFixtureContract(unittest.TestCase):
             ldap_e2e_fixture.LDAPFixture(False, True, False, False, True)
 
     def test_all_directory_flags_require_booleans_before_allocating_resources(self):
-        for name in ("directory_enabled", "directory_empty", "directory_slow", "directory_v2", "user_assets_v2", "directory_v3", "directory_v4", "computer_assets_v3", "group_assets_v3", "empty_transition"):
+        for name in ("directory_enabled", "directory_empty", "directory_slow", "directory_v2", "user_assets_v2", "directory_v3", "directory_v4", "computer_assets_v3", "group_assets_v3", "empty_transition", "user_export_failure_v3"):
             for value in (None, 0, 1, 0.0, 1.0, "true", "false", [], {}):
                 with self.subTest(name=name, value=value), \
                      patch.object(ldap_e2e_fixture.tempfile, "TemporaryDirectory") as allocate:
