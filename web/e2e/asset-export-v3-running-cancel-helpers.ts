@@ -3,7 +3,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { writeFile } from "node:fs/promises";
 import { evidenceProvenance, hash, sensitiveBudget } from "./user-asset-export-v3-helpers";
-import { panelFor, terminalSetup } from "./user-asset-export-v3-terminal-helpers";
+import { terminalSetup } from "./user-asset-export-v3-terminal-helpers";
 
 // Only this isolated fixture's loopback controller receives the private token.
 // Native fetch avoids Playwright request diagnostics recording its header.
@@ -27,12 +27,19 @@ type CapturedStatus = {
     crop: { x: number; y: number; width: number; height: number; viewportWidth: number; viewportHeight: number };
     inputRects: { x: number; y: number; width: number; height: number }[] };
 };
-export async function captureRunningStatus(page: Page, taskID: string, state: "running" | "cancel_requested" | "cancelled", filename: string): Promise<CapturedStatus> {
-  const panel = panelFor(page);
+export async function captureRunningStatus(page: Page, taskID: string, state: "running" | "cancel_requested" | "cancelled", filename: string, kind: "user" | "group" | "computer" = "user"): Promise<CapturedStatus> {
+  // Closed selector mapping: callers cannot supply arbitrary regions or labels.
+  const selectors = {
+    user: { region: "用户资产导出", progress: "用户导出持久化进度" },
+    group: { region: "组资产导出", progress: "组导出持久化进度" },
+    computer: { region: "计算机资产导出", progress: "计算机导出持久化进度" },
+  } as const;
+  const selected = selectors[kind];
+  const panel = page.getByRole("region", { name: selected.region, exact: true });
   const labels = { running: "执行中", cancel_requested: "已请求取消，待确认", cancelled: "已取消" };
   const status = panel.getByRole("status").filter({ hasText: new RegExp(`^${labels[state]} ·`) });
   const identity = panel.getByText(`任务 ID：${taskID}`, { exact: true });
-  const progress = panel.getByLabel("用户导出持久化进度", { exact: true }).locator("..");
+  const progress = panel.getByLabel(selected.progress, { exact: true }).locator("..");
   await status.scrollIntoViewIfNeeded({ timeout: 1500 });
   await progress.scrollIntoViewIfNeeded({ timeout: 1500 });
   const boxes = await Promise.all([identity, status, progress].map((locator) => locator.boundingBox()));

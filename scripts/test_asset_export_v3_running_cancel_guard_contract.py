@@ -1,6 +1,7 @@
 """Offline mocked contracts: no real process, database, socket or signal."""
 import copy
 import json
+import io
 from pathlib import Path
 import signal
 import unittest
@@ -114,10 +115,10 @@ class ContractTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 g.identifier(value)
 
-    def guard(self):
+    def guard(self, **options):
         with patch.object(g, 'OwnedExportWorkerGuard') as factory:
             guard = g.RunningExportCancelGuard(Mock(), 'a'*32, '/fake/bin/adtr',
-                'adtr-auth-e2e-'+'a'*12, 'adtr-user-export-'+'a'*32, 'postgres://localhost/adtr_e2e')
+                'adtr-auth-e2e-'+'a'*12, 'adtr-user-export-'+'a'*32, 'postgres://localhost/adtr_e2e', **options)
         guard.owned = factory.return_value
         guard.owned.assert_identity = Mock(return_value="T")
         return guard
@@ -236,6 +237,204 @@ class ContractTests(unittest.TestCase):
         self.assertIn("AND cycle='queue' FOR UPDATE", source)
         self.assertIn("hmac.compare_digest", source)
         self.assertIn("ThreadingHTTPServer(('127.0.0.1', 0)", source)
+
+
+
+    def test_closed_kind_mapping_and_default_user_sql_compatibility(self):
+        self.assertEqual(set(g.EXPORT_KINDS), {'user', 'group', 'computer'})
+        default_sql = self.guard().observe_sql('task-one')
+        self.assertEqual(default_sql, self.guard(asset_kind='user').observe_sql('task-one'))
+        for kind in ('user', 'group', 'computer'):
+            with self.subTest(kind=kind):
+                expected = (kind + '_assets.v3.export',) + tuple(
+                    'adtr.' + kind + '_asset_export_' + suffix
+                    for suffix in ('snapshots', 'manifests', 'chunks'))
+                self.assertEqual(g.export_kind(kind), expected)
+                sql = self.guard(asset_kind=kind).observe_sql('task-one')
+                self.assertEqual(sql, default_sql.replace('adtr.user_asset_export_',
+                                                         'adtr.' + kind + '_asset_export_'))
+                for table in expected[1:]:
+                    self.assertEqual(sql.count(table), 1)
+        with self.assertRaises(TypeError):
+            g.EXPORT_KINDS['user'] = ('injected',)
+
+    def test_invalid_selectors_rejected_before_owned_resources(self):
+        for kind in (None, 0, True, [], {}, '', 'Group', ' user', 'user ',
+                     'user_assets.v3.export', 'adtr.group_asset_export_snapshots',
+                     "group; SELECT pg_sleep(30)", ('user',)):
+            with self.subTest(kind=kind), patch.object(g, 'OwnedExportWorkerGuard') as owned, patch.object(g, 'Psql') as pg:
+                with self.assertRaises(RuntimeError):
+                    g.RunningExportCancelGuard(Mock(), 'a'*32, '/fake/bin/adtr',
+                        'adtr-auth-e2e-'+'a'*12, 'adtr-user-export-'+'a'*32,
+                        'postgres://localhost/adtr_e2e', asset_kind=kind)
+                with self.assertRaises(RuntimeError):
+                    g.validate_checkpoint(task(), 'task-one', 'worker', kind)
+                owned.assert_not_called(); pg.assert_not_called()
+        for option in ('tables', 'snapshots', 'task_kind', 'sql'):
+            with self.subTest(option=option), self.assertRaises(TypeError):
+                self.guard(**{option: 'adtr.tasks'})
+
+    def test_observation_rejects_identifier_injection(self):
+        for kind in ('user', 'group', 'computer'):
+            for value in ("task' OR true --", '', 'x'*129, None):
+                with self.subTest(kind=kind, value=value), self.assertRaises(RuntimeError):
+                    self.guard(asset_kind=kind).observe_sql(value)
+
+    def test_each_kind_checkpoint_rejects_wrong_kind_and_unsafe_fence(self):
+        for kind in ('user', 'group', 'computer'):
+            row = task(); row['kind'] = kind + '_assets.v3.export'
+            self.assertEqual(g.validate_checkpoint(row, 'task-one', 'worker', kind)['kind'], row['kind'])
+            for field, value in [('kind', other + '_assets.v3.export') for other in ('user', 'group', 'computer') if other != kind] + [
+                    ('taskID', 'another'), ('progress', 0), ('snapshotCount', 0),
+                    ('manifestCount', 1), ('chunkCount', 1), ('attempt', 2),
+                    ('state', 'cancel_requested'), ('fencingToken', 0),
+                    ('leaseOwner', 'worker-4'), ('leaseOwner', 'other-0'),
+                    ('leaseRemainingSeconds', 20), ('leaseUntilEpoch', 140)]:
+                bad = row | {field: value}
+                with self.subTest(kind=kind, field=field, value=value), self.assertRaises(RuntimeError):
+                    g.validate_checkpoint(bad, 'task-one', 'worker', kind)
+
+    def test_complete_checkpoint_each_new_kind_and_transitive_blockers(self):
+        for kind in ('group', 'computer'):
+            guard = self.guard(asset_kind=kind); guard.threads = Mock(return_value=['T'] * 4)
+            running = task() | {'kind': kind + '_assets.v3.export'}
+            queued = running | {'state': 'queued', 'attempt': 0, 'snapshotCount': 0}
+            rows = [session(100), session(101)]
+            rows[1]['blockers'] = [100]
+            rows[1]['locks'][-1] = lock('tuple', 'ExclusiveLock', False, 'adtr.system_worker_activity')
+            observer, barrier = Mock(), Mock(pid=99)
+            observer.query.side_effect = [{'task': queued, 'sessions': []},
+                {'task': running, 'sessions': rows}, {'task': running, 'sessions': rows}]
+            barrier.query.side_effect = [{'count': 1}, True]
+            with patch.object(g, 'Psql', side_effect=[observer, barrier]):
+                result = guard.checkpoint('task-one', 'worker')
+            self.assertEqual(result['kind'], running['kind'])
+            self.assertEqual(result['blockedOwnedBackends'], 2)
+            self.assertTrue(result['allThreadsStopped'])
+            self.assertTrue(result['activityLockReleased'])
+            guard.owned.process.send_signal.assert_called_once_with(signal.SIGSTOP)
+            observer.close.assert_called_once(); barrier.close.assert_called_once()
+            for call in observer.query.call_args_list:
+                self.assertIn('adtr.' + kind + '_asset_export_snapshots', call.args[0])
+
+    def test_wrong_initial_kind_fails_before_activity_lock_and_resume(self):
+        for kind in ('group', 'computer'):
+            guard = self.guard(asset_kind=kind); guard.threads = Mock(return_value=['T'])
+            observer = Mock()
+            observer.query.return_value = {'task': task() | {'state': 'queued', 'attempt': 0, 'snapshotCount': 0}, 'sessions': []}
+            with patch.object(g, 'Psql', return_value=observer) as pg, self.assertRaises(RuntimeError):
+                guard.checkpoint('task-one', 'worker')
+            pg.assert_called_once_with(guard.container, True)
+            guard.owned.process.send_signal.assert_not_called()
+            guard.owned.resume.assert_called_once()  # Fail-closed cleanup CONT.
+            observer.close.assert_called_once()
+            self.assertTrue(guard.failed)
+
+    def test_new_kinds_still_fail_closed_on_capture_deadline(self):
+        for kind in ('group', 'computer'):
+            guard = self.guard(asset_kind=kind); guard.threads = Mock(return_value=['T'])
+            queued = task() | {'kind': kind + '_assets.v3.export', 'state': 'queued', 'attempt': 0, 'snapshotCount': 0}
+            observer, barrier = Mock(), Mock(pid=99)
+            observer.query.return_value = {'task': queued, 'sessions': []}
+            barrier.query.return_value = {'count': 1}
+            with patch.object(g, 'Psql', side_effect=[observer, barrier]), patch.object(g.time, 'monotonic', side_effect=[0., 0., 1.5, 1.5]):
+                with self.assertRaises(RuntimeError):
+                    guard.checkpoint('task-one', 'worker')
+            self.assertTrue(guard.failed)
+            guard.owned.process.send_signal.assert_not_called()
+            self.assertEqual(guard.owned.resume.call_count, 2)
+            observer.close.assert_called_once(); barrier.close.assert_called_once()
+
+    def test_new_kinds_still_require_every_thread_stopped(self):
+        for kind in ('group', 'computer'):
+            guard = self.guard(asset_kind=kind)
+            guard.threads = Mock(side_effect=[['T'], ['T', 'S']])
+            running = task() | {'kind': kind + '_assets.v3.export'}
+            queued = running | {'state': 'queued', 'attempt': 0, 'snapshotCount': 0}
+            observer, barrier = Mock(), Mock(pid=99)
+            observer.query.side_effect = [{'task': queued, 'sessions': []}, {'task': running, 'sessions': [session()]}]
+            barrier.query.return_value = {'count': 1}
+            with patch.object(g, 'Psql', side_effect=[observer, barrier]), patch.object(g.time, 'sleep'), patch.object(g.time, 'monotonic', side_effect=[0., 0., .1, .1, .1, .2, .6, .6]):
+                with self.assertRaises(RuntimeError):
+                    guard.checkpoint('task-one', 'worker')
+            self.assertTrue(guard.failed)
+            self.assertIsNone(guard.stopped_at)
+            guard.owned.process.send_signal.assert_called_once_with(signal.SIGSTOP)
+            self.assertEqual(guard.owned.resume.call_count, 2)
+            observer.close.assert_called_once(); barrier.close.assert_called_once()
+
+    def test_http_checkpoint_cannot_select_kind_tables_or_sql(self):
+        for kind in ('user', 'group', 'computer'):
+            guard = self.guard(asset_kind=kind)
+            guard.checkpoint = Mock(return_value={'checkpointCaught': True})
+            with patch.object(g, 'ThreadingHTTPServer') as server, patch.object(g.threading, 'Thread'):
+                server.return_value.server_port = 12345
+                guard.start()
+                handler_type = server.call_args.args[1]
+            for extra in ({}, {'asset_kind': 'computer'}, {'kind': 'user'},
+                          {'taskKind': 'computer_assets.v3.export'},
+                          {'tables': ['adtr.tasks']}, {'sql': 'SELECT 1'}):
+                data = json.dumps({'taskID': 'task-one', 'workerID': 'worker'} | extra).encode()
+                handler = object.__new__(handler_type)
+                handler.client_address = ('127.0.0.1', 1234)
+                handler.headers = {'Host': '127.0.0.1:12345', 'Content-Type': 'application/json',
+                    'Content-Length': str(len(data)), 'X-ADTR-Guard-Token': guard.token}
+                handler.path = '/checkpoint'; handler.rfile = io.BytesIO(data); handler.wfile = io.BytesIO()
+                handler.send_response = Mock(); handler.send_header = Mock(); handler.end_headers = Mock()
+                guard.checkpoint.reset_mock()
+                handler.do_POST()
+                handler.send_response.assert_called_once_with(409 if extra else 200)
+                if extra:
+                    guard.checkpoint.assert_not_called()
+                else:
+                    guard.checkpoint.assert_called_once_with('task-one', 'worker')
+                self.assertEqual(guard.asset_kind, kind)
+
+
+    def test_failure_diagnostics_are_closed_and_never_print_raw_values(self):
+        secret = "postgres://sensitive:credential@host/db SELECT tenant worker token"
+        event = g.failure_event('capture', RuntimeError(secret))
+        other = g.failure_event(secret, ValueError(secret))
+        self.assertEqual(event, {'event': 'running_cancel_guard_failure', 'stage': 'capture', 'reason': 'unclassified'})
+        self.assertEqual(other['stage'], 'unclassified')
+        for message, reason in list(g.FAILURE_REASONS.items()) + [(secret, 'unclassified')]:
+            guard = self.guard()
+            with patch.object(g.sys, 'stderr', new_callable=io.StringIO) as output:
+                guard._report_failure('capture', RuntimeError(message))
+                guard._emit_failure(); guard._emit_failure()
+            self.assertEqual(guard.failure_diagnostic['reason'], reason)
+            self.assertEqual(json.loads(output.getvalue()), guard.failure_diagnostic)
+            self.assertNotIn(secret, output.getvalue())
+            self.assertEqual(set(guard.failure_diagnostic), {'event', 'stage', 'reason'})
+            self.assertEqual(len(output.getvalue().splitlines()), 1)
+
+    def test_first_failure_survives_cleanup_failure_without_raw_output(self):
+        guard = self.guard(asset_kind='computer'); guard.threads = Mock(return_value=['T'])
+        observer = Mock()
+        observer.query.side_effect = RuntimeError('checkpoint database observation unavailable')
+        observer.close.side_effect = RuntimeError('sensitive cleanup exception')
+        with patch.object(g, 'Psql', return_value=observer), patch.object(g.sys, 'stderr', new_callable=io.StringIO) as output:
+            with self.assertRaises(RuntimeError):
+                guard.checkpoint('task-one', 'worker')
+            guard._report_failure('http_request', RuntimeError('later failure'))
+        self.assertEqual(guard.failure_diagnostic, {'event': 'running_cancel_guard_failure',
+            'stage': 'initial_observation', 'reason': 'database_observation_unavailable'})
+        self.assertEqual(output.getvalue(), '')  # Never log before CONT/session cleanup.
+        self.assertNotIn('sensitive', output.getvalue())
+        self.assertEqual(guard.owned.resume.call_count, 2)
+        observer.close.assert_called_once()
+
+    def test_failed_diagnostic_output_cannot_prevent_fail_closed_cleanup(self):
+        guard = self.guard(asset_kind='computer'); guard.threads = Mock(return_value=['T'])
+        observer = Mock(); observer.query.side_effect = RuntimeError('checkpoint database session exited')
+        with patch.object(g, 'Psql', return_value=observer), patch.object(g, 'print', side_effect=OSError('output unavailable'), create=True):
+            with self.assertRaises(RuntimeError):
+                guard.checkpoint('task-one', 'worker')
+            guard._emit_failure()
+        self.assertTrue(guard.failed)
+        self.assertEqual(guard.failure_diagnostic['reason'], 'database_session_exited')
+        guard.owned.resume.assert_called_once()
+        observer.close.assert_called_once()
 
 
 if __name__ == '__main__':

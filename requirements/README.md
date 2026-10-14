@@ -74,13 +74,13 @@ independently reviewed. Historical run38545054964 remains54 successful/14 failed
 (root cause unestablished). Attempt2's passed reader/verify and duplicate queued
 rollup are preserved separately from final attempt3 success.
 
-The new user-only running-cancel candidate adds one job to these68 (69 expected),
+The historical user-only running-cancel candidate added one job to these68 (69 expected),
 without production/schema changes. It targets real running after snapshot/progress10,
 then cancel_requested and cancelled, with exact owned-Worker/PG-lock/lease guards.
 It is not runtime verified; exact-head CI and independent artifact review are pending.
 It does not prove chunk-stage cancellation or fencing races; group/computer retain
 queued-only cancellation browser coverage. See the
-[candidate contract](../docs/user-asset-export-v3-contract.md#candidate-running-cancellation-after-capture-2026-10-14-not-runtime-verified).
+[historical candidate contract](../docs/user-asset-export-v3-contract.md).
 Full EXP-007 legacy parity/capacity and EXP-009 DNS/IP exports remain open.
 Issue30 and Issue151 remain open. The new documentation/code revision must pass
 its own checks; old CI success cannot be transferred to it.
@@ -91,3 +91,18 @@ Priority never removes a requirement.
 reduction, duplicate requirement IDs, missing field/control references or an
 acceptance claim with unresolved gates. Source definitions remain in the linked
 Issues; no omitted field is silently treated as implemented.
+
+
+The next group/computer snapshot-stage running-cancel candidate starts from PR163
+main `ec0da2018cc5914b8d0ca345c1c2c4cd5078d177`, tree
+`ec801e6ffc0bce09cd89714bb1be3586d2781fad`, whose separate main CI38588506730
+passed69/69. It preserves those69 jobs and adds two isolated kind-specific slices
+(71 expected). Exact-head CI and independent artifacts are pending for this new
+candidate; the historical user-only candidate paragraph above describes its prior
+checkpoint. Production code/schema/lease/timeout and acceptance counts are unchanged.
+
+PR163 subsequently completed its user snapshot-stage slice: final head
+`4d5bdcc4e29351ee49cc3f3d2d2ee8ad8e29462f`, PR CI38579256706 attempt2
+69/69 and fresh main CI38588506730 attempt1 69/69; both current artifact sets
+were independently reviewed. Historical failed attempts remain in the delivery
+ledger. This closes that user engineering checkpoint, not full product acceptance.

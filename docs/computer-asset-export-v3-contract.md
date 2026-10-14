@@ -161,3 +161,42 @@ Historical failures are retained:
 
 AD-F-053 stays in_progress, product_accepted=false; Issues30/151 remain open and
 product acceptance remains0/209. No production deployment is implied.
+
+
+## Candidate: snapshot-stage running cancellation (2026-10-14)
+
+The test-only `computer-asset-export-v3-running-cancel` suite extends PR163 main
+`ec0da2018cc5914b8d0ca345c1c2c4cd5078d177` (tree
+`ec801e6ffc0bce09cd89714bb1be3586d2781fad`). Together the group and computer
+suites add exactly two isolated stable-body jobs to the prior69, yielding71.
+The new reversible contract restores all prior runner/workflow bytes. The old
+terminal suites remain separate, with no double configuration or validation path.
+Exact-head runtime verification and independent artifact inspection are pending.
+
+The fixed runner-selected kind binds the owned Worker guard to the computer export
+identity, snapshot tables, and original source. The guard's default remains user;
+the HTTP checkpoint accepts only taskID/workerID, never a caller-selected kind.
+`running` here requires a durable snapshot and progress10 for an executing attempt;
+`cancel_requested` requires a persisted request while that Worker remains paused;
+`cancelled` requires its genuine resumed terminal transition and cleanup. A short
+activity-row lock exposes this checkpoint; it must not block the API task-row write.
+More than20seconds live lease is required before STOP, with CONT within10seconds
+and owned-process identity rechecked. These test-only guards are necessary to keep
+the observation within the same live execution; removing them can test completion
+or lease recovery instead. Failure cleanup resumes the Worker and releases locks.
+Production lease/heartbeat/timeout values and security limits remain unchanged.
+
+A successful case must prove the original receipt, durable transitions/events,
+no downloadable file, zero snapshot/manifest/chunk rows, and subsequent activity
+by the same Worker. A freshly completed computer source and kind-specific sensitive
+operation budgets are required. Evidence formatVersion1/suite runningCancel is
+bound to actual checkout/tree/run/source hashes. Only the exact provenance JSON,
+evidence JSON, running-checkpoint.png, cancel-requested.png and cancelled-terminal.png
+are staged after validation; raw logs, proof inputs, XLSX and traces are excluded.
+CI screenshots must be inspected independently, not inferred from validator success.
+
+Local checks are static or explicitly allowlisted offline Python with subprocess,
+network and signals rejected; local Go/Node/PG/browser/build are not run. This
+candidate does not establish chunk-stage cancellation, fencing races, legacy field
+parity, capacity or real AD/Windows acceptance. AD-F-053 stays in_progress;
+Issue30/151 and product acceptance0/209 remain open.

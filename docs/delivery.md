@@ -5,7 +5,42 @@
 
 ## 当前组合状态（2026-10-11，核对至 main 6f7f44a）
 
-### 2026-10-14 用户运行中取消候选（尚未运行验收）
+### 2026-10-14 组/计算机 snapshot 阶段运行中取消候选
+
+本候选以已合并 PR163 的 main `ec0da2018cc5914b8d0ca345c1c2c4cd5078d177`、
+tree `ec801e6ffc0bce09cd89714bb1be3586d2781fad` 为基线；独立
+[main-push CI38588506730](https://github.com/yunpiao/adtr/actions/runs/38588506730)
+为69/69。该历史成功不转移到本候选。仅增加 group/computer 两项独立 stable-body
+running-cancel 浏览器切片，预期71项；可逆契约逐字节还原旧69项 runner/workflow。
+
+目标为各自真实导出 snapshot/progress10 已提交后的 running → cancel_requested →
+cancelled，固定组/计算机任务种类及来源。旧用户默认、queued 取消切片、生产代码、
+schema、租约、超时、并行及 artifact allowlist 保持。详情见各自
+[组契约](group-asset-export-v3-contract.md)与[计算机契约](computer-asset-export-v3-contract.md)。
+候选精确 head CI、独立产物审查及 main-push 均待完成；本地只允许显式白名单、
+审计钩子拒绝子进程/网络/信号的离线 Python 检查，不执行 Go/Node/PG/浏览器/build。
+该范围不覆盖 chunk 生成阶段取消、fencing 竞争、完整字段/容量或真实 AD/Windows。
+AD-F-053 仍 in_progress，Issue30/151 保持 open，产品验收0/209。
+
+### 2026-10-14 PR163 用户 snapshot 阶段运行中取消合并证据
+
+[PR163](https://github.com/yunpiao/adtr/pull/163)最终 head
+`4d5bdcc4e29351ee49cc3f3d2d2ee8ad8e29462f` 与 main
+`ec0da2018cc5914b8d0ca345c1c2c4cd5078d177` 共用 tree
+`ec801e6ffc0bce09cd89714bb1be3586d2781fad`。
+[精确 head CI38579256706](https://github.com/yunpiao/adtr/actions/runs/38579256706)
+attempt2逐项69/69；独立[main CI38588506730](https://github.com/yunpiao/adtr/actions/runs/38588506730)
+attempt1首次69/69。PR artifact11902942969（SHA256
+`1956d254dfe0fd16911e473c52ca8f9fb728d78fcc225590edf99694ec0bec4e`）及 fresh main
+artifact11907692240（SHA256
+`bc5aefae6611c54291f4d1c8973d1ca87018031fbe51e57dd8075e1911417baf`）均独立审查通过；
+main 审查覆盖1071个仓库blob、946个来源hash、2JSON和3PNG。
+历史失败仍保留：head aeca058 的 run38571548413为67成功/2失败，真实浏览器通过但
+新裁剪与旧全视口验证不符；之后修复3个测试文件。最终head的38579256706 attempt1
+出现directory GET effective socket_hang_up，根因尚未查明；同head针对性重跑收敛后
+attempt2为69/69。该证据仅覆盖用户 snapshot 阶段，不证明chunk取消或fencing竞争。
+
+### 2026-10-14 用户运行中取消历史候选（当时尚未运行验收）
 
 新候选基于已合并PR162的main `94b098d6acf5187e1ecf9aa659f5abed00122ce7`、tree
 `0c669bd750c2ec137311aad08b6a05744ddff907`。仅增加用户导出真实running取消测试，
