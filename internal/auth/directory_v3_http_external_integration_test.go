@@ -410,9 +410,16 @@ func TestDirectoryV3HTTPObservedCountsPinnedFullSnapshotAndReadOnlyAuthority(t *
 	for _, actor := range []string{"directory-http-no-assets", "directory-http-no-domains"} {
 		f.request(actor, path, nil, 403)
 	}
-	for _, actor := range []string{"directory-http-no-scope", "directory-foreign"} {
-		f.request(actor, path, nil, 404)
+	f.request("directory-http-no-scope", path, nil, 404)
+	f.request("directory-http-no-scope", path+"&observationId="+first.ID, nil, 404)
+	// This actor is entitled to its own tenant's identically named domain,
+	// which has no observation. Neither unpinned nor pinned reads may cross tenants.
+	foreignRaw := f.request("directory-foreign", path, nil, 200).Body.Bytes()
+	foreign := operationalDecode[domains.DirectoryV3List](t, foreignRaw)
+	if foreign.DictionaryVersion != 3 || foreign.Available || foreign.ObservedCounts != nil || foreign.ObservationID != "" || foreign.Source != nil || foreign.List == nil || len(foreign.List) != 0 || foreign.Page.Total != 0 || !bytes.Contains(foreignRaw, []byte(`"observedCounts":null`)) {
+		t.Fatal("same domain ID exposed another tenant's observation or counts", foreign)
 	}
+	f.error(f.request("directory-foreign", path+"&observationId="+first.ID, nil, 409), "directory_observation_unavailable")
 	if f.count(`SELECT count(*) FROM adtr.tasks`) != tasksBefore || f.count(`SELECT count(*) FROM adtr.domain_directory_task_uses`) != usesBefore {
 		t.Fatal("count reads mutated producer ledger")
 	}
