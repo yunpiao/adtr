@@ -65,7 +65,7 @@ def specimen(failure=True):
         case['postResume'] = {k: copy.deepcopy(case[k]) for k in ('receipt', 'detail', 'database', 'unavailableDownload')}
         data['cases'] = [case]
         data['sensitiveBudget']['after']['exportTasks'] = 1
-        data['worker'] = {'pause': {'pid': 20, 'parentPID': 10, 'starttime': '1000', 'binarySHA256': '1'*64, 'nonceSHA256': '2'*64, 'applicationNameSHA256': '3'*64, 'allThreadsStopped': True, 'threadCount': 6, 'connections': 1, 'activeTransactions': 0, 'workerID': 'worker-1', 'queueSuccessBefore': '1234.500000'}, 'resume': {'sameIdentity': True, 'allThreadsRunning': True, 'readyStatus': 200, 'workerID': 'worker-1', 'queueSuccessAfterFirst': '1234.750000', 'queueSuccessAfter': '1235.000000'}}
+        data['worker'] = {'pause': {'pid': 20, 'parentPID': 10, 'starttime': '1000', 'binarySHA256': '1'*64, 'nonceSHA256': '2'*64, 'applicationNameSHA256': '3'*64, 'allThreadsStopped': True, 'databaseIdentityVerified': True, 'threadCount': 6, 'connections': 1, 'activeTransactions': 0, 'workerID': 'worker-1', 'queueSuccessBefore': '1234.500000'}, 'resume': {'sameIdentity': True, 'allThreadsRunning': True, 'readyStatus': 200, 'workerID': 'worker-1', 'queueSuccessAfterFirst': '1234.750000', 'queueSuccessAfter': '1235.000000'}}
     return data, files
 
 
@@ -76,6 +76,17 @@ class TerminalEvidenceContract(unittest.TestCase):
     def test_both_positive_unit_specimens(self):
         for failure in (True, False):
             self.check(*specimen(failure))
+
+    def test_verified_zero_connection_quiescence(self):
+        data, files = specimen(False)
+        data['worker']['pause']['connections'] = 0
+        self.check(data, files)
+        for changes in ({'activeTransactions': 1}, {'databaseIdentityVerified': False}, {'allThreadsStopped': False}):
+            with self.subTest(changes=changes):
+                changed = copy.deepcopy(data)
+                changed['worker']['pause'].update(changes)
+                with self.assertRaises(ValueError):
+                    self.check(changed, files)
 
     def test_shared_corruption_matrix(self):
         mutations = [
@@ -162,7 +173,10 @@ class TerminalEvidenceContract(unittest.TestCase):
             lambda d: d['cases'][0]['postResume']['detail'].update(downloadStatus='pending'),
             lambda d: d['worker']['pause'].update(allThreadsStopped=False),
             lambda d: d['worker']['pause'].update(activeTransactions=1),
-            lambda d: d['worker']['pause'].update(connections=0),
+            lambda d: d['worker']['pause'].update(connections=-1),
+            lambda d: d['worker']['pause'].update(connections=False),
+            lambda d: d['worker']['pause'].update(databaseIdentityVerified=False),
+            lambda d: d['worker']['pause'].pop('databaseIdentityVerified'),
             lambda d: d['worker']['resume'].update(sameIdentity=False),
             lambda d: d['worker']['resume'].update(workerID='different-worker'),
             lambda d: d['worker']['resume'].update(queueSuccessAfter='1234.500000'),
@@ -193,12 +207,29 @@ class TerminalEvidenceContract(unittest.TestCase):
         self.assertIn('xact_start IS NOT NULL', helper)
         self.assertIn('ADTR_E2E_EXPORT_WORKER_NONCE=', helper)
         self.assertIn('queueSuccessBefore', helper)
+        self.assertIn('databaseEntries.length !== 1', helper)
+        self.assertIn('database.searchParams.getAll("application_name").length !== 1', helper)
+        self.assertIn('baseline.searchParams.has("application_name")', helper)
+        self.assertIn('baseline.pathname !== "/adtr_e2e"', helper)
+        self.assertIn('database.toString() !== baseline.toString()', helper)
+        self.assertIn('datname=current_database() AND application_name=', helper)
+        self.assertIn('w.databaseIdentityVerified && pg.activeTransactions === 0', helper)
+        self.assertIn('Number.isSafeInteger(pg.connections) || pg.connections < 0', helper)
+        self.assertNotIn('pg.connections > 0', helper)
+        self.assertIn('Date.now() + 10_000', helper)
         for name in ('failure', 'cancel'):
             source = (root / f'web/e2e/user-asset-export-v3-{name}.spec.ts').read_text()
             self.assertNotIn('route.fulfill', source)
             self.assertNotIn('waitForTimeout', source)
             self.assertIn('test.setTimeout(900_000)', source)
-        self.assertIn('finally { await restoreOwnedExportWorker(); }', (root / 'web/e2e/user-asset-export-v3-cancel.spec.ts').read_text())
+        failure = (root / 'web/e2e/user-asset-export-v3-failure.spec.ts').read_text()
+        self.assertIn('terminalError.scrollIntoViewIfNeeded()', failure)
+        self.assertGreaterEqual(failure.count('toBeInViewport({ ratio: 1 })'), 4)
+        cancel = (root / 'web/e2e/user-asset-export-v3-cancel.spec.ts').read_text()
+        self.assertIn('finally { await restoreOwnedExportWorker(); }', cancel)
+        self.assertIn('cancelledStatus.scrollIntoViewIfNeeded()', cancel)
+        self.assertGreaterEqual(cancel.count('toBeInViewport({ ratio: 1 })'), 3)
+        self.assertLess(cancel.index('expect(postResume.database).toEqual(database)'), cancel.index('await screenshot(page, info,'))
 
 
 if __name__ == '__main__':

@@ -130,9 +130,10 @@ def terminal_case(case, data, rows, read_artifact):
 def worker_proof(worker):
     exact(worker, ['pause', 'resume'], 'owned Worker evidence')
     pause, resume = worker['pause'], worker['resume']
-    exact(pause, ['pid', 'parentPID', 'starttime', 'binarySHA256', 'nonceSHA256', 'applicationNameSHA256', 'allThreadsStopped', 'threadCount', 'connections', 'activeTransactions', 'workerID', 'queueSuccessBefore'], 'pause proof')
+    exact(pause, ['pid', 'parentPID', 'starttime', 'binarySHA256', 'nonceSHA256', 'applicationNameSHA256', 'allThreadsStopped', 'databaseIdentityVerified', 'threadCount', 'connections', 'activeTransactions', 'workerID', 'queueSuccessBefore'], 'pause proof')
     exact(resume, ['sameIdentity', 'allThreadsRunning', 'readyStatus', 'workerID', 'queueSuccessAfterFirst', 'queueSuccessAfter'], 'resume proof')
-    require(all(type(pause[k]) is int and pause[k] > 0 for k in ('pid', 'parentPID', 'threadCount', 'connections')), 'owned Worker numeric identity')
+    require(all(type(pause[k]) is int and pause[k] > 0 for k in ('pid', 'parentPID', 'threadCount')), 'owned Worker numeric identity')
+    require(type(pause['connections']) is int and pause['connections'] >= 0 and pause['databaseIdentityVerified'] is True, 'verified database identity and nonnegative live session count')
     require(pause['pid'] > 1 and pause['parentPID'] > 1 and pause['pid'] != pause['parentPID'], 'owned child Worker')
     require(type(pause['starttime']) is str and re.fullmatch(r'[0-9]+', pause['starttime']), 'process birth identity')
     for key in ('binarySHA256', 'nonceSHA256', 'applicationNameSHA256'):

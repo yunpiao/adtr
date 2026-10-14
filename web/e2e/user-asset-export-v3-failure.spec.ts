@@ -21,6 +21,14 @@ test("failed XLSX retains receipt and explicitly recovers with ordered safe subs
   expect(recovered.detail).toMatchObject({ downloadReady: false, downloadStatus: "failed", task: { state: "failed", error: "export_invalid_text" } });
   const database = await terminalExport(operation.create.taskID);
   expect(database).toMatchObject({ state: "failed", error: "export_invalid_text", attempt: 1, snapshotCount: 0, manifestCount: 0, chunkCount: 0, idempotencyKey: operation.idempotencyKey });
+  // Keep the actual terminal result and recovery entry in the evidence frame;
+  // a visible export panel alone can leave these below the 900px viewport.
+  const terminalError = panel.getByText("任务错误代码：export_invalid_text", { exact: false });
+  await terminalError.scrollIntoViewIfNeeded();
+  await expect(terminalError).toBeInViewport({ ratio: 1 });
+  await expect(panel.getByText(`任务 ID：${operation.create.taskID}`, { exact: true })).toBeInViewport({ ratio: 1 });
+  await expect(panel.getByRole("status").filter({ hasText: "任务失败，没有可下载文件" })).toBeInViewport({ ratio: 1 });
+  await expect(panel.getByRole("button", { name: "按当前列表创建另一导出", exact: true })).toBeInViewport({ ratio: 1 });
   const failed = { name: "failed", ...operation, request: operation.create.request, ...recovered, database,
     unavailableDownload: await unavailableDownload(context, operation.create.taskID),
     ui: { downloadButtons: await panel.getByRole("button", { name: "下载用户 XLSX", exact: true }).count(), downloadEvents: downloads, error: "export_invalid_text" },

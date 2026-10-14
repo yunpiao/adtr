@@ -32,12 +32,19 @@ test("queued export is cancelled with fresh MFA and never executes after Worker 
     const database = await terminalExport(operation.create.taskID);
     expect(database).toMatchObject({ state: "cancelled", error: "cancelled", attempt: 0, snapshotCount: 0, manifestCount: 0, chunkCount: 0 });
     const unavailable = await unavailableDownload(context, operation.create.taskID);
-    const image = await screenshot(page, info, "cancelled-terminal.png");
     const resume = await resumeOwnedExportWorker(context, pause);
     const postResume = { ...await receiptAndDetail(page, setup.actorId, operation.create.taskID), database: await terminalExport(operation.create.taskID), unavailableDownload: await unavailableDownload(context, operation.create.taskID) };
     expect(postResume.database).toEqual(database);
     expect(postResume.detail).toMatchObject({ downloadReady: false, downloadStatus: "cancelled", task: { state: "cancelled" } });
     expect(downloads).toBe(0);
+    // Capture the actual cancelled UI after the two resumed queue cycles and
+    // immutable attempt-zero database check, without adding database data to UI.
+    const cancelledStatus = panel.getByRole("status").filter({ hasText: "服务器已确认取消，没有可下载文件" });
+    await cancelledStatus.scrollIntoViewIfNeeded();
+    await expect(cancelledStatus).toBeInViewport({ ratio: 1 });
+    await expect(panel.getByText(`任务 ID：${operation.create.taskID}`, { exact: true })).toBeInViewport({ ratio: 1 });
+    await expect(panel.getByRole("button", { name: "按当前列表创建另一导出", exact: true })).toBeInViewport({ ratio: 1 });
+    const image = await screenshot(page, info, "cancelled-terminal.png");
     await writeTerminalEvidence(info, setup, "queuedCancel", [{ name: "cancelled", ...operation, request: operation.create.request, queued, cancel, ...recovered, database, postResume, unavailableDownload: unavailable, ui: { downloadButtons: await panel.getByRole("button", { name: "下载用户 XLSX", exact: true }).count(), downloadEvents: downloads }, screenshot: image }], { pause, resume });
   } finally { await restoreOwnedExportWorker(); }
 });

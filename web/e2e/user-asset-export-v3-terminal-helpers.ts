@@ -142,6 +142,16 @@ async function checkedWorker() {
     const stat = await readFile(`${root}/stat`, "utf8"), tail = stat.slice(stat.lastIndexOf(")") + 2).trim().split(/\s+/u);
     const cmd = (await readFile(`${root}/cmdline`, "utf8")).split("\0");
     const env = (await readFile(`${root}/environ`, "utf8")).split("\0");
+    // The Worker opens/closes a connection for each transaction, so a genuine
+    // idle Worker normally has zero PG sessions. Bind that zero to this exact
+    // database/application before accepting it; never persist or print a DSN.
+    const databaseEntries = env.filter((entry) => entry.startsWith("ADTR_DATABASE_URL="));
+    if (databaseEntries.length !== 1) throw new Error("database identity");
+    const database = new URL(databaseEntries[0].slice("ADTR_DATABASE_URL=".length));
+    const baseline = new URL(process.env.ADTR_DATABASE_URL ?? "");
+    if (baseline.searchParams.has("application_name") || baseline.pathname !== "/adtr_e2e" || !["postgres:", "postgresql:"].includes(baseline.protocol) || database.searchParams.getAll("application_name").length !== 1 || database.searchParams.get("application_name") !== config.applicationName) throw new Error("database identity");
+    database.searchParams.delete("application_name");
+    if (database.toString() !== baseline.toString()) throw new Error("database identity");
     if (tail[1] !== String(config.parentPID) || tail[19] !== config.starttime || JSON.stringify(cmd) !== JSON.stringify(["./bin/adtr", "-mode", "worker", ""]) || await readlink(`${root}/exe`) !== config.binary || await readlink(`${root}/cwd`) !== resolve("..") || !env.includes(`ADTR_E2E_EXPORT_WORKER_NONCE=${config.nonce}`)) throw new Error("identity");
     const threads = await readdir(`${root}/task`);
     if (threads.length === 0) throw new Error("missing threads");
@@ -149,7 +159,7 @@ async function checkedWorker() {
       if (!/^[0-9]+$/u.test(id)) throw new Error("thread");
       return (await readFile(`${root}/task/${id}/status`, "utf8")).match(/^State:\s+(\S)/mu)?.[1] ?? "";
     }));
-    return { ...config, states };
+    return { ...config, states, databaseIdentityVerified: true };
   } catch { throw new Error("Owned Worker identity could not be verified"); }
 }
 async function signalWorker(signal: "SIGSTOP" | "SIGCONT") {
@@ -171,22 +181,29 @@ let ownedStopped = false;
 export async function pauseOwnedExportWorker() {
   // Any missed in-flight transaction resumes before another bounded attempt.
   const deadline = Date.now() + 10_000;
+  const samples = { attempts: 0, zeroConnections: 0, activeTransactions: 0, lastConnections: 0, lastActiveTransactions: 0 };
   try {
     while (Date.now() < deadline) {
       await signalWorker("SIGSTOP"); ownedStopped = true;
       await expect.poll(async () => (await checkedWorker()).states.every((s) => s === "T"), { timeout: 2000 }).toBe(true);
       const w = await checkedWorker();
-      const pg = await databaseJSON(`SELECT jsonb_build_object('connections',count(*),'activeTransactions',count(*) FILTER (WHERE xact_start IS NOT NULL)) FROM pg_stat_activity WHERE application_name='${w.applicationName}'`);
-      if (pg.connections > 0 && pg.activeTransactions === 0) {
+      const pg = await databaseJSON(`SELECT jsonb_build_object('connections',count(*),'activeTransactions',count(*) FILTER (WHERE xact_start IS NOT NULL)) FROM pg_stat_activity WHERE datname=current_database() AND application_name='${w.applicationName}'`);
+      if (!Number.isSafeInteger(pg.connections) || pg.connections < 0 || !Number.isSafeInteger(pg.activeTransactions) || pg.activeTransactions < 0 || pg.activeTransactions > pg.connections) throw new Error("Invalid Worker quiescence counts");
+      samples.attempts++; samples.zeroConnections += Number(pg.connections === 0);
+      samples.activeTransactions += Number(pg.activeTransactions > 0);
+      samples.lastConnections = pg.connections; samples.lastActiveTransactions = pg.activeTransactions;
+      if (w.databaseIdentityVerified && pg.activeTransactions === 0) {
         // Capture only AFTER stop confirmation, so a pre-stop late commit cannot
         // be mistaken for the post-resume real queue cycle.
         const queue = await queueActivity();
-        return { pid: w.pid, parentPID: w.parentPID, starttime: w.starttime, binarySHA256: hash(await readFile(w.binary)), nonceSHA256: hash(w.nonce), applicationNameSHA256: hash(w.applicationName), allThreadsStopped: true, threadCount: w.states.length, connections: pg.connections, activeTransactions: 0, workerID: queue.workerID, queueSuccessBefore: queue.success };
+        return { pid: w.pid, parentPID: w.parentPID, starttime: w.starttime, binarySHA256: hash(await readFile(w.binary)), nonceSHA256: hash(w.nonce), applicationNameSHA256: hash(w.applicationName), allThreadsStopped: true, databaseIdentityVerified: w.databaseIdentityVerified, threadCount: w.states.length, connections: pg.connections, activeTransactions: 0, workerID: queue.workerID, queueSuccessBefore: queue.success };
       }
       await signalWorker("SIGCONT"); ownedStopped = false;
       await new Promise((done) => setTimeout(done, 100));
     }
-    throw new Error("Owned Worker did not reach a transaction-free stop");
+    // Only bounded integer counters are diagnostic; no process environment,
+    // application identifier, SQL output or credentials are included.
+    throw new Error(`Owned Worker did not reach a transaction-free stop: ${JSON.stringify(samples)}`);
   } catch (error) { await restoreOwnedExportWorker(); throw error; }
 }
 export async function restoreOwnedExportWorker() {
