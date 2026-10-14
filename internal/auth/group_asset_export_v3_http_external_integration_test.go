@@ -609,6 +609,26 @@ func TestGroupExportCrossKindKeysTasksAndPermissionsStayIsolated(t *testing.T) {
 	if user.TaskID == "" || user.TaskID == groupID || user.TaskID != user.Task.ID || user.Task.Kind != domains.UserAssetExportV3KindName || user.Replayed || !reflect.DeepEqual(user.Request, wantUser) || string(user.Task.Result) != "{}" || string(user.Task.Cursor) != "{}" {
 		t.Fatal("cross-kind key adopted")
 	}
+	// Both creates must belong to this same actor to test kind isolation rather
+	// than the owner guard. They can consume the current and next TOTP steps.
+	// Wait for the real clock to make a third step valid, as the operational
+	// HTTP fixture does; never reset replay state, move clocks or widen limits.
+	ownerID := f.clients["directory-admin"].id
+	committedStep := f.count(`SELECT mfa_last_step FROM adtr.users WHERE id=$1`, ownerID)
+	for committedStep > time.Now().Unix()/30 {
+		timer := time.NewTimer(time.Until(time.Unix(committedStep*30, 0).Add(25 * time.Millisecond)))
+		select {
+		case <-f.ctx.Done():
+			timer.Stop()
+			t.Fatal("timed out awaiting an actually fresh owner TOTP step")
+		case <-timer.C:
+		}
+	}
+	sensitiveDigest := sha256.Sum256([]byte("sensitive:" + strconv.FormatInt(ownerID, 10)))
+	sensitiveBucket := hex.EncodeToString(sensitiveDigest[:])
+	if f.count(`SELECT count FROM adtr.auth_attempts WHERE bucket=$1`, sensitiveBucket) != 2 {
+		t.Fatal("two owner creates must consume exactly two sensitive attempts")
+	}
 	for _, tc := range []struct{ path, own, other string }{{groupAssetExportPath, groupID, user.TaskID}, {assetExportPath, user.TaskID, groupID}} {
 		raw := f.request("directory-admin", tc.path+"/receipt?domainId=domain-one&idempotencyKey=same-key", nil, 200).Body.Bytes()
 		var receiptID, kind string
@@ -642,6 +662,11 @@ func TestGroupExportCrossKindKeysTasksAndPermissionsStayIsolated(t *testing.T) {
 			f.request("directory-admin", tc.path+suffix+"?taskID="+tc.other, nil, 404)
 		}
 		f.request("directory-admin", tc.path+"/cancel", f.proof("directory-admin", map[string]any{"taskID": tc.other}), 404)
+	}
+	// Denied kind-crossing cancellations charge the independent sensitive
+	// budget but roll back proof consumption with their failed transaction.
+	if f.count(`SELECT mfa_last_step FROM adtr.users WHERE id=$1`, ownerID) != committedStep || f.count(`SELECT count FROM adtr.auth_attempts WHERE bucket=$1`, sensitiveBucket) != 4 {
+		t.Fatal("denied cross-kind cancellation changed proof state or attempt accounting")
 	}
 	if f.count(`SELECT count(*) FROM adtr.tasks WHERE task_id IN ($1,$2) AND state='queued'`, groupID, user.TaskID) != 2 {
 		t.Fatal("cross-kind cancel mutated task")
