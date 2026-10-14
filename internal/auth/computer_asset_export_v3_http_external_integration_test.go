@@ -493,7 +493,7 @@ func TestComputerAssetExportV3ConcurrentOriginalKeyIsolation(t *testing.T) {
 		}
 		return out, e
 	}
-	var wg sync.WaitComputer
+	var wg sync.WaitGroup
 	results := make([]tasks.Submission, 2)
 	errs := make([]error, 2)
 	start := make(chan struct{})

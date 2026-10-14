@@ -65,11 +65,27 @@ def specimen():
 
 
 class GroupMembershipEvidence(unittest.TestCase):
+    def test_exact_computer_permission_catalog_rejects_duplicates_unknown_and_false_coercion(self):
+        entries = [{'mark': mark, 'auth': {'readable': mark in v.READABLE, 'writeable': False}} for mark in sorted(v.PERMISSIONS)]
+        v.validate_permissions(entries, v.PERMISSIONS, 'reader permissions')
+        index = next(i for i, entry in enumerate(entries) if entry['mark'] == 'computer_asset_exports')
+        for replacement in [entries[0], {'mark': 'unknown_asset_exports', 'auth': {'readable': False, 'writeable': False}}]:
+            altered = copy.deepcopy(entries)
+            altered[index] = copy.deepcopy(replacement)
+            with self.assertRaises(ValueError):
+                v.validate_permissions(altered, v.PERMISSIONS, 'reader permissions')
+        for field in ('readable', 'writeable'):
+            for value in (0, None, 'false'):
+                altered = copy.deepcopy(entries)
+                altered[index]['auth'][field] = value
+                with self.subTest(field=field, value=value), self.assertRaises(ValueError):
+                    v.validate_permissions(altered, v.PERMISSIONS, 'reader permissions')
+
     def test_user_export_mark_is_explicitly_denied(self):
         data, shots = specimen()
         permission = next(p for p in data['reader']['permissions'] if p['mark'] == 'user_asset_exports')
         self.assertEqual(permission['auth'], {'readable': False, 'writeable': False})
-        self.assertEqual(len(data['reader']['permissions']), 15)
+        self.assertEqual(len(data['reader']['permissions']), 16)
         # Registration expands the exact catalog, never this reader's authority.
         for field in ('readable', 'writeable'):
             for value in (True, 1):
@@ -86,7 +102,7 @@ class GroupMembershipEvidence(unittest.TestCase):
         data, shots = specimen()
         permission = next(p for p in data['reader']['permissions'] if p['mark'] == 'group_asset_exports')
         self.assertEqual(permission['auth'], {'readable': False, 'writeable': False})
-        self.assertEqual(len(data['reader']['permissions']), 15)
+        self.assertEqual(len(data['reader']['permissions']), 16)
         # Registration expands the exact catalog, never this reader's authority.
         for field in ('readable', 'writeable'):
             for value in (True, 1):
@@ -96,6 +112,23 @@ class GroupMembershipEvidence(unittest.TestCase):
                     v.validate(altered, altered['backend']['provenance'], altered['uiProvenance'], shots.__getitem__)
         altered = copy.deepcopy(data)
         altered['reader']['permissions'] = [p for p in altered['reader']['permissions'] if p['mark'] != 'group_asset_exports']
+        with self.assertRaises(ValueError):
+            v.validate(altered, altered['backend']['provenance'], altered['uiProvenance'], shots.__getitem__)
+
+    def test_computer_export_mark_is_explicitly_denied(self):
+        data, shots = specimen()
+        permission = next(p for p in data['reader']['permissions'] if p['mark'] == 'computer_asset_exports')
+        self.assertEqual(permission['auth'], {'readable': False, 'writeable': False})
+        self.assertEqual(len(data['reader']['permissions']), 16)
+        # Registration expands the exact catalog, never this reader's authority.
+        for field in ('readable', 'writeable'):
+            for value in (True, 1):
+                altered = copy.deepcopy(data)
+                next(p for p in altered['reader']['permissions'] if p['mark'] == 'computer_asset_exports')['auth'][field] = value
+                with self.subTest(field=field, value=value), self.assertRaises(ValueError):
+                    v.validate(altered, altered['backend']['provenance'], altered['uiProvenance'], shots.__getitem__)
+        altered = copy.deepcopy(data)
+        altered['reader']['permissions'] = [p for p in altered['reader']['permissions'] if p['mark'] != 'computer_asset_exports']
         with self.assertRaises(ValueError):
             v.validate(altered, altered['backend']['provenance'], altered['uiProvenance'], shots.__getitem__)
 

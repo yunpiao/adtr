@@ -145,10 +145,10 @@ test("real browser → API → PostgreSQL users and function permissions", async
   expect(adminMenu.menu.map((node: Permission) => node.mark).sort()).toEqual([
     "audit",
     "audit_exports",
+    "computer_asset_exports",
     "directory_assets",
     "domains",
     "group_asset_exports",
-    "computer_asset_exports",
     "operation_accounts",
     "permissions",
     "roles",
