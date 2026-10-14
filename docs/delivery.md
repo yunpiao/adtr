@@ -5,7 +5,41 @@
 
 ## 当前组合状态（2026-10-11，核对至 main 6f7f44a）
 
-### 2026-10-14 EXP-007候选补充（尚未通过候选验收）
+### 2026-10-14 用户运行中取消候选（尚未运行验收）
+
+新候选基于已合并PR162的main `94b098d6acf5187e1ecf9aa659f5abed00122ce7`、tree
+`0c669bd750c2ec137311aad08b6a05744ddff907`。仅增加用户导出真实running取消测试，
+保留旧68项CI并增加1项，预期69项；不修改生产代码、schema或生产超时/租约。
+候选目标是已持久化snapshot/progress10的running → cancel_requested → cancelled，
+而不是把queued取消重新计作运行中取消。使用精确owned Worker、临时activity行锁、
+全部PG锁等待校验、预备fresh MFA；停止前活租约须大于20秒，同Worker须10秒内CONT。
+必须分别证明任务/事件/回执、无下载、取消后snapshot/manifest/chunk清零和同Worker后续活动。
+详细门禁与失败清理见[用户导出契约](user-asset-export-v3-contract.md)。
+
+当前仅候选实现，尚无本候选精确head CI、真实浏览器/PG运行或独立产物验收结果。
+本地仅静态与明确白名单、无子进程/网络的纯Python检查；不运行Go/Node/PG/浏览器/build。
+不证明chunk生成阶段取消或fencing竞争；group/computer仍只有queued取消浏览器证据。
+AD-F-053保持in_progress，产品0/209，Issue30/151保持open。
+
+### 2026-10-14 PR162 EXP-007合并证据补充
+
+[PR162](https://github.com/yunpiao/adtr/pull/162)最终head
+`09e1c52f8ceac2a2d85cdc8b4c71fbf515fa078a`与实际main合并提交
+`94b098d6acf5187e1ecf9aa659f5abed00122ce7`共有tree
+`0c669bd750c2ec137311aad08b6a05744ddff907`。
+[PR CI38550970449](https://github.com/yunpiao/adtr/actions/runs/38550970449)
+最终attempt3逐项68/68；独立[main-push CI38561279766](https://github.com/yunpiao/adtr/actions/runs/38561279766)
+attempt1逐项68/68。fresh main产物11893251763/11893351368/11892781839独立复核通过，
+包含940来源对象、216个实际XLSX单元格和6张PNG；范围为正常/空结果、失败恢复和queued取消。
+
+历史失败保留：初始head74af592/tree791bfd的run38545054964 attempt1为54成功14失败，
+其中8项编译sync.WaitComputer错误、4项旧membership权限目录预期、1项权限排序预期及verify。
+修复后的38550970449 attempt1为66成功2失败（reader socket-hangup及verify），
+连接中断根因尚未查明；attempt2实际reader/verify通过但最新rollup有queued重复记录，
+当前attempt重跑及元数据收敛后attempt3为68/68。旧attempt job重跑403保留为失败操作，
+不计作测试失败已消失的证明。新候选不得继承这些历史通过结果。
+
+### 2026-10-14 EXP-007历史候选补充（当时尚未通过候选验收）
 
 计算机导出候选以main `7ed455aecee1352f0261e7064253891af1c31c79`、tree
 `bdfc54e0982cb07a4679c5fa022f9324da31832a` 为基线，保留既有65项检查，

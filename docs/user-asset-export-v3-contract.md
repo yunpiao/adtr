@@ -319,9 +319,62 @@ viewports; it does not retrospectively convert old failed evidence into success.
 Running/cancel_requested browser scenarios remain unverified by these artifacts.
 These results apply only to the recorded revisions, not subsequent group exports.
 
+## Candidate: running cancellation after capture (2026-10-14, not runtime verified)
+
+The new test-only `user-asset-export-v3-running-cancel` slice starts from merged
+PR162 main `94b098d6acf5187e1ecf9aa659f5abed00122ce7`, tree
+`0c669bd750c2ec137311aad08b6a05744ddff907`. It preserves the prior 68 CI jobs
+and adds exactly one (69 expected). Exact-delta contracts restore the previous
+runner/workflow bytes before checking historical digests and counts. No production
+code, schema, lease, heartbeat, timeout or export limit changes are authorized.
+The candidate has no exact-head runtime pass or independently accepted artifacts yet.
+Static and explicitly allowlisted pure-Python checks must not start subprocesses or
+use the network; local Go, Node, PostgreSQL, browser and build execution is forbidden.
+
+The target is a real `user_assets.v3.export` execution with its capture snapshot and
+progress10 already committed. `running` means the owned Worker has acquired and
+started that attempt; `cancel_requested` means the dedicated API has durably requested
+cancellation of the running task, with Worker confirmation still pending; `cancelled`
+means the Worker/engine has completed the terminal transition. The test must observe
+all three states and their durable task/event/receipt evidence in that order. A queued
+attempt0 cancellation does not establish this boundary.
+
+The synthetic harness binds the exact owned Worker and its database identity, then
+uses a temporary activity-row lock to hold execution after capture. The lock is a
+test coordination device, required to expose this normally short-lived checkpoint;
+without it this small export can finish before the cancellation request. It delays
+the test Worker only, must check all PostgreSQL lock relationships before pausing,
+and must release its transaction on success or failure. It must not hold task-row
+locks that prevent the API from durably requesting cancellation. The intended pause
+requires more than20seconds of live lease and CONT of that same Worker within10seconds;
+these bounds preserve lease headroom rather than exercising lease expiry. Removing
+them could turn this test into lease recovery and invalidate the claimed execution
+identity. Failure of a guard must fail evidence collection, not silently relax it.
+Fresh MFA is prepared before the pause so proof preparation does not consume this
+bounded window; credentials and proof must never enter retained evidence.
+
+Required evidence includes the running snapshot/progress10 checkpoint, durable
+cancel_requested and cancelled transitions, original-operation receipt identity,
+no available download, and zero generated snapshot/manifest/chunk rows after
+cancellation. The same Worker must resume and demonstrate subsequent real activity;
+cleanup must resume it and release test locks even when assertions fail. The success
+artifact allowlist is exactly provenance JSON, evidence JSON, running-checkpoint.png,
+cancel-requested.png and cancelled-terminal.png. No XLSX, trace, raw logs or proof
+inputs are retained. Provenance must bind the actual checkout/tree/run/source bytes;
+PNG and database evidence must be independently inspected after CI runs.
+
+This candidate covers cancellation after capture, before chunk-generation evidence.
+It does not establish chunk-stage cancellation, concurrent fencing races, or all
+cancellation boundaries. Group/computer browser cancellation remains queued-only.
+PR162's recorded68/68 results verify its computer slice, not this candidate; PR159/160
+history above remains unchanged. AD-F-053 remains in_progress, product_accepted=false;
+Issue30/151 and product acceptance0/209 remain open pending their full gates.
+
 AD-F-053 therefore remains `in_progress`, `product_accepted=false`.
 EXP-006 legacy business/default columns and full filter semantics, EXP-007 computer,
-EXP-008 group and EXP-009 DNS/IP exports are not delivered by this bounded slice.
+EXP-008 group and EXP-009 DNS/IP exports are not delivered by this bounded user slice.
+Separate bounded group/computer implementations are merged in PR161/162; their
+full legacy compatibility and product acceptance remain open.
 Real AD, eight Windows versions, target capacity/peak memory and production gates
 remain open. [Issue30](https://github.com/yunpiao/adtr/issues/30) and
 [Issue151](https://github.com/yunpiao/adtr/issues/151) stay open; product acceptance

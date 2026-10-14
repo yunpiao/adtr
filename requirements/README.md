@@ -61,11 +61,26 @@ Earlier runs38520290658 and38525081993 retain their3 and2 failures respectively.
 The10000-row/32MiB guardrails do not verify
 legacy100000-row capacity.
 The [bounded EXP-007 computer slice](../docs/computer-asset-export-v3-contract.md)
-is in implementation on main `7ed455aecee1352f0261e7064253891af1c31c79`:
-five collected scalar facts, shared computer-list search/time-range/order, all
-matching rows, independent permission/task/schema23 storage, and no DNS/IP/SPN,
-OS or business-status inference. Exact candidate CI and artifact review remain
-pending; all65 existing checks are retained and3 dedicated jobs target68 checks.
+is merged in PR162 at main `94b098d6acf5187e1ecf9aa659f5abed00122ce7`, tree
+`0c669bd750c2ec137311aad08b6a05744ddff907`: five collected scalar facts,
+shared computer-list search/time-range/order, all matching rows and independent
+permission/task/schema23 storage. Final head `09e1c52f8ceac2a2d85cdc8b4c71fbf515fa078a`
+passed [38550970449](https://github.com/yunpiao/adtr/actions/runs/38550970449)
+attempt3 with68/68; separate main-push
+[38561279766](https://github.com/yunpiao/adtr/actions/runs/38561279766) attempt1
+passed68/68, with fresh normal/empty, failure/recovery and queued-cancel artifacts
+independently reviewed. Historical run38545054964 remains54 successful/14 failed;
+38550970449 attempt1 remains66 successful/2 failed after reader socket-hangup
+(root cause unestablished). Attempt2's passed reader/verify and duplicate queued
+rollup are preserved separately from final attempt3 success.
+
+The new user-only running-cancel candidate adds one job to these68 (69 expected),
+without production/schema changes. It targets real running after snapshot/progress10,
+then cancel_requested and cancelled, with exact owned-Worker/PG-lock/lease guards.
+It is not runtime verified; exact-head CI and independent artifact review are pending.
+It does not prove chunk-stage cancellation or fencing races; group/computer retain
+queued-only cancellation browser coverage. See the
+[candidate contract](../docs/user-asset-export-v3-contract.md#candidate-running-cancellation-after-capture-2026-10-14-not-runtime-verified).
 Full EXP-007 legacy parity/capacity and EXP-009 DNS/IP exports remain open.
 Issue30 and Issue151 remain open. The new documentation/code revision must pass
 its own checks; old CI success cannot be transferred to it.

@@ -3207,7 +3207,7 @@
         "remaining": [
           "PR160已验证failed→安全两列恢复与queued取消真实browser/Worker/PG链；running/cancel_requested等其他取消边界仍须逐项验收。",
           "EXP-006完整旧字段、默认业务列、多域、status/overviewType/updateTm/scoreSort及全部源系统筛选语义未达1:1；六scalar列不能替代未采集业务字段。",
-          "EXP-008组及EXP-007计算机五scalar有界切片的完整旧筛选/业务默认列/目标容量仍未验收；EXP-007当前候选CI与独立审查待完成，EXP-009 DNS/IP导出未实现。",
+          "EXP-008组及EXP-007计算机五scalar有界切片已分别在PR161/162合并验证，但完整旧筛选/业务默认列/目标容量仍未验收；EXP-009 DNS/IP导出未实现。",
           "真实AD及八版本Windows、目标容量/峰值内存、生产验收开放；代码上限不代表容量验收。",
           "Issue30与Issue151保持open；product_accepted=false，产品接受数仍0/209。未来文档或代码提交需独立CI，不继承上述运行通过。"
         ],
@@ -3263,11 +3263,53 @@
         },
         "computer_export_slice": {
           "contract": "docs/computer-asset-export-v3-contract.md",
-          "status": "implementation_in_progress",
+          "status": "merged_bounded_slice_verified",
           "base_commit": "7ed455aecee1352f0261e7064253891af1c31c79",
           "base_tree": "bdfc54e0982cb07a4679c5fa022f9324da31832a",
           "scope": "EXP-007仅dictionary3固定单域观测五scalar列guid/sAMAccountName/sid/dn/whenCreated，共享计算机列表search/startTm/endTm/creatTm并导出全部匹配行；独立computer_asset_exports权限、computer_assets.v3.export任务与schema23三表，不推断DNS/IP/SPN/OS/业务状态。",
-          "verification": "本候选真实CI、XLSX/截图/数据库证据及独立实际diff审查待完成；保护限不等于容量验收。全部旧65项检查保留，新增3项预期68项；不继承基线通过结果。"
+          "verification": "PR162最终精确head及独立main-push均68/68；fresh main产物11893251763/11893351368/11892781839独立核对940来源对象、216实际XLSX单元格、6PNG通过；正常/空结果、失败恢复及queued取消为有界工程证据，不替代完整旧字段/容量/生产验收。",
+          "pr": "https://github.com/yunpiao/adtr/pull/162",
+          "head": "09e1c52f8ceac2a2d85cdc8b4c71fbf515fa078a",
+          "merge_commit": "94b098d6acf5187e1ecf9aa659f5abed00122ce7",
+          "tree": "0c669bd750c2ec137311aad08b6a05744ddff907",
+          "ci": [
+            {
+              "url": "https://github.com/yunpiao/adtr/actions/runs/38550970449",
+              "run_attempt": 3,
+              "result": "68/68 jobs success"
+            },
+            {
+              "url": "https://github.com/yunpiao/adtr/actions/runs/38561279766",
+              "run_attempt": 1,
+              "result": "68/68 jobs success"
+            }
+          ],
+          "historical_failures": [
+            {
+              "run": "38545054964",
+              "head_prefix": "74af592",
+              "tree_prefix": "791bfd",
+              "run_attempt": 1,
+              "result": "54 successful jobs; 14 failed",
+              "detail": "8项sync.WaitComputer编译、4项旧membership权限目录预期、1项权限排序预期及verify失败，后续修复不覆盖历史。"
+            },
+            {
+              "run": "38550970449",
+              "run_attempt": 1,
+              "result": "66 successful jobs; 2 failed",
+              "detail": "reader socket-hangup及verify失败；连接中断根因尚未查明。attempt2实际reader/verify通过但最新rollup有queued重复；当前attempt重跑及元数据收敛后attempt3为68/68。旧attempt job重跑403为失败操作，不是新增测试结果。"
+            }
+          ]
+        },
+        "running_cancel_candidate": {
+          "contract": "docs/user-asset-export-v3-contract.md",
+          "status": "candidate_not_runtime_verified",
+          "base_commit": "94b098d6acf5187e1ecf9aa659f5abed00122ce7",
+          "base_tree": "0c669bd750c2ec137311aad08b6a05744ddff907",
+          "suite": "user-asset-export-v3-running-cancel",
+          "scope": "仅test-only用户导出真实running（snapshot/progress10已持久化）→cancel_requested→cancelled；精确owned Worker、临时activity行锁及全部PG锁校验、fresh MFA预备、live lease>20s且同Worker10s内CONT；取消后snapshot/manifest/chunk清零、原始receipt与后续Worker活动。",
+          "verification": "旧68项CI完整保留并增加1项，预期69；尚无本候选精确head运行或独立产物验收。本地限静态及明确白名单无子进程/网络纯Python；不运行Go/Node/PG/browser/build。",
+          "remaining": "不证明chunk阶段取消/fencing竞争；group/computer浏览器取消仍限queued；无生产/schema变更，不增加产品验收，Issue30/151保持open。"
         }
       }
     },

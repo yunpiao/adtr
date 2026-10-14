@@ -7,6 +7,8 @@ from pathlib import Path
 import re
 import unittest
 
+from test_user_asset_export_v3_running_cancel_runner_contract import restore as restore_running_cancel
+
 CHANGES = {'.github/workflows/ci.yml': ('0c7af05d6b5a38b78e2a4d854d9768d214df32dafef46e8e040e9d9b40acb964',
                               [('  browser:\n'
                                 '    needs: [prepare-postgres]\n'
@@ -529,12 +531,16 @@ CHANGES = {'.github/workflows/ci.yml': ('0c7af05d6b5a38b78e2a4d854d9768d214df32d
                                 '"scripts/validate_group_members_v4_evidence.py",\n')])}
 
 
-def restore(text, name):
+def restore_computer_only(text, name):
     for old, new in reversed(CHANGES[name][1]):
         if text.count(new) != 1:
             raise ValueError('computer export addition absent or altered: ' + name)
         text = text.replace(new, old)
     return text
+
+
+def restore(text, name):
+    return restore_computer_only(restore_running_cancel(text, name), name)
 
 
 def restore_runner(text):
@@ -551,7 +557,7 @@ class ComputerExportRunnerContract(unittest.TestCase):
             self.assertEqual(hashlib.sha256(restore(Path(name).read_text(), name).encode()).hexdigest(), digest)
 
     def test_68_jobs_and_unchanged_limits(self):
-        source = Path('.github/workflows/ci.yml').read_text()
+        source = restore_running_cancel(Path('.github/workflows/ci.yml').read_text(), '.github/workflows/ci.yml')
         names = re.findall(r'^          - name: ([a-z0-9-]+)$', source, re.M)
         self.assertEqual(len(names), 48)
         self.assertEqual(len(names) + 8 + 7 + 5, 68)
@@ -562,12 +568,12 @@ class ComputerExportRunnerContract(unittest.TestCase):
 
     def test_modified_or_duplicate_delta_fails(self):
         for name, (_, changes) in CHANGES.items():
-            source = Path(name).read_text()
+            source = restore_running_cancel(Path(name).read_text(), name)
             for _, new in changes:
                 with self.assertRaises(ValueError):
-                    restore(source + new, name)
+                    restore_computer_only(source + new, name)
                 with self.assertRaises(ValueError):
-                    restore(source.replace(new, '!' + new[1:]), name)
+                    restore_computer_only(source.replace(new, '!' + new[1:]), name)
 
 
 if __name__ == '__main__':
