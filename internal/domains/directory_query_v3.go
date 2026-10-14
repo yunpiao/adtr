@@ -14,10 +14,19 @@ import (
 
 const DirectoryV3PageMaxBytes = 8 << 20
 
+// DirectoryV3ObservedCounts counts explicit decoded kinds in one complete,
+// validated immutable observation, independently of the requested page/filter.
+type DirectoryV3ObservedCounts struct {
+	User     int `json:"user"`
+	Group    int `json:"group"`
+	Computer int `json:"computer"`
+}
+
 // DirectoryV3List cannot widen the legacy DTO accidentally. Its fixed integer
 // pin is present even when no current observation is available.
 type DirectoryV3List struct {
 	DictionaryVersion int                              `json:"dictionaryVersion"`
+	ObservedCounts    *DirectoryV3ObservedCounts       `json:"observedCounts"`
 	Available         bool                             `json:"available"`
 	ObservationID     string                           `json:"observationId,omitempty"`
 	Source            *ldapconnection.DirectorySource  `json:"source,omitempty"`
@@ -26,14 +35,27 @@ type DirectoryV3List struct {
 }
 
 func directoryV3Page(observationID string, o ldapconnection.DirectoryV3Observation, f DirectoryFilter) (DirectoryV3List, error) {
+	counts := &DirectoryV3ObservedCounts{}
 	rows := make([]int, 0, len(o.Objects))
 	for i, object := range o.Objects {
+		// Computer objects also carry objectClass=user. Only the validated kind
+		// determines the bucket, so every object contributes exactly once.
+		switch object.Base.Kind {
+		case directoryassets.User:
+			counts.User++
+		case directoryassets.Group:
+			counts.Group++
+		case directoryassets.Computer:
+			counts.Computer++
+		default:
+			return DirectoryV3List{}, problem(409, "directory_observation_unavailable")
+		}
 		if f.Kind == "" || object.Base.Kind == f.Kind {
 			rows = append(rows, i)
 		}
 	}
 	sort.Slice(rows, func(i, j int) bool { return o.Objects[rows[i]].Base.GUID < o.Objects[rows[j]].Base.GUID })
-	out := DirectoryV3List{DictionaryVersion: 3, Available: true, ObservationID: observationID, Source: &o.Source, List: []directoryassets.PublicObjectV3{}, Page: Page{Index: f.PageIdx, Size: f.PageSize, Total: len(rows)}}
+	out := DirectoryV3List{DictionaryVersion: 3, ObservedCounts: counts, Available: true, ObservationID: observationID, Source: &o.Source, List: []directoryassets.PublicObjectV3{}, Page: Page{Index: f.PageIdx, Size: f.PageSize, Total: len(rows)}}
 	if len(rows) > 0 {
 		out.Page.Pages = (len(rows) + f.PageSize - 1) / f.PageSize
 	}

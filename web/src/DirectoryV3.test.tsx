@@ -45,6 +45,7 @@ import {
   validDirectoryV3Input,
   uncertainDirectoryV3Error,
   type DirectoryV3Object,
+  type DirectoryV3ObservedCounts,
   type DirectoryV3Query,
 } from "./directory-v3-api";
 import {
@@ -128,11 +129,16 @@ const observation = (
   q = query,
   total = rows.length,
   observationId = "observation-one",
+  observedCounts: DirectoryV3ObservedCounts = rows.reduce(
+    (counts, value) => ({ ...counts, [value.kind]: counts[value.kind] + 1 }),
+    { user: 0, group: 0, computer: 0 },
+  ),
 ) => ({
   dictionaryVersion: 3 as const,
   available: true,
   observationId,
   source,
+  observedCounts,
   list: rows,
   page: {
     pageIdx: q.pageIdx,
@@ -144,6 +150,7 @@ const observation = (
 const absent = () => ({
   dictionaryVersion: 3 as const,
   available: false,
+  observedCounts: null,
   list: [],
   page: { pageIdx: 1, pageSize: 50, total: 0, totalPage: 0 },
 });
@@ -297,7 +304,11 @@ afterEach(() => {
 
 describe("strict directory contracts", () => {
   it("requires dictionary 3 on unavailable and available observations without widening the legacy parser", () => {
-    const { dictionaryVersion: _, ...legacyAbsent } = absent();
+    const {
+      dictionaryVersion: _,
+      observedCounts: __,
+      ...legacyAbsent
+    } = absent();
     expect(parseLegacyObservation(legacyAbsent, query).available).toBe(false);
     expect(() => parseDirectoryV3Observation(legacyAbsent, query)).toThrow(
       "invalid_response",
@@ -430,6 +441,91 @@ describe("strict directory contracts", () => {
     expect(parseDirectoryV3Observation(observation(), query).list).toEqual([
       row(),
     ]);
+  });
+  it("validates full-observation counts independently of kind and page", () => {
+    const counts = { user: 51, group: 2, computer: 1 };
+    for (const kind of ["", "user", "group", "computer"] as const) {
+      const allRows = [
+        ...Array.from({ length: 51 }, (_, i) => row(i + 1)),
+        row(52, "group"),
+        row(53, "group"),
+        row(54, "computer"),
+      ];
+      const selected = allRows.filter((r) => !kind || r.kind === kind);
+      for (const pageIdx of [1, 2, 3]) {
+        const q = { ...query, kind, pageIdx, pageSize: 25 };
+        const value = observation(
+          selected.slice((pageIdx - 1) * 25, pageIdx * 25),
+          q,
+          selected.length,
+          "observation-one",
+          counts,
+        );
+        expect(parseDirectoryV3Observation(value, q).observedCounts).toEqual(
+          counts,
+        );
+      }
+    }
+    expect(
+      parseDirectoryV3Observation(absent(), query).observedCounts,
+    ).toBeNull();
+    expect(
+      parseDirectoryV3Observation(observation([]), query).observedCounts,
+    ).toEqual({ user: 0, group: 0, computer: 0 });
+  });
+  it.each([
+    undefined,
+    null,
+    [],
+    {},
+    { user: 1, group: 0 },
+    { user: 1, group: 0, computer: 0, password: "private" },
+    { user: -1, group: 1, computer: 1 },
+    { user: 0.5, group: 0.5, computer: 0 },
+    { user: "1", group: 0, computer: 0 },
+    { user: 10001, group: 0, computer: 0 },
+    { user: 9999, group: 1, computer: 1 },
+    { user: 0, group: 1, computer: 0 },
+    { user: 2, group: 0, computer: 0 },
+  ])(
+    "rejects malformed or contradictory observed counts %#",
+    (observedCounts) => {
+      expect(() =>
+        parseDirectoryV3Observation({ ...observation(), observedCounts }, query),
+      ).toThrow("invalid_response");
+    },
+  );
+  it("requires the count key, null for unavailable, and exact active-kind totals", () => {
+    const { observedCounts: _, ...missing } = observation();
+    const { observedCounts: __, ...missingAbsent } = absent();
+    for (const value of [
+      missing,
+      missingAbsent,
+      { ...absent(), observedCounts: { user: 0, group: 0, computer: 0 } },
+    ])
+      expect(() => parseDirectoryV3Observation(value, query)).toThrow(
+        "invalid_response",
+      );
+    const q: DirectoryV3Query = { ...query, kind: "user" };
+    expect(() =>
+      parseDirectoryV3Observation(
+        { ...observation(), observedCounts: { user: 2, group: 0, computer: 0 } },
+        q,
+      ),
+    ).toThrow("invalid_response");
+    // The full sum matches, but a partial page contradicts the per-kind counts.
+    expect(() =>
+      parseDirectoryV3Observation(
+        observation(
+          Array.from({ length: 50 }, (_, i) => row(i + 1)),
+          query,
+          51,
+          "observation-one",
+          { user: 49, group: 2, computer: 0 },
+        ),
+        query,
+      ),
+    ).toThrow("invalid_response");
   });
   it("rejects widened records, inconsistent page metadata, wrong pins, kinds, GUID order and malformed dates", () => {
     const bad = [
@@ -679,6 +775,16 @@ describe("directory observations and access", () => {
       else if (state === "empty")
         await screen.findByText("已成功观察，当前筛选结果为空。");
       else await screen.findByRole("alert");
+      if (state === "empty")
+        expect(screen.getByLabelText("本次观测中的对象数量")).toHaveTextContent(
+          "本次观测中的对象数量：用户 0 · 组 0 · 计算机 0",
+        );
+      if (state === "absent")
+        expect(screen.getByLabelText("本次观测中的对象数量")).toHaveTextContent(
+          "暂无可用观测",
+        );
+      if (state === "error")
+        expect(screen.queryByLabelText("本次观测中的对象数量")).toBeNull();
       if (state !== "available")
         expect(
           screen.queryByRole("table", { name: "目录对象观察" }),
@@ -687,6 +793,70 @@ describe("directory observations and access", () => {
         expect(screen.queryByText("已成功观察，当前筛选结果为空。")).toBeNull();
     },
   );
+  it("shows the same mixed counts across filters and pages, then replaces them on a new observation", async () => {
+    let refreshed = false;
+    override = (url) => {
+      if (url.split("?")[0] !== "/api/directory/v3/observation") return;
+      const p = new URL(url, "https://local.invalid").searchParams;
+      const q: DirectoryV3Query = {
+        domainId: choice.domainId,
+        kind: (p.get("kind") ?? "") as DirectoryV3Query["kind"],
+        pageIdx: Number(p.get("pageIdx")),
+        pageSize: Number(p.get("pageSize")),
+      };
+      const full = refreshed
+        ? [row(1, "computer")]
+        : [
+            ...Array.from({ length: 51 }, (_, i) => row(i + 1)),
+            row(52, "group"),
+            row(53, "group"),
+            row(54, "computer"),
+          ];
+      const selected = full.filter((r) => !q.kind || r.kind === q.kind);
+      return response(
+        observation(
+          selected.slice((q.pageIdx - 1) * q.pageSize, q.pageIdx * q.pageSize),
+          q,
+          selected.length,
+          refreshed ? "observation-two" : "observation-one",
+          refreshed
+            ? { user: 0, group: 0, computer: 1 }
+            : { user: 51, group: 2, computer: 1 },
+        ),
+      );
+    };
+    await start();
+    const expectCounts = async () => {
+      await waitFor(() =>
+        expect(screen.getByLabelText("本次观测中的对象数量")).toHaveTextContent(
+          "本次观测中的对象数量：用户 51 · 组 2 · 计算机 1",
+        ),
+      );
+    };
+    await expectCounts();
+    fireEvent.click(
+      within(
+        screen.getByRole("navigation", { name: "目录观察分页" }),
+      ).getByRole("button", { name: "下一页" }),
+    );
+    await screen.findByText("observed-54");
+    await expectCounts();
+    expect(params("/api/directory/v3/observation").observationId).toBe(
+      "observation-one",
+    );
+    for (const kind of ["user", "group", "computer"]) {
+      fill("目录对象类型", kind);
+      await expectCounts();
+    }
+    fill("目录每页条数", "25");
+    await expectCounts();
+    refreshed = true;
+    click("刷新目录观察");
+    await screen.findByText(/观察编号：observation-two/);
+    expect(screen.getByLabelText("本次观测中的对象数量")).toHaveTextContent(
+      "本次观测中的对象数量：用户 0 · 组 0 · 计算机 1",
+    );
+  });
   it("uses pinned pages and resets the observation pin on kind, page size, and explicit refresh", async () => {
     override = (url) => {
       if (url.split("?")[0] !== "/api/directory/v3/observation") return;
@@ -697,14 +867,18 @@ describe("directory observations and access", () => {
         pageIdx: Number(p.get("pageIdx")),
         pageSize: Number(p.get("pageSize")),
       };
-      const start = (q.pageIdx - 1) * q.pageSize + 1;
+      const full = [
+        ...Array.from({ length: 51 }, (_, i) => row(i + 1)),
+        ...Array.from({ length: 51 }, (_, i) => row(i + 52, "group")),
+      ];
+      const selected = full.filter((r) => !q.kind || r.kind === q.kind);
       return response(
         observation(
-          Array.from({ length: Math.min(q.pageSize, 51 - start + 1) }, (_, i) =>
-            row(start + i, q.kind || "user"),
-          ),
+          selected.slice((q.pageIdx - 1) * q.pageSize, q.pageIdx * q.pageSize),
           q,
-          51,
+          selected.length,
+          "observation-one",
+          { user: 51, group: 51, computer: 0 },
         ),
       );
     };
@@ -725,7 +899,7 @@ describe("directory observations and access", () => {
       observationId: "observation-one",
     });
     fill("目录对象类型", "group");
-    await screen.findByText("observed-1");
+    await screen.findByText("observed-52");
     expect(params("/api/directory/v3/observation")).toEqual({
       domainId: choice.domainId,
       pageIdx: "1",
@@ -733,9 +907,9 @@ describe("directory observations and access", () => {
       kind: "group",
     });
     next();
-    await screen.findByText("observed-51");
+    await screen.findByText("observed-102");
     fill("目录每页条数", "25");
-    await screen.findByText("observed-1");
+    await screen.findByText("observed-52");
     expect(params("/api/directory/v3/observation")).toEqual({
       domainId: choice.domainId,
       pageIdx: "1",
@@ -743,9 +917,9 @@ describe("directory observations and access", () => {
       kind: "group",
     });
     next();
-    await screen.findByText("observed-26");
+    await screen.findByText("observed-77");
     click("刷新目录观察");
-    await screen.findByText("observed-1");
+    await screen.findByText("observed-52");
     expect(params("/api/directory/v3/observation")).toEqual({
       domainId: choice.domainId,
       pageIdx: "1",
@@ -763,6 +937,8 @@ describe("directory observations and access", () => {
                 Array.from({ length: 50 }, (_, i) => row(i + 1)),
                 query,
                 51,
+                "observation-one",
+                { user: 51, group: 0, computer: 0 },
               ),
             )
         : undefined;
@@ -775,6 +951,7 @@ describe("directory observations and access", () => {
     );
     await screen.findByText(/原目录观察已不可用/);
     expect(screen.queryByText("observed-1")).toBeNull();
+    expect(screen.queryByLabelText("本次观测中的对象数量")).toBeNull();
     expect(calls("/api/directory/v3/observation")).toHaveLength(2);
     click("刷新目录观察");
     await screen.findByText("observed-1");
@@ -1302,6 +1479,44 @@ describe("directory synchronization and recovery", () => {
 });
 
 describe("directory identity and request lifecycle", () => {
+  it("clears counts and source details when a refreshed read loses permission", async () => {
+    await start();
+    await screen.findByText("observed-1");
+    expect(screen.getByLabelText("本次观测中的对象数量")).toBeVisible();
+    override = (url) =>
+      url.split("?")[0] === "/api/directory/v3/observation"
+        ? response({ error: "forbidden" }, 403)
+        : undefined;
+    click("刷新目录观察");
+    await screen.findByRole("alert");
+    expect(screen.queryByLabelText("本次观测中的对象数量")).toBeNull();
+    expect(screen.queryByText(/观察编号：/)).toBeNull();
+    expect(screen.queryByText(/服务器名称：/)).toBeNull();
+  });
+  it("discards late counts when a newly resolved source replaces the observation", async () => {
+    const pending = deferred();
+    let reads = 0;
+    override = (url) => {
+      if (url.split("?")[0] !== "/api/directory/v3/observation") return;
+      reads += 1;
+      return reads === 1
+        ? pending.promise
+        : response(observation([row(2, "group")], query, 1, "observation-new"));
+    };
+    await start();
+    await waitFor(() => expect(reads).toBe(1));
+    const requestSignal = calls("/api/directory/v3/observation")[0][1]
+      .signal as AbortSignal;
+    await selectSource();
+    await screen.findByText(/观察编号：observation-new/);
+    expect(requestSignal.aborted).toBe(true);
+    await pending.resolve(observation());
+    expect(screen.getByLabelText("本次观测中的对象数量")).toHaveTextContent(
+      "本次观测中的对象数量：用户 0 · 组 1 · 计算机 0",
+    );
+    expect(screen.queryByText(/观察编号：observation-one/)).toBeNull();
+    expect(screen.queryByText("observed-1")).toBeNull();
+  });
   it("removes protected data and notifies session expiry on a foreign-actor success", async () => {
     const lost = vi.fn();
     await start(lost);
@@ -1314,6 +1529,7 @@ describe("directory identity and request lifecycle", () => {
     await waitFor(() => expect(lost).toHaveBeenCalledOnce());
     expect(screen.queryByRole("table", { name: "目录对象观察" })).toBeNull();
     expect(screen.queryByRole("radio")).toBeNull();
+    expect(screen.queryByLabelText("本次观测中的对象数量")).toBeNull();
   });
   it.each(["actor", "csrf"])(
     "aborts late observation after %s switch even when the transport ignores AbortSignal",
@@ -1342,6 +1558,7 @@ describe("directory identity and request lifecycle", () => {
       await pending.resolve(observation());
       expect(screen.queryByRole("table", { name: "目录对象观察" })).toBeNull();
       expect(screen.queryByText("observed-1")).toBeNull();
+      expect(screen.queryByLabelText("本次观测中的对象数量")).toBeNull();
     },
   );
   it("aborts late synchronization on actor switch and never attributes the old receipt to the new actor", async () => {
@@ -1495,7 +1712,8 @@ describe("bounded dictionary 2 transport and isolated recovery", () => {
 describe("dictionary3 exact-profile isolation", () => {
   it("leaves existing v2 objects/tasks strict and never converts their null history", () => {
     const { primaryGroupID: _, servicePrincipalName: __, ...base } = row();
-    const v2 = { ...observation(), dictionaryVersion: 2, list: [base] };
+    const { observedCounts: ___, ...v3 } = observation();
+    const v2 = { ...v3, dictionaryVersion: 2, list: [base] };
     expect(parseDirectoryV2Observation(v2, query).dictionaryVersion).toBe(2);
     expect(() => parseDirectoryV3Observation(v2, query)).toThrow(
       "unsupported_directory_profile",

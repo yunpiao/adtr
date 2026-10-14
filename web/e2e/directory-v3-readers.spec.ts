@@ -342,6 +342,9 @@ async function readerView(
   await signedIn(page, readerUsername);
   const region = page.getByRole("region", { name: "目录观察", exact: true });
   await expect(region).toContainText(`观察编号：${observationId}`);
+  await expect(
+    page.getByLabel("本次观测中的对象数量", { exact: true }),
+  ).toHaveText("本次观测中的对象数量：用户 0 · 组 0 · 计算机 0");
   await expect(region.getByRole("status")).toHaveText(
     "已成功观察，当前筛选结果为空。",
   );
@@ -1058,6 +1061,7 @@ test("real empty dictionary-v3 reader and same-context account-switch isolation"
   expect(beforeObservation.value).toEqual({
     dictionaryVersion: 3,
     available: false,
+    observedCounts: null,
     list: [],
     page: { pageIdx: 1, pageSize: 50, total: 0, totalPage: 0 },
   });
@@ -1113,6 +1117,7 @@ test("real empty dictionary-v3 reader and same-context account-switch isolation"
   expect(observation).toMatchObject({
     dictionaryVersion: 3,
     available: true,
+    observedCounts: { user: 0, group: 0, computer: 0 },
     observationId: taskUUID,
     list: [],
     page: { pageIdx: 1, pageSize: 50, total: 0, totalPage: 0 },
@@ -1692,6 +1697,9 @@ test("real empty dictionary-v3 reader and same-context account-switch isolation"
         page.getByRole("region", { name: "目录观察", exact: true }),
       ).toHaveCount(0);
       await expect(page.getByText(taskUUID, { exact: false })).toHaveCount(0);
+      await expect(
+        page.getByLabel("本次观测中的对象数量", { exact: true }),
+      ).toHaveCount(0);
       safe(consoles);
       expect(
         consoles.filter((message) => /Uncaught|unhandled/i.test(message)),

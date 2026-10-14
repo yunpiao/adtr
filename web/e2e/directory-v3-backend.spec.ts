@@ -636,6 +636,7 @@ test("dictionary3 real backend Worker TLS LDAP PostgreSQL API facts", async ({
   expect(initial).toMatchObject({
     dictionaryVersion: 3,
     available: false,
+    observedCounts: null,
     list: [],
   });
   const submitted = await post("/api/directory/v3/sync", sync);
@@ -675,11 +676,14 @@ test("dictionary3 real backend Worker TLS LDAP PostgreSQL API facts", async ({
   expect(observed).toMatchObject({
     dictionaryVersion: 3,
     available: true,
+    observedCounts: { user: 12, group: 12, computer: 6 },
     observationId: taskUUID,
     page: { total: 30, totalPage: 2 },
   });
   expect(observed.list).toHaveLength(25);
   expect(second.list).toHaveLength(5);
+  expect(second.observedCounts).toEqual({ user: 12, group: 12, computer: 6 });
+  expect(second.observationId).toBe(taskUUID);
   const expected = expectedObjects().map((object, index) => {
     const n = index + 1;
     const present = (n <= 12 && n !== 12) || n > 24;

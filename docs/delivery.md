@@ -5,6 +5,45 @@
 
 ## 当前组合状态（2026-10-11，核对至 main 6f7f44a）
 
+
+### 2026-10-14 AD-F-052 本次观测对象数量候选
+
+基线 main `d24a0cf304631d433b79f75dfd92038f6563826a`、tree
+`bce5fdfd382e12a65983da0f64b5ca17f397639c`。Issue30 的
+FLD-0586/0588/0590 仅推进同一完整有效字典3观测中的 user/group/computer
+数量，按对象 kind 分类，在筛选与分页前计算；不可用为 null，成功空观测为三个0。
+页面明确标记“本次观测中的对象数量”，绑定观察编号及来源，沿用当前读取权限与失效清理。
+这不是旧系统资产总数口径验收；差异/安全风险概览、图表、真实AD和Windows兼容性仍开放。
+
+沿用71项CI，不增加job，不修改schema/collector/工作流限制。
+目前仅候选实现与离线白名单静态检查；精确head运行、独立复审、合并和main-push
+证据仍待完成。历史CI不继承到本候选。详见[字典3契约](directory-v3-contract.md)。
+AD-F-052 从not_started改为in_progress，Issue30保持open，产品验收仍0/209。
+
+### 2026-10-14 PR164 组/计算机 snapshot 运行中取消合并证据
+
+[PR164](https://github.com/yunpiao/adtr/pull/164)最终head
+`a3ab990f39eb1b3d4e695dc497ecdbd84a0a942c`与实际main
+`d24a0cf304631d433b79f75dfd92038f6563826a`共用tree
+`bce5fdfd382e12a65983da0f64b5ca17f397639c`；main父提交依次为
+`ec0da2018cc5914b8d0ca345c1c2c4cd5078d177`及上述head。
+[精确head CI38607510864](https://github.com/yunpiao/adtr/actions/runs/38607510864)
+attempt1为71/71；独立[main CI38615254322](https://github.com/yunpiao/adtr/actions/runs/38615254322)
+attempt2为71个唯一检查全部成功。
+
+历史失败保留：初始head395e9fc的run38599594145为69成功/2失败（计算机checkpoint及verify），
+原始checkpoint失败原因尚未查明；后续仅补充诊断的新head通过。main attempt1的auth4
+包在600.034秒超时并导致verify失败；同head针对性重跑auth4包398.612秒通过，
+目标DirectoryV3测试22.59秒（PR为31.32秒）。源码及限制不变，耗时差异根因尚未查明。
+
+fresh main组产物11921085467（SHA256
+`47e9cfdfe6c15300e1924fd2d0c22b36073c9ddd84be2fa5b6759917a33ba2d8`）与计算机产物
+11919813345（SHA256
+`907afee286add99760ba8d701eeee9da3cc7626605acf0770c7e225357cb4e2a`）均独立复核通过，
+覆盖1084仓库blob、各959/962来源hash及共6张PNG。证据限于两个kind的snapshot/progress10
+运行中取消；chunk阶段取消、fencing竞争及完整产品验收仍开放。AD-F-053保持in_progress，
+Issue30/151保持open，产品验收0/209；上述历史成功不转移到后续候选。
+
 ### 2026-10-14 组/计算机 snapshot 阶段运行中取消候选
 
 本候选以已合并 PR163 的 main `ec0da2018cc5914b8d0ca345c1c2c4cd5078d177`、

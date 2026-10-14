@@ -81,6 +81,14 @@ FAILURE_STAGES = frozenset({'preflight', 'observer_open', 'initial_observation',
     'stop_identity', 'stop_signal', 'all_threads', 'stopped_observation',
     'checkpoint_validation', 'session_validation', 'capture_window',
     'barrier_release', 'cleanup', 'http_request'})
+RELATION_FAILURE_VALUES = MappingProxyType({
+    'subreason': frozenset({'relation_not_allowlisted', 'lock_not_granted', 'mode_not_allowlisted'}),
+    'relationCategory': frozenset({'known_allowlist', 'other'}),
+    'modeCategory': frozenset({'AccessShareLock', 'RowShareLock', 'RowExclusiveLock',
+        'ShareUpdateExclusiveLock', 'ShareLock', 'ShareRowExclusiveLock',
+        'ExclusiveLock', 'AccessExclusiveLock', 'other'}),
+    'queryKind': frozenset({'activity', 'schema', 'schemaGate', 'idle', 'unclassified'}),
+})
 
 
 def failure_event(stage, error):
@@ -91,7 +99,31 @@ def failure_event(stage, error):
     event = {'event': 'running_cancel_guard_failure',
              'stage': stage if stage in FAILURE_STAGES else 'unclassified',
              'reason': reason}
+    detail = getattr(error, 'relation_diagnostic', None) if reason == 'unsafe_relation_lock' else None
+    if (type(detail) is dict and set(detail) == set(RELATION_FAILURE_VALUES) | {'granted'}
+            and type(detail['granted']) is bool and all(type(detail[key]) is str
+                and detail[key] in values for key, values in RELATION_FAILURE_VALUES.items())):
+        event.update(detail)
     return event
+
+
+def relation_lock_failure(lock, query_kind):
+    # Retain only closed categories on the exception; never the lock/session.
+    # Priority matches the rejection predicate. The other fields also show
+    # simultaneous failures without logging any relation or query text.
+    known_relation = lock['relation'] in RELATIONS
+    granted = bool(lock['granted'])
+    mode = lock['mode']
+    error = RuntimeError('unsafe owned relation lock')
+    error.relation_diagnostic = {
+        'subreason': ('relation_not_allowlisted' if not known_relation else
+                      'lock_not_granted' if not granted else 'mode_not_allowlisted'),
+        'relationCategory': 'known_allowlist' if known_relation else 'other',
+        'modeCategory': mode if type(mode) is str and mode in RELATION_FAILURE_VALUES['modeCategory'] else 'other',
+        'granted': granted,
+        'queryKind': query_kind if type(query_kind) is str and query_kind in RELATION_FAILURE_VALUES['queryKind'] else 'unclassified',
+    }
+    return error
 
 
 def export_kind(asset_kind):
@@ -200,8 +232,9 @@ def validate_sessions(sessions, lock_pid):
         for lock in locks:
             typ, mode = lock['type'], lock['mode']
             if typ == 'relation':
-                require(lock['relation'] in RELATIONS and lock['granted'] and mode in
-                        ('AccessShareLock', 'RowShareLock', 'RowExclusiveLock'), 'unsafe owned relation lock')
+                if not (lock['relation'] in RELATIONS and lock['granted'] and mode in
+                        ('AccessShareLock', 'RowShareLock', 'RowExclusiveLock')):
+                    raise relation_lock_failure(lock, kind)
             elif typ == 'advisory':
                 require(lock['classid'] == '0' and lock['objid'] == '734192801' and
                         lock['objsubid'] == 1 and mode == 'ShareLock' and lock['granted'],

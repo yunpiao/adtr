@@ -408,6 +408,136 @@ class ContractTests(unittest.TestCase):
             self.assertEqual(set(guard.failure_diagnostic), {'event', 'stage', 'reason'})
             self.assertEqual(len(output.getvalue().splitlines()), 1)
 
+    def test_relation_diagnostics_preserve_exact_rejection_matrix(self):
+        relations = {'adtr.schema_version', 'adtr.schema_version_pkey',
+            'adtr.system_worker_activity', 'adtr.system_worker_activity_pkey',
+            'adtr.system_worker_activity_recent'}
+        allowed_modes = {'AccessShareLock', 'RowShareLock', 'RowExclusiveLock'}
+        other_modes = {'ShareUpdateExclusiveLock', 'ShareLock',
+            'ShareRowExclusiveLock', 'ExclusiveLock', 'AccessExclusiveLock'}
+        secret_relation = 'private.tenant_worker_token'
+        secret_mode = 'postgres://sensitive:credential@host/db SELECT private'
+        self.assertEqual(g.RELATIONS, relations)
+        for relation in sorted(relations | {secret_relation}):
+            for mode in sorted(allowed_modes | other_modes | {secret_mode}):
+                for granted in (False, True):
+                    with self.subTest(relation=relation, mode=mode, granted=granted):
+                        row = session()
+                        row['locks'].append(lock('relation', mode, granted, relation))
+                        if relation in relations and granted and mode in allowed_modes:
+                            self.assertEqual(g.validate_sessions([row], 99)[1:], (1, 1))
+                            continue
+                        with self.assertRaisesRegex(RuntimeError, '^unsafe owned relation lock$') as caught:
+                            g.validate_sessions([row], 99)
+                        event = g.failure_event('session_validation', caught.exception)
+                        self.assertEqual(event, {
+                            'event': 'running_cancel_guard_failure', 'stage': 'session_validation',
+                            'reason': 'unsafe_relation_lock',
+                            'subreason': ('relation_not_allowlisted' if relation not in relations else
+                                          'lock_not_granted' if not granted else 'mode_not_allowlisted'),
+                            'relationCategory': 'known_allowlist' if relation in relations else 'other',
+                            'modeCategory': 'other' if mode == secret_mode else mode,
+                            'granted': granted, 'queryKind': 'activity',
+                        })
+                        for raw in (relation, secret_mode, row['query']):
+                            self.assertNotIn(raw, json.dumps(event))
+                        self.assertEqual(set(caught.exception.__dict__), {'relation_diagnostic'})
+
+    def test_relation_diagnostics_use_fixed_query_kinds(self):
+        for query, kind in ((g.ACTIVITY_SQL, 'activity'), (g.SCHEMA_SQL, 'schema'),
+                            (g.GATE_SQL, 'schemaGate')):
+            row = session(101); row.update(query=query, blockers=[])
+            row['locks'] = [lock('relation', 'ShareLock', relation='adtr.schema_version')]
+            with self.subTest(kind=kind), self.assertRaises(RuntimeError) as caught:
+                g.validate_sessions([session(), row], 99)
+            event = g.failure_event('session_validation', caught.exception)
+            self.assertEqual(event['queryKind'], kind)
+            self.assertNotIn(query, json.dumps(event))
+        row = session(); row['query'] = 'SELECT sensitive FROM private_table'
+        with self.assertRaises(RuntimeError) as caught:
+            g.validate_sessions([row], 99)
+        self.assertEqual(g.failure_event('session_validation', caught.exception), {
+            'event': 'running_cancel_guard_failure', 'stage': 'session_validation',
+            'reason': 'unsafe_transaction_query'})
+
+    def test_relation_diagnostic_fields_are_exactly_allowlisted(self):
+        secret = 'postgres://private:credential@host/db SQL tenant worker token'
+        error = g.relation_lock_failure(lock('relation', secret, False, secret), secret)
+        detail = error.relation_diagnostic
+        self.assertEqual(detail, {'subreason': 'relation_not_allowlisted',
+            'relationCategory': 'other', 'modeCategory': 'other',
+            'granted': False, 'queryKind': 'unclassified'})
+        self.assertNotIn(secret, json.dumps(g.failure_event('session_validation', error)))
+        base = {'event': 'running_cancel_guard_failure', 'stage': 'session_validation',
+                'reason': 'unsafe_relation_lock'}
+        mutations = [detail | {key: value} for key in detail
+                     for value in (secret, [], {}, None, 1)]
+        mutations += [detail | {'raw': secret}, {key: value for key, value in detail.items()
+                      if key != 'subreason'}, [detail], None]
+        for invalid in mutations:
+            with self.subTest(detail=invalid):
+                error.relation_diagnostic = invalid
+                self.assertEqual(g.failure_event('session_validation', error), base)
+        unrelated = RuntimeError('checkpoint database session exited')
+        unrelated.relation_diagnostic = detail
+        self.assertEqual(set(g.failure_event('capture', unrelated)), {'event', 'stage', 'reason'})
+
+    def test_relation_failure_emits_once_after_cont_and_all_cleanup(self):
+        for cleanup_failure in (False, True):
+            with self.subTest(cleanup_failure=cleanup_failure):
+                guard = self.guard(asset_kind='computer')
+                guard.threads = Mock(return_value=['T'])
+                running = task() | {'kind': 'computer_assets.v3.export'}
+                queued = running | {'state': 'queued', 'attempt': 0, 'snapshotCount': 0}
+                bad = session()
+                bad['locks'].append(lock('relation', 'private_mode_token', False, 'private.tenant'))
+                observer, barrier = Mock(), Mock(pid=99)
+                observer.query.side_effect = [{'task': queued, 'sessions': []},
+                    {'task': running, 'sessions': [session()]},
+                    {'task': running, 'sessions': [bad]}]
+                barrier.query.return_value = {'count': 1}
+                events, lines = [], []
+                guard.owned.resume.side_effect = lambda: events.append('resume')
+                guard.owned.process.send_signal.side_effect = lambda _: events.append('stop')
+                def close_barrier():
+                    events.append('barrier_close')
+                    if cleanup_failure:
+                        raise RuntimeError('private cleanup credential')
+                barrier.close.side_effect = close_barrier
+                observer.close.side_effect = lambda: events.append('observer_close')
+                with patch.object(g, 'ThreadingHTTPServer') as server, patch.object(g.threading, 'Thread'):
+                    server.return_value.server_port = 12345
+                    guard.start()
+                    handler_type = server.call_args.args[1]
+                data = json.dumps({'taskID': 'task-one', 'workerID': 'worker'}).encode()
+                handler = object.__new__(handler_type)
+                handler.client_address = ('127.0.0.1', 1234)
+                handler.headers = {'Host': '127.0.0.1:12345', 'Content-Type': 'application/json',
+                    'Content-Length': str(len(data)), 'X-ADTR-Guard-Token': guard.token}
+                handler.path = '/checkpoint'; handler.rfile = io.BytesIO(data); handler.wfile = io.BytesIO()
+                handler.send_response = Mock(); handler.send_header = Mock(); handler.end_headers = Mock()
+                def emit(line, **kwargs):
+                    events.append('emit'); lines.append(line)
+                with patch.object(g, 'Psql', side_effect=[observer, barrier]), patch.object(g, 'print', side_effect=emit, create=True):
+                    handler.do_POST()
+                    guard._emit_failure()
+                self.assertEqual(events, ['resume', 'stop', 'resume', 'barrier_close',
+                    'observer_close'] + (['resume'] if cleanup_failure else []) + ['emit'])
+                self.assertTrue(guard.failed)
+                self.assertIsNone(guard.stopped_at)
+                handler.send_response.assert_called_once_with(409)
+                self.assertEqual(handler.wfile.getvalue(), b'{"error":"running_cancel_guard_failed"}')
+                self.assertEqual(len(lines), 1)
+                self.assertEqual(json.loads(lines[0]), guard.failure_diagnostic)
+                self.assertEqual(guard.failure_diagnostic, {
+                    'event': 'running_cancel_guard_failure', 'stage': 'session_validation',
+                    'reason': 'unsafe_relation_lock', 'subreason': 'relation_not_allowlisted',
+                    'relationCategory': 'other', 'modeCategory': 'other',
+                    'granted': False, 'queryKind': 'activity'})
+                for raw in ('private', 'task-one', 'worker', guard.token, guard.database_url, g.ACTIVITY_SQL):
+                    self.assertNotIn(raw, lines[0])
+                observer.close.assert_called_once(); barrier.close.assert_called_once()
+
     def test_first_failure_survives_cleanup_failure_without_raw_output(self):
         guard = self.guard(asset_kind='computer'); guard.threads = Mock(return_value=['T'])
         observer = Mock()

@@ -182,3 +182,42 @@ The parent requirements Issues remain open because full scope and product
 acceptance remain incomplete. Engineering evidence and PR merge do not change
 0/209. Any engineering Issue closure separately awaits the existing user
 confirmation requirement.
+
+## AD-F-052 bounded observed object counts (candidate, 2026-10-14)
+
+Issue [#30](https://github.com/yunpiao/adtr/issues/30), FLD-0586/0588/0590:
+`GET /api/directory/v3/observation` adds required `observedCounts`.
+Unavailable responses contain `observedCounts: null`; a successful empty
+observation contains `{ "user": 0, "group": 0, "computer": 0 }`.
+Available responses contain exactly these three nonnegative integer keys. Counts
+are computed from all validated objects in the response's same immutable
+observation before kind filtering or pagination. Each object increments its
+validated `kind` once: a computer with inherited `objectClass=user` is counted
+only as computer. No separate query may substitute a newer observation.
+
+The existing `page.total` still means the filtered result total. The three counts
+stay stable across kind and page changes on one observation; their sum equals
+all-kind total, and each selected-kind count equals that kind's total. Each count
+and their sum stay within the existing 10000-object observation limit. Existing
+source/revision checks, explicit observation pins, current tenant/domain read
+permission and no-store responses apply unchanged. A stale pin returns the
+existing unavailable error; a refreshed source with no successful observation
+returns null counts. Producer-grant revocation alone does not remove authorized
+stored reads, while removal of current reader domain access denies those reads.
+
+The browser labels this “本次观测中的对象数量” beside observation ID/source.
+It clears the counts with the observation on source changes, errors, revocation,
+account changes and stale-response rejection. It shows unavailable distinctly
+from successful zero counts. This is an explicitly observed-count slice, not
+verified legacy asset-total parity. Collection exclusions, complete source
+compatibility, security/risk summaries, differences and charts remain outside
+this slice. AD-F-052 is in_progress; product acceptance remains 0/209.
+
+Existing dictionary3 backend/browser/controls/readers CI jobs are extended with
+mixed 12-user/12-group/6-computer and actual empty synthetic TLS LDAP cases,
+PostgreSQL observation binding, kind/page stability and existing source/session
+isolation paths. No workflow job, schema or collector change is required.
+Local verification is restricted to explicitly allowlisted offline pure-Python
+checks with subprocess/network/signal audit denial. Runtime Go/Node/PostgreSQL/
+browser execution and exact-head 71-job CI are pending; source assertions alone
+do not establish runtime acceptance.
