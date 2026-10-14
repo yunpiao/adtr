@@ -3,6 +3,7 @@ import hashlib
 from pathlib import Path
 import re
 import unittest
+from test_group_asset_export_v3_runner_contract import restore_runner as restore_group_runner, restore_workflow as restore_group_workflow
 
 BASE_RUNNER_SHA256 = 'c2fb0e247fb11c078b05c9db097a341ed14bc6f16f2ed686a0b03583d017d7f3'
 RUNNER_CHANGES = [('from user_asset_export_v3_ci import configure as configure_user_export, capture as capture_user_export, '
@@ -165,22 +166,22 @@ def restore(text, changes):
 
 
 def restore_runner(text):
-    return restore(text, RUNNER_CHANGES)
+    return restore(restore_group_runner(text), RUNNER_CHANGES)
 
 
 def restore_workflow(text):
-    return restore(text, WORKFLOW_CHANGES)
+    return restore(restore_group_workflow(text), WORKFLOW_CHANGES)
 
 
 class TerminalRunnerContract(unittest.TestCase):
     def test_prior_60_jobs_and_runner_byte_exact(self):
         for name, changes, sha in [('scripts/test_auth_e2e.py', RUNNER_CHANGES, BASE_RUNNER_SHA256),
                                    ('.github/workflows/ci.yml', WORKFLOW_CHANGES, BASE_WORKFLOW_SHA256)]:
-            self.assertEqual(hashlib.sha256(restore(Path(name).read_text(), changes).encode()).hexdigest(), sha)
+            self.assertEqual(hashlib.sha256(restore((restore_group_runner if name.endswith(".py") else restore_group_workflow)(Path(name).read_text()), changes).encode()).hexdigest(), sha)
 
     def test_mutated_additions_rejected(self):
         for name, changes in [('scripts/test_auth_e2e.py', RUNNER_CHANGES), ('.github/workflows/ci.yml', WORKFLOW_CHANGES)]:
-            source = Path(name).read_text()
+            source = (restore_group_runner if name.endswith(".py") else restore_group_workflow)(Path(name).read_text())
             for old, new in changes:
                 with self.assertRaises(ValueError):
                     restore(source + new, changes)
@@ -188,7 +189,7 @@ class TerminalRunnerContract(unittest.TestCase):
                     restore(source.replace(new, '!' + new[1:]), changes)
 
     def test_62_jobs_preserve_limits_and_failure_uploads(self):
-        source = Path('.github/workflows/ci.yml').read_text()
+        source = restore_group_workflow(Path('.github/workflows/ci.yml').read_text())
         names = re.findall(r'^          - name: ([a-z0-9-]+)$', source, re.M)
         self.assertEqual(len(names), 42)
         self.assertEqual(len(names) + 8 + 7 + 5, 62)

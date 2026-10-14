@@ -642,6 +642,7 @@ test("real browser → API → Worker → PostgreSQL task result, idempotency an
     { mark: "system_logs", auth: { readable: false, writeable: false } },
     { mark: "directory_assets", auth: { readable: false, writeable: false } },
     { mark: "user_asset_exports", auth: { readable: false, writeable: false } },
+    { mark: "group_asset_exports", auth: { readable: false, writeable: false } },
   ]);
   await page.getByRole("button", { name: "用户管理", exact: true }).click();
   await page.getByRole("button", { name: "新增用户", exact: true }).click();

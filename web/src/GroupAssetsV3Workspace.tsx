@@ -1,3 +1,5 @@
+import GroupAssetExportV3 from "./GroupAssetExportV3";
+import { readExportRecovery } from "./group-asset-export-v3-recovery";
 import { directoryV3DisplaySPN } from "./directory-v3-facts";
 import {
   useLayoutEffect,
@@ -51,6 +53,7 @@ export default function GroupAssetsV3Workspace(props: Props) {
   );
 }
 function Workspace({ profile, sessionChanged }: Props) {
+  const recovery = readExportRecovery(profile.ID);
   const [source, setSource] = useState<ResolvedSource | null>(null);
   const [sourceGeneration, setSourceGeneration] = useState(0);
   const [pickerGeneration, setPickerGeneration] = useState(0);
@@ -102,6 +105,7 @@ function Workspace({ profile, sessionChanged }: Props) {
     readable("domains") &&
     readable("directory_assets") &&
     gate.data?.checks[0] === true;
+  const canExport = !!readable("group_asset_exports") && !!readable("tasks");
   return (
     <section
       className="user-assets-workspace"
@@ -183,6 +187,14 @@ function Workspace({ profile, sessionChanged }: Props) {
           ) : (
             <p role="status">当前账户无权选择已配置域。</p>
           )}
+          {!source && recovery && canExport && (
+            <GroupAssetExportV3
+              profile={profile}
+              query={{ domainId: recovery.domainId, expectedRevision: "", expectedCredentialRevision: "", search: "", pageIdx: 1, pageSize: 10 }}
+              disabled={true}
+              failure={lost}
+            />
+          )}
           {source && (
             <>
               <p className="asset-source-revisions">
@@ -194,6 +206,7 @@ function Workspace({ profile, sessionChanged }: Props) {
                 key={sourceGeneration}
                 profile={profile}
                 source={source}
+                canExport={canExport}
                 failure={(error) => {
                   clearSource();
                   setNotice(groupAssetsV3Error(error));
@@ -327,10 +340,12 @@ function Assets({
   profile,
   source,
   failure,
+  canExport,
 }: {
   profile: Profile;
   source: ResolvedSource;
   failure: (error: unknown) => void;
+  canExport: boolean;
 }) {
   const initial: GroupAssetsV3Query = {
     domainId: source.selection.domainId,
@@ -560,6 +575,9 @@ function Assets({
       {stale && <p role="status">原观测已不可用，请明确刷新观测。</p>}
       {list && !list.available && (
         <p role="status">暂无可读取的已完成观测，尚不能确定组数量。</p>
+      )}
+      {canExport && (
+        <GroupAssetExportV3 profile={profile} query={query} disabled={dirty || busy || stale || !list?.available} failure={failure} />
       )}
       {list?.available && (
         <>

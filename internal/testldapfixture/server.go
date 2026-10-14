@@ -28,6 +28,7 @@ type server struct {
 	directoryMode            bool
 	directoryV3              bool
 	userExportFailureV3      bool
+	groupExportFailureV3     bool
 	directoryV4              bool
 	groupMembersV4Pagination bool
 	directoryV2              bool
@@ -125,7 +126,7 @@ func (s *server) handle(ctx context.Context, raw net.Conn, ldaps bool) {
 	conn := raw
 	secure, bound := false, false
 	rootRead := false
-	directory := directorySession{v2: s.directoryV2, v3: s.directoryV3, userExportFailureV3: s.userExportFailureV3, v4: s.directoryV4, groupMembersV4Pagination: s.groupMembersV4Pagination, userAssetsV2: s.userAssetsV2, computerAssetsV3: s.computerAssetsV3, groupAssetsV3: s.groupAssetsV3, empty: s.directoryEmpty, slow: s.directorySlow, emptyTransition: s.emptyTransition}
+	directory := directorySession{v2: s.directoryV2, v3: s.directoryV3, userExportFailureV3: s.userExportFailureV3, groupExportFailureV3: s.groupExportFailureV3, v4: s.directoryV4, groupMembersV4Pagination: s.groupMembersV4Pagination, userAssetsV2: s.userAssetsV2, computerAssetsV3: s.computerAssetsV3, groupAssetsV3: s.groupAssetsV3, empty: s.directoryEmpty, slow: s.directorySlow, emptyTransition: s.emptyTransition}
 	defer directory.reset()
 	upgrade := func() bool {
 		tlsConn := tls.Server(raw, s.tlsConfig)

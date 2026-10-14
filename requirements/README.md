@@ -40,9 +40,20 @@ AD-F-053 is now `in_progress` for the merged
 60/60 CI runs verify the normal 12-row and header-only synthetic browser paths.
 This records implementation evidence, not full feature acceptance: only six
 collected scalar columns from one pinned dictionary3 domain/observation are covered.
-Failure recovery and queued cancellation in a real browser remain planned,
-not verified by those two runs; HTTP/PostgreSQL/DOM coverage is distinct.
-EXP-007 computer, EXP-008 group and EXP-009 DNS/IP exports remain outside this slice.
+[PR160](https://github.com/yunpiao/adtr/pull/160) is merged at
+`9f91f7121a00b02101f53c545e3da53da1ec27ed`. Its exact-head
+[38497165578](https://github.com/yunpiao/adtr/actions/runs/38497165578) and separate
+main-push [38501083953](https://github.com/yunpiao/adtr/actions/runs/38501083953)
+each passed62/62 jobs, with independently reviewed actual failure/recovery and
+queued-cancellation artifacts. The first run38493130354 still records its
+queued-cancel/verify failure and truncated failed-state screenshot; missing PG
+counts leave its precise connection count unknown. Running/cancel_requested
+browser coverage remains open.
+The [bounded EXP-008 group slice](../docs/group-asset-export-v3-contract.md) is now
+in implementation: five dictionary3 scalar columns, shared group-list search/order,
+all matching rows, separate permission/task/storage and no automatic custom grants.
+Its candidate CI/artifacts are pending. The10000-row/32MiB guardrails do not verify
+legacy100000-row capacity. EXP-007 computer and EXP-009 DNS/IP exports remain open.
 Issue30 and Issue151 remain open. The new documentation/code revision must pass
 its own checks; old CI success cannot be transferred to it.
 Source-system compatibility, real AD/Windows and production gates remain open.

@@ -94,6 +94,7 @@ export const marks: Mark[] = [
   "system_logs",
   "directory_assets",
   "user_asset_exports",
+  "group_asset_exports",
 ];
 export const labels: Record<Mark, string> = {
   users: "用户管理",
@@ -110,6 +111,7 @@ export const labels: Record<Mark, string> = {
   operation_accounts: "管理操作账户",
   directory_assets: "目录资产",
   user_asset_exports: "用户资产导出",
+  group_asset_exports: "组资产导出",
 };
 export const operations = [
   "GET /api/access/users",

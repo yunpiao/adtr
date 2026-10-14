@@ -16,8 +16,8 @@ from test_integration import IMAGE
 
 class LDAPFixture:
     def __init__(self, control_enabled=False, directory_enabled=False,
-                 directory_empty=False, directory_slow=False, *, directory_v2=False, user_assets_v2=False, directory_v3=False, directory_v4=False, computer_assets_v3=False, group_assets_v3=False, empty_transition=False, group_members_v4_pagination=False, group_members_v4_refresh=False, user_export_failure_v3=False):
-        if any(not isinstance(value, bool) for value in (directory_enabled, directory_empty, directory_slow, directory_v2, user_assets_v2, directory_v3, directory_v4, computer_assets_v3, group_assets_v3, empty_transition, group_members_v4_pagination, group_members_v4_refresh, user_export_failure_v3)):
+                 directory_empty=False, directory_slow=False, *, directory_v2=False, user_assets_v2=False, directory_v3=False, directory_v4=False, computer_assets_v3=False, group_assets_v3=False, empty_transition=False, group_members_v4_pagination=False, group_members_v4_refresh=False, user_export_failure_v3=False, group_export_failure_v3=False):
+        if any(not isinstance(value, bool) for value in (directory_enabled, directory_empty, directory_slow, directory_v2, user_assets_v2, directory_v3, directory_v4, computer_assets_v3, group_assets_v3, empty_transition, group_members_v4_pagination, group_members_v4_refresh, user_export_failure_v3, group_export_failure_v3)):
             raise TypeError("synthetic directory modes must be booleans")
         if user_export_failure_v3 and (not directory_enabled or not directory_v3 or
                                        directory_v2 or directory_v4 or user_assets_v2 or
@@ -26,6 +26,12 @@ class LDAPFixture:
                                        group_members_v4_pagination or group_members_v4_refresh):
             raise ValueError("synthetic export failure requires exclusive nonempty fast dictionary3 mode")
         self.user_export_failure_v3 = user_export_failure_v3
+        if group_export_failure_v3 and (not directory_enabled or not directory_v3 or not group_assets_v3 or
+                                        user_export_failure_v3 or directory_v2 or directory_v4 or user_assets_v2 or
+                                        computer_assets_v3 or directory_empty or directory_slow or control_enabled or
+                                        empty_transition or group_members_v4_pagination or group_members_v4_refresh):
+            raise ValueError("group export failure requires exclusive nonempty fast group dictionary3 mode")
+        self.group_export_failure_v3 = group_export_failure_v3
         if empty_transition and not group_members_v4_refresh and (not directory_enabled or not directory_v3 or
                                  computer_assets_v3 == group_assets_v3 or
                                  directory_empty or directory_slow or directory_v2 or
@@ -132,6 +138,8 @@ class LDAPFixture:
             command.append("-group-members-v4-refresh")
         if self.group_members_v4_pagination:
             command.append("-group-members-v4-pagination")
+        if self.group_export_failure_v3:
+            command.append("-group-export-failure-v3")
         if self.user_export_failure_v3:
             command.append("-user-export-failure-v3")
         if self.directory_v3:
@@ -173,7 +181,7 @@ class LDAPFixture:
                    ADTR_E2E_LDAP_USERNAME=username, ADTR_E2E_LDAP_PASSWORD=password)
         for suffix, enabled in (("MODE", self.directory_enabled),
                                 ("EMPTY", self.directory_empty), ("SLOW", self.directory_slow),
-                                ("USER_EXPORT_FAILURE_V3", self.user_export_failure_v3), ("GROUP_MEMBERS_V4_REFRESH", self.group_members_v4_refresh), ("GROUP_MEMBERS_V4_PAGINATION", self.group_members_v4_pagination), ("V4", self.directory_v4), ("V3", self.directory_v3), ("V2", self.directory_v2), ("USER_ASSETS_V2", self.user_assets_v2), ("COMPUTER_ASSETS_V3", self.computer_assets_v3), ("GROUP_ASSETS_V3", self.group_assets_v3)):
+                                ("GROUP_EXPORT_FAILURE_V3", self.group_export_failure_v3), ("USER_EXPORT_FAILURE_V3", self.user_export_failure_v3), ("GROUP_MEMBERS_V4_REFRESH", self.group_members_v4_refresh), ("GROUP_MEMBERS_V4_PAGINATION", self.group_members_v4_pagination), ("V4", self.directory_v4), ("V3", self.directory_v3), ("V2", self.directory_v2), ("USER_ASSETS_V2", self.user_assets_v2), ("COMPUTER_ASSETS_V3", self.computer_assets_v3), ("GROUP_ASSETS_V3", self.group_assets_v3)):
             key = "ADTR_E2E_LDAP_DIRECTORY_" + suffix
             if enabled:
                 env[key] = "true"

@@ -1,7 +1,7 @@
 # User asset XLSX export v3: implemented bounded first slice
 
 Interface/lifecycle freeze, 2026-10-13; evidence reconciled 2026-10-14.
-PR159 is merged. AD-F-053 is in_progress and product acceptance remains 0/209.
+PR159 and PR160 are merged. AD-F-053 is in_progress and product acceptance remains 0/209.
 Original implementation base: actual remote main `325f28095b9fb5a60c7e43e698ac2013d78d4a59`, tree
 `d52cc6084bf765e7d768f1d037ef7c435f5ab3d7`.
 References: [F14 #30](https://github.com/yunpiao/adtr/issues/30), AD-F-053 / EXP-006,
@@ -239,7 +239,7 @@ validate it afterward. Success artifacts are only validated JSON, two XLSX, two
 PNG and provenance; failure retains only existing sanitized diagnostics. These
 are synthetic evidence gates, not real AD or production acceptance. Local reconciliation is static/Python only. The completed GitHub CI runs below
 provide compilation, PostgreSQL and normal/empty browser evidence for PR159;
-they do not verify later changes or the planned failure/cancellation browser slice.
+they do not verify later changes. PR160 terminal-path evidence is recorded separately below.
 
 
 ## Recorded implementation evidence (2026-10-14)
@@ -279,13 +279,45 @@ This is synthetic-source end-to-end evidence, not a real AD/Windows experiment.
   `3fa0cd822cfc9a449a79671cbc538668a0aea3f48d4ae1fac7e6a9b6c4d557f4`, empty
   `de1310f3311dab4dfb1db475dba18aef3e12f06268098ebe95a049a8fe630fbe`
 
-Named HTTP, real-PostgreSQL and DOM tests cover cancellation/failure behavior.
-Actual browser failure recovery and cancellation were not exercised by the above
-normal/empty artifacts. The next planned slice is failed export followed by an
-explicit new safe two-column submission, plus queued cancellation with persisted
-terminal-state/cleanup checks. Its fixture, browser and CI work is in progress;
-no run or artifact from that plan is claimed as passed here. Record the exact
-future head, run, source and artifacts only after execution and independent review.
+## Recorded failure/recovery and queued-cancel evidence (PR160)
+
+[PR160](https://github.com/yunpiao/adtr/pull/160) merged at
+`9f91f7121a00b02101f53c545e3da53da1ec27ed`; final head
+`53ba4154bfc8708e79bfd31dac506c9b057f3178`, tree
+`6625e1166634a9627a07f28a5e6007007aaacc94`.
+[Exact-head CI38497165578](https://github.com/yunpiao/adtr/actions/runs/38497165578)
+and separate [main-push CI38501083953](https://github.com/yunpiao/adtr/actions/runs/38501083953)
+each passed62/62 jobs on attempt1. The PR run actually checked out merge ref
+`13f579fee59ffd595b91b5ce34a8d9c4345894e4`, distinct from its head; both
+actual checkouts have the recorded tree. The actual browser/Worker/PostgreSQL chain
+verified export_invalid_text, durable original failed receipt and zero generated
+failed-task snapshot/manifest/chunk rows. Explicit new safe SAM/GUID submission
+produced all12 matched rows and a genuine two-column XLSX. Complete failed/ready
+screenshots, workbook cells/order/download metadata and source provenance were
+independently reviewed, not inferred from HTTP or DOM tests.
+
+Queued-cancel evidence bound the exact owned Worker to its actual database identity,
+verified all threads stopped, zero connections and zero active transactions,
+then resumed that same Worker to readiness200. Two strictly later actual queue
+successes left the original task cancelled, attempt0, with no execution/artifact.
+PR artifacts11864880540(failure)/11864223677(cancel) and fresh main artifacts
+11866141622(failure)/11866660781(cancel) each passed independent allowlist,
+865-source Git-blob/provenance and actual three-PNG pixel review. Failure sets have
+exactly5 files; cancellation sets3. Main ZIP SHA256 values are respectively
+`924c1baa557adc7e534030a2b1bb68e833200b80752f73b1be0b1cd0fae5e97d` and
+`f5ce285fae5de239573f5ccabc41936cbf9a1103ba12559f720bd2f06cc9114b`.
+
+Historical [run38493130354](https://github.com/yunpiao/adtr/actions/runs/38493130354)
+at initial head `8f5c8d091d32e3fc957905ef607fdf6d59647e2e` remains failed:
+60 successful jobs, queued-cancel failure and aggregate verify failure. The old
+pause check did not meet its connections>0 quiescence condition within10seconds;
+PG counts were not captured, so the actual count is unknown. Its failure-recovery
+API/PG/XLSX passed, but its failed-state screenshot cropped the terminal message.
+The final repair accepts a legitimately zero-connection quiescent owned Worker
+only after actual identity/database/all-thread checks and captures full terminal
+viewports; it does not retrospectively convert old failed evidence into success.
+Running/cancel_requested browser scenarios remain unverified by these artifacts.
+These results apply only to the recorded revisions, not subsequent group exports.
 
 AD-F-053 therefore remains `in_progress`, `product_accepted=false`.
 EXP-006 legacy business/default columns and full filter semantics, EXP-007 computer,
