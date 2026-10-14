@@ -391,5 +391,51 @@ class ContractTests(unittest.TestCase):
                 self.assertEqual(guard.asset_kind, kind)
 
 
+    def test_failure_diagnostics_are_closed_and_never_print_raw_values(self):
+        secret = "postgres://sensitive:credential@host/db SELECT tenant worker token"
+        event = g.failure_event('capture', RuntimeError(secret))
+        other = g.failure_event(secret, ValueError(secret))
+        self.assertEqual(event, {'event': 'running_cancel_guard_failure', 'stage': 'capture', 'reason': 'unclassified'})
+        self.assertEqual(other['stage'], 'unclassified')
+        for message, reason in list(g.FAILURE_REASONS.items()) + [(secret, 'unclassified')]:
+            guard = self.guard()
+            with patch.object(g.sys, 'stderr', new_callable=io.StringIO) as output:
+                guard._report_failure('capture', RuntimeError(message))
+                guard._emit_failure(); guard._emit_failure()
+            self.assertEqual(guard.failure_diagnostic['reason'], reason)
+            self.assertEqual(json.loads(output.getvalue()), guard.failure_diagnostic)
+            self.assertNotIn(secret, output.getvalue())
+            self.assertEqual(set(guard.failure_diagnostic), {'event', 'stage', 'reason'})
+            self.assertEqual(len(output.getvalue().splitlines()), 1)
+
+    def test_first_failure_survives_cleanup_failure_without_raw_output(self):
+        guard = self.guard(asset_kind='computer'); guard.threads = Mock(return_value=['T'])
+        observer = Mock()
+        observer.query.side_effect = RuntimeError('checkpoint database observation unavailable')
+        observer.close.side_effect = RuntimeError('sensitive cleanup exception')
+        with patch.object(g, 'Psql', return_value=observer), patch.object(g.sys, 'stderr', new_callable=io.StringIO) as output:
+            with self.assertRaises(RuntimeError):
+                guard.checkpoint('task-one', 'worker')
+            guard._report_failure('http_request', RuntimeError('later failure'))
+        self.assertEqual(guard.failure_diagnostic, {'event': 'running_cancel_guard_failure',
+            'stage': 'initial_observation', 'reason': 'database_observation_unavailable'})
+        self.assertEqual(output.getvalue(), '')  # Never log before CONT/session cleanup.
+        self.assertNotIn('sensitive', output.getvalue())
+        self.assertEqual(guard.owned.resume.call_count, 2)
+        observer.close.assert_called_once()
+
+    def test_failed_diagnostic_output_cannot_prevent_fail_closed_cleanup(self):
+        guard = self.guard(asset_kind='computer'); guard.threads = Mock(return_value=['T'])
+        observer = Mock(); observer.query.side_effect = RuntimeError('checkpoint database session exited')
+        with patch.object(g, 'Psql', return_value=observer), patch.object(g, 'print', side_effect=OSError('output unavailable'), create=True):
+            with self.assertRaises(RuntimeError):
+                guard.checkpoint('task-one', 'worker')
+            guard._emit_failure()
+        self.assertTrue(guard.failed)
+        self.assertEqual(guard.failure_diagnostic['reason'], 'database_session_exited')
+        guard.owned.resume.assert_called_once()
+        observer.close.assert_called_once()
+
+
 if __name__ == '__main__':
     unittest.main()

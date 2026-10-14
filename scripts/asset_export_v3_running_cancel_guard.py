@@ -15,6 +15,7 @@ import re
 import secrets
 import signal
 import subprocess
+import sys
 import threading
 import time
 from urllib.parse import parse_qsl, urlsplit
@@ -44,6 +45,53 @@ EXPORT_KINDS = MappingProxyType({
     'computer': ('computer_assets.v3.export', 'adtr.computer_asset_export_snapshots',
                  'adtr.computer_asset_export_manifests', 'adtr.computer_asset_export_chunks'),
 })
+
+
+# Failure evidence is closed enums only. Never serialize exception text, SQL,
+# checkpoint identities, process environment, connection strings or tokens.
+FAILURE_REASONS = MappingProxyType({
+    'checkpoint database session exited': 'database_session_exited',
+    'checkpoint database session ended': 'database_session_ended',
+    'checkpoint database observation unavailable': 'database_observation_unavailable',
+    'initial strict queued pause required': 'initial_threads_not_stopped',
+    'initial queued transaction-free boundary missed': 'initial_boundary_missed',
+    'exact pre-existing activity row required': 'activity_row_mismatch',
+    'missed two-second activity checkpoint': 'capture_deadline_missed',
+    'not all owned threads stopped': 'threads_not_stopped',
+    'wrong exporter checkpoint': 'checkpoint_identity_mismatch',
+    'exporter did not enter first fenced transaction': 'checkpoint_state_mismatch',
+    'snapshot boundary missed': 'snapshot_boundary_missed',
+    'checkpoint fence is not owned by a configured slot': 'fence_owner_mismatch',
+    'insufficient actual database-clock lease': 'lease_boundary_missed',
+    'activity checkpoint exceeded safe callback window': 'capture_window_exceeded',
+    'activity barrier release unverified': 'barrier_release_unverified',
+    'unsafe owned transaction query': 'unsafe_transaction_query',
+    'unsafe owned relation lock': 'unsafe_relation_lock',
+    'unsafe owned advisory lock': 'unsafe_advisory_lock',
+    'unsafe virtual transaction lock': 'unsafe_virtual_transaction_lock',
+    'unsafe transaction lock': 'unsafe_transaction_lock',
+    'unsafe tuple lock': 'unsafe_tuple_lock',
+    'unrecognized owned lock': 'unrecognized_lock',
+    'unowned or cyclic barrier blocker': 'unowned_barrier_blocker',
+    'unexpected barrier waiter': 'unexpected_barrier_waiter',
+    'missed actual activity checkpoint': 'activity_waiter_missing',
+})
+FAILURE_STAGES = frozenset({'preflight', 'observer_open', 'initial_observation',
+    'initial_boundary', 'barrier_open', 'barrier_lock', 'resume', 'capture',
+    'stop_identity', 'stop_signal', 'all_threads', 'stopped_observation',
+    'checkpoint_validation', 'session_validation', 'capture_window',
+    'barrier_release', 'cleanup', 'http_request'})
+
+
+def failure_event(stage, error):
+    # Exact allowlisting also handles unexpected exceptions without disclosing
+    # their values. Diagnostic output must never prevent CONT or cleanup.
+    message = error.args[0] if type(error) is RuntimeError and len(error.args) == 1 and type(error.args[0]) is str else None
+    reason = FAILURE_REASONS.get(message, 'unclassified')
+    event = {'event': 'running_cancel_guard_failure',
+             'stage': stage if stage in FAILURE_STAGES else 'unclassified',
+             'reason': reason}
+    return event
 
 
 def export_kind(asset_kind):
@@ -206,12 +254,27 @@ class RunningExportCancelGuard:
         self.database_url = database_url
         self.token = secrets.token_hex(32)
         self.failed = False
+        self.failure_diagnostic = None
+        self._failure_emitted = False
         self.stopped_at = None
         self.used = False
         self._done = threading.Event()
         self._mutex = threading.RLock()
         self.server = None
         self._watcher = None
+
+    def _report_failure(self, stage, error):
+        if self.failure_diagnostic is None:
+            self.failure_diagnostic = failure_event(stage, error)
+
+    def _emit_failure(self):
+        # Called by HTTP only after checkpoint CONT/session cleanup has run.
+        if self.failure_diagnostic is not None and not self._failure_emitted:
+            self._failure_emitted = True
+            try:
+                print(json.dumps(self.failure_diagnostic, sort_keys=True), file=sys.stderr, flush=True)
+            except (OSError, ValueError):
+                pass
 
     def threads(self):
         self.owned.assert_identity()
@@ -261,45 +324,60 @@ class RunningExportCancelGuard:
         self.used = True
         require(all(s == 'T' for s in self.threads()), 'initial strict queued pause required')
         lock = observer = None
+        stage = 'observer_open'
         try:
             observer = Psql(self.container, True)
             # Persistent observer exists AND successfully sampled before CONT.
+            stage = 'initial_observation'
             initial = observer.query(self.observe_sql(task_id))
+            stage = 'initial_boundary'
             require(initial['task'] and initial['task']['kind'] == export_kind(self.asset_kind)[0] and initial['task']['state'] == 'queued' and initial['task']['attempt'] == 0
                     and initial['task']['snapshotCount'] == 0 and
                     all(not s['transaction'] for s in initial['sessions']), 'initial queued transaction-free boundary missed')
+            stage = 'barrier_open'
             lock = Psql(self.container, False)
+            stage = 'barrier_lock'
             locked = lock.query("BEGIN; SELECT jsonb_build_object('count',count(*)) FROM (SELECT worker_id FROM adtr.system_worker_activity WHERE tenant_id='default' AND worker_id='" + worker_id + "' AND cycle='queue' FOR UPDATE) owned")
             require(locked['count'] == 1, 'exact pre-existing activity row required')
             observer_started = time.monotonic()
+            stage = 'resume'
             self.owned.resume()
             resumed = time.monotonic()
             deadline = resumed + 1.5  # fail closed before the production 2s callback expires
             sample = None
+            stage = 'capture'
             while time.monotonic() < deadline:
                 sample = observer.query(self.observe_sql(task_id), timeout=.5)
                 task = sample['task']
                 if task and task['state'] == 'running' and task['progress'] == 10 and task['snapshotCount'] == 1 and any(lock.pid in s['blockers'] and normalized(s['query']) == normalized(ACTIVITY_SQL) for s in sample['sessions']):
                     observed = time.monotonic()
+                    stage = 'stop_identity'
                     self.owned.assert_identity()
                     issued = time.monotonic()
                     with self._mutex:
                         self.stopped_at = issued
+                        stage = 'stop_signal'
                         self.owned.process.send_signal(signal.SIGSTOP)
                     break
                 time.sleep(.002)
             else:
                 raise RuntimeError('missed two-second activity checkpoint')
+            stage = 'all_threads'
             while time.monotonic() < issued + .5:
                 states = self.threads()
                 if all(s == 'T' for s in states):
                     break
                 time.sleep(.002)
             require(all(s == 'T' for s in states), 'not all owned threads stopped')
+            stage = 'stopped_observation'
             sample = observer.query(self.observe_sql(task_id), timeout=.5)
+            stage = 'checkpoint_validation'
             task = validate_checkpoint(sample['task'], task_id, worker_id, self.asset_kind)
+            stage = 'session_validation'
             sessions, blocked, txs = validate_sessions(sample['sessions'], lock.pid)
+            stage = 'capture_window'
             require(time.monotonic() < deadline, 'activity checkpoint exceeded safe callback window')
+            stage = 'barrier_release'
             released = lock.query("ROLLBACK; SELECT to_json(true)", timeout=.5)
             require(released is True, 'activity barrier release unverified')
             return task | {'workerIDSHA256': digest(worker_id), 'applicationNameSHA256': digest(self.application_name),
@@ -309,7 +387,8 @@ class RunningExportCancelGuard:
                 'observerStartedMonotonic': observer_started, 'resumedForCheckpointMonotonic': resumed,
                 'checkpointObservedMonotonic': observed, 'stopIssuedMonotonic': issued,
                 'stopStartedMonotonic': issued, 'barrierBackendPID': lock.pid, 'sessions': sessions}
-        except Exception:
+        except Exception as error:
+            self._report_failure(stage, error)
             self.failed = True
             self.resume()
             raise RuntimeError('running checkpoint guard failed closed') from None
@@ -321,7 +400,8 @@ class RunningExportCancelGuard:
                 finally:
                     if observer is not None:
                         observer.close()
-            except Exception:
+            except Exception as error:
+                self._report_failure('cleanup', error)
                 self.failed = True
                 self.resume()
                 raise RuntimeError('checkpoint session cleanup failed') from None
@@ -371,7 +451,9 @@ class RunningExportCancelGuard:
                         raise RuntimeError('unknown guard command')
                     body = json.dumps(result).encode()
                     self.send_response(200)
-                except Exception:
+                except Exception as error:
+                    guard._report_failure('http_request', error)
+                    guard._emit_failure()
                     body = b'{"error":"running_cancel_guard_failed"}'
                     self.send_response(409)
                 self.send_header('Content-Type', 'application/json')
