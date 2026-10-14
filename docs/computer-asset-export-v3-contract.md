@@ -1,7 +1,7 @@
 # Computer asset XLSX export v3: bounded EXP-007 slice
 
-Contract freeze 2026-10-14; implementation and exact-revision CI pending.
-Base main `7ed455aecee1352f0261e7064253891af1c31c79`, tree
+Contract freeze 2026-10-14; PR162 merged, exact-revision evidence recorded below.
+Original implementation base main `7ed455aecee1352f0261e7064253891af1c31c79`, tree
 `bdfc54e0982cb07a4679c5fa022f9324da31832a`. Refs
 [F14 #30](https://github.com/yunpiao/adtr/issues/30), AD-F-053 / EXP-007,
 [computer list](computer-assets-v3-contract.md) and
@@ -119,11 +119,45 @@ selected text followed by safe-column recovery, and queued cancellation with
 owned-Worker quiescence, resumed activity and durable zero-artifact evidence.
 Actual XLSX/PNG evidence must bind database/source/checkout/run provenance.
 
-Preserve all65 baseline checks and add3 for68; no old failure or requirement is
+The original candidate preserved all65 baseline checks and added3 for68; no old failure or requirement is
 removed. Local validation is static/gofmt and explicitly guarded pure Python;
-local Go/Node/PostgreSQL/browser/build execution is not claimed. Candidate CI,
-independent actual-diff/artifact review, current-main compatibility and separate
-post-merge main-push checks remain mandatory. Existing CI success is baseline only.
+local Go/Node/PostgreSQL/browser/build execution is not claimed. Each later candidate requires its own CI, independent actual-diff/artifact review,
+current-main compatibility and separate post-merge main-push checks. The recorded
+PR162 success below is baseline evidence only for later revisions.
 Running/cancel_requested browser acceptance, full legacy filters/business columns,
 DNS/IP exports, real AD/eight Windows versions, target capacity and production
 acceptance remain open. No deployment or Issue closure is part of this slice.
+
+## Recorded PR162 evidence (2026-10-14)
+
+[PR162](https://github.com/yunpiao/adtr/pull/162) is merged. Final head
+`09e1c52f8ceac2a2d85cdc8b4c71fbf515fa078a` and actual main merge
+`94b098d6acf5187e1ecf9aa659f5abed00122ce7` have tree
+`0c669bd750c2ec137311aad08b6a05744ddff907`.
+[PR CI38550970449](https://github.com/yunpiao/adtr/actions/runs/38550970449)
+finished68/68 on attempt3; independent
+[main-push CI38561279766](https://github.com/yunpiao/adtr/actions/runs/38561279766)
+finished68/68 on attempt1. These results bind those exact revisions, not the new
+user running-cancel candidate or future documentation/code changes.
+
+Fresh main artifacts11893251763,11893351368 and11892781839 independently passed
+source/provenance and actual-file inspection:940 source objects,216 XLSX cells and
+six PNGs across normal/empty, failure/recovery and queued-cancel scenarios. This
+establishes the bounded synthetic browser/Worker/PostgreSQL/API slice, with queued
+cancellation only. It does not establish running cancellation, real AD or product
+capacity/compatibility acceptance.
+
+Historical failures are retained:
+- Initial head74af592/tree791bfd, run38545054964 attempt1:54 successful jobs and14
+  failed (eight sync.WaitComputer compile failures, four stale membership-permission
+  catalog expectations, one sorted-access expectation and aggregate verify)
+- Corrected head09e1, run38550970449 attempt1:66 successful and two failed
+  (reader socket-hangup and verify). The precise socket failure cause is unknown
+- Attempt2's actual reader and verify jobs passed, but the latest rollup still had
+  queued duplicate metadata. A rerun of current eligible attempt jobs and metadata
+  convergence produced final attempt3's68/68. A rejected old-attempt job rerun403
+  remains a failed operation; it is not a test pass or evidence that the old failure
+  never occurred
+
+AD-F-053 stays in_progress, product_accepted=false; Issues30/151 remain open and
+product acceptance remains0/209. No production deployment is implied.
