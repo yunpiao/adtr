@@ -76,46 +76,10 @@ func (s *Store) GroupAssetsV3ListTx(ctx context.Context, tx pgx.Tx, tenant strin
 }
 
 func groupAssetsV3Page(ctx context.Context, selection UserAssetsV2Selection, id string, o ldapconnection.DirectoryV3Observation, f GroupAssetsV3Filter) (GroupAssetsV3List, error) {
-	rows := make([]directoryassets.PublicObjectV3, 0)
-	observedGroupCount := 0
-	search := strings.ToLower(f.Search)
-	for _, stored := range o.Objects {
-		if err := ctx.Err(); err != nil {
-			return GroupAssetsV3List{}, err
-		}
-		if stored.Base.Kind != directoryassets.Group {
-			continue
-		}
-		observedGroupCount++
-		object, err := directoryassets.ProjectV3(stored)
-		if err != nil {
-			return GroupAssetsV3List{}, problem(409, "directory_observation_unavailable")
-		}
-		if !groupAssetsV3Match(object, search) {
-			continue
-		}
-		rows = append(rows, object)
+	rows, observedGroupCount, err := groupAssetsV3Rows(ctx, o, f)
+	if err != nil {
+		return GroupAssetsV3List{}, err
 	}
-	sort.Slice(rows, func(i, j int) bool {
-		if f.CreatTm != "" {
-			a, b := rows[i].WhenCreated, rows[j].WhenCreated
-			if a == nil && b != nil {
-				return false
-			}
-			if a != nil && b == nil {
-				return true
-			}
-			// The v3 supplemental projection retains fixed v2 guarantees: fixed-width UTC whole seconds; text order is
-			// chronological, including year 0001 (which is not a missing value).
-			if a != nil && b != nil && *a != *b {
-				if f.CreatTm == "desc" {
-					return *a > *b
-				}
-				return *a < *b
-			}
-		}
-		return rows[i].GUID < rows[j].GUID
-	})
 	out := GroupAssetsV3List{DictionaryVersion: 3, Selection: selection, Available: true, ObservedGroupCount: &observedGroupCount, ObservationID: id, Source: &o.Source, List: []directoryassets.PublicObjectV3{}, Page: Page{Index: f.PageIdx, Size: f.PageSize, Total: len(rows)}}
 	if len(rows) > 0 {
 		out.Page.Pages = (len(rows) + f.PageSize - 1) / f.PageSize
@@ -152,4 +116,49 @@ func validateGroupAssetsV3Response(ctx context.Context, out GroupAssetsV3List) e
 		return problem(422, "directory_limit_exceeded")
 	}
 	return ctx.Err()
+}
+
+// groupAssetsV3Rows is the single filtering and ordering path for list and export.
+func groupAssetsV3Rows(ctx context.Context, o ldapconnection.DirectoryV3Observation, f GroupAssetsV3Filter) ([]directoryassets.PublicObjectV3, int, error) {
+	rows := make([]directoryassets.PublicObjectV3, 0)
+	observedGroupCount := 0
+	search := strings.ToLower(f.Search)
+	for _, stored := range o.Objects {
+		if err := ctx.Err(); err != nil {
+			return nil, 0, err
+		}
+		if stored.Base.Kind != directoryassets.Group {
+			continue
+		}
+		observedGroupCount++
+		object, err := directoryassets.ProjectV3(stored)
+		if err != nil {
+			return nil, 0, problem(409, "directory_observation_unavailable")
+		}
+		if !groupAssetsV3Match(object, search) {
+			continue
+		}
+		rows = append(rows, object)
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		if f.CreatTm != "" {
+			a, b := rows[i].WhenCreated, rows[j].WhenCreated
+			if a == nil && b != nil {
+				return false
+			}
+			if a != nil && b == nil {
+				return true
+			}
+			// The v3 supplemental projection retains fixed v2 guarantees: fixed-width UTC whole seconds; text order is
+			// chronological, including year 0001 (which is not a missing value).
+			if a != nil && b != nil && *a != *b {
+				if f.CreatTm == "desc" {
+					return *a > *b
+				}
+				return *a < *b
+			}
+		}
+		return rows[i].GUID < rows[j].GUID
+	})
+	return rows, observedGroupCount, nil
 }

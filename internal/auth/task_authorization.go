@@ -105,6 +105,16 @@ func taskAuthorizer(now func() time.Time) tasks.Authorizer {
 				return deny()
 			}
 		}
+		if scope.TaskName == domains.GroupAssetExportV3KindName && role != "platform_admin" {
+			var allowed bool
+			err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT FROM adtr.access_permissions d JOIN adtr.access_permissions a ON a.tenant_id=d.tenant_id AND a.role_id=d.role_id JOIN adtr.access_permissions x ON x.tenant_id=d.tenant_id AND x.role_id=d.role_id WHERE d.tenant_id=$1 AND d.role_id=$2 AND d.mark='domains' AND d.readable AND a.mark='directory_assets' AND a.readable AND x.mark='group_asset_exports' AND x.readable AND ($3 OR x.writeable))`, p.TenantID, role, action == tasks.Read).Scan(&allowed)
+			if err != nil {
+				return "", err
+			}
+			if !allowed {
+				return deny()
+			}
+		}
 		if isDirectoryTaskKind(scope.TaskName) && role != "platform_admin" {
 			var allowed bool
 			err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT FROM adtr.access_permissions d JOIN adtr.access_permissions a ON a.tenant_id=d.tenant_id AND a.role_id=d.role_id WHERE d.tenant_id=$1 AND d.role_id=$2 AND d.mark='domains' AND d.readable AND a.mark='directory_assets' AND a.readable AND ($3 OR a.writeable))`, p.TenantID, role, action == tasks.Read).Scan(&allowed)

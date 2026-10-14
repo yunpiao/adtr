@@ -32,7 +32,7 @@ func TestSchema21PreservesHistoryAndRegistersNoAutomaticGrant(t *testing.T) {
 	f.finish(run, done, false)
 	before, projection := f.snapshot(), f.auditProjection()
 	delete(before, "schema_version")
-	if err := Migrate(f.ctx, f.config); err != nil {
+	if err := migrateTo(f.ctx, f.config, 21); err != nil {
 		t.Fatal(err)
 	}
 	after := f.snapshot()
@@ -46,7 +46,7 @@ func TestSchema21PreservesHistoryAndRegistersNoAutomaticGrant(t *testing.T) {
 	}
 	catalog := f.catalogSnapshot()
 	snapshot := f.snapshot()
-	if err := Migrate(f.ctx, f.config); err != nil {
+	if err := migrateTo(f.ctx, f.config, 21); err != nil {
 		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(snapshot, f.snapshot()) || catalog != f.catalogSnapshot() {
@@ -56,8 +56,8 @@ func TestSchema21PreservesHistoryAndRegistersNoAutomaticGrant(t *testing.T) {
 	if err := f.conn.QueryRow(f.ctx, `SELECT version=21 AND NOT EXISTS(SELECT FROM adtr.access_permissions WHERE mark='user_asset_exports') AND NOT EXISTS(SELECT FROM adtr.tasks WHERE kind='user_assets.v3.export') AND to_regclass('adtr.user_asset_export_snapshots') IS NOT NULL AND to_regclass('adtr.user_asset_export_chunks') IS NOT NULL AND to_regclass('adtr.user_asset_export_manifests') IS NOT NULL FROM adtr.schema_version`).Scan(&valid); err != nil || !valid {
 		t.Fatal("migration invented grant/data or missed artifacts", err)
 	}
-	if err := Ready(f.ctx, f.config); err != nil {
-		t.Fatal(err)
+	if Ready(f.ctx, f.config) == nil {
+		t.Fatal("historical schema21 must remain incompatible with schema22 runtime")
 	}
 	f.assertOldEngineRejected(engine, task)
 }
@@ -75,7 +75,7 @@ func TestSchema21RefusesReservedTaskAndForeignObjectsAtomically(t *testing.T) {
 			}
 			before, catalog := f.snapshot(), f.catalogSnapshot()
 			for range 2 {
-				if err := Migrate(f.ctx, f.config); !errors.Is(err, ErrUserAssetExportV3ReservedCollision) {
+				if err := migrateTo(f.ctx, f.config, 21); !errors.Is(err, ErrUserAssetExportV3ReservedCollision) {
 					t.Fatal(err)
 				}
 				if !reflect.DeepEqual(before, f.snapshot()) || catalog != f.catalogSnapshot() {
@@ -92,14 +92,14 @@ func TestSchema21RequiresOriginalDirectoryExecutorQuiescence(t *testing.T) {
 	task := f.submitDirectoryV3(engine, "first", grant)
 	run, done := f.start(engine, opened, task, "schema21-open-worker")
 	before := f.snapshot()
-	if err := Migrate(f.ctx, f.config); !errors.Is(err, ErrCredentialUseMigrationBlocked) {
+	if err := migrateTo(f.ctx, f.config, 21); !errors.Is(err, ErrCredentialUseMigrationBlocked) {
 		t.Fatal("opened source use did not block upgrade", err)
 	}
 	if !reflect.DeepEqual(before, f.snapshot()) {
 		t.Fatal("blocked migration changed rows")
 	}
 	f.finish(run, done, false)
-	if err := Migrate(f.ctx, f.config); err != nil {
+	if err := migrateTo(f.ctx, f.config, 21); err != nil {
 		t.Fatal(err)
 	}
 }

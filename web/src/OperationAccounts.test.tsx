@@ -370,10 +370,13 @@ describe("operation account strict safe projections", () => {
   });
 });
 describe("operation account permissions and lifecycle", () => {
-  it("round trips all fourteen marks with operation accounts denied by default", () => {
-    expect(marks).toHaveLength(14);
+  it("round trips all fifteen marks with operation accounts denied by default", () => {
+    expect(marks).toHaveLength(15);
     expect(
       emptyPermissions().find((p) => p.mark === "user_asset_exports")?.auth,
+    ).toEqual({ readable: false, writeable: false });
+    expect(
+      emptyPermissions().find((p) => p.mark === "group_asset_exports")?.auth,
     ).toEqual({ readable: false, writeable: false });
     expect(
       emptyPermissions().find((value) => value.mark === "operation_accounts")

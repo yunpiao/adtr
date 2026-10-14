@@ -3205,12 +3205,54 @@
           }
         ],
         "remaining": [
-          "failed→安全两列恢复、queued取消的真实browser/Worker/PG证据为下一slice验证计划，尚未运行，不计通过；running取消等其他边界仍须逐项验收。",
+          "PR160已验证failed→安全两列恢复与queued取消真实browser/Worker/PG链；running/cancel_requested等其他取消边界仍须逐项验收。",
           "EXP-006完整旧字段、默认业务列、多域、status/overviewType/updateTm/scoreSort及全部源系统筛选语义未达1:1；六scalar列不能替代未采集业务字段。",
-          "EXP-007计算机、EXP-008组、EXP-009 DNS/IP导出未由本slice实现或验收。",
+          "EXP-008组五scalar有界切片实现中，完整旧筛选/业务默认列/100000行容量未验收；EXP-007计算机和EXP-009 DNS/IP导出未由这些slice实现或验收。",
           "真实AD及八版本Windows、目标容量/峰值内存、生产验收开放；代码上限不代表容量验收。",
           "Issue30与Issue151保持open；product_accepted=false，产品接受数仍0/209。未来文档或代码提交需独立CI，不继承上述运行通过。"
-        ]
+        ],
+        "latest_regression": {
+          "pr": "https://github.com/yunpiao/adtr/pull/160",
+          "head": "53ba4154bfc8708e79bfd31dac506c9b057f3178",
+          "merge_commit": "9f91f7121a00b02101f53c545e3da53da1ec27ed",
+          "tree": "6625e1166634a9627a07f28a5e6007007aaacc94",
+          "ci": [
+            {
+              "url": "https://github.com/yunpiao/adtr/actions/runs/38497165578",
+              "run_attempt": 1,
+              "result": "62/62 jobs success",
+              "checkout_commit": "13f579fee59ffd595b91b5ce34a8d9c4345894e4",
+              "checkout_tree": "6625e1166634a9627a07f28a5e6007007aaacc94"
+            },
+            {
+              "url": "https://github.com/yunpiao/adtr/actions/runs/38501083953",
+              "run_attempt": 1,
+              "result": "62/62 jobs success",
+              "checkout_commit": "9f91f7121a00b02101f53c545e3da53da1ec27ed",
+              "checkout_tree": "6625e1166634a9627a07f28a5e6007007aaacc94"
+            }
+          ],
+          "verified": [
+            "实际合成TLS LDAP→Worker→PostgreSQL→API→浏览器失败export_invalid_text、原失败回执/零临时产物、显式新安全两列12行恢复、实际XLSX及完整failed/ready截图。",
+            "queued取消在绑定实际数据库/身份且全线程停止的owned Worker上进行；恢复同Worker后两次严格后续队列成功，原任务保持cancelled/attempt0/无产物。",
+            "两次运行各独立5文件failure与3文件cancel产物、865来源Git blob/provenance与3张实际PNG像素均复核CLEAR；PR产物11864880540/11864223677，main产物11866141622/11866660781。"
+          ],
+          "historical_failures": [
+            {
+              "url": "https://github.com/yunpiao/adtr/actions/runs/38493130354",
+              "head": "8f5c8d091d32e3fc957905ef607fdf6d59647e2e",
+              "result": "60 successful jobs; queued-cancel and aggregate verify failed",
+              "detail": "10秒内未满足旧connections>0静止判定，未记录PG计数，不能证明当时确为0连接；该轮failed截图终态消息截断，后续成功不覆盖旧失败。"
+            }
+          ]
+        },
+        "group_export_slice": {
+          "contract": "docs/group-asset-export-v3-contract.md",
+          "status": "implementation_in_progress",
+          "base_commit": "9f91f7121a00b02101f53c545e3da53da1ec27ed",
+          "scope": "EXP-008仅dictionary3固定单域观测五scalar列guid/sAMAccountName/sid/dn/whenCreated，共享组列表search/creatTm并导出所有匹配行；独立group_asset_exports权限/任务/存储，schema22注册无现有自定义角色授权。",
+          "verification": "本候选真实CI/产物及独立最终tree审查待执行；10k行/32MiB保护限不等于100k容量验收。"
+        }
       }
     },
     {

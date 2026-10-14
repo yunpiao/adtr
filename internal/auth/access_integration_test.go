@@ -66,7 +66,7 @@ func newAccessFixture(t *testing.T) *accessFixture {
 		}
 		admin.Close(ctx)
 	})
-	if _, e = conn.Exec(ctx, "CREATE SCHEMA adtr;"+Schema+SchemaV3+ResourceSchema+TaskPermissionSchema+AuditPermissionMarks+SystemPermissionMarks+SchedulePermissionMarks+DomainPermissionMarks+OperationAccountPermissionMarks+OperationalLogPermissionMarks+DirectoryPermissionMarks+UserAssetExportV3PermissionMarks); e != nil {
+	if _, e = conn.Exec(ctx, "CREATE SCHEMA adtr;"+Schema+SchemaV3+ResourceSchema+TaskPermissionSchema+AuditPermissionMarks+SystemPermissionMarks+SchedulePermissionMarks+DomainPermissionMarks+OperationAccountPermissionMarks+OperationalLogPermissionMarks+DirectoryPermissionMarks+UserAssetExportV3PermissionMarks+GroupAssetExportV3PermissionMarks); e != nil {
 		t.Fatal(e)
 	}
 	s, e := New(cfg, []byte(strings.Repeat("x", 32)), "http://localhost:8080", true)
@@ -208,7 +208,7 @@ func TestAccessDurableLifecycleAndFilters(t *testing.T) {
 		"users": true, "roles": true, "permissions": true, "tasks": true,
 		"audit": true, "audit_exports": true, "system": true, "schedules": true,
 		"task_archive": true, "domains": true, "operation_accounts": true,
-		"system_logs": true, "directory_assets": true, "user_asset_exports": true,
+		"system_logs": true, "directory_assets": true, "user_asset_exports": true, "group_asset_exports": true,
 	}
 	permissions := roleInfo["permissions"].([]any)
 	if len(permissions) != len(wantMarks) {

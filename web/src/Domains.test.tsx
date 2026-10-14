@@ -248,9 +248,12 @@ describe("domain safe DTO and validation", () => {
     expect(validIP("http://host")).toBe(false);
   });
   it("round trips the domains mark with deny-by-default editor state", () => {
-    expect(marks).toHaveLength(14);
+    expect(marks).toHaveLength(15);
     expect(
       emptyPermissions().find((p) => p.mark === "user_asset_exports")?.auth,
+    ).toEqual({ readable: false, writeable: false });
+    expect(
+      emptyPermissions().find((p) => p.mark === "group_asset_exports")?.auth,
     ).toEqual({ readable: false, writeable: false });
     expect(emptyPermissions().find((p) => p.mark === "domains")?.auth).toEqual({
       readable: false,

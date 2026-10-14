@@ -9,7 +9,14 @@ import (
 
 // Dedicated immutable thirty-row mode: 23 groups, three users, four computers.
 // Distractor computers inherit user; group rows carry only group classes.
+// U+FFFE is valid UTF-8 and permitted by the directory codec, but forbidden in XML.
+const groupExportFailureV3SAM = "group-invalid\ufffe"
+
 func groupAssetsV3Entry(id, row int) []byte {
+	return groupAssetsV3EntryWithExportFailure(id, row, false)
+}
+
+func groupAssetsV3EntryWithExportFailure(id, row int, exportFailure bool) []byte {
 	kind, ou := "group", "Groups"
 	classes := []string{"top", "group"}
 	if row > 23 {
@@ -25,6 +32,9 @@ func groupAssetsV3Entry(id, row int) []byte {
 	attrs := append(directoryAttribute("objectGUID", string(bytes.Repeat([]byte{byte(row)}, 16))), directoryAttribute("objectClass", classes...)...)
 	if row != 23 {
 		sam := name
+		if exportFailure && row == 1 {
+			sam = groupExportFailureV3SAM
+		}
 		if row == 20 {
 			sam = "İΣ𐐀 literal.*"
 		}
