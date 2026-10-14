@@ -6,6 +6,7 @@ import re
 import unittest
 from unittest.mock import patch
 import user_asset_export_v3_ci as gate
+from test_user_asset_export_v3_terminal_runner_contract import restore_runner as restore_terminal_runner, restore_workflow as restore_terminal_workflow
 
 BASE_WORKFLOW_SHA256 = '67dfbefd8aff88fe1089e969a2d60a99234f3023cd402c963829d2f9d021b4a7'
 BASE_RUNNER_SHA256 = '32c82e2d6c19e3d2aec727f275e01277f04e6a1d4573945ed5ff530874591686'
@@ -97,10 +98,10 @@ def restore(text, changes):
     return text
 
 def restore_workflow(text):
-    return restore(text, WORKFLOW_CHANGES)
+    return restore(restore_terminal_workflow(text), WORKFLOW_CHANGES)
 
 def restore_runner(text):
-    return restore(text, RUNNER_CHANGES)
+    return restore(restore_terminal_runner(text), RUNNER_CHANGES)
 
 class ExportRunnerContract(unittest.TestCase):
     def test_prior_59_jobs_byte_exact(self):
@@ -109,7 +110,7 @@ class ExportRunnerContract(unittest.TestCase):
 
     def test_mutated_additions_rejected(self):
         for filename, changes in [('.github/workflows/ci.yml', WORKFLOW_CHANGES), ('scripts/test_auth_e2e.py', RUNNER_CHANGES)]:
-            source = Path(filename).read_text()
+            source = (restore_terminal_workflow if filename.endswith("ci.yml") else restore_terminal_runner)(Path(filename).read_text())
             for old, new in changes:
                 with self.assertRaises(ValueError):
                     restore(source + new, changes)
@@ -117,7 +118,7 @@ class ExportRunnerContract(unittest.TestCase):
                     restore(source.replace(new, '!' + new[1:]), changes)
 
     def test_suite_60_preserves_concurrency_limits(self):
-        workflow = Path('.github/workflows/ci.yml').read_text()
+        workflow = restore_terminal_workflow(Path('.github/workflows/ci.yml').read_text())
         names = re.findall(r'^          - name: ([a-z0-9-]+)$', workflow, re.M)
         self.assertEqual(len(names), 40)
         self.assertEqual(names.count('user-asset-export-v3'), 1)
@@ -146,7 +147,7 @@ class ExportRunnerContract(unittest.TestCase):
                 gate.configure({key: 'true'})
 
     def test_capture_precedes_database_and_validation_follows_browser(self):
-        source = Path('scripts/test_auth_e2e.py').read_text()
+        source = restore_terminal_runner(Path('scripts/test_auth_e2e.py').read_text())
         self.assertLess(source.index('capture_user_export()'), source.index('creation_attempted = True'))
         self.assertLess(source.index('subprocess.run(command,'), source.index('validate_user_export()'))
         self.assertIn('timeout=930 if args.suite == "user-asset-export-v3"', source)

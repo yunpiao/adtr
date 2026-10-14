@@ -16,7 +16,7 @@ Statuses are deliberately distinct:
   items; this is not the same as a PR, merge or deploy status
 
 Current product acceptance remains **0/209**: **19 implemented_verified_slice**
-requirements, **33 in_progress**, and **157 not_started**. These are requirement
+requirements, **34 in_progress**, and **156 not_started**. These are requirement
 status counts, not PR counts or 19 fully accepted features. AD-F-042 is now
 in_progress for [the bounded raw-group workspace](../docs/group-assets-v3-contract.md);
 its classification fields, source compatibility and real acceptance remain open.
@@ -34,6 +34,17 @@ That success is baseline evidence, never a pass for a future documentation commi
 The catalog records narrow implemented scope and remaining gates; passing a shared
 suite does not verify every source field. Original evidence is retained in
 `previous_evidence` or supplemented by `latest_regression` where applicable.
+AD-F-053 is now `in_progress` for the merged
+[bounded EXP-006 user XLSX export](../docs/user-asset-export-v3-contract.md).
+[PR159](https://github.com/yunpiao/adtr/pull/159) and its exact-head/post-merge
+60/60 CI runs verify the normal 12-row and header-only synthetic browser paths.
+This records implementation evidence, not full feature acceptance: only six
+collected scalar columns from one pinned dictionary3 domain/observation are covered.
+Failure recovery and queued cancellation in a real browser remain planned,
+not verified by those two runs; HTTP/PostgreSQL/DOM coverage is distinct.
+EXP-007 computer, EXP-008 group and EXP-009 DNS/IP exports remain outside this slice.
+Issue30 and Issue151 remain open. The new documentation/code revision must pass
+its own checks; old CI success cannot be transferred to it.
 Source-system compatibility, real AD/Windows and production gates remain open.
 Priority never removes a requirement.
 
