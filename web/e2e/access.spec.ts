@@ -148,6 +148,7 @@ test("real browser → API → PostgreSQL users and function permissions", async
     "directory_assets",
     "domains",
     "group_asset_exports",
+    "computer_asset_exports",
     "operation_accounts",
     "permissions",
     "roles",
@@ -217,6 +218,7 @@ test("real browser → API → PostgreSQL users and function permissions", async
     { mark: "directory_assets", auth: { readable: false, writeable: false } },
     { mark: "user_asset_exports", auth: { readable: false, writeable: false } },
     { mark: "group_asset_exports", auth: { readable: false, writeable: false } },
+    { mark: "computer_asset_exports", auth: { readable: false, writeable: false } },
   ]);
   expect(persistedRole.permissions).toEqual(permissions.permissions);
 

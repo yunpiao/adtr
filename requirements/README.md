@@ -49,11 +49,24 @@ queued-cancellation artifacts. The first run38493130354 still records its
 queued-cancel/verify failure and truncated failed-state screenshot; missing PG
 counts leave its precise connection count unknown. Running/cancel_requested
 browser coverage remains open.
-The [bounded EXP-008 group slice](../docs/group-asset-export-v3-contract.md) is now
-in implementation: five dictionary3 scalar columns, shared group-list search/order,
+The [bounded EXP-008 group slice](../docs/group-asset-export-v3-contract.md) is merged
+in PR161: five dictionary3 scalar columns, shared group-list search/order,
 all matching rows, separate permission/task/storage and no automatic custom grants.
-Its candidate CI/artifacts are pending. The10000-row/32MiB guardrails do not verify
-legacy100000-row capacity. EXP-007 computer and EXP-009 DNS/IP exports remain open.
+Exact final head `5c9b0ee673e35955bcaf4147cae075015bae4cf7` passed
+[38530232594](https://github.com/yunpiao/adtr/actions/runs/38530232594), and merge
+`7ed455aecee1352f0261e7064253891af1c31c79` passed
+[38535766672](https://github.com/yunpiao/adtr/actions/runs/38535766672), each65/65.
+Both runs' normal/empty, failure/recovery and queued-cancel artifacts were reviewed.
+Earlier runs38520290658 and38525081993 retain their3 and2 failures respectively.
+The10000-row/32MiB guardrails do not verify
+legacy100000-row capacity.
+The [bounded EXP-007 computer slice](../docs/computer-asset-export-v3-contract.md)
+is in implementation on main `7ed455aecee1352f0261e7064253891af1c31c79`:
+five collected scalar facts, shared computer-list search/time-range/order, all
+matching rows, independent permission/task/schema23 storage, and no DNS/IP/SPN,
+OS or business-status inference. Exact candidate CI and artifact review remain
+pending; all65 existing checks are retained and3 dedicated jobs target68 checks.
+Full EXP-007 legacy parity/capacity and EXP-009 DNS/IP exports remain open.
 Issue30 and Issue151 remain open. The new documentation/code revision must pass
 its own checks; old CI success cannot be transferred to it.
 Source-system compatibility, real AD/Windows and production gates remain open.

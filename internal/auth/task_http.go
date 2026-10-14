@@ -276,7 +276,7 @@ func (s *Service) handleTask(ctx context.Context, r *http.Request, engine *tasks
 		if err = tx.QueryRow(ctx, "SELECT COALESCE((SELECT kind FROM adtr.tasks WHERE tenant_id=$1 AND task_id=$2),'')", actor.tenant, in.TaskUUID).Scan(&privateKind); err != nil {
 			return nil, err
 		}
-		if code := dedicatedTaskRouteCode(privateKind); code != "" && (path == "/recover" || privateKind == domains.UserAssetExportV3KindName || privateKind == domains.GroupAssetExportV3KindName || privateKind == operationallogs.BundleKindName || isDirectoryTaskKind(privateKind)) {
+		if code := dedicatedTaskRouteCode(privateKind); code != "" && (path == "/recover" || privateKind == domains.UserAssetExportV3KindName || privateKind == domains.ComputerAssetExportV3KindName || privateKind == domains.GroupAssetExportV3KindName || privateKind == operationallogs.BundleKindName || isDirectoryTaskKind(privateKind)) {
 			if _, err = engine.DetailTx(ctx, tx, tasks.Principal{TenantID: actor.tenant, ActorID: actor.ID}, in.TaskUUID); err != nil {
 				return nil, err
 			}
@@ -350,6 +350,8 @@ func dedicatedTaskRouteCode(kind string) string {
 	switch kind {
 	case domains.UserAssetExportV3KindName:
 		return "user_asset_export_route_required"
+	case domains.ComputerAssetExportV3KindName:
+		return "computer_asset_export_route_required"
 	case domains.GroupAssetExportV3KindName:
 		return "group_asset_export_route_required"
 	case audit.ExportKind:

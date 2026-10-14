@@ -718,6 +718,10 @@ describe("roles and explicit function permissions", () => {
           mark: "group_asset_exports",
           auth: { readable: false, writeable: false },
         },
+        {
+          mark: "computer_asset_exports",
+          auth: { readable: false, writeable: false },
+        },
       ],
       actorPassword: "Actor Password 123",
       totpCode: "123456",

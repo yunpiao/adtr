@@ -29,6 +29,12 @@ PR #81 已将独立 `domain.directory_read.v2` 任务/授权、迁移16和 `/api
 
 ## 本地构建与测试
 
+EXP-007计算机资产有界XLSX导出正在实现：固定dictionary3单域观测、五个已采集
+scalar列、与列表相同的搜索/创建时间范围/排序及全部匹配行；独立权限、任务和
+schema23存储。契约与当前验证门禁见[计算机导出契约](docs/computer-asset-export-v3-contract.md)。
+候选CI、实际产物与独立审查待完成；完整旧字段/筛选、真实AD/Windows和容量
+验收仍开放，AD-F-053保持in_progress，产品验收仍0/209。
+
 需要 Go **1.27.1**、Node **24.19.0**、npm、make；集成测试另需 Python 3、Docker Engine 与 Compose v2。
 Go 依赖由 `go.mod`/`go.sum` 固定，容器基础镜像固定 digest。
 

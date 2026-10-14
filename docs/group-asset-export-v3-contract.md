@@ -1,12 +1,34 @@
 # Group asset XLSX export v3: bounded EXP-008 slice
 
-Contract freeze 2026-10-14; implementation and exact-revision CI pending.
+Contract freeze 2026-10-14; PR161 merged and bounded engineering evidence verified.
 Base main `9f91f7121a00b02101f53c545e3da53da1ec27ed`, tree
 `6625e1166634a9627a07f28a5e6007007aaacc94`. Refs
 [F14 #30](https://github.com/yunpiao/adtr/issues/30), AD-F-053 / EXP-008,
 [group list contract](group-assets-v3-contract.md), and
 [user export lifecycle](user-asset-export-v3-contract.md).
 AD-F-053 remains in_progress; Issues30/151 remain open; product acceptance is0/209.
+
+## Verified publication checkpoint
+
+[PR161](https://github.com/yunpiao/adtr/pull/161) final head
+`5c9b0ee673e35955bcaf4147cae075015bae4cf7`, tree
+`bdfc54e0982cb07a4679c5fa022f9324da31832a`, passed all65 jobs in
+[38530232594](https://github.com/yunpiao/adtr/actions/runs/38530232594), attempt1.
+Merge `7ed455aecee1352f0261e7064253891af1c31c79` passed separate main-push
+[38535766672](https://github.com/yunpiao/adtr/actions/runs/38535766672), attempt1,
+65/65. Each run's three actual artifacts were independently reviewed:8/5/3 files,
+six PNGs,901 source objects, four XLSX with120/48/2/48 cells and23/23/0/23 data rows,
+plus matching PostgreSQL/HTTP digests. Failure uses selected U+FFFE text followed
+by a new-key safe-column recovery; queued cancellation records attempt0.
+
+Historical [38520290658](https://github.com/yunpiao/adtr/actions/runs/38520290658)
+retains62 passing/3 failing jobs; [38525081993](https://github.com/yunpiao/adtr/actions/runs/38525081993)
+retains63 passing/2 failing jobs. Test-only UI timing, strict DTO and real MFA-window
+repairs preceded the final success; those earlier failures are not erased.
+Evidence summary is also recorded in [Issue30](https://github.com/yunpiao/adtr/issues/30#issuecomment-6165117314).
+These runs verify that exact group-export revision, not future computer-export or
+documentation changes. Full legacy parity, running cancellation and acceptance
+gates below remain open.
 
 ## Frozen source, filters and columns
 

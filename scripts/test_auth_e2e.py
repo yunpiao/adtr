@@ -18,6 +18,8 @@ import uuid
 from user_asset_export_v3_ci import configure as configure_user_export, capture as capture_user_export, validate as validate_user_export
 from user_asset_export_v3_terminal_ci import SUITES as EXPORT_TERMINAL_SUITES, configure as configure_terminal_export, capture as capture_terminal_export, validate as validate_terminal_export
 from user_asset_export_v3_worker_guard import OwnedExportWorkerGuard
+from computer_asset_export_v3_ci import configure as configure_computer_export, capture as capture_computer_export, validate as validate_computer_export
+from computer_asset_export_v3_terminal_ci import SUITES as COMPUTER_EXPORT_TERMINAL_SUITES, configure as configure_computer_terminal, capture as capture_computer_terminal, validate as validate_computer_terminal
 from group_asset_export_v3_ci import configure as configure_group_export, capture as capture_group_export, validate as validate_group_export
 from group_asset_export_v3_terminal_ci import SUITES as GROUP_EXPORT_TERMINAL_SUITES, configure as configure_group_terminal, capture as capture_group_terminal, validate as validate_group_terminal
 from ci_postgres_image import postgres_image_args
@@ -33,10 +35,11 @@ REAL_TAB_LIFECYCLE_SUITES = {"account-references", "session-invalidation", "dire
 USER_ASSETS_V2_SUITES = {"user-assets-v2", "user-assets-v2-readers"}
 DIRECTORY_V2_SUITES = {"directory-v2", "directory-v2-controls", "directory-v2-readers"} | USER_ASSETS_V2_SUITES
 COMPUTER_ASSETS_V3_SUITES = {"computer-assets-v3", "computer-assets-v3-readers"}
+COMPUTER_EXPORT_SUITES = COMPUTER_EXPORT_TERMINAL_SUITES | {"computer-asset-export-v3"}
 GROUP_EXPORT_SUITES = GROUP_EXPORT_TERMINAL_SUITES | {"group-asset-export-v3"}
 GROUP_ASSETS_V3_SUITES = {"group-assets-v3", "group-assets-v3-readers"}
 EMPTY_TRANSITION_SUITES = {"group-assets-v3", "computer-assets-v3"}
-DIRECTORY_V3_SUITES = GROUP_EXPORT_SUITES | EXPORT_TERMINAL_SUITES | {"user-asset-export-v3", "directory-v3-backend", "user-assets-v3", "directory-v3", "directory-v3-controls", "directory-v3-readers"} | COMPUTER_ASSETS_V3_SUITES | GROUP_ASSETS_V3_SUITES
+DIRECTORY_V3_SUITES = COMPUTER_EXPORT_SUITES | GROUP_EXPORT_SUITES | EXPORT_TERMINAL_SUITES | {"user-asset-export-v3", "directory-v3-backend", "user-assets-v3", "directory-v3", "directory-v3-controls", "directory-v3-readers"} | COMPUTER_ASSETS_V3_SUITES | GROUP_ASSETS_V3_SUITES
 DIRECTORY_V4_SUITES = {"directory-v4-backend", "group-members-v4", "group-members-v4-empty", "group-members-v4-pagination", "group-members-v4-refresh"}
 DIRECTORY_SUITES = DIRECTORY_V4_SUITES | DIRECTORY_V3_SUITES | {"directory", "directory-controls", "directory-readers"} | DIRECTORY_V2_SUITES
 EMPTY_DIRECTORY_SUITES = {"directory-controls", "directory-readers", "directory-v2-controls", "directory-v2-readers", "directory-v3-controls", "directory-v3-readers"}
@@ -73,7 +76,7 @@ def validate_asset_refresh_evidence(suite):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--suite", choices=["group-asset-export-v3", "group-asset-export-v3-failure", "group-asset-export-v3-cancel", "user-asset-export-v3-failure", "user-asset-export-v3-cancel", "user-asset-export-v3", "auth", "access", "resource", "tasks", "messages", "messages-bulk", "audit", "system", "maintenance", "domains", "operations", "profile", "credential-use", "account-references", "operational-logs", "session-invalidation", "account-reference-barrier", "directory", "directory-controls", "directory-readers", "directory-v2", "directory-v2-controls", "directory-v2-readers", "directory-v3-backend", "directory-v4-backend", "group-members-v4", "group-members-v4-empty", "group-members-v4-pagination", "group-members-v4-refresh", "user-assets-v3", "computer-assets-v3", "computer-assets-v3-readers", "group-assets-v3", "group-assets-v3-readers", "directory-v3", "directory-v3-controls", "directory-v3-readers", "user-assets-v2", "user-assets-v2-readers"], default="auth")
+    parser.add_argument("--suite", choices=["computer-asset-export-v3", "computer-asset-export-v3-failure", "computer-asset-export-v3-cancel", "group-asset-export-v3", "group-asset-export-v3-failure", "group-asset-export-v3-cancel", "user-asset-export-v3-failure", "user-asset-export-v3-cancel", "user-asset-export-v3", "auth", "access", "resource", "tasks", "messages", "messages-bulk", "audit", "system", "maintenance", "domains", "operations", "profile", "credential-use", "account-references", "operational-logs", "session-invalidation", "account-reference-barrier", "directory", "directory-controls", "directory-readers", "directory-v2", "directory-v2-controls", "directory-v2-readers", "directory-v3-backend", "directory-v4-backend", "group-members-v4", "group-members-v4-empty", "group-members-v4-pagination", "group-members-v4-refresh", "user-assets-v3", "computer-assets-v3", "computer-assets-v3-readers", "group-assets-v3", "group-assets-v3-readers", "directory-v3", "directory-v3-controls", "directory-v3-readers", "user-assets-v2", "user-assets-v2-readers"], default="auth")
     parser.add_argument("--expired", action="store_true")
     args = parser.parse_args()
     # Check display support before creating a disposable database or fixtures.
@@ -108,6 +111,12 @@ def main():
     if args.suite in GROUP_EXPORT_TERMINAL_SUITES:
         configure_group_terminal(env, args.suite)
         capture_group_terminal(args.suite)
+    if args.suite == "computer-asset-export-v3":
+        configure_computer_export(env)
+        capture_computer_export()
+    if args.suite in COMPUTER_EXPORT_TERMINAL_SUITES:
+        configure_computer_terminal(env, args.suite)
+        capture_computer_terminal(args.suite)
     logs = tempfile.TemporaryFile(mode="w+")
     try:
         creation_attempted = True
@@ -181,11 +190,12 @@ def main():
                                            directory_v4=args.suite in DIRECTORY_V4_SUITES,
                                            group_members_v4_pagination=args.suite == "group-members-v4-pagination",
                                            group_members_v4_refresh=args.suite == "group-members-v4-refresh",
-                                           computer_assets_v3=args.suite in COMPUTER_ASSETS_V3_SUITES,
+                                           computer_assets_v3=args.suite in COMPUTER_ASSETS_V3_SUITES | COMPUTER_EXPORT_SUITES,
                                            group_assets_v3=args.suite in GROUP_ASSETS_V3_SUITES | GROUP_EXPORT_SUITES,
                                            user_assets_v2=args.suite in USER_ASSETS_V2_SUITES,
                                            user_export_failure_v3=args.suite == "user-asset-export-v3-failure",
-                                           group_export_failure_v3=args.suite == "group-asset-export-v3-failure")
+                                           group_export_failure_v3=args.suite == "group-asset-export-v3-failure",
+                                           computer_export_failure_v3=args.suite == "computer-asset-export-v3-failure")
                 ldap_fixture.start(env)
                 if args.suite in DIRECTORY_SUITES:
                     env["ADTR_DIRECTORY_READ_ENABLED"] = "true"
@@ -233,7 +243,7 @@ def main():
             if args.suite == "messages-bulk":
                 # Identify only our worker connections for quiescent SIGSTOP tests.
                 worker_env["ADTR_DATABASE_URL"] += "&application_name=adtr-message-bulk-worker"
-            if args.suite in {"user-asset-export-v3-cancel", "group-asset-export-v3-cancel"}:
+            if args.suite in {"user-asset-export-v3-cancel", "group-asset-export-v3-cancel", "computer-asset-export-v3-cancel"}:
                 export_worker_nonce = uuid.uuid4().hex
                 export_worker_app = "adtr-user-export-" + export_worker_nonce
                 worker_env["ADTR_E2E_EXPORT_WORKER_NONCE"] = export_worker_nonce
@@ -243,7 +253,7 @@ def main():
                 worker_env.pop(key, None)
             diagnostics.phase("worker-start")
             worker = subprocess.Popen(["./bin/adtr", "-mode", "worker"], env=worker_env, stdout=logs, stderr=logs)
-            if args.suite in {"user-asset-export-v3-cancel", "group-asset-export-v3-cancel"}:
+            if args.suite in {"user-asset-export-v3-cancel", "group-asset-export-v3-cancel", "computer-asset-export-v3-cancel"}:
                 export_worker_guard = OwnedExportWorkerGuard(worker, export_worker_nonce, Path("bin/adtr").resolve())
                 export_worker_guard.start()
                 env.update(ADTR_E2E_WORKER_PID=str(worker.pid), ADTR_E2E_HARNESS_PID=str(os.getpid()),
@@ -274,7 +284,7 @@ def main():
         # enter an error-context prompt; explicit safe screenshots remain intact.
         env["PLAYWRIGHT_NO_COPY_PROMPT"] = "1"
         diagnostics.phase("browser-start")
-        subprocess.run(command, env=env, check=True, timeout=930 if args.suite in GROUP_EXPORT_SUITES else 930 if args.suite in EXPORT_TERMINAL_SUITES else 930 if args.suite == "user-asset-export-v3" else 660 if args.suite == "account-references" else 930 if args.suite in EMPTY_DIRECTORY_SUITES | USER_ASSETS_V2_SUITES | {"user-assets-v3"} | COMPUTER_ASSETS_V3_SUITES | GROUP_ASSETS_V3_SUITES else 660 if args.suite in {"directory", "directory-v2", "directory-v3-backend", "directory-v4-backend", "group-members-v4", "group-members-v4-empty", "group-members-v4-pagination", "group-members-v4-refresh", "directory-v3"} else 600 if args.suite == "audit" else 540 if args.suite in {"maintenance", "domains", "operations", "credential-use", "account-references", "operational-logs", "account-reference-barrier"} else 480 if args.suite == "system" else 420)
+        subprocess.run(command, env=env, check=True, timeout=930 if args.suite in COMPUTER_EXPORT_SUITES else 930 if args.suite in GROUP_EXPORT_SUITES else 930 if args.suite in EXPORT_TERMINAL_SUITES else 930 if args.suite == "user-asset-export-v3" else 660 if args.suite == "account-references" else 930 if args.suite in EMPTY_DIRECTORY_SUITES | USER_ASSETS_V2_SUITES | {"user-assets-v3"} | COMPUTER_ASSETS_V3_SUITES | GROUP_ASSETS_V3_SUITES else 660 if args.suite in {"directory", "directory-v2", "directory-v3-backend", "directory-v4-backend", "group-members-v4", "group-members-v4-empty", "group-members-v4-pagination", "group-members-v4-refresh", "directory-v3"} else 600 if args.suite == "audit" else 540 if args.suite in {"maintenance", "domains", "operations", "credential-use", "account-references", "operational-logs", "account-reference-barrier"} else 480 if args.suite == "system" else 420)
         if args.suite == "user-asset-export-v3":
             validate_user_export()
         if export_worker_guard is not None:
@@ -285,6 +295,10 @@ def main():
             validate_group_export()
         if args.suite in GROUP_EXPORT_TERMINAL_SUITES:
             validate_group_terminal(args.suite)
+        if args.suite == "computer-asset-export-v3":
+            validate_computer_export()
+        if args.suite in COMPUTER_EXPORT_TERMINAL_SUITES:
+            validate_computer_terminal(args.suite)
         validate_asset_refresh_evidence(args.suite)
         if args.suite == "group-members-v4":
             subprocess.run([sys.executable, "scripts/validate_group_members_v4_evidence.py",

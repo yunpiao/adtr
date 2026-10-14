@@ -3207,7 +3207,7 @@
         "remaining": [
           "PR160已验证failed→安全两列恢复与queued取消真实browser/Worker/PG链；running/cancel_requested等其他取消边界仍须逐项验收。",
           "EXP-006完整旧字段、默认业务列、多域、status/overviewType/updateTm/scoreSort及全部源系统筛选语义未达1:1；六scalar列不能替代未采集业务字段。",
-          "EXP-008组五scalar有界切片实现中，完整旧筛选/业务默认列/100000行容量未验收；EXP-007计算机和EXP-009 DNS/IP导出未由这些slice实现或验收。",
+          "EXP-008组及EXP-007计算机五scalar有界切片的完整旧筛选/业务默认列/目标容量仍未验收；EXP-007当前候选CI与独立审查待完成，EXP-009 DNS/IP导出未实现。",
           "真实AD及八版本Windows、目标容量/峰值内存、生产验收开放；代码上限不代表容量验收。",
           "Issue30与Issue151保持open；product_accepted=false，产品接受数仍0/209。未来文档或代码提交需独立CI，不继承上述运行通过。"
         ],
@@ -3248,10 +3248,26 @@
         },
         "group_export_slice": {
           "contract": "docs/group-asset-export-v3-contract.md",
-          "status": "implementation_in_progress",
+          "status": "merged_bounded_slice_verified",
           "base_commit": "9f91f7121a00b02101f53c545e3da53da1ec27ed",
+          "pr": "https://github.com/yunpiao/adtr/pull/161",
+          "head": "5c9b0ee673e35955bcaf4147cae075015bae4cf7",
+          "merge_commit": "7ed455aecee1352f0261e7064253891af1c31c79",
+          "tree": "bdfc54e0982cb07a4679c5fa022f9324da31832a",
+          "ci": [
+            "https://github.com/yunpiao/adtr/actions/runs/38530232594",
+            "https://github.com/yunpiao/adtr/actions/runs/38535766672"
+          ],
           "scope": "EXP-008仅dictionary3固定单域观测五scalar列guid/sAMAccountName/sid/dn/whenCreated，共享组列表search/creatTm并导出所有匹配行；独立group_asset_exports权限/任务/存储，schema22注册无现有自定义角色授权。",
-          "verification": "本候选真实CI/产物及独立最终tree审查待执行；10k行/32MiB保护限不等于100k容量验收。"
+          "verification": "两个精确运行attempt1均65/65；各自三份实际artifact独立核对8/5/3文件、6PNG、901源对象、4XLSX行数23/23/0/23与PG/HTTP摘要；U+FFFE失败及新key安全列恢复、queued取消attempt0。历史38520290658为62成功3失败、38525081993为63成功2失败，均保留。10k行/32MiB保护限不等于100k容量验收；后续候选须独立检查。"
+        },
+        "computer_export_slice": {
+          "contract": "docs/computer-asset-export-v3-contract.md",
+          "status": "implementation_in_progress",
+          "base_commit": "7ed455aecee1352f0261e7064253891af1c31c79",
+          "base_tree": "bdfc54e0982cb07a4679c5fa022f9324da31832a",
+          "scope": "EXP-007仅dictionary3固定单域观测五scalar列guid/sAMAccountName/sid/dn/whenCreated，共享计算机列表search/startTm/endTm/creatTm并导出全部匹配行；独立computer_asset_exports权限、computer_assets.v3.export任务与schema23三表，不推断DNS/IP/SPN/OS/业务状态。",
+          "verification": "本候选真实CI、XLSX/截图/数据库证据及独立实际diff审查待完成；保护限不等于容量验收。全部旧65项检查保留，新增3项预期68项；不继承基线通过结果。"
         }
       }
     },
