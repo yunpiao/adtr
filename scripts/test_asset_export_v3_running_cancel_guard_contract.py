@@ -36,7 +36,7 @@ class ContractTests(unittest.TestCase):
         import ast
         tree = ast.parse(Path(g.__file__).read_text())
         for node in ast.walk(tree):
-            if isinstance(node, ast.FunctionDef) and node.name in ('registered_candidate', 'registry_matches_pg', 'validate_sealed_registry', 'checkpoint'):
+            if isinstance(node, ast.FunctionDef) and node.name in ('candidate_identity', 'registered_candidate', 'registry_matches_pg', 'validate_sealed_registry', 'checkpoint'):
                 for call in ast.walk(node):
                     if isinstance(call, ast.Call) and isinstance(call.func, ast.Name) and call.func.id == 'require':
                         message = call.args[1]
@@ -88,6 +88,127 @@ class ContractTests(unittest.TestCase):
             error = RuntimeError('missed two-second activity checkpoint')
             error.capture_observations = count
             self.assertNotIn('observations', g.failure_event('capture', error))
+
+    def run_candidate_samples(self, guard, rows, frames=None, expire=False):
+        guard.threads = Mock(return_value=['T'])
+        running = task() | {'kind': g.export_kind(guard.asset_kind)[0]}
+        queued = running | {'state': 'queued', 'attempt': 0, 'snapshotCount': 0}
+        observer, barrier = Mock(), Mock(pid=99)
+        observer.query.side_effect = [{'otherNonterminal': 0, 'journalCount': 0, 'task': queued, 'sessions': []},
+            *[{'task': running, 'sessions': value} for value in rows]]
+        barrier.query.side_effect = [{'count': 1}, True]
+        if frames is not None:
+            guard.controller.snapshot.side_effect = frames
+        now = [0.]
+        with patch.object(g, 'Psql', side_effect=[observer, barrier]), patch.object(g.time, 'monotonic', side_effect=lambda: now[0]), patch.object(g.time, 'sleep', side_effect=lambda _: now.__setitem__(0, 1.5 if expire else now[0])):
+            return guard.checkpoint('task-one', 'worker')
+
+    def test_early_binding_known_initialization_waits_then_direct_strict_every_kind(self):
+        for kind in g.EXPORT_KINDS:
+            for query in ('BEGIN', g.SCHEMA_SQL, g.GATE_SQL, '', g.ACTIVITY_SQL):
+                guard = self.guard(asset_kind=kind)
+                early = session() | {'query': query, 'blockers': [], 'waitType': 'Client'}
+                result = self.run_candidate_samples(guard, [[early], [session()], [session()], [session()]])
+                self.assertTrue(result['checkpointCaught'])
+                guard.controller.pin.assert_called_once()
+                guard.owned.process.send_signal.assert_called_once_with(signal.SIGSTOP)
+
+    def test_indirect_candidate_only_waits_deadline_without_pin_or_stop(self):
+        guard = self.guard()
+        frame = copy.deepcopy(guard.controller.snapshot.return_value)
+        frame.update(status='open', open=2)
+        frame['records'].append({'generation': 3, 'state': 'open', 'backend': 101, 'candidate': None})
+        with self.assertRaises(RuntimeError):
+            self.run_candidate_samples(guard, [[session() | {'blockers': [101]}, session(101)]], [frame], expire=True)
+        event = guard.failure_diagnostic
+        self.assertEqual(event['reason'], 'capture_deadline_missed')
+        self.assertEqual(event['lastNotReady']['blockerCategory'], 'indirect_owned_activity')
+        guard.controller.pin.assert_not_called()
+        guard.owned.process.send_signal.assert_not_called()
+
+    def test_selected_candidate_cannot_disappear_change_or_hide_in_incomplete_registry(self):
+        for field in ('missing', 'generation', 'ticket', 'backend', 'fencingToken', 'pending'):
+            guard = self.guard()
+            frame = copy.deepcopy(guard.controller.snapshot.return_value)
+            changed = copy.deepcopy(frame)
+            record = changed['records'][0]
+            if field == 'missing': record['candidate'] = None
+            elif field == 'ticket': record['generation'] += 10
+            elif field == 'backend': record['backend'] += 1
+            elif field == 'pending':
+                record['candidate'] = None
+                changed['pending'] = 1
+                changed['records'].append({'generation': 3, 'state': 'pending', 'backend': 0, 'candidate': None})
+            else: record['candidate'][field] += 10
+            early = session() | {'query': 'BEGIN', 'blockers': []}
+            with self.assertRaises(RuntimeError):
+                self.run_candidate_samples(guard, [[early], [early]], [frame, changed])
+            self.assertIn(guard.failure_diagnostic['reason'], ('selected_candidate_changed', 'candidate_backend_unavailable'))
+            guard.controller.pin.assert_not_called()
+            guard.owned.process.send_signal.assert_not_called()
+
+    def test_candidate_unknown_sql_fatal_and_diagnostic_private(self):
+        for query, category in (('private SQL secret', 'other'), ('COMMIT', 'commit'), ('ROLLBACK', 'rollback')):
+            guard = self.guard()
+            with self.assertRaises(RuntimeError):
+                self.run_candidate_samples(guard, [[session() | {'query': query, 'blockers': []}]])
+            event = guard.failure_diagnostic
+            self.assertEqual(event['reason'], 'candidate_chain_mismatch')
+            self.assertEqual(event['queryCategory'], category)
+            self.assertNotIn('private', json.dumps(event))
+            guard.controller.pin.assert_not_called()
+            guard.owned.process.send_signal.assert_not_called()
+
+    def test_candidate_sealed_regression_and_owned_cycle_fail_before_stop(self):
+        guard = self.guard()
+        with self.assertRaises(RuntimeError):
+            self.run_candidate_samples(guard, [[session()], [session() | {'query': 'BEGIN', 'blockers': []}]])
+        self.assertEqual(guard.failure_diagnostic['reason'], 'candidate_chain_mismatch')
+        guard.controller.pin.assert_called_once()
+        guard.owned.process.send_signal.assert_not_called()
+        guard = self.guard()
+        early = session() | {'query': 'BEGIN', 'blockers': []}
+        with self.assertRaises(RuntimeError):
+            self.run_candidate_samples(guard, [[early, session(101) | {'blockers': [102]},
+                session(102) | {'blockers': [101]}]])
+        self.assertEqual(guard.failure_diagnostic['reason'], 'unowned_barrier_blocker')
+        guard.controller.pin.assert_not_called()
+        guard.owned.process.send_signal.assert_not_called()
+
+    def test_candidate_wait_does_not_hide_duplicate_identity_or_later_bad_sample(self):
+        early = session() | {'query': 'BEGIN', 'blockers': []}
+        for bad in (session(101) | {'blockers': [999]}, session(101) | {'state': 42},
+                    session(101) | {'locks': [lock('unknown', 'ShareLock')]}):
+            guard = self.guard()
+            with self.assertRaises(RuntimeError): self.run_candidate_samples(guard, [[early, bad]])
+            guard.controller.pin.assert_not_called()
+        guard = self.guard()
+        frame = copy.deepcopy(guard.controller.snapshot.return_value)
+        record = copy.deepcopy(frame['records'][0]); record.update(generation=3, backend=101)
+        record['candidate']['generation'] = 4
+        frame['records'].append(record); frame['open'] = 2
+        with self.assertRaises(RuntimeError):
+            self.run_candidate_samples(guard, [[early, session(101)]], [frame])
+        self.assertEqual(guard.failure_diagnostic['reason'], 'candidate_ambiguous')
+        guard.controller.pin.assert_not_called()
+
+    def test_selected_candidate_post_stop_begin_remains_immediate_failure(self):
+        guard = self.guard()
+        with self.assertRaises(RuntimeError):
+            self.run_candidate_samples(guard, [[session()], [session()], [session() | {'query': 'BEGIN', 'blockers': []}]])
+        self.assertEqual(guard.failure_diagnostic['reason'], 'unsafe_transaction_query')
+        guard.owned.process.send_signal.assert_called_once_with(signal.SIGSTOP)
+        self.assertEqual(guard.owned.resume.call_count, 2)
+
+    def test_candidate_diagnostic_rejects_extra_fields_subclasses_and_unknown_values(self):
+        pending = g.candidate_activity_pending(session() | {'query': 'BEGIN', 'blockers': []}, [session()], 99)
+        valid = pending.candidate_diagnostic
+        for change in ({'transaction': 1}, {'queryCategory': 'private' * 10000}, {'extra': 'private'}):
+            value = RuntimeError('candidate activity not ready'); value.candidate_diagnostic = valid | change
+            self.assertNotIn('queryCategory', g.failure_event('candidate_binding', value))
+        class Sub(RuntimeError): pass
+        value = Sub('candidate activity not ready'); value.candidate_diagnostic = valid
+        self.assertEqual(g.failure_event('candidate_binding', value)['reason'], 'unclassified')
 
     def test_runtime_projection_types_are_closed_and_never_freeze_whitelist(self):
         shapes = {
@@ -307,7 +428,7 @@ class ContractTests(unittest.TestCase):
         expected = {
             'validate_sessions': '4efb9b60ec57914d43c55c695e0916b07d71fbcd3f3cdac8c3cd06b630bbd092',
             'validate_checkpoint': '83ff1b7a711627ec7ee4e28761dde75f5e18ae3e81abb39927b8057022a06e74',
-            'checkpoint': '5e919a44e16be3010201fceef9a13f1ccf2494870c0cb6f18464b54c08b284e2',
+            'checkpoint': '0a692e55ef373d58e28b64a6913ea4986f9aed5078ee8af72cc98f2d870f62fc',
         }
         actual = {node.name: hashlib.sha256(ast.get_source_segment(source, node).encode()).hexdigest()
                   for node in ast.walk(ast.parse(source)) if isinstance(node, ast.FunctionDef)

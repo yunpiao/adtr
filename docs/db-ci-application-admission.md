@@ -208,3 +208,31 @@ unclassified. Neither exception arguments nor private frames are serialized. Thi
 instrumentation retains the original absolute capture deadline, refusal behavior
 and recovery order. The next exact-tree CI must distinguish a target-chain mismatch,
 registry inconsistency, protocol rejection, or a checkpoint that never became ready.
+
+### Candidate registration precedes the activity statement
+
+PR173 run 39039571691 reported `candidate_binding/candidate_chain_mismatch`
+for all three export kinds. This establishes that the combined activity predicate
+was false; it does not establish which member failed. In the fixed source,
+`withActivityTx` registers the candidate before `Begin`, schema validation, and
+the activity statement. The observer also samples PostgreSQL before requesting
+the registry snapshot, so registration may be newer than the sampled SQL.
+
+Before pinning, a complete trusted sample and complete registry/PG set must first
+identify one authoritative candidate. The guard retains its registration and
+connection generations, backend, task, kind, attempt, slot owner, fence, committed
+version, and phase. Disappearance or replacement fails, including while the next
+registry set is incomplete. Only known BEGIN, schema, schema-gate, empty query,
+or activity statements that have not reached the original direct activity/barrier
+predicate may wait within the original absolute 1.5-second window. Unknown SQL
+fails with closed diagnostic fields. Waiting never grants pin or STOP eligibility.
+The same singleton strict checks remain mandatory before pin, and sealed/frozen
+samples retain immediate strict rejection.
+
+An indirect owned activity chain is only a waiting condition. If it persists,
+the attempt expires without STOP. It may reveal a shared-row drain obstruction;
+this patch does not authorize additional exempt connections. Timeout diagnostics
+classify only query/state/wait enums, transaction boolean, and blocker category
+from the already sampled data. No identifier, query text, new RPC, or extra window
+is introduced. Actual CI must determine whether early observation or an indirect
+chain caused the recorded failures.

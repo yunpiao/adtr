@@ -87,6 +87,8 @@ FAILURE_REASONS = MappingProxyType({
     'invalid candidate phase': 'candidate_phase_invalid',
     'candidate backend unavailable': 'candidate_backend_unavailable',
     'candidate activity chain mismatch': 'candidate_chain_mismatch',
+    'candidate activity not ready': 'candidate_activity_pending',
+    'selected candidate changed': 'selected_candidate_changed',
     'invalid registry counts': 'registry_counts_invalid',
     'registry counts disagree': 'registry_counts_disagree',
     'invalid registry record': 'registry_record_invalid',
@@ -280,9 +282,14 @@ def failure_event(stage, error):
     if (type(detail) is dict and set(detail) == {'blockerCheck'} and
             type(detail['blockerCheck']) is str and detail['blockerCheck'] in BLOCKER_CHECKS):
         event.update(detail)
+    detail = getattr(error, 'candidate_diagnostic', None) if reason in ('candidate_activity_pending', 'candidate_chain_mismatch') else None
+    if (type(detail) is dict and set(detail) == set(CANDIDATE_WAIT_VALUES) | {'transaction'}
+            and type(detail['transaction']) is bool and all(type(detail[key]) is str
+                and detail[key] in values for key, values in CANDIDATE_WAIT_VALUES.items())):
+        event.update({key: detail[key] for key in (*CANDIDATE_WAIT_VALUES, 'transaction')})
     pending = getattr(error, 'last_not_ready_error', None) if reason == 'capture_deadline_missed' else None
     if (type(pending) is RuntimeError and len(pending.args) == 1 and
-            type(pending.args[0]) is str and pending.args[0] in FREEZE_NOT_READY | {'owned registry observation incomplete', 'owned connections still draining', 'checkpoint task boundary pending', 'owned candidate registration absent'}):
+            type(pending.args[0]) is str and pending.args[0] in FREEZE_NOT_READY | {'owned registry observation incomplete', 'owned connections still draining', 'checkpoint task boundary pending', 'owned candidate registration absent', 'candidate activity not ready'}):
         event['lastNotReady'] = failure_event('capture', pending)
     observations = getattr(error, 'capture_observations', None) if reason == 'capture_deadline_missed' else None
     if type(observations) is int and 0 <= observations <= 1000000:
@@ -661,27 +668,75 @@ JOURNAL_PROOF_SQL = """SELECT jsonb_build_object(
  FROM adtr.operational_log_events e WHERE module='worker' AND code='queue_progress'"""
 
 
-def registered_candidate(frame, task, sessions, lock_pid):
-    """Private IPC and PG must independently identify the same exact attempt."""
+def candidate_identity(frame, task, sessions):
+    """Select identity only, never grant pin or frozen eligibility."""
     require(frame['status'] in ('open', 'draining', 'sealed'), 'invalid registry state')
     matches = []
     by_pid = {row['pid']: row for row in sessions}
+    keys = ('taskID', 'kind', 'attempt', 'leaseOwner', 'fencingToken', 'resultVersion')
     for record in frame['records']:
         candidate = record['candidate']
         if candidate is None:
             continue
-        if all(candidate[key] == task[key] for key in ('taskID', 'kind', 'attempt',
-                'leaseOwner', 'fencingToken', 'resultVersion')):
+        if all(candidate[key] == task[key] for key in keys):
             require(candidate['phase'] == 'first-fenced-progress-10', 'invalid candidate phase')
             require(record['state'] == 'open' and record['backend'] in by_pid,
                     'candidate backend unavailable')
-            row = by_pid[record['backend']]
-            require(normalized(row['query']) == normalized(ACTIVITY_SQL) and
-                    row['transaction'] is True and lock_pid in row['blockers'],
-                    'candidate activity chain mismatch')
-            matches.append((candidate['generation'], record['backend']))
+            matches.append((candidate['generation'], record['backend'], record['generation'],
+                            *(candidate[key] for key in keys), candidate['phase']))
     require(len(matches) <= 1, 'ambiguous candidate identity')
     return matches[0] if matches else None
+
+
+def activity_direct(row, lock_pid):
+    return (normalized(row['query']) == normalized(ACTIVITY_SQL) and
+            row['transaction'] is True and lock_pid in row['blockers'])
+
+
+def registered_candidate(frame, task, sessions, lock_pid):
+    identity = candidate_identity(frame, task, sessions)
+    if identity is None:
+        return None
+    row = next(row for row in sessions if row['pid'] == identity[1])
+    require(activity_direct(row, lock_pid), 'candidate activity chain mismatch')
+    return identity[:2]
+
+
+CANDIDATE_WAIT_VALUES = {
+    key: TRANSACTION_FAILURE_VALUES[key] for key in
+    ('queryCategory', 'stateCategory', 'waitTypeCategory')}
+CANDIDATE_WAIT_VALUES['blockerCategory'] = frozenset({'none', 'direct_barrier_only',
+    'direct_plus_owned', 'indirect_owned_activity', 'owned_nonactivity', 'unresolved'})
+
+
+def candidate_activity_pending(row, sessions, lock_pid):
+    # Same already trust-checked sample; no new query or retained private values.
+    detail = transaction_query_failure(row).transaction_diagnostic
+    reachable = {lock_pid}
+    for _ in sessions:
+        for item in sessions:
+            if (item['blockers'] and set(item['blockers']) <= reachable and
+                    normalized(item['query']) == normalized(ACTIVITY_SQL) and
+                    item['transaction'] is True and item['waitType'] == 'Lock'):
+                reachable.add(item['pid'])
+    blockers = set(row['blockers'])
+    if not blockers:
+        category = 'none'
+    elif blockers == {lock_pid}:
+        category = 'direct_barrier_only'
+    elif lock_pid in blockers:
+        category = 'direct_plus_owned'
+    elif blockers <= reachable:
+        category = 'indirect_owned_activity'
+    elif blockers <= {item['pid'] for item in sessions}:
+        category = 'owned_nonactivity'
+    else:
+        category = 'unresolved'
+    error = RuntimeError('candidate activity not ready')
+    error.candidate_diagnostic = {key: detail[key] for key in
+        ('queryCategory', 'stateCategory', 'waitTypeCategory')}
+    error.candidate_diagnostic.update(transaction=row['transaction'], blockerCategory=category)
+    return error
 
 
 def registry_matches_pg(frame, sessions):
@@ -847,6 +902,7 @@ class RunningExportCancelGuard:
             deadline = resumed + 1.5  # fail closed before the production 2s callback expires
             self.controller.arm(deadline)
             candidate = None
+            selected_identity = None
             sealed_frame = None
             sample = None
             last_not_ready = None
@@ -861,24 +917,47 @@ class RunningExportCancelGuard:
                     last_not_ready = pending
                 stage = 'capture'
                 task = sample['task']
+                if selected_identity is not None:
+                    validate_checkpoint(task, task_id, worker_id, self.asset_kind)
+                    require(tuple(task[key] for key in ('taskID', 'kind', 'attempt',
+                        'leaseOwner', 'fencingToken', 'resultVersion')) == selected_identity[3:9],
+                        'selected candidate changed')
                 if task and task['state'] == 'running' and task['progress'] == 10 and task['snapshotCount'] == 1:
                     stage = 'checkpoint_validation'
                     validate_checkpoint(task, task_id, worker_id, self.asset_kind)
                     stage = 'registry_snapshot'
                     frame = self.controller.snapshot(deadline)
                     stage = 'registry_match'
-                    if not registry_matches_pg(frame, sample['sessions']):
+                    registry_complete = registry_matches_pg(frame, sample['sessions'])
+                    if selected_identity is not None:
+                        require(candidate_identity(frame, task, sample['sessions']) == selected_identity,
+                                'selected candidate changed')
+                    if not registry_complete:
                         last_not_ready = RuntimeError('owned registry observation incomplete')
                         stage = 'capture'
                         time.sleep(.002)
                         continue
                     if candidate is None:
                         stage = 'candidate_binding'
-                        candidate = registered_candidate(frame, task, sample['sessions'], lock.pid)
-                        if candidate is None:
+                        identity = candidate_identity(frame, task, sample['sessions'])
+                        if identity is None:
                             last_not_ready = RuntimeError('owned candidate registration absent')
                             time.sleep(.002)
                             continue
+                        if selected_identity is None:
+                            selected_identity = identity
+                        require(identity == selected_identity, 'selected candidate changed')
+                        target = next(row for row in sample['sessions'] if row['pid'] == identity[1])
+                        if not activity_direct(target, lock.pid):
+                            last_not_ready = candidate_activity_pending(target, sample['sessions'], lock.pid)
+                            if normalized(target['query']) not in {normalized(ACTIVITY_SQL),
+                                    normalized(SCHEMA_SQL), normalized(GATE_SQL), '', 'begin', 'BEGIN'}:
+                                rejected = RuntimeError('candidate activity chain mismatch')
+                                rejected.candidate_diagnostic = last_not_ready.candidate_diagnostic
+                                raise rejected
+                            time.sleep(.002)
+                            continue
+                        candidate = identity[:2]
                         # Only this exact existing candidate may be pinned. Its
                         # singleton sample must pass the unchanged strict rules.
                         stage = 'candidate_strict'
