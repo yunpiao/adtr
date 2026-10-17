@@ -516,6 +516,47 @@ def final_journal_projection(logs):
                 pass
 
 
+RECOVERY_CLEANUP_EVENT = 'owned_ci_recovery_cleanup'
+RECOVERY_CLEANUP_COUNTS = frozenset({'qualified', 'completed', 'pending', 'open',
+                                     'connectPending', 'failed'})
+
+
+def recovery_cleanup_projection(logs):
+    """Private shutdown proof; absent or malformed summaries are never zero."""
+    position = None
+    try:
+        logs.flush()
+        position = logs.tell()
+        logs.seek(0)
+        text = logs.read(MAX_FINAL_LOG_BYTES + 1)
+        if type(text) is not str or len(text.encode('utf-8')) > MAX_FINAL_LOG_BYTES:
+            return None
+        candidates = [line for line in text.splitlines(keepends=True) if RECOVERY_CLEANUP_EVENT in line]
+        if (len(candidates) != 1 or not candidates[0].endswith('\n')
+                or len(candidates[0].encode('utf-8')) > 1024):
+            return None
+        frame = json.loads(candidates[0], object_pairs_hook=_unique_object,
+                           parse_constant=lambda _: _fail())
+        flags = {'captureAuthorized', 'released', 'settled'}
+        fields = RECOVERY_CLEANUP_COUNTS | flags | {'event'}
+        if (type(frame) is not dict or set(frame) != fields
+                or frame['event'] != RECOVERY_CLEANUP_EVENT
+                or not all(type(frame[key]) is bool for key in flags)
+                or not all(type(frame[key]) is int and 0 <= frame[key] <= 2 ** 63 - 1
+                           for key in RECOVERY_CLEANUP_COUNTS)):
+            return None
+        # Accounting/authorization and independent PostgreSQL proof belong to guard.
+        return {key: frame[key] for key in fields}
+    except Exception:
+        return None
+    finally:
+        if position is not None:
+            try:
+                logs.seek(position)
+            except Exception:
+                pass
+
+
 def diagnostic_projection(frame, seq):
     fields = {'version', 'epoch', 'seq', 'kind', 'reason', 'phase',
               'pending', 'open', 'total', 'retained'}
@@ -894,6 +935,11 @@ class OwnedCIWorker:
         except Exception:
             pass  # Optional evidence must not interrupt owned cleanup.
         return report
+
+    def recovery_cleanup_after_wait(self, logs):
+        if self.process is None or type(self.process.returncode) is not int:
+            return None
+        return recovery_cleanup_projection(logs)
 
     def final_journal_after_wait(self, logs):
         if self.process is None or type(self.process.returncode) is not int:

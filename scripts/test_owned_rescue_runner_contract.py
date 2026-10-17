@@ -226,6 +226,12 @@ RUNNER_DELTAS = [('from user_asset_export_v3_terminal_ci import SUITES as EXPORT
   '                    shutdown_error = RuntimeError("owned CI activity fixture cleanup failed")\n'
   '            if running_cancel_guard is not None and shutdown_error is None:\n'
   '                try:\n'
+  '                    running_cancel_guard.verify_recovery_cleanup_after_wait(worker.returncode, '
+  'owned_ci_worker.recovery_cleanup_after_wait(logs))\n'
+  '                except Exception:\n'
+  '                    shutdown_error = RuntimeError("owned CI recovery cleanup proof failed")\n'
+  '            if running_cancel_guard is not None and shutdown_error is None:\n'
+  '                try:\n'
   "                    # The worker's successful Wait includes journal.Close/drain.\n"
   '                    # Query its final report while the isolated database is alive.\n'
   '                    running_cancel_guard.verify_journal_after_wait(worker.returncode, '
@@ -652,6 +658,88 @@ class Contracts(unittest.TestCase):
                     else:
                         self.assertEqual(rows[1], detail)
 
+    def test_recovery_cleanup_private_summary_is_strict_and_after_wait(self):
+        import io
+        summary = dict(event=r.RECOVERY_CLEANUP_EVENT, captureAuthorized=True,
+                       released=True, settled=True,
+                       **{key: 0 for key in r.RECOVERY_CLEANUP_COUNTS})
+        line = json.dumps(summary) + '\n'
+        owner = r.OwnedCIWorker(); owner.process = Mock(returncode=None)
+        logs = io.StringIO(line); logs.seek(6)
+        with patch('builtins.print') as output:
+            self.assertIsNone(owner.recovery_cleanup_after_wait(logs))
+            self.assertEqual(logs.tell(), 6)
+            owner.process.returncode = 0
+            self.assertEqual(owner.recovery_cleanup_after_wait(logs), summary)
+            self.assertEqual(logs.tell(), 6)
+            output.assert_not_called()
+        bad = [line + line, line.rstrip(), '', 'prefix ' + line, ' ' * 1024 + line,
+               json.dumps(summary | {'private': 'secret'}) + '\n', '\udcff' + line,
+               line.replace('"released": true', '"released": true, "released": false')]
+        for key in r.RECOVERY_CLEANUP_COUNTS:
+            for value in (True, -1, 2 ** 63, 1.0, '0', {}, None):
+                bad.append(json.dumps(summary | {key: value}) + '\n')
+            maximum = summary | {key: 2 ** 63 - 1}
+            self.assertEqual(r.recovery_cleanup_projection(io.StringIO(json.dumps(maximum) + '\n')), maximum)
+        for key in ('captureAuthorized', 'released', 'settled'):
+            for value in (0, 1, None, 'true'):
+                bad.append(json.dumps(summary | {key: value}) + '\n')
+        for key in summary:
+            bad.append(json.dumps({k: v for k, v in summary.items() if k != key}) + '\n')
+        for text in bad:
+            logs = io.StringIO(text); logs.seek(1 if text else 0); before = logs.tell()
+            self.assertIsNone(r.recovery_cleanup_projection(logs))
+            self.assertEqual(logs.tell(), before)
+        with patch.object(r, 'MAX_FINAL_LOG_BYTES', len(line) - 1):
+            self.assertIsNone(r.recovery_cleanup_projection(io.StringIO(line)))
+        broken = Mock(); broken.tell.return_value = 12
+        broken.read.side_effect = RuntimeError('private failure')
+        self.assertIsNone(r.recovery_cleanup_projection(broken))
+        self.assertEqual(broken.seek.call_args.args, (12,))
+
+    def test_recovery_cleanup_must_pass_before_journal_and_keeps_finally(self):
+        source = Path(__file__).with_name('test_auth_e2e.py').read_text()
+        tree = ast.parse(source)
+        gates = [node for node in ast.walk(tree) if isinstance(node, ast.If)
+                 and ast.unparse(node.test) == 'running_cancel_guard is not None and shutdown_error is None']
+        self.assertEqual(len(gates), 2)
+        gates.sort(key=lambda node: node.lineno)
+        self.assertIn('verify_recovery_cleanup_after_wait', ast.get_source_segment(source, gates[0]))
+        self.assertIn('verify_journal_after_wait', ast.get_source_segment(source, gates[1]))
+        wait_loop = next(node for node in ast.walk(tree) if isinstance(node, ast.For)
+                         and ast.unparse(node.target) == '(label, process)')
+        self.assertLess(wait_loop.end_lineno, gates[0].lineno)
+        self.assertLess(source.index('owned_ci_worker.close_after_wait()'),
+                        source.index('running_cancel_guard.verify_recovery_cleanup_after_wait'))
+        self.assertLess(source.index('cleanup_activity_fixture_after_wait(worker.returncode)'),
+                        source.index('running_cancel_guard.verify_recovery_cleanup_after_wait'))
+        self.assertLess(gates[1].end_lineno, next(node.lineno for node in ast.walk(tree)
+                        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                        and node.func.id == 'remove_owned_container'))
+        code = compile(ast.fix_missing_locations(ast.Module(body=gates, type_ignores=[])),
+                       '<recovery-proof-contract>', 'exec')
+        for prior, failure in ((None, None), (None, RuntimeError('private error')),
+                               (RuntimeError('prior'), None)):
+            guard, owner = Mock(), Mock()
+            guard.verify_recovery_cleanup_after_wait.side_effect = failure
+            owner.recovery_cleanup_after_wait.return_value = None
+            owner.final_journal_after_wait.return_value = {'private': 'journal'}
+            scope = dict(running_cancel_guard=guard, owned_ci_worker=owner,
+                         worker=Mock(returncode=0), logs=object(), shutdown_error=prior)
+            exec(code, scope)
+            if prior is None:
+                guard.verify_recovery_cleanup_after_wait.assert_called_once_with(0, None)
+                if failure is None:
+                    guard.verify_journal_after_wait.assert_called_once_with(0, {'private': 'journal'})
+                else:
+                    guard.verify_journal_after_wait.assert_not_called()
+                    self.assertEqual(str(scope['shutdown_error']), 'owned CI recovery cleanup proof failed')
+            else:
+                guard.verify_recovery_cleanup_after_wait.assert_not_called()
+                owner.recovery_cleanup_after_wait.assert_not_called()
+                guard.verify_journal_after_wait.assert_not_called()
+                self.assertIs(scope['shutdown_error'], prior)
+
     def test_final_journal_private_projection_is_strict_and_post_wait(self):
         import io
         stats = dict(event=r.FINAL_JOURNAL_EVENT, processIDSHA256='ab' * 32,
@@ -869,7 +957,8 @@ class Contracts(unittest.TestCase):
                        and isinstance(node.func, ast.Name) and node.func.id == 'remove_owned_container')
         self.assertLess(proof.lineno, cleanup.lineno)
         gate = next(node for node in ast.walk(tree) if isinstance(node, ast.If)
-                    and ast.unparse(node.test) == 'running_cancel_guard is not None and shutdown_error is None')
+                    and ast.unparse(node.test) == 'running_cancel_guard is not None and shutdown_error is None'
+                    and 'verify_journal_after_wait' in ast.get_source_segment(source, node))
         self.assertTrue(gate.lineno < proof.lineno < gate.end_lineno)
         # Execute only this isolated cleanup gate with mocks: no processes/DB.
         block = ast.Module(body=[gate], type_ignores=[])

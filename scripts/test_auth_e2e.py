@@ -419,6 +419,11 @@ def main():
                     shutdown_error = RuntimeError("owned CI activity fixture cleanup failed")
             if running_cancel_guard is not None and shutdown_error is None:
                 try:
+                    running_cancel_guard.verify_recovery_cleanup_after_wait(worker.returncode, owned_ci_worker.recovery_cleanup_after_wait(logs))
+                except Exception:
+                    shutdown_error = RuntimeError("owned CI recovery cleanup proof failed")
+            if running_cancel_guard is not None and shutdown_error is None:
+                try:
                     # The worker's successful Wait includes journal.Close/drain.
                     # Query its final report while the isolated database is alive.
                     running_cancel_guard.verify_journal_after_wait(worker.returncode, owned_ci_worker.final_journal_after_wait(logs))

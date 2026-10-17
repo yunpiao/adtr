@@ -136,8 +136,9 @@ func captureEndDeclarations(fset *token.FileSet, path string, files []*ast.File,
 					}
 					if obj.Name() == "captureObligationsEndedLocked" && sig.Recv() != nil && isNamed(sig.Recv().Type(), managed, "lifecycleGate") {
 						allowed := path == managed && ((filename == "lifecycle_ci.go" && (name == "lifecycleTicket.closedObserved" || name == "lifecycleTicket.closingConnection")) || (filename == "seal_ci.go" && (name == "lifecycleGate.registerActivityRow" || name == "lifecycleGate.invalidateWaitLocked")))
+						allowed = allowed || (name == "lifecycleGate.release" && exactRecoveryFunction(path, filename, name, fn))
 						if !allowed || !captureConsumerCall(x, ancestors, name == "lifecycleGate.registerActivityRow") {
-							emit(x, "capture-end authorization outside the four reviewed liveness call sites")
+							emit(x, "capture-end authorization outside reviewed liveness or first-release authorization call sites")
 						}
 					}
 				case *ast.SelectorExpr:
@@ -181,15 +182,7 @@ func captureEndDeclarations(fset *token.FileSet, path string, files []*ast.File,
 	return out
 }
 
-const captureEndCleanupBody = `{
- stopOnce.Do(func(){stopping.Store(true);normal.Close();rescue.Close()})
- wg.Wait()
- g.mu.Lock()
- g.captureEndFD = 0
- captureEnd.Close()
- g.mu.Unlock()
- reportOnce.Do(func(){g.writeFinalInvalidationDiagnostic()})
-}`
+const captureEndCleanupBody = recoveryCleanupBody
 
 func captureEndCleanup(path, file, function string, field *ast.SelectorExpr, ancestors []ast.Node) bool {
 	if path != managed || file != "application_controller_ci.go" || function != "StartCIController" || field.Sel.Name != "captureEndFD" || len(ancestors) < 2 {

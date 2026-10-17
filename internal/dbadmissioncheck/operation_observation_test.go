@@ -15,6 +15,7 @@ func observerFixtures(t *testing.T) (string, fixtureImporter) {
 		{"errors", `package errors;func Is(error,error)bool{return false}`},
 		{"os", `package os;type File struct{};var Stderr *File;func(*File)Write([]byte)(int,error){return 0,nil}`},
 		{"sync", `package sync;type Mutex struct{};func(*Mutex)Lock(){};func(*Mutex)Unlock(){}`},
+		{pgx + "/pgconn", `package pgconn;var ErrConnClosed error`},
 		{pgx, `package pgx;import "context";type Conn struct{};func(*Conn)IsClosed()bool{return false};type TraceQueryStartData struct{SQL string;Args []any};type TraceQueryEndData struct{Err error};type QueryTracer interface{TraceQueryStart(context.Context,*Conn,TraceQueryStartData)context.Context;TraceQueryEnd(context.Context,*Conn,TraceQueryEndData)};type ConnConfig struct{Tracer QueryTracer};func(c *ConnConfig)Copy()*ConnConfig{return c}`},
 	} {
 		p, _ := fixtureCheck(t, entry.path, "fixture.go", entry.source, imp)
@@ -26,8 +27,8 @@ func observerFixtures(t *testing.T) (string, fixtureImporter) {
 	}
 	source := strings.Replace(string(data), "import (", "import (\n\"sync\"", 1) + `
  type invalidationReason string;const invalidUncleanClose invalidationReason="unclean_close"
- type lifecycleGate struct{mu sync.Mutex;application bool;workerContext context.Context;firstInvalidReason invalidationReason;firstUncleanOperation *uncleanOperationDiagnostic}
- type lifecycleTicket struct{gate *lifecycleGate;conn *Conn;state byte;firstOperationError,firstNativeClosedError *operationErrorDiagnostic}
+ type lifecycleGate struct{mu sync.Mutex;application bool;workerContext context.Context;firstInvalidReason invalidationReason;firstUncleanOperation *uncleanOperationDiagnostic;recoveryFinalized bool}
+ type lifecycleTicket struct{gate *lifecycleGate;conn *Conn;state byte;firstOperationError,firstNativeClosedError *operationErrorDiagnostic;operationInFlight int;operationSequence,activeOperation uint64;contaminateRecoveryLocked func()}
  var coordinator struct{sync.Mutex;gate *lifecycleGate}
  func(g *lifecycleGate)diagnosticPhaseLocked()string{return "open"}
  `
@@ -47,6 +48,13 @@ func TestObserverNativeAndConfigCapabilitiesAreExact(t *testing.T) {
 		bad          bool
 	}{
 		{"reviewed observer", original, false},
+		{"overlap ignored", strings.Replace(original, "t.operationInFlight != 0", "t.operationInFlight == 0", 1), true},
+		{"sequence mismatch ignored", strings.Replace(original, "trace.sequence != t.activeOperation", "trace.sequence == t.activeOperation", 1), true},
+		{"rollback wrong sentinel", strings.Replace(original, "pgconn.ErrConnClosed", "context.Canceled", 1), true},
+		{"rollback permitted while open", strings.Replace(original, `operation == "rollback" && nativeClosed`, `operation == "rollback" && !nativeClosed`, 1), true},
+		{"forged trace identity", original + `func other(){_=operationTraceKey{}}`, true},
+		{"trace sequence mutation", original + `func other(trace *operationTrace){trace.sequence=2}`, true},
+		{"first error altered", original + `func other(d *operationErrorDiagnostic){d.NativeClosedAtEnd=true}`, true},
 		{"overwrite existing tracer", strings.Replace(original, "config.Tracer != nil", "config.Tracer == nil", 1), true},
 		{"mutate caller config", strings.Replace(original, "copy := config.Copy()", "copy := config", 1), true},
 		{"extra config effect", strings.Replace(original, "copy.Tracer =", "config.Tracer=nil;copy.Tracer =", 1), true},

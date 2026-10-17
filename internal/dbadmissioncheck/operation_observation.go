@@ -72,37 +72,61 @@ var observationBodies = map[string]string{
 	case "rollback":
 		operation = "rollback"
 	}
-	g := o.ticket.gate
+	t := o.ticket
+	g := t.gate
+	nativeClosed := conn != nil && conn.IsClosed()
 	g.mu.Lock()
-	phase := g.diagnosticPhaseLocked()
+	matched := t.conn != nil && t.conn.raw == conn && t.state == 'o'
+	closedRollback := operation == "rollback" && nativeClosed && matched && t.firstOperationError != nil && t.firstOperationError == t.firstNativeClosedError
+	if t.operationInFlight != 0 || t.operationSequence == ^uint64(0) || g.recoveryFinalized || t.state == 'q' || t.state == 'r' || (t.firstOperationError != nil && !closedRollback) {
+		t.contaminateRecoveryLocked()
+	}
+	if t.operationSequence != ^uint64(0) {
+		t.operationSequence++
+	}
+	t.activeOperation = t.operationSequence
+	t.operationInFlight++
+	trace := operationTrace{o, ctx, operation, g.diagnosticPhaseLocked(), t.activeOperation, closedRollback}
 	g.mu.Unlock()
-	// Retain only the original context and a closed category, never SQL/arguments.
-	return context.WithValue(ctx, operationTraceKey{}, operationTrace{o, ctx, operation, phase})
+	return context.WithValue(ctx, operationTraceKey{}, trace)
 }`,
 	"operationObserver.TraceQueryEnd": `{
-	if data.Err == nil {
-		return
-	}
-	// Classify the returned error independently before looking at cancellation.
+	// Error identity is sampled independently before observing cancellation.
 	category := diagnosticErrorCategory(data.Err)
 	trace, ok := ctx.Value(operationTraceKey{}).(operationTrace)
+	t := o.ticket
+	g := t.gate
 	if !ok || trace.observer != o {
+		g.mu.Lock()
+		t.contaminateRecoveryLocked()
+		g.mu.Unlock()
 		return
 	}
 	state := diagnosticContextState(trace.ctx)
 	matches := (state == "canceled" && category == "canceled") || (state == "deadline_exceeded" && category == "deadline_exceeded")
 	nativeClosed := conn != nil && conn.IsClosed()
-	g := o.ticket.gate
+	closedRollbackResult := data.Err != nil && errors.Is(data.Err, pgconn.ErrConnClosed)
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	ticket := o.ticket
-	matched := ticket.conn != nil && ticket.conn.raw == conn && ticket.state == 'o'
-	d := &operationErrorDiagnostic{trace.operation, trace.startPhase, g.diagnosticPhaseLocked(), state, category, matches, nativeClosed, diagnosticContextState(g.workerContext), matched}
-	if ticket.firstOperationError == nil {
-		ticket.firstOperationError = d
+	matched := t.conn != nil && t.conn.raw == conn && t.state == 'o'
+	if t.operationInFlight != 1 || trace.sequence != t.activeOperation || !matched || g.recoveryFinalized {
+		t.contaminateRecoveryLocked()
 	}
-	if nativeClosed && ticket.firstNativeClosedError == nil {
-		ticket.firstNativeClosedError = d
+	if t.operationInFlight > 0 {
+		t.operationInFlight--
+	}
+	if t.firstOperationError != nil && !(trace.closedRollback && closedRollbackResult && nativeClosed && matched) {
+		t.contaminateRecoveryLocked()
+	}
+	if data.Err == nil {
+		return
+	}
+	d := &operationErrorDiagnostic{trace.operation, trace.startPhase, g.diagnosticPhaseLocked(), state, category, matches, nativeClosed, diagnosticContextState(g.workerContext), matched}
+	if t.firstOperationError == nil {
+		t.firstOperationError = d
+	}
+	if nativeClosed && t.firstNativeClosedError == nil {
+		t.firstNativeClosedError = d
 	}
 }`,
 	"validOperationPhase": `{
@@ -164,7 +188,7 @@ var observationBodies = map[string]string{
 var observationTypes = map[string]string{
 	"operationObserver":          "struct{ ticket *lifecycleTicket }",
 	"operationTraceKey":          "struct{}",
-	"operationTrace":             "struct {\n\tobserver              *operationObserver\n\tctx                   context.Context\n\toperation, startPhase string\n}",
+	"operationTrace":             "struct {\n\tobserver              *operationObserver\n\tctx                   context.Context\n\toperation, startPhase string\n\tsequence              uint64\n\tclosedRollback        bool\n}",
 	"operationErrorDiagnostic":   "struct {\n\tOperation           string `json:\"operation\"`\n\tStartPhase          string `json:\"startPhase\"`\n\tEndPhase            string `json:\"endPhase\"`\n\tContextState        string `json:\"contextState\"`\n\tErrorCategory       string `json:\"errorCategory\"`\n\tErrorMatchesContext bool   `json:\"errorMatchesContext\"`\n\tNativeClosedAtEnd   bool   `json:\"nativeClosedAtEnd\"`\n\tRootContextState    string `json:\"rootContextState\"`\n\tConnectionMatched   bool   `json:\"connectionMatched\"`\n}",
 	"uncleanOperationDiagnostic": "struct {\n\tEvent                  string                    `json:\"event\"`\n\tBirthPhase             string                    `json:\"birthPhase\"`\n\tBirthCaptureEnded      bool                      `json:\"birthCaptureEnded\"`\n\tFirstError             *operationErrorDiagnostic `json:\"firstError\"`\n\tFirstNativeClosedError *operationErrorDiagnostic `json:\"firstNativeClosedError\"`\n\tRootAtClose            string                    `json:\"rootAtClose\"`\n}",
 }

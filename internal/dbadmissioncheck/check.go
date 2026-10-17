@@ -38,6 +38,7 @@ func Check(fset *token.FileSet, path string, files []*ast.File, info *types.Info
 	out = append(out, journalFinalDeclarations(fset, path, files, info)...)
 	out = append(out, uncleanCloseDeclarations(fset, path, files, info)...)
 	out = append(out, operationObservationDeclarations(fset, path, files, info)...)
+	out = append(out, recoveryDeclarations(fset, path, files, info)...)
 	scanners := scanOnlyParameters(files, info)
 	emit := func(n ast.Node, reason string) { out = append(out, Diagnostic{fset.Position(n.Pos()), reason}) }
 	for _, file := range files {
@@ -126,7 +127,10 @@ func Check(fset *token.FileSet, path string, files []*ast.File, info *types.Info
 							if path == managed && filepath.Base(fset.Position(file.Pos()).Filename) == "lifecycle_ci.go" && name == "lifecycleTicket.connected" && lifecycleBackendRead(fn, sel, ancestors, info) {
 								allowed = true
 							}
-							if exactObserverFunction(path, filepath.Base(fset.Position(file.Pos()).Filename), name, fn) && name == "operationObserver.TraceQueryEnd" && sourceText(sel) == "conn.IsClosed" && s.Kind() == types.MethodVal && isNamed(s.Recv(), pgx, "Conn") {
+							if exactObserverFunction(path, filepath.Base(fset.Position(file.Pos()).Filename), name, fn) && (name == "operationObserver.TraceQueryStart" || name == "operationObserver.TraceQueryEnd") && sourceText(sel) == "conn.IsClosed" && s.Kind() == types.MethodVal && isNamed(s.Recv(), pgx, "Conn") {
+								allowed = true
+							}
+							if recoveryNativeRead(path, filepath.Base(fset.Position(file.Pos()).Filename), name, fn, sel, info) {
 								allowed = true
 							}
 							if !allowed {

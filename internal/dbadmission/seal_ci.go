@@ -12,14 +12,15 @@ var errSealProtocol = errors.New("database seal unavailable")
 // sealAttempt is installed only by package tests in this verification slice.
 // LOCAL_SEALED is a local lifetime assertion, never PostgreSQL eligibility.
 type sealAttempt struct {
-	epoch          uint64
-	target         *lifecycleTicket
-	registration   *activityRegistration
-	released       bool
-	captureEnded   bool
-	publishInvalid func()
-	publishOnce    sync.Once
-	publishDone    chan struct{}
+	epoch              uint64
+	target             *lifecycleTicket
+	registration       *activityRegistration
+	released           bool
+	captureEnded       bool
+	recoveryAuthorized bool
+	publishInvalid     func()
+	publishOnce        sync.Once
+	publishDone        chan struct{}
 }
 
 type sealSnapshot struct {
@@ -75,6 +76,7 @@ func (g *lifecycleGate) registerActivityRow(conn *Conn, identity ActivityIdentit
 	}
 	g.next++
 	registration := &activityRegistration{identity: identity, backend: ticket.backend, generation: g.next, activityKey: key}
+	ticket.recoveryEverRegistered = true
 	ticket.registration = registration
 	g.notifyLocked()
 	g.mu.Unlock()
@@ -151,6 +153,11 @@ func (g *lifecycleGate) release(epoch uint64) error {
 	if g.seal == nil || epoch != g.seal.epoch {
 		return errSealProtocol
 	}
+	if g.seal.released {
+		return nil
+	}
+	// Consume only before release; rescue remains possible without permission.
+	g.seal.recoveryAuthorized = g.captureObligationsEndedLocked() && !g.invalid
 	g.seal.released = true
 	g.closing = false
 	g.notifyLocked()

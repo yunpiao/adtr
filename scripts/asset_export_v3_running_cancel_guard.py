@@ -1226,6 +1226,48 @@ class RunningExportCancelGuard:
         require(not self.failed and self.stopped_at is None and self.used, 'running checkpoint guard incomplete or failed')
         self.owned.check()
 
+    def verify_recovery_cleanup_after_wait(self, worker_exit_code, summary=None):
+        counts = ('qualified', 'completed', 'pending', 'open', 'connectPending', 'failed')
+        keys = {'event', 'captureAuthorized', 'released', 'settled', *counts}
+        valid = (type(summary) is dict and set(summary) == keys and
+            summary['event'] == 'owned_ci_recovery_cleanup' and
+            all(type(summary[k]) is bool for k in ('captureAuthorized', 'released', 'settled')) and
+            all(type(summary[k]) is int and 0 <= summary[k] <= 2**63-1 for k in counts))
+        checks = {'workerWait': type(worker_exit_code) is int and worker_exit_code == 0 and self.used and not self.failed,
+                  'summary': valid,
+                  'authorized': valid and summary['captureAuthorized'] and summary['released'],
+                  'settled': valid and summary['settled'],
+                  'completed': valid and summary['qualified'] == summary['completed'],
+                  'remainingZero': valid and all(summary[k] == 0 for k in ('pending', 'open', 'connectPending', 'failed'))}
+        proof = None
+        observer = None
+        observed = True
+        if checks['workerWait']:
+            try:
+                require(re.fullmatch('adtr-user-export-[0-9a-f]{32}', self.application_name) is not None,
+                        'invalid application identity')
+                observer = Psql(self.container, True)
+                proof = observer.query("SELECT jsonb_build_object('database',current_database(),'backendCount',"
+                    "(SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() AND application_name='"
+                    + self.application_name + "'))")
+            except Exception:
+                observed = False
+            finally:
+                if observer is not None:
+                    try:
+                        observer.close()
+                    except Exception:
+                        observed = False
+        valid_proof = (type(proof) is dict and set(proof) == {'database', 'backendCount'} and
+            type(proof['database']) is str and proof['database'] == 'adtr_e2e' and type(proof['backendCount']) is int and
+            0 <= proof['backendCount'] <= 2**63-1)
+        checks['ownedBackendsZero'] = observed and valid_proof and proof['backendCount'] == 0
+        event = {'event': 'running_cancel_recovery_cleanup', 'verified': all(checks.values()),
+                 'checks': checks, 'counts': {k: summary[k] if valid else None for k in counts},
+                 'ownedBackendCount': proof['backendCount'] if valid_proof else None}
+        print(json.dumps(event, sort_keys=True), flush=True)
+        require(all(checks.values()), 'owned recovery cleanup unverified')
+
     def verify_journal_after_wait(self, worker_exit_code, final_record=None):
         # Persisted reports precede Append's acknowledgement. Final delivery is
         # instead witnessed after recorder Close and bound to this DB process.

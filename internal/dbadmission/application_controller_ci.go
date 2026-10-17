@@ -122,18 +122,19 @@ func StartCIController(normal, rescue, witness, captureEnd *os.File, nonce [16]b
 	coordinator.used = true
 	coordinator.gate = g
 	var stopping atomic.Bool
-	var stopOnce, reportOnce sync.Once
+	var stopOnce, reportOnce, recoveryOnce sync.Once
 	var wg sync.WaitGroup
 	cleanup := func() {
 		stopOnce.Do(func() { stopping.Store(true); normal.Close(); rescue.Close() })
 		wg.Wait()
+		recoveryOnce.Do(func() { g.finishRecoveryCleanup() })
 		// Retain the reader through controller join and serialize raw-FD teardown
 		// with every consumer, so a late callback cannot read a reused descriptor.
 		g.mu.Lock()
 		g.captureEndFD = 0
 		captureEnd.Close()
 		g.mu.Unlock()
-		reportOnce.Do(func() { g.writeFinalInvalidationDiagnostic() })
+		reportOnce.Do(func() { g.writeFinalInvalidationDiagnostic(); g.writeRecoveryCleanupDiagnostic() })
 	}
 	// Each channel has one reader. Normal EOF cannot close the rescue channel.
 	wg.Add(2)

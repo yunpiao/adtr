@@ -39,19 +39,28 @@ type lifecycleGate struct {
 	firstUncleanClose                                          *uncleanCloseDiagnostic
 	firstUncleanOperation                                      *uncleanOperationDiagnostic
 	workerContext                                              context.Context
+	recoveryQualified, recoveryCompleted                       uint64
+	recoveryFinalized                                          bool
 }
 
 type lifecycleTicket struct {
-	gate                   *lifecycleGate
-	generation             uint64
-	state                  byte
-	conn                   *Conn
-	backend                uint32
-	registration           *activityRegistration
-	birthPhase             string
-	birthCaptureEnded      bool
-	firstOperationError    *operationErrorDiagnostic
-	firstNativeClosedError *operationErrorDiagnostic
+	gate                               *lifecycleGate
+	generation                         uint64
+	state                              byte
+	conn                               *Conn
+	backend                            uint32
+	registration                       *activityRegistration
+	birthPhase                         string
+	birthCaptureEnded                  bool
+	firstOperationError                *operationErrorDiagnostic
+	firstNativeClosedError             *operationErrorDiagnostic
+	recoveryEpoch                      uint64
+	recoveryAuthorized                 bool
+	recoveryContaminated               bool
+	recoveryEverRegistered             bool
+	operationSequence, activeOperation uint64
+	operationInFlight                  int
+	cleanupDone                        <-chan struct{}
 }
 
 func acquireLifecycle(ctx context.Context) (lifecyclePermit, error) {
@@ -113,6 +122,10 @@ func (g *lifecycleGate) acquire(ctx context.Context) (*lifecycleTicket, error) {
 			g.tickets = make(map[uint64]*lifecycleTicket)
 		}
 		ticket := &lifecycleTicket{gate: g, generation: g.next, state: 'p', birthPhase: g.diagnosticPhaseLocked(), birthCaptureEnded: g.seal != nil && g.seal.captureEnded}
+		if g.seal != nil && g.seal.released && g.seal.recoveryAuthorized && !g.invalid && !g.recoveryFinalized {
+			ticket.recoveryEpoch = g.seal.epoch
+			ticket.recoveryAuthorized = true
+		}
 		g.tickets[ticket.generation] = ticket
 		g.pending++
 		g.notifyLocked()
@@ -132,7 +145,15 @@ func (g *lifecycleGate) closeAdmission() {
 func (g *lifecycleGate) locallyDrained() bool {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	return g.closing && !g.invalid && g.pending == 0 && g.open == 0
+	if !g.closing || g.invalid || g.pending != 0 || g.open != 0 {
+		return false
+	}
+	for _, t := range g.tickets {
+		if t.state == 'p' || t.state == 'o' || t.state == 'x' || t.state == 'q' || t.operationInFlight != 0 {
+			return false
+		}
+	}
+	return true
 }
 
 func (t *lifecycleTicket) connected(conn *Conn) {
@@ -191,6 +212,17 @@ func (t *lifecycleTicket) closedObserved(observation closeObservation) {
 	}
 	// Inspect registration before clearing it. A closed candidate or any epoch
 	// target remains retained; its release callback/ACK may still refer to it.
+	if t.operationInFlight != 0 || g.recoveryFinalized {
+		g.invalidateBecauseLocked(invalidCloseState)
+	}
+	if !clean && t.canAwaitRecoveryLocked(observation) {
+		t.state = 'q'
+		t.cleanupDone = t.conn.raw.PgConn().CleanupDone()
+		g.open--
+		g.recoveryQualified++
+		g.notifyLocked()
+		return
+	}
 	prunable := clean && !g.invalid && t.registration == nil &&
 		(g.seal == nil || g.seal.target != t)
 	if !clean {

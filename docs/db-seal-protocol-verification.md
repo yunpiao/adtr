@@ -74,3 +74,53 @@ The original sticky failure remains fatal. Any future recovery rule still needs
 same-connection cancellation evidence, a correctly bound post-capture lifetime,
 actual CleanupDone and backend disappearance, and unchanged business/journal
 terminal proofs; this diagnostic change supplies no such exemption.
+
+## Restricted recovery cancellation and final resource proof (candidate)
+
+This candidate distinguishes a narrowly witnessed post-capture cancellation from
+an unresolved physical lifetime. Only a new ordinary ticket born after the
+existing authorization was consumed and release completed can qualify. Earlier
+tickets, any previously registered candidate, and the target cannot qualify. Release consumes once before its state
+transition; an abort without authorization still releases for rescue, but cannot
+later gain recovery permission from a late frame.
+
+The first error must itself be the first native-closed error (same immutable
+record), a statement whose original context and returned error match Canceled,
+with the observed root also canceled and the same raw connection. A deadline,
+unknown/missing observer, earlier other error, or BEGIN whose native die happens
+later stays fatal. Any later business operation or overlap contaminates the
+candidate. Only an already-native-closed cleanup rollback with the precise
+pgconn.ErrConnClosed sentinel is permitted afterward; fixed dependency source
+shows that this branch does not dispatch SQL.
+
+A qualifying wrapper Close enters a retained pending-cleanup state, not clean
+closure. At controller cleanup, after application producers and recorder Close,
+all pending CleanupDone channels share one fixed two-second budget. The registry
+mutex is not held while waiting. The parent still enforces its original 30-second
+Wait ceiling; the 1.5-second capture budget is unchanged. Missing completion,
+remaining open/closing/pending connections, active traces, or contamination
+remains a hard sticky failure. Existing sticky history is never cleared.
+
+A final private summary is necessary but insufficient. After actual Wait and
+sticky reread, the parent independently checks that the complete startup-verified
+worker application_name has zero backends in the expected isolated database.
+It also retains the original business terminal and journal final delivery proofs.
+Query failure, a malformed/missing summary, or a remaining backend rejects the
+run. No PID subset is used to stand in for the full owned set.
+
+Default builds retain the original pgx context, query result and Close behavior.
+This CI candidate adds bounded shutdown waiting, retained cleanup metadata and
+extra observational synchronization. It can conservatively reject other genuine
+cancellations. It addresses the independently demonstrated normal Worker.Run
+shutdown/native-close combination, not a proven cause of every historical
+running-cancel failure. New race/PG/whole-suite runtime evidence is still required.
+
+The new recovery PG fixture uses a synthetically authorized target-only registry
+and a real capture-end pipe as its starting state; it does not reproduce the
+ACTIVITY barrier/strict capture prerequisite. It then uses real dispatched SQL,
+root cancellation and a latch on only the primary socket's native Close to hold
+actual CleanupDone deterministically. Its independent full-owned PG observation
+polls within the test deadline. The application guard instead makes a single
+strict observation after Wait and rejects even transient remaining backends.
+The three real main/browser suites remain required for the full capture and final
+resource proof on the exact candidate tree.

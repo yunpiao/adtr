@@ -12,7 +12,7 @@ import (
 func TestFinalDiagnosticCapabilityIsExact(t *testing.T) {
 	imp := fixtureImporter{}
 	for path, source := range map[string]string{
-		"sync":          `package sync;type Once struct{};func(*Once)Do(f func()){f()}`,
+		"sync":          `package sync;type Once struct{};func(*Once)Do(f func()){f()};type Mutex struct{};func(*Mutex)Lock(){};func(*Mutex)Unlock(){};type WaitGroup struct{};func(*WaitGroup)Wait(){}`,
 		"encoding/json": `package json;func Marshal(any)([]byte,error){return nil,nil}`,
 		"os":            `package os;type File struct{};var Stderr *File;func(*File)Write([]byte)(int,error){return 0,nil}`,
 	} {
@@ -20,8 +20,8 @@ func TestFinalDiagnosticCapabilityIsExact(t *testing.T) {
 		imp[path] = p
 	}
 	writer := `package dbadmission
- import("encoding/json";"os")
- type lifecycleGate struct{writeUncleanCloseDiagnostic func();writeUncleanOperationDiagnostic func()}
+ import("encoding/json";"os";"sync")
+ type lifecycleGate struct{mu sync.Mutex;captureEndFD int;finishRecoveryCleanup func();writeUncleanCloseDiagnostic func();writeUncleanOperationDiagnostic func();writeRecoveryCleanupDiagnostic func()}
  func(g *lifecycleGate)finalInvalidationDiagnostic()struct{}{return struct{}{}}
  func(g *lifecycleGate)writeFinalInvalidationDiagnostic(){
  data,err:=json.Marshal(g.finalInvalidationDiagnostic())
@@ -30,7 +30,7 @@ func TestFinalDiagnosticCapabilityIsExact(t *testing.T) {
  g.writeUncleanOperationDiagnostic()
  }
  `
-	caller := `package dbadmission;import "sync";func StartCIController(g *lifecycleGate){var reportOnce sync.Once;cleanup:=func(){reportOnce.Do(func(){g.writeFinalInvalidationDiagnostic()})};cleanup()}`
+	caller := `package dbadmission;import "sync";type shutdownFlag struct{};func(*shutdownFlag)Store(bool){};type closer struct{};func(*closer)Close(){};func StartCIController(g *lifecycleGate){var stopOnce,reportOnce,recoveryOnce sync.Once;var wg sync.WaitGroup;var stopping shutdownFlag;normal,rescue,captureEnd:=&closer{},&closer{},&closer{};cleanup:=func()` + recoveryCleanupBody + `;cleanup()}`
 	for _, tc := range []struct {
 		name, file, writer, caller string
 		bad                        bool

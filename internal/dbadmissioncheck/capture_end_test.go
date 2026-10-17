@@ -33,7 +33,7 @@ func captureFixture(t *testing.T) (string, fixtureImporter) {
  type activityRegistration struct{generation uint64}
  type lifecycleTicket struct{gate *lifecycleGate;generation uint64;state byte;registration *activityRegistration}
  type sealAttempt struct{captureEnded,released bool;epoch uint64;target *lifecycleTicket;registration *activityRegistration}
- type lifecycleGate struct{mu sync.Mutex;writeFinalInvalidationDiagnostic func();seal *sealAttempt;invalid,closing bool;captureEndFD int;nonce [16]byte;pending,open int;invalidateBecauseLocked func(invalidationReason);notifyLocked func()}
+ type lifecycleGate struct{mu sync.Mutex;writeFinalInvalidationDiagnostic func();writeRecoveryCleanupDiagnostic func();finishRecoveryCleanup func();seal *sealAttempt;invalid,closing bool;captureEndFD int;nonce [16]byte;pending,open int;invalidateBecauseLocked func(invalidationReason);notifyLocked func()}
  `
 	return source, imp
 }
@@ -118,7 +118,7 @@ func TestCaptureEndConsumersAreLimited(t *testing.T) {
 
 func TestCaptureEndDescriptorCleanupIsExact(t *testing.T) {
 	original, imp := captureFixture(t)
-	prefix := `package dbadmission;import("os";"sync");type stopper struct{};func(*stopper)Store(bool){};func StartCIController(g *lifecycleGate,normal,rescue,captureEnd *os.File){var stopOnce,reportOnce sync.Once;var wg sync.WaitGroup;var stopping stopper;cleanup:=func()`
+	prefix := `package dbadmission;import("os";"sync");type stopper struct{};func(*stopper)Store(bool){};func StartCIController(g *lifecycleGate,normal,rescue,captureEnd *os.File){var stopOnce,reportOnce,recoveryOnce sync.Once;var wg sync.WaitGroup;var stopping stopper;cleanup:=func()`
 	suffix := `;cleanup()}`
 	for _, tc := range []struct {
 		name, body string

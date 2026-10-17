@@ -32,6 +32,44 @@ def task():
 
 
 class ContractTests(unittest.TestCase):
+    def test_recovery_cleanup_requires_final_counts_and_all_owned_backends_zero(self):
+        summary = dict(event='owned_ci_recovery_cleanup', captureAuthorized=True,
+            released=True, settled=True, qualified=2, completed=2, pending=0,
+            open=0, connectPending=0, failed=0)
+        guard = self.guard(); guard.used = True; guard.failed = False
+        guard.application_name = 'adtr-user-export-' + 'a' * 32
+        guard.container = 'adtr-auth-e2e-' + 'a' * 12
+        observer = Mock()
+        observer.query.return_value = {'database': 'adtr_e2e', 'backendCount': 0}
+        with patch.object(g, 'Psql', return_value=observer), patch('sys.stdout', new_callable=io.StringIO) as output:
+            guard.verify_recovery_cleanup_after_wait(0, summary)
+        self.assertTrue(json.loads(output.getvalue())['verified'])
+        sql = observer.query.call_args.args[0]
+        self.assertIn("application_name='" + guard.application_name + "'", sql)
+        self.assertIn('datname=current_database()', sql)
+        self.assertNotIn('pid=', sql)
+        observer.close.assert_called_once()
+        for bad in (None, summary | {'pending': 1}, summary | {'open': 1},
+                    summary | {'connectPending': 1}, summary | {'failed': 1},
+                    summary | {'qualified': 3}, summary | {'settled': False},
+                    summary | {'captureAuthorized': False}, summary | {'released': False},
+                    summary | {'qualified': True}, summary | {'private': 'secret'}):
+            with self.subTest(summary=bad), patch.object(g, 'Psql', return_value=observer), patch('sys.stdout', new_callable=io.StringIO):
+                with self.assertRaises(RuntimeError):
+                    guard.verify_recovery_cleanup_after_wait(0, bad)
+        for proof in ({'database': 'other', 'backendCount': 0}, {'database': 'adtr_e2e', 'backendCount': 1},
+                      {'database': 'adtr_e2e', 'backendCount': False}, None, {}):
+            observer.query.return_value = proof
+            with patch.object(g, 'Psql', return_value=observer), patch('sys.stdout', new_callable=io.StringIO):
+                with self.assertRaises(RuntimeError):
+                    guard.verify_recovery_cleanup_after_wait(0, summary)
+        observer.query.side_effect = RuntimeError('private SQL identity')
+        with patch.object(g, 'Psql', return_value=observer), patch('sys.stdout', new_callable=io.StringIO) as output:
+            with self.assertRaises(RuntimeError):
+                guard.verify_recovery_cleanup_after_wait(0, summary)
+        self.assertNotIn('private', output.getvalue())
+        self.assertNotIn(guard.application_name, output.getvalue())
+
     def test_all_registry_and_checkpoint_require_messages_have_closed_reasons(self):
         import ast
         tree = ast.parse(Path(g.__file__).read_text())
