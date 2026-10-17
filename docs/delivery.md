@@ -1,5 +1,95 @@
 # 交付台账与工作约定
 
+### 2026-10-17 running-cancel 全会话冻结前就绪预检候选
+
+基线PR167 head `abddb252`（完整发布SHA由远程提交记录核对），本地同树提交
+`5ad803998fce88d638199543620f5e305fb84ab9`、tree
+`db5458b3481e7670cb7c4cb599945c5a2470542e`。
+[run38997385830](https://github.com/yunpiao/adtr/actions/runs/38997385830) 的computer
+job `117293165648` 记录other/idle-in-transaction/Client/unsafe_relation；安全artifact
+`12088272241`。本轮user/group通过，说明该捕获问题并非user专有；具体事务来源仍未知。
+
+候选修复已确认的捕获门槛缺口：运行期先完整检查所有owned会话/锁的结构、类型、
+PID唯一性、blocker归属及无环，防止首条busy语句遮住后续非法样本。
+未知锁类型、外部blocker、重复PID、结构/身份/观察异常立即失败。
+目标进入首个snapshot边界后，先调用原checkpoint验证，再以原validate_sessions
+对完整原样样本预检。仅固定的严格冻结谓词拒绝可视为尚未就绪，继续原捕获循环；
+other和unsafe_relation不会被认定安全，也不会作为成功冻结证据。
+
+1.5秒deadline从原resume点计算，绝不重置或延长；mutex内SIGSTOP前再次检查deadline。
+超时保留最后闭集lastNotReady诊断并失败，不输出SQL/参数/ID或异常原值。
+仅在完整样本已满足原冻结规则时发出一次STOP；全线程停止后重新观察并执行原严格
+checkpoint/session验证。停后任何失败立即CONT清理，不重新解冻捕获。
+SQL/关系/锁白名单、租约门槛、冻结后严格验证、barrier释放及清理保持。
+
+新增预检用于避免已明确观察到其他事务仍忙时立即冻结；删除会恢复原捕获竞态。
+副作用是就绪可能更晚，繁忙样本可能耗尽原截止时间而失败；观察至STOP的剩余竞态
+仍通过停后严格复核拒绝，不能声称消除全部不稳定性。
+
+离线66项契约通过（guard49项），含三kind忙到安全只STOP一次、持续忙超时无STOP、
+发信号前到期、首个busy遮挡后续坏样本、目标身份/租约错误、预检安全但停后变坏立即
+清理，以及诊断隐私和未知异常传播。原validate_sessions/validate_checkpoint逐字节
+保持。Node/Go/PostgreSQL/browser未本地运行，独立审及精确head CI仍待完成。
+
+### 2026-10-17 running-cancel 持锁类别补充诊断候选
+
+PR167 head `b7c6e1703179637874c70c096dcdf5e67721123f` 的
+[run38995521988](https://github.com/yunpiao/adtr/actions/runs/38995521988)
+user job `117287169944` 再现严格事务拒绝；安全 artifact `12087746411` 记录
+`other` / `idle in transaction` / `Client` / `locksPresent=true`。
+这表示观察时事务尚未结束、未执行查询、正在等待客户端且有锁；非active状态的query
+是最近语句。具体事务路径与锁类别尚未确认，不能由other推断为任何已知安全SQL。
+状态语义见[PostgreSQL文档](https://www.postgresql.org/docs/18/monitoring-stats.html)。
+
+静态检查及合成样本已证实捕获门槛缺口：现有capture只要求一个活动记录waiter及目标
+snapshot边界即SIGSTOP，然后才验证全会话。拥有相同application_name的worker进程
+还运行多槽claim、recovery、scheduler、maintenance及message循环；可能冻结另一个
+尚未结束的事务。这是与证据一致的机制假设，不是此次失败具体来源的证明。
+
+本候选只在拒绝事务事件增加 `lockSafetyCategory`：none、allowlisted_shapes、
+unsafe_relation、unsafe_advisory、unsafe_virtualxid、unsafe_transactionid、
+unsafe_tuple、unknown_lock。固定优先级汇总首类违规，不依赖锁枚举顺序。
+allowlisted_shapes仅说明锁形状符合原非activity规则，事务query仍被拒绝。
+字段不含锁名称、对象、ID、SQL或参数；删去只失去诊断信息，不改变准入。
+捕获、1.5秒窗口、租约、SQL白名单、冻结后复核、CONT及清理完全不改。
+
+离线Python契约59项通过（guard42项），包含516组锁形状与原非activity锁规则的
+一致性矩阵、未知值/字段注入隐私检查及清理后单次输出。所有原有函数逐字节比对，
+仅transaction_query_failure增加诊断字段，其余保持；diff检查通过。真实运行与
+精确head CI待完成，不能将本地静态结果当作浏览器或数据库验证。
+
+未来候选可以在冻结前要求全会话满足原严格冻结条件，运行窗口内不满足条件时继续
+观察，但需独立明确观察/身份异常与未就绪的边界，固定截止时间，并保留冻结后
+严格复核；观察到STOP间的竞态仍需验证。此次不采纳该行为改动，也不放行other。
+
+### 2026-10-17 running-cancel 事务拒绝诊断候选
+
+基线真实 main `73ef65bf9860e695ce2f1a0b2b39c264f458c43d`，内容树
+`bf65237e8d323a69f94f5bd1955704b0a907d460`；独立源码副本的 Git tree
+已逐内容重建核对一致。本地快照提交仅用于审查，不冒充真实 main 提交。
+
+[main-push run 38993821990](https://github.com/yunpiao/adtr/actions/runs/38993821990)
+的 user running-cancel job `117281858696` 在 02:27:31 UTC 拒绝了未匹配
+严格 SQL 白名单的事务，输出 `unsafe_transaction_query` / `session_validation`。
+安全诊断 artifact `12086807691` 已保留。现有证据未记录具体 SQL 类别和会话状态，
+根因尚未确定；历史同代码重跑通过不能证明本次失败安全，也不能支持扩大白名单。
+
+候选仅增加闭集失败诊断：`queryCategory` 为完整匹配的 activity/schema/schemaGate、
+begin/commit/rollback 或 other；`stateCategory`、`waitTypeCategory` 为固定类别，
+未知值归 other，空等待归 none；`locksPresent` 仅说明是否观察到锁。
+诊断不包含原 SQL、参数、连接串、环境、标识符、锁对象或异常原值。
+这些类别仅用于定位；BEGIN/COMMIT/ROLLBACK 事务仍被原严格规则拒绝。
+删除新增字段只会失去定位信息，不改变安全判定；副作用为失败事件增加四个字段。
+SQL 接受列表、冻结时序、清理及 CONT 后单次输出顺序保持。
+
+离线验证：原 guard 36 项基线通过；新增后 40 项 guard 契约通过，合并相关 runner/
+安全产物契约共 57 项通过，审计钩子禁止真实进程、网络、信号。
+首次组合运行因工作目录错误出现10项文件缺失错误；保留记录并在仓库根目录原代码
+重跑57项全通过。逆变换诊断新增片段后，guard 与原源码逐字节一致；`git diff --check` 通过。
+本地 Node/Go/PostgreSQL/browser 未运行；独立复审、精确远程 head CI 与合并后验证待完成。
+这是诊断增强候选，不宣称已解决实际事务拒绝根因，不改变产品验收范围。
+
+
 总路线图：https://github.com/yunpiao/adtr/issues/1 。全部 209 项均在范围内。
 工程文档、代码、PR、最新 head CI、合并、产品验收分别记录；任一阶段不能代表后续阶段完成。
 

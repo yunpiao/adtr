@@ -75,9 +75,11 @@ FAILURE_REASONS = MappingProxyType({
     'unowned or cyclic barrier blocker': 'unowned_barrier_blocker',
     'unexpected barrier waiter': 'unexpected_barrier_waiter',
     'missed actual activity checkpoint': 'activity_waiter_missing',
+    'invalid owned session observation': 'invalid_session_observation',
+    'nonidle unclassified owned session': 'nonidle_session',
 })
 FAILURE_STAGES = frozenset({'preflight', 'observer_open', 'initial_observation',
-    'initial_boundary', 'barrier_open', 'barrier_lock', 'resume', 'capture',
+    'initial_boundary', 'barrier_open', 'barrier_lock', 'resume', 'capture', 'capture_readiness',
     'stop_identity', 'stop_signal', 'all_threads', 'stopped_observation',
     'checkpoint_validation', 'session_validation', 'capture_window',
     'barrier_release', 'cleanup', 'http_request'})
@@ -89,6 +91,84 @@ RELATION_FAILURE_VALUES = MappingProxyType({
         'ExclusiveLock', 'AccessExclusiveLock', 'other'}),
     'queryKind': frozenset({'activity', 'schema', 'schemaGate', 'idle', 'unclassified'}),
 })
+
+
+TRANSACTION_FAILURE_VALUES = MappingProxyType({
+    'lockSafetyCategory': frozenset({'none', 'allowlisted_shapes', 'unsafe_relation',
+        'unsafe_advisory', 'unsafe_virtualxid', 'unsafe_transactionid',
+        'unsafe_tuple', 'unknown_lock'}),
+    'queryCategory': frozenset({'activity', 'schema', 'schemaGate', 'begin', 'commit', 'rollback', 'other'}),
+    'stateCategory': frozenset({'active', 'idle', 'idle in transaction',
+        'idle in transaction (aborted)', 'fastpath function call', 'disabled', 'other'}),
+    'waitTypeCategory': frozenset({'Activity', 'BufferPin', 'Client', 'Extension',
+        'IO', 'IPC', 'Lock', 'LWLock', 'Timeout', 'none', 'other'}),
+})
+
+
+# Only these exact strict-freeze predicate failures may mean "not ready" while
+# the owned process is still running. They NEVER authorize a frozen sample.
+FREEZE_NOT_READY = frozenset({'unsafe owned transaction query',
+    'unsafe owned relation lock', 'unsafe owned advisory lock',
+    'unsafe virtual transaction lock', 'unsafe transaction lock', 'unsafe tuple lock',
+    'nonidle unclassified owned session', 'unexpected barrier waiter',
+    'missed actual activity checkpoint'})
+
+
+def transaction_lock_category(locks):
+    # Diagnostic only, for the rejected/unclassified query path. Never authorize
+    # a transaction from this summary. Fixed priority makes mixed-lock samples
+    # independent of pg_locks row order, without retaining names or identifiers.
+    if type(locks) is not list:
+        return 'unknown_lock'
+    failures = set()
+    for lock in locks:
+        if type(lock) is not dict:
+            failures.add('unknown_lock')
+            continue
+        typ, mode = lock.get('type'), lock.get('mode')
+        granted = lock.get('granted') is True
+        if typ == 'relation':
+            relation = lock.get('relation')
+            if not (type(relation) is str and relation in RELATIONS and granted and
+                    mode in ('AccessShareLock', 'RowShareLock', 'RowExclusiveLock')):
+                failures.add('unsafe_relation')
+        elif typ == 'advisory':
+            if not (lock.get('classid') == '0' and lock.get('objid') == '734192801'
+                    and lock.get('objsubid') == 1 and mode == 'ShareLock' and granted):
+                failures.add('unsafe_advisory')
+        elif typ in ('virtualxid', 'transactionid'):
+            if not (mode == 'ExclusiveLock' and granted):
+                failures.add('unsafe_' + typ)
+        elif typ == 'tuple':
+            failures.add('unsafe_tuple')  # Unclassified queries never qualify.
+        else:
+            failures.add('unknown_lock')
+    for category in ('unknown_lock', 'unsafe_relation', 'unsafe_advisory',
+                     'unsafe_virtualxid', 'unsafe_transactionid', 'unsafe_tuple'):
+        if category in failures:
+            return category
+    return 'allowlisted_shapes' if locks else 'none'
+
+
+def transaction_query_failure(session):
+    # Diagnostic classification ONLY: never use these categories to accept a
+    # session. Match entire known statements, not prefixes or SQL fragments.
+    query = normalized(session['query'])
+    category = {normalized(ACTIVITY_SQL): 'activity', normalized(SCHEMA_SQL): 'schema',
+                normalized(GATE_SQL): 'schemaGate'}.get(query)
+    if category is None:
+        category = {'begin': 'begin', 'commit': 'commit', 'rollback': 'rollback'}.get(query.lower(), 'other')
+    state, wait = session['state'], session['waitType']
+    error = RuntimeError('unsafe owned transaction query')
+    error.transaction_diagnostic = {
+        'queryCategory': category,
+        'lockSafetyCategory': transaction_lock_category(session['locks']),
+        'stateCategory': state if type(state) is str and state in TRANSACTION_FAILURE_VALUES['stateCategory'] else 'other',
+        'waitTypeCategory': ('none' if wait is None else wait
+            if type(wait) is str and wait in TRANSACTION_FAILURE_VALUES['waitTypeCategory'] else 'other'),
+        'locksPresent': bool(session['locks']),
+    }
+    return error
 
 
 def failure_event(stage, error):
@@ -104,6 +184,15 @@ def failure_event(stage, error):
             and type(detail['granted']) is bool and all(type(detail[key]) is str
                 and detail[key] in values for key, values in RELATION_FAILURE_VALUES.items())):
         event.update(detail)
+    detail = getattr(error, 'transaction_diagnostic', None) if reason == 'unsafe_transaction_query' else None
+    if (type(detail) is dict and set(detail) == set(TRANSACTION_FAILURE_VALUES) | {'locksPresent'}
+            and type(detail['locksPresent']) is bool and all(type(detail[key]) is str
+                and detail[key] in values for key, values in TRANSACTION_FAILURE_VALUES.items())):
+        event.update(detail)
+    pending = getattr(error, 'last_not_ready_error', None) if reason == 'capture_deadline_missed' else None
+    if (type(pending) is RuntimeError and len(pending.args) == 1 and
+            type(pending.args[0]) is str and pending.args[0] in FREEZE_NOT_READY):
+        event['lastNotReady'] = failure_event('capture', pending)
     return event
 
 
@@ -225,7 +314,8 @@ def validate_sessions(sessions, lock_pid):
                 normalized(GATE_SQL): 'schemaGate'}.get(normalized(session['query']), 'idle')
         active = session['transaction']
         if active:
-            require(kind != 'idle', 'unsafe owned transaction query')
+            if kind == 'idle':
+                raise transaction_query_failure(session)
             transactions += 1
         else:
             require(session['state'] == 'idle' and not locks, 'nonidle unclassified owned session')
@@ -258,6 +348,72 @@ def validate_sessions(sessions, lock_pid):
         safe.append({k: session[k] for k in ('pid', 'transaction', 'state', 'waitType', 'blockers', 'locks')} | {'queryKind': kind, 'querySHA256': digest(normalized(session['query']))})
     require(blocked > 0, 'missed actual activity checkpoint')
     return safe, blocked, transactions
+
+
+def validate_session_observation(sessions, lock_pid):
+    """Check the ENTIRE observation before fail-fast freeze classification.
+
+    An early busy query must not hide a later malformed/unowned/cyclic row.
+    The SQL observer already restricts every backend to the verified application.
+    No row is filtered or rewritten to obtain a passing freeze validation.
+    """
+    require(type(sessions) is list and type(lock_pid) is int and lock_pid > 0,
+            'invalid owned session observation')
+    pids = set()
+    for row in sessions:
+        require(type(row) is dict and set(row) == {'pid', 'transaction', 'state',
+            'query', 'waitType', 'blockers', 'locks'}, 'invalid owned session observation')
+        require(type(row['pid']) is int and row['pid'] > 0 and row['pid'] != lock_pid and
+            type(row['transaction']) is bool and type(row['state']) is str and
+            type(row['query']) is str and (row['waitType'] is None or type(row['waitType']) is str)
+            and type(row['blockers']) is list and type(row['locks']) is list,
+            'invalid owned session observation')
+        require(row['state'] in ('active', 'idle', 'idle in transaction',
+            'idle in transaction (aborted)', 'fastpath function call', 'disabled') and
+            (row['waitType'] is None or row['waitType'] in ('Activity', 'BufferPin',
+             'Client', 'Extension', 'IO', 'IPC', 'Lock', 'LWLock', 'Timeout')),
+            'invalid owned session observation')
+        require(row['pid'] not in pids, 'duplicate owned backend')
+        pids.add(row['pid'])
+        require(all(type(pid) is int and pid > 0 for pid in row['blockers']),
+                'invalid owned session observation')
+        for lock in row['locks']:
+            require(type(lock) is dict and set(lock) == {'type', 'mode', 'granted',
+                'relation', 'classid', 'objid', 'objsubid'}, 'invalid owned session observation')
+            require(type(lock['type']) is str and type(lock['mode']) is str and
+                type(lock['granted']) is bool and
+                all(lock[k] is None or type(lock[k]) is str for k in ('relation', 'classid', 'objid'))
+                and (lock['objsubid'] is None or type(lock['objsubid']) is int),
+                'invalid owned session observation')
+            require(lock['type'] in ('relation', 'advisory', 'virtualxid', 'transactionid', 'tuple'),
+                    'unrecognized owned lock')
+    require(all(set(row['blockers']) <= pids | {lock_pid} for row in sessions),
+            'unowned or cyclic barrier blocker')
+    # Acyclic owned chains must resolve to an unblocked owned backend or barrier.
+    resolved = {lock_pid}
+    for _ in sessions:
+        for row in sessions:
+            if set(row['blockers']) <= resolved:
+                resolved.add(row['pid'])
+    require(pids <= resolved, 'unowned or cyclic barrier blocker')
+
+
+def freeze_readiness(sessions, lock_pid):
+    validate_session_observation(sessions, lock_pid)
+    try:
+        validate_sessions(sessions, lock_pid)
+    except RuntimeError as error:
+        if (type(error) is not RuntimeError or len(error.args) != 1 or
+                type(error.args[0]) is not str or error.args[0] not in FREEZE_NOT_READY):
+            raise
+        # Retain only a fresh error and the existing closed diagnostics, not the
+        # traceback/session sample. failure_event independently validates fields.
+        pending = RuntimeError(error.args[0])
+        for field in ('relation_diagnostic', 'transaction_diagnostic'):
+            if hasattr(error, field):
+                setattr(pending, field, getattr(error, field))
+        return pending
+    return None
 
 
 def validate_checkpoint(row, task_id, worker_id, asset_kind='user'):
@@ -378,23 +534,42 @@ class RunningExportCancelGuard:
             resumed = time.monotonic()
             deadline = resumed + 1.5  # fail closed before the production 2s callback expires
             sample = None
+            last_not_ready = None
             stage = 'capture'
             while time.monotonic() < deadline:
                 sample = observer.query(self.observe_sql(task_id), timeout=.5)
+                stage = 'capture_readiness'
+                validate_session_observation(sample['sessions'], lock.pid)
+                stage = 'capture'
                 task = sample['task']
                 if task and task['state'] == 'running' and task['progress'] == 10 and task['snapshotCount'] == 1 and any(lock.pid in s['blockers'] and normalized(s['query']) == normalized(ACTIVITY_SQL) for s in sample['sessions']):
+                    stage = 'checkpoint_validation'
+                    validate_checkpoint(task, task_id, worker_id, self.asset_kind)
+                    stage = 'capture_readiness'
+                    pending = freeze_readiness(sample['sessions'], lock.pid)
+                    if pending is not None:
+                        last_not_ready = pending
+                        stage = 'capture'
+                        time.sleep(.002)
+                        continue
                     observed = time.monotonic()
                     stage = 'stop_identity'
                     self.owned.assert_identity()
-                    issued = time.monotonic()
                     with self._mutex:
+                        issued = time.monotonic()
+                        if issued >= deadline:
+                            expired = RuntimeError('missed two-second activity checkpoint')
+                            expired.last_not_ready_error = last_not_ready
+                            raise expired
                         self.stopped_at = issued
                         stage = 'stop_signal'
                         self.owned.process.send_signal(signal.SIGSTOP)
                     break
                 time.sleep(.002)
             else:
-                raise RuntimeError('missed two-second activity checkpoint')
+                expired = RuntimeError('missed two-second activity checkpoint')
+                expired.last_not_ready_error = last_not_ready
+                raise expired
             stage = 'all_threads'
             while time.monotonic() < issued + .5:
                 states = self.threads()
