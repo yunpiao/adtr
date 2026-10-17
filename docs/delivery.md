@@ -5,6 +5,69 @@
 
 ## 当前组合状态（2026-10-11，核对至 main 6f7f44a）
 
+### 2026-10-17 字典3测试凭据去硬编码候选
+
+仅 `directory-v3` 浏览器套件的三个账户密码与未提交证明输入改为必需环境变量：
+`ADTR_E2E_DIRECTORY_PASSWORD`（bootstrap 修改后的密码）、
+`ADTR_E2E_DIRECTORY_PRODUCER_INITIAL_PASSWORD`（新建 producer 初始密码）、
+`ADTR_E2E_DIRECTORY_PRODUCER_PASSWORD`（producer 修改后的密码）、
+`ADTR_E2E_DIRECTORY_DRAFT_PASSWORD` / `ADTR_E2E_DIRECTORY_DRAFT_CODE`（导航丢弃测试的未提交输入）。
+`scripts/test_auth_e2e.py --suite directory-v3` 每次生成独立临时值，覆盖继承同名值，
+仅通过进程环境传给自有测试子进程；不读取或创建 GitHub Secrets，不持久化或打印值。
+32字符随机密码满足现有12–64字符规则；draft code 是随机六位输入，不是真实MFA验证码。
+这些变量仅该套件必需，直接运行 Playwright 缺失任一项时失败，无固定密码回退；删除生成
+接线将阻断该套件。除下述 `group-members-v4` 外，其他套件不注入新值；原 bootstrap/LDAP 随机凭据和真实MFA流程保持。
+进程环境仍包含临时敏感输入，不应转储；trace/video/自动截图关闭及DOM快照抑制保持，
+人工截图仍只在已有清理检查点采集。新增密码纳入现有公开结果/storage/console泄漏检查。
+
+后续对本次待提交文件扫描补充 `group-members-v4` 的五个固定账户密码，改为
+`ADTR_E2E_MEMBERSHIP_PASSWORD`、`ADTR_E2E_MEMBERSHIP_READER_INITIAL_PASSWORD`、
+`ADTR_E2E_MEMBERSHIP_READER_PASSWORD`、`ADTR_E2E_MEMBERSHIP_PRODUCER_INITIAL_PASSWORD`、
+`ADTR_E2E_MEMBERSHIP_PRODUCER_PASSWORD`，分别用于bootstrap修改后、reader初始/修改后、
+producer初始/修改后密码。仅该套件生成并必需，缺失失败且无回退，全部进入泄漏检查列表。
+`Tasks.test.tsx` 的fetch mock密码/验证码每项测试临时生成；重放验证码确定不同于首个，
+保留两次请求值断言。mock CSRF会话标记及 `actorPassword` 字段名断言不是真实凭据，保持原语义。
+
+原19项离线检查加凭据10项、最新runner契约4项共33项通过，209项需求映射检查通过。
+第一次执行25项时24通过、1项旧runner字节保真检查失败，原因是新增接线；随后加入严格
+数量/位置校验的恢复器，撤销精确新增片段后仍比对原始哈希，保留首次失败与重跑证据。
+沿用 `make check` 的 `*_contract.py` 自动发现和既有CI套件，不增加job或权限。
+这些是离线单元/静态检查；TypeScript/格式/DOM/浏览器/API/Worker/PostgreSQL、精确head
+CI、发布和合并仍待完成。原冻结patch及原暂存区保持，新增改动单独待审。
+
+### 2026-10-14 AD-F-189 专用任务通用控制隔离候选
+
+Issue-first 记录见 [#12 comment6180459935](https://github.com/yunpiao/adtr/issues/12#issuecomment-6180459935)，
+关联 [#26](https://github.com/yunpiao/adtr/issues/26)、[#30](https://github.com/yunpiao/adtr/issues/30)。
+基线 main `7140933be2459dbfc4b824aa6d6d6c46a9f4f8da`、tree
+`0a770734095ea8561f872c74e1234dba21e619f2`；编辑前已核对全部1084个blob与文件模式。
+
+已确认缺陷：前端专用种类判断只覆盖目录v1/v2，遗漏
+`domain.directory_read.v3`、`domain.directory_read.v4`、`user_assets.v3.export`、
+`group_assets.v3.export`、`computer_assets.v3.export`。服务端已拒绝这些种类的通用
+cancel/recover，但旧任务详情仍显示通用动作/证明表单，并将已脱敏的result/cursor显示为普通结果。
+本候选按精确kind隐藏这些入口、密码/MFA表单及私有结果/游标，保留真实状态、进度、错误、
+持久事件与刷新；内部TaskAction另设防护。只清理经当前详情确认属于当前actor/当前task的旧通用
+recover意图，保留其他actor/task及专用导出恢复记录，不自动重放写入。
+
+目录v3入口为`#directory-v3`；v4的`#group-members-v4`只读已保存结果，采集/取消仍需专用API。
+三类资产导出分别指向对应`#*-assets-v3`页面的专用面板，不承诺按任意taskID自动恢复。
+健康、审计、域连接既有合法动作及目录v1/v2/日志包限制保持，具体契约见
+[任务工作区](soc-task-ui.md#2026-10-14-specialized-task-controls-candidate)。
+
+候选验证目标包括五kind×九state的45组DOM负断言、无通用写入、恢复意图账户/任务隔离、
+迟到响应、会话与导航回归，并扩展已有真实任务浏览器套件。沿用71项CI，不新增job；
+无后端、schema、权限或策略改动。本地受执行限制，候选DOM/运行时、格式、类型/构建与真实
+浏览器/API/Worker/PostgreSQL尚未运行；精确head全矩阵、独立审查、发布、合并及独立main-push
+验证均待完成。已写测试和静态检查不算运行通过，任何历史CI均不继承到本候选。
+显式白名单离线Python检查已通过19项（组成员证据校验器的合成单元、既有runner与字典3静态契约），
+完整209项需求映射校验及`git diff --check`通过；审计钩子禁止子进程、网络和信号。
+这些结果不证明新增105项DOM回归或11处真实浏览器检查点已执行。
+
+AD-F-189保留历史较窄切片的`implemented_verified_slice`及原PR72/77/94证据，
+本次仅追加candidate记录，不扩大已验证声明。Issue12/26/30保持开放，产品验收仍0/209；
+源系统状态/字段、engineRestart、容量/保留期及真实AD/Windows验收仍开放。
+
 
 ### 2026-10-14 AD-F-052 本次观测对象数量候选
 

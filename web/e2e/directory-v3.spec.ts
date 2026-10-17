@@ -1,4 +1,5 @@
 import { navigateTo } from "./navigation";
+import { expectSpecializedTaskReadOnly } from "./specialized-task-controls";
 import {
   test,
   expect,
@@ -48,6 +49,11 @@ function requireFixture() {
     "ADTR_E2E_LDAP_IP",
     "ADTR_E2E_LDAP_USERNAME",
     "ADTR_E2E_LDAP_PASSWORD",
+    "ADTR_E2E_DIRECTORY_PASSWORD",
+    "ADTR_E2E_DIRECTORY_PRODUCER_INITIAL_PASSWORD",
+    "ADTR_E2E_DIRECTORY_PRODUCER_PASSWORD",
+    "ADTR_E2E_DIRECTORY_DRAFT_PASSWORD",
+    "ADTR_E2E_DIRECTORY_DRAFT_CODE",
   ] as const;
   if (
     names.some((name) => !process.env[name]) ||
@@ -636,10 +642,13 @@ test("real dictionary-v3 UI → authenticated API → worker → paged synthetic
   test.setTimeout(630_000);
   let username = process.env.ADTR_E2E_USERNAME!;
   const initialPassword = process.env.ADTR_E2E_PASSWORD!;
-  let password = "Changed Directory Password 123";
+  let password = process.env.ADTR_E2E_DIRECTORY_PASSWORD!;
   const producerUsername = "directory-producer";
-  const producerInitial = "Initial Directory Producer Password 123";
-  const producerPassword = "Changed Directory Producer Password 123";
+  const producerInitial =
+    process.env.ADTR_E2E_DIRECTORY_PRODUCER_INITIAL_PASSWORD!;
+  const producerPassword = process.env.ADTR_E2E_DIRECTORY_PRODUCER_PASSWORD!;
+  const draftPassword = process.env.ADTR_E2E_DIRECTORY_DRAFT_PASSWORD!;
+  const draftCode = process.env.ADTR_E2E_DIRECTORY_DRAFT_CODE!;
   const accountUser = process.env.ADTR_E2E_LDAP_USERNAME!;
   const accountPassword = process.env.ADTR_E2E_LDAP_PASSWORD!;
   const ldapIP = process.env.ADTR_E2E_LDAP_IP!;
@@ -651,6 +660,8 @@ test("real dictionary-v3 UI → authenticated API → worker → paged synthetic
     password,
     producerInitial,
     producerPassword,
+    draftPassword,
+    draftCode,
     accountUser,
     accountPassword,
   ];
@@ -989,11 +1000,11 @@ test("real dictionary-v3 UI → authenticated API → worker → paged synthetic
   await page.getByRole("button", { name: "审阅角色授权", exact: true }).click();
   await fillSecret(
     page.getByLabel("操作者当前密码", { exact: true }),
-    "Unsubmitted synthetic proof",
+    draftPassword,
   );
   await fillSecret(
     page.getByLabel("未使用的认证器验证码", { exact: true }),
-    "123456",
+    draftCode,
   );
   await navigateTo(page, "字典 3 目录采集");
   await page.goBack();
@@ -1171,6 +1182,17 @@ test("real dictionary-v3 UI → authenticated API → worker → paged synthetic
     /objectGUID|samAccountName|objectSid|whenCreated|Mixed@example|grantRevision|accountCredentialRevision|connectionCredentialGeneration/u,
   );
   safe(generic);
+
+  await expectSpecializedTaskReadOnly(
+    context,
+    {
+      actorId,
+      taskUUID,
+      taskName: "domain.directory_read.v3",
+      state: "succeeded",
+    },
+    safe,
+  );
 
   const refreshed = await observationAction(page, () =>
     page.getByRole("button", { name: "刷新目录观察", exact: true }).click(),

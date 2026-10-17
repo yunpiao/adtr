@@ -28,7 +28,37 @@ If history APIs are unavailable/rate-limited, the current clean in-memory view r
 
 Server menu plus exact operation checks remain mandatory. A restored detail cannot fetch without `GET /api/tasks/detail`; a restored archived selection or archived/all list query cannot read until the current tasks-write/task_archive-read gate allows that visibility. Denied saved visibility offers an explicit return to default-visible tasks. A 404 active lookup does not automatically retry with `visibility=all`.
 
-All submit, cancel, recover, schedule, archive, restore and unconfirmed-action controls retain their existing proof/idempotency/permission and server-write contracts. Dedicated audit, connection, directory and runtime-log entrypoints retain their special restrictions. Generic task APIs still redact private result/cursor metadata; the UI neither reconstructs it nor routes dedicated task types through generic recovery. Task events remain execution history, not a claimed AD threat-evidence chain.
+All submit, cancel, recover, schedule, archive, restore and unconfirmed-action controls retain their existing proof/idempotency/permission and server-write contracts. Dedicated audit, connection, directory and runtime-log entrypoints retain their special restrictions. Generic task APIs still redact private result/cursor metadata. The original UI restrictions covered directory v1/v2; the later five-kind presentation gap and its candidate repair are recorded below. Task events remain execution history, not a claimed AD threat-evidence chain.
+
+### 2026-10-14 specialized-task controls candidate
+
+Refs [F48 #12 / AD-F-189 issue-first record](https://github.com/yunpiao/adtr/issues/12#issuecomment-6180459935), [#26](https://github.com/yunpiao/adtr/issues/26) and [#30](https://github.com/yunpiao/adtr/issues/30). Baseline main is `7140933be2459dbfc4b824aa6d6d6c46a9f4f8da`, tree `0a770734095ea8561f872c74e1234dba21e619f2`; its 1,084 source blobs and file modes were checked before the candidate edits. This is a separate candidate checkpoint; historical verification below does not establish this changed UI.
+
+The confirmed defect is an incomplete frontend kind classification. The generic workspace recognized directory v1/v2, but omitted these exact dedicated kinds:
+
+- `domain.directory_read.v3`
+- `domain.directory_read.v4`
+- `user_assets.v3.export`
+- `group_assets.v3.export`
+- `computer_assets.v3.export`
+
+The backend already rejects their generic cancel/recover requests with `directory_route_required` or the corresponding asset-export route-required error. Nevertheless, the old UI offered generic actions/proof forms and displayed redacted result/cursor metadata as ordinary results. The candidate extends exact-kind classification, suppresses generic cancel/recover controls and their password/MFA forms, and hides private result/cursor fields for all five kinds. It retains the actual task UUID, state, progress, error, persistent events and refresh. An internal `TaskAction` guard also blocks a generic write if a stale or programmatic action reaches the component. This frontend guard complements the existing server boundary; no backend, schema, permission, policy or CI-job change is included.
+
+After the current detail read identifies a dedicated kind, the candidate clears only an old generic recover intent matching both the current actor and task. It does not clear another actor's intent, another task's intent, or a dedicated export recovery record; it does not replay a write. Refresh, Back/Forward, delayed reads and session replacement must preserve the existing current-account/read-only navigation boundary.
+
+Navigation describes the destination's actual capability:
+
+- Directory v3 links to `#directory-v3`, the existing dedicated directory workspace
+- Directory v4 links to `#group-members-v4` to read saved results only; this page has no collection/cancellation UI, so those operations still require the dedicated API
+- The three asset-export kinds link to `#user-assets-v3`, `#group-assets-v3` and `#computer-assets-v3`, respectively, where their dedicated export panels exist; the link does not promise to select or resume an arbitrary task ID
+
+Existing authorized health/audit/domain-connection actions, directory v1/v2 restrictions and runtime-log restrictions remain separate kind-specific contracts. A task's state and event history retain their existing meaning; suppressed generic controls do not rewrite a task or imply collection, cancellation, recovery or download success.
+
+Candidate test coverage targets all 45 combinations of five exact kinds and nine task states, private-field/action/proof negative assertions, zero generic mutation requests, actor/task-scoped intent handling, stale/session/navigation boundaries and the existing legitimate-action regressions. Existing actual-task browser suites are being extended rather than adding CI jobs. At this checkpoint the candidate's DOM/runtime tests, formatting, typecheck/build and real browser/API/Worker/PostgreSQL execution have not run locally because of the execution restrictions. Exact-head verification must run the unchanged 71-job matrix; independent review, publication, merge and separate main-push verification remain pending. Test source and static checks alone are not runtime evidence.
+
+The explicit offline Python allowlist passed 19 existing tests: synthetic membership-evidence validator units, membership runner contracts and directory-v3 static contracts. The complete 209-feature requirements mapping and `git diff --check` also passed. An audit hook denied subprocesses, network and signals. These results do not execute the 105 added DOM cases or the 11 added real-browser checkpoints.
+
+AD-F-189 retains `implemented_verified_slice` for its previously verified narrower slices; this candidate does not upgrade that status or replace the PR72/77/94 evidence. Issue #12 remains open and product acceptance remains 0/209. Complete source-state compatibility, `engineRestart`, capacity/retention, real AD/Windows and full product acceptance remain open.
 
 ## Verification and open gates
 

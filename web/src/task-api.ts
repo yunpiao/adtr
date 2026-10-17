@@ -27,6 +27,25 @@ export const stateLabels: Record<TaskState, string> = {
 export const isDomainConnectionTask = (name: unknown) =>
   name === "domain.connection_test" ||
   name === "domain.account_connection_test";
+export const isDirectoryTask = (name: unknown) =>
+  name === "domain.directory_read" ||
+  name === "domain.directory_read.v2" ||
+  name === "domain.directory_read.v3" ||
+  name === "domain.directory_read.v4";
+export const isAssetExportTask = (name: unknown) =>
+  name === "user_assets.v3.export" ||
+  name === "group_assets.v3.export" ||
+  name === "computer_assets.v3.export";
+// Mirror the exact dedicated-route boundary; neighboring/future kind names do
+// not inherit these controls or imply a new payload/recovery contract.
+export const requiresDedicatedTaskControls = (name: unknown) =>
+  name === "system.logs_bundle" ||
+  isDirectoryTask(name) ||
+  isAssetExportTask(name);
+export const requiresDedicatedTaskRecovery = (name: unknown) =>
+  name === "audit.export" ||
+  isDomainConnectionTask(name) ||
+  requiresDedicatedTaskControls(name);
 export const terminal = (state: TaskState) =>
   [
     "succeeded",
@@ -345,6 +364,14 @@ export function taskError(error: unknown): string {
       "审计导出须通过操作审计页面创建，请在那里重新提交导出条件。",
     operational_log_route_required:
       "运行日志诊断包须通过「运行日志与诊断包」页面提交或取消，并重新核验当前权限。",
+    directory_route_required:
+      "目录任务须通过对应版本的专用接口操作。字典 3 可在「字典 3 目录采集」页面处理；字典 4 的「组成员」页面仅查看已保存结果，采集和取消仍需专用 API。请先核对任务版本。",
+    user_asset_export_route_required:
+      "用户资产导出须通过「用户资产」页面的专用导出面板核验权限和操作。该页面不会按此任务 ID 自动恢复；请保留原导出操作记录。",
+    group_asset_export_route_required:
+      "组资产导出须通过「组资产」页面的专用导出面板核验权限和操作。该页面不会按此任务 ID 自动恢复；请保留原导出操作记录。",
+    computer_asset_export_route_required:
+      "计算机资产导出须通过「计算机资产」页面的专用导出面板核验权限和操作。该页面不会按此任务 ID 自动恢复；请保留原导出操作记录。",
   };
   return error instanceof ApiError
     ? (specific[error.code] ??

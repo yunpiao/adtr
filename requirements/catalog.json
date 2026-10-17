@@ -12172,6 +12172,46 @@
             "返回、刷新、前后退重新鉴权并恢复账户绑定只读查询/选择，真实桌面/390px八图及独立审查已记录"
           ],
           "local_contract": "docs/soc-task-ui.md"
+        },
+        "specialized_task_controls_candidate": {
+          "date": "2026-10-14",
+          "status": "candidate_unverified",
+          "issue_record": "https://github.com/yunpiao/adtr/issues/12#issuecomment-6180459935",
+          "related_issues": [
+            "https://github.com/yunpiao/adtr/issues/26",
+            "https://github.com/yunpiao/adtr/issues/30"
+          ],
+          "baseline_commit": "7140933be2459dbfc4b824aa6d6d6c46a9f4f8da",
+          "baseline_tree": "0a770734095ea8561f872c74e1234dba21e619f2",
+          "baseline_source_check": "1084 source blobs and file modes checked before candidate edits; baseline verification is not candidate runtime evidence.",
+          "exact_kinds": [
+            "domain.directory_read.v3",
+            "domain.directory_read.v4",
+            "user_assets.v3.export",
+            "group_assets.v3.export",
+            "computer_assets.v3.export"
+          ],
+          "confirmed_defect": "通用API已经拒绝五种专用任务的cancel/recover，但旧前端种类判断遗漏它们，仍显示通用动作/证明表单及已脱敏result/cursor。",
+          "scope": [
+            "按精确kind隐藏通用取消/恢复、密码/MFA表单与私有result/cursor；内部TaskAction防护，保留真实状态/进度/错误/持久事件/刷新。",
+            "仅在当前详情确认kind后清理当前actor/当前task的旧通用recover意图；其他actor/task及专用导出恢复记录保留，不自动重放写入。",
+            "v3指向#directory-v3；v4的#group-members-v4仅查看已保存结果，采集/取消仍需专用API；三类资产页面有专用导出面板，不承诺任意taskID自动恢复。",
+            "既有健康/审计/域连接合法动作及目录v1/v2/日志包限制保持；无后端/schema/权限/策略/CI job变化。"
+          ],
+          "verification_targets": [
+            "五kind×九state的45组DOM私有字段/动作/证明负断言，无通用写入，actor/task意图隔离及迟到响应/会话/导航回归。",
+            "扩展既有真实任务浏览器套件，精确候选head沿用71项CI。"
+          ],
+          "verification_status": "候选DOM/运行时、格式、类型/构建与真实浏览器/API/Worker/PostgreSQL本地均未运行；受执行限制。静态检查和测试源码不计为运行通过，历史CI不继承。",
+          "local_static_checks": "显式白名单离线Python的19项既有组成员证据合成单元/runner/字典3静态契约通过，209项需求映射校验及git diff --check通过；审计钩子拒绝子进程/网络/信号。新增105项DOM和11处真实浏览器检查点尚未执行。",
+          "remaining": [
+            "独立实际diff审查、候选发布及精确head完整71项CI/真实链路证据。",
+            "通过合并前门禁后核对base/head、正常合并、main内容树/父提交及独立main-push CI。",
+            "保留历史较窄切片的implemented_verified_slice及PR72/77/94证据；本候选不升级功能状态，Issue12保持open，产品验收0/209。",
+            "完整源系统状态/字段兼容、engineRestart、容量/保留期、真实AD/Windows与产品验收仍开放。"
+          ],
+          "local_contract": "docs/soc-task-ui.md#2026-10-14-specialized-task-controls-candidate",
+          "delivery_record": "docs/delivery.md"
         }
       }
     },

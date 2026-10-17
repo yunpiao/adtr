@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { expectSpecializedTaskReadOnly } from "./specialized-task-controls";
 import { proof } from "./computer-assets-v3-fixture";
 import { exportPrefix, responseValue } from "./computer-asset-export-v3-helpers";
 import { chooseColumns, createExport, panelFor, pauseOwnedExportWorker, receiptAndDetail, restoreOwnedExportWorker, resumeOwnedExportWorker, safeColumns, screenshot, terminalExport, terminalSetup, unavailableDownload, writeTerminalEvidence } from "./computer-asset-export-v3-terminal-helpers";
@@ -19,6 +20,16 @@ test("queued export is cancelled with fresh MFA and never executes after Worker 
     await expect(panel).toContainText("等待执行");
     const queued = await terminalExport(operation.create.taskID);
     expect(queued).toMatchObject({ state: "queued", attempt: 0, snapshotCount: 0, manifestCount: 0, chunkCount: 0 });
+    await expectSpecializedTaskReadOnly(
+      context,
+      {
+        actorId: setup.actorId,
+        taskUUID: operation.create.taskID,
+        taskName: "computer_assets.v3.export",
+        state: "queued",
+      },
+      setup.fixture.safe,
+    );
     await proof(page, setup.fixture.bootstrap.password, setup.fixture.bootstrap.auth);
     const [cancelResponse] = await Promise.all([
       page.waitForResponse((r) => new URL(r.url()).pathname === `${exportPrefix}/cancel` && r.request().method() === "POST"),
