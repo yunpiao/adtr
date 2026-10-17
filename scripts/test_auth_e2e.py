@@ -19,6 +19,7 @@ from user_asset_export_v3_ci import configure as configure_user_export, capture 
 from user_asset_export_v3_terminal_ci import SUITES as EXPORT_TERMINAL_SUITES, configure as configure_terminal_export, capture as capture_terminal_export, validate as validate_terminal_export
 from user_asset_export_v3_worker_guard import OwnedExportWorkerGuard
 from asset_export_v3_running_cancel_guard import RunningExportCancelGuard
+from owned_rescue_runner import OwnedCIWorker, ENV_FDS
 from user_asset_export_v3_running_cancel_ci import SUITE as RUNNING_CANCEL_SUITE, configure as configure_running_cancel, capture as capture_running_cancel, validate as validate_running_cancel
 from group_asset_export_v3_running_cancel_ci import SUITE as GROUP_RUNNING_CANCEL_SUITE, configure as configure_group_running_cancel, capture as capture_group_running_cancel, validate as validate_group_running_cancel
 from computer_asset_export_v3_running_cancel_ci import SUITE as COMPUTER_RUNNING_CANCEL_SUITE, configure as configure_computer_running_cancel, capture as capture_computer_running_cancel, validate as validate_computer_running_cancel
@@ -85,6 +86,10 @@ def main():
     parser.add_argument("--suite", choices=["group-asset-export-v3-running-cancel", "computer-asset-export-v3-running-cancel", "user-asset-export-v3-running-cancel", "computer-asset-export-v3", "computer-asset-export-v3-failure", "computer-asset-export-v3-cancel", "group-asset-export-v3", "group-asset-export-v3-failure", "group-asset-export-v3-cancel", "user-asset-export-v3-failure", "user-asset-export-v3-cancel", "user-asset-export-v3", "auth", "access", "resource", "tasks", "messages", "messages-bulk", "audit", "system", "maintenance", "domains", "operations", "profile", "credential-use", "account-references", "operational-logs", "session-invalidation", "account-reference-barrier", "directory", "directory-controls", "directory-readers", "directory-v2", "directory-v2-controls", "directory-v2-readers", "directory-v3-backend", "directory-v4-backend", "group-members-v4", "group-members-v4-empty", "group-members-v4-pagination", "group-members-v4-refresh", "user-assets-v3", "computer-assets-v3", "computer-assets-v3-readers", "group-assets-v3", "group-assets-v3-readers", "directory-v3", "directory-v3-controls", "directory-v3-readers", "user-assets-v2", "user-assets-v2-readers"], default="auth")
     parser.add_argument("--expired", action="store_true")
     args = parser.parse_args()
+    # Only the three explicit running-cancel suites install the CI controller.
+    # The default make build remains untagged. Build before source provenance.
+    if args.suite in {RUNNING_CANCEL_SUITE} | KIND_RUNNING_CANCEL_SUITES:
+        subprocess.run(["make", "build-ci-running-cancel"], check=True, timeout=180)
     # Check display support before creating a disposable database or fixtures.
     command = browser_command(args.suite)
     name = "adtr-auth-e2e-" + uuid.uuid4().hex[:12]
@@ -94,6 +99,7 @@ def main():
     owner = uuid.uuid4().hex
     server = None
     worker = None
+    owned_ci_worker = None
     export_worker_guard = None
     running_cancel_guard = None
     ldap_fixture = None
@@ -236,7 +242,7 @@ def main():
                 for key in ["ADTR_LDAP_CA_FILE", "ADTR_LDAP_EGRESS_POLICY_FILE"]:
                     env.pop(key, None)
         # Credentials are only needed by explicit bootstrap; never pass them to the server.
-        runtime_env = {k: v for k, v in env.items() if not k.startswith("ADTR_BOOTSTRAP_") and not k.startswith("ADTR_E2E_")}
+        runtime_env = {k: v for k, v in env.items() if not k.startswith("ADTR_BOOTSTRAP_") and not k.startswith("ADTR_E2E_") and k not in ENV_FDS}
         diagnostics.phase("api-start")
         server = subprocess.Popen(["./bin/adtr", "-mode", "api"], env=runtime_env, stdout=logs, stderr=logs)
         for _ in range(100):
@@ -269,7 +275,12 @@ def main():
             for key in ["ADTR_AUTH_KEY", "ADTR_ORIGIN", "ADTR_WEB_DIR"]:
                 worker_env.pop(key, None)
             diagnostics.phase("worker-start")
-            worker = subprocess.Popen(["./bin/adtr", "-mode", "worker"], env=worker_env, stdout=logs, stderr=logs)
+            if args.suite in {RUNNING_CANCEL_SUITE} | KIND_RUNNING_CANCEL_SUITES:
+                owned_ci_worker = OwnedCIWorker.spawn(["./bin/adtr", "-mode", "worker"],
+                    env=worker_env, stdout=logs, stderr=logs, binary=Path("bin/adtr").resolve())
+                worker = owned_ci_worker.process
+            else:
+                worker = subprocess.Popen(["./bin/adtr", "-mode", "worker"], env=worker_env, stdout=logs, stderr=logs)
             if args.suite in {RUNNING_CANCEL_SUITE, "user-asset-export-v3-cancel", "group-asset-export-v3-cancel", "computer-asset-export-v3-cancel"} | KIND_RUNNING_CANCEL_SUITES:
                 export_worker_guard = OwnedExportWorkerGuard(worker, export_worker_nonce, Path("bin/adtr").resolve())
                 export_worker_guard.start()
@@ -281,7 +292,7 @@ def main():
                            ADTR_E2E_EXPORT_WORKER_READY_URL=f"http://127.0.0.1:{worker_port}/readyz")
                 if args.suite in {RUNNING_CANCEL_SUITE} | KIND_RUNNING_CANCEL_SUITES:
                     asset_kind = {GROUP_RUNNING_CANCEL_SUITE: "group", COMPUTER_RUNNING_CANCEL_SUITE: "computer"}.get(args.suite, "user")
-                    running_cancel_guard = RunningExportCancelGuard(worker, export_worker_nonce, Path("bin/adtr").resolve(), name, export_worker_app, env["ADTR_DATABASE_URL"], asset_kind=asset_kind)
+                    running_cancel_guard = RunningExportCancelGuard(worker, export_worker_nonce, Path("bin/adtr").resolve(), name, export_worker_app, env["ADTR_DATABASE_URL"], asset_kind=asset_kind, controller=owned_ci_worker.controller)
                     running_cancel_guard.start()
                     env.update(ADTR_E2E_RUNNING_CANCEL_GUARD_URL=running_cancel_guard.url,
                                ADTR_E2E_RUNNING_CANCEL_GUARD_TOKEN=running_cancel_guard.token)
@@ -369,6 +380,11 @@ def main():
                     account_barrier.close()
                 except Exception as error:
                     shutdown_error = error
+            if owned_ci_worker is not None and worker.poll() is None:
+                try:
+                    owned_ci_worker.controller.resume_and_release(abort=True)
+                except (OSError, RuntimeError):
+                    shutdown_error = RuntimeError("owned CI rescue cleanup failed")
             for label, process in [("worker", worker), ("API", server)]:
                 if process is None:
                     continue
@@ -387,6 +403,18 @@ def main():
                     process.kill()
                     process_record["after_cleanup"] = process.wait(timeout=10)
                     shutdown_error = RuntimeError(f"{label} did not stop gracefully")
+            if owned_ci_worker is not None:
+                try:
+                    owned_ci_worker.close_after_wait()
+                except (OSError, RuntimeError, subprocess.TimeoutExpired):
+                    shutdown_error = RuntimeError("owned CI final witness or cleanup failed")
+            if running_cancel_guard is not None and shutdown_error is None:
+                try:
+                    # The worker's successful Wait includes journal.Close/drain.
+                    # Query its final report while the isolated database is alive.
+                    running_cancel_guard.verify_journal_after_wait(worker.returncode)
+                except Exception:
+                    shutdown_error = RuntimeError("owned CI final journal proof failed")
             if ldap_fixture is not None:
                 try:
                     ldap_fixture.close()

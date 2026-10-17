@@ -179,6 +179,10 @@ func TestSealIntegrationExistingTargetAndSecondBegin(t *testing.T) {
 	if pendingConn.Close(ctx) != nil {
 		t.Fatal("pending connection cleanup failed")
 	}
+	application, appErr := g.applicationSnapshot(1, "reply")
+	if appErr != nil || application.Status != "sealed" || len(application.Records) != 1 || application.Records[0].Backend != target.raw.PgConn().PID() || application.Records[0].Candidate == nil {
+		t.Fatal("application registry PG target mismatch")
+	}
 	if g.frame(1).Status != "sealed" {
 		t.Fatal("clean target-only lifetime did not seal")
 	}

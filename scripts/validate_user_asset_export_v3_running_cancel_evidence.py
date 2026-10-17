@@ -18,7 +18,7 @@ from validate_user_asset_export_v3_evidence import require, exact, sha, strict_j
 
 SUITE = 'user-asset-export-v3-running-cancel'
 LIVE_KEYS = (terminal.DB_KEYS - {'leaseOwner'}) | {'leaseOwnerSHA256', 'fencingToken', 'sourceSHA256', 'observationID', 'databaseClock', 'leaseUntilEpoch'}
-CHECKPOINT_KEYS = {'taskID','kind','state','attempt','progress','snapshotCount','manifestCount','chunkCount','fencingToken','leaseOwnerSHA256','workerIDSHA256','applicationNameSHA256','leaseRemainingSeconds','databaseClock','leaseUntilEpoch','allThreadsStopped','threadCount','ownedSessionCount','allowedActivityTransactions','unsafeTransactions','blockedOwnedBackends','activityLockReleased','observerStartedBeforeResume','checkpointCaught','observerStartedMonotonic','resumedForCheckpointMonotonic','checkpointObservedMonotonic','stopIssuedMonotonic','stopStartedMonotonic','barrierBackendPID','sessions'}
+CHECKPOINT_KEYS = {'taskID','kind','state','attempt','progress','snapshotCount','manifestCount','chunkCount','fencingToken','leaseOwnerSHA256','workerIDSHA256','applicationNameSHA256','leaseRemainingSeconds','databaseClock','leaseUntilEpoch','allThreadsStopped','threadCount','ownedSessionCount','allowedActivityTransactions','unsafeTransactions','blockedOwnedBackends','activityLockReleased','observerStartedBeforeResume','checkpointCaught','observerStartedMonotonic','resumedForCheckpointMonotonic','checkpointObservedMonotonic','stopIssuedMonotonic','stopStartedMonotonic','barrierBackendPID','sessions','resultVersion','admissionSealed','stickyWitnessValid'}
 ACTIVITY_SQL = """WITH observed AS (SELECT clock_timestamp() AS at)
 INSERT INTO adtr.system_worker_activity(tenant_id,worker_id,cycle,status,error_code,last_activity_at,last_success_at)
 SELECT $1,$2,$3,$4,$5,at,CASE WHEN $4='success' THEN at ELSE NULL END FROM observed
@@ -200,11 +200,11 @@ def worker_proof(worker, case):
     require(all(type(t) is str and re.fullmatch('[0-9]+\\.[0-9]+',t) for t in times),'real database queue timestamps')
     require(Decimal(times[0]) < Decimal(times[1]) < Decimal(times[2]),'two actual queue success cycles')
     exact(cp,CHECKPOINT_KEYS,'checkpoint fields')
-    for k in ('taskID','kind','state','attempt','progress','snapshotCount','manifestCount','chunkCount','fencingToken','leaseOwnerSHA256','leaseUntilEpoch'):
+    for k in ('taskID','kind','state','attempt','progress','snapshotCount','manifestCount','chunkCount','fencingToken','leaseOwnerSHA256','leaseUntilEpoch','resultVersion'):
         require(cp[k] == case['running']['database'][k],'checkpoint and independent database agree: '+k)
     require(cp['workerIDSHA256'] == pause['workerIDSHA256'] and cp['applicationNameSHA256'] == pause['applicationNameSHA256'],'checkpoint same owner identity')
     require(all(integer(cp[k]) for k in ('attempt','progress','snapshotCount','manifestCount','chunkCount','fencingToken','threadCount','ownedSessionCount','allowedActivityTransactions','unsafeTransactions','blockedOwnedBackends')) and cp['threadCount'] > 0,'checkpoint integer observations')
-    require(all(cp[k] is True for k in ('allThreadsStopped','activityLockReleased','observerStartedBeforeResume','checkpointCaught')),'safe captured/released checkpoint')
+    require(all(cp[k] is True for k in ('allThreadsStopped','activityLockReleased','observerStartedBeforeResume','checkpointCaught','admissionSealed','stickyWitnessValid')),'safe captured/released checkpoint')
     require(all(number(cp[k]) for k in ('leaseRemainingSeconds','databaseClock','leaseUntilEpoch','observerStartedMonotonic','resumedForCheckpointMonotonic','checkpointObservedMonotonic','stopIssuedMonotonic','stopStartedMonotonic')),'finite database and monotonic clocks')
     require(cp['leaseRemainingSeconds'] > 20 and abs(cp['leaseUntilEpoch']-cp['databaseClock']-cp['leaseRemainingSeconds']) < .01,'independently reconstructed >20s real lease')
     require(cp['observerStartedMonotonic'] <= cp['resumedForCheckpointMonotonic'] <= cp['checkpointObservedMonotonic'] <= cp['stopIssuedMonotonic'] == cp['stopStartedMonotonic'] and cp['stopIssuedMonotonic']-cp['resumedForCheckpointMonotonic'] < 1.5,'persistent observer precedes resume and stop meets actual callback window')

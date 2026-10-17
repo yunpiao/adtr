@@ -25,3 +25,17 @@ prepare-image: web-build
 	$(GO) mod verify
 	$(GO) mod vendor
 
+
+# Explicit CI-only binary for the three owned running-cancel acceptance suites.
+# Never add this tag to build/check or to deployment artifacts.
+.PHONY: build-ci-running-cancel
+build-ci-running-cancel:
+	test "$$(uname -s)" = Linux
+	test "$$(uname -m)" = x86_64
+	$(GO) test -count=1 ./internal/dbadmissioncheck
+	GOOS=linux GOARCH=amd64 $(GO) build -tags=adtr_ci_dbadmission -buildvcs=false -trimpath -o bin/adtr ./cmd/adtr
+
+.PHONY: test-owned-rescue-ci
+test-owned-rescue-ci:
+	test "$$(uname -s)" = Linux
+	ADTR_RUN_OWNED_RESCUE_TESTS=1 python3 scripts/test_owned_rescue_runner_runtime.py

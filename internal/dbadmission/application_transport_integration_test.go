@@ -1,0 +1,118 @@
+//go:build integration && adtr_ci_dbadmission && linux && amd64
+
+package dbadmission
+
+import (
+	"bufio"
+	"context"
+	"encoding/json"
+	"os"
+	"sync/atomic"
+	"syscall"
+	"testing"
+	"time"
+)
+
+func applicationTestPair(t *testing.T) (*os.File, *os.File) {
+	t.Helper()
+	fds, err := syscall.Socketpair(syscall.AF_UNIX, syscall.SOCK_STREAM, 0)
+	if err != nil {
+		t.Fatal("owned socketpair")
+	}
+	for _, fd := range fds {
+		if syscall.SetNonblock(fd, true) != nil {
+			t.Fatal("owned socket mode")
+		}
+	}
+	a, b := os.NewFile(uintptr(fds[0]), "owned-a"), os.NewFile(uintptr(fds[1]), "owned-b")
+	t.Cleanup(func() { a.Close(); b.Close() })
+	return a, b
+}
+func TestIntegrationApplicationNormalEOFLeavesRescueLive(t *testing.T) {
+	normal, parent := applicationTestPair(t)
+	rescue, supervisor := applicationTestPair(t)
+	coordinator.Lock()
+	priorGate, priorUsed := coordinator.gate, coordinator.used
+	coordinator.gate = nil
+	coordinator.used = false
+	coordinator.Unlock()
+	defer func() {
+		coordinator.Lock()
+		coordinator.gate = priorGate
+		coordinator.used = priorUsed
+		coordinator.Unlock()
+	}()
+	page, nonce := testWitnessFile(t, nil)
+	failed := make(chan struct{}, 2)
+	cleanup, err := StartCIController(normal, rescue, page, nonce, func() { failed <- struct{}{} })
+	if err != nil {
+		t.Fatal("application install")
+	}
+	defer cleanup()
+	if _, err := StartCIController(normal, rescue, page, nonce, nil); err == nil {
+		t.Fatal("second installation accepted")
+	}
+	coordinator.Lock()
+	g := coordinator.gate
+	coordinator.Unlock()
+	w := g.witness.(*ciWitness)
+	parent.SetDeadline(time.Now().Add(3 * time.Second))
+	reader := bufio.NewReader(parent)
+	read := func() applicationFrame {
+		t.Helper()
+		line, e := reader.ReadBytes('\n')
+		if e != nil {
+			t.Fatal("normal reply")
+		}
+		var frame applicationFrame
+		if json.Unmarshal(line, &frame) != nil {
+			t.Fatal("normal frame")
+		}
+		return frame
+	}
+	if f := read(); f.Kind != "ready" || f.Status != "open" || len(f.Records) != 0 {
+		t.Fatal("ready incomplete")
+	}
+	ticket, err := g.acquire(context.Background())
+	if err != nil {
+		t.Fatal("admission")
+	}
+	conn := attachTestTicket(ticket)
+	if _, err = g.register(conn, testSealIdentity()); err != nil {
+		t.Fatal("registration")
+	}
+	generation := g.candidates()[0].generation
+	if writeApplicationFrame(parent, applicationRequest{Version: 2, Epoch: 1, Seq: 1, Op: "pin", Target: generation}, 1024) != nil {
+		t.Fatal("pin send")
+	}
+	if f := read(); f.Status != "sealed" || f.Target != generation {
+		t.Fatal("pin reply")
+	}
+	parent.Close()
+	select {
+	case <-failed:
+	case <-time.After(time.Second):
+		t.Fatal("EOF did not cancel business")
+	}
+	if atomic.LoadUint32(w.invalid) != 1 {
+		t.Fatal("EOF did not stick")
+	}
+	supervisor.SetDeadline(time.Now().Add(time.Second))
+	if writeApplicationFrame(supervisor, applicationRequest{Version: 2, Epoch: 1, Seq: 2, Op: "abort"}, 256) != nil {
+		t.Fatal("rescue unavailable")
+	}
+	line, err := bufio.NewReader(supervisor).ReadBytes('\n')
+	if err != nil {
+		t.Fatal("rescue ack")
+	}
+	var ack map[string]any
+	if json.Unmarshal(line, &ack) != nil || ack["status"] != "released" || len(ack) != 5 {
+		t.Fatal("rescue frame")
+	}
+	g.mu.Lock()
+	closing := g.closing
+	g.mu.Unlock()
+	if atomic.LoadUint32(w.invalid) != 1 || closing {
+		t.Fatal("release erased failure or stayed closed")
+	}
+}

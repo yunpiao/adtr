@@ -22,7 +22,7 @@ NS = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'
 REL = 'http://schemas.openxmlformats.org/package/2006/relationships'
 REQUEST_KEYS = {'domainId', 'expectedRevision', 'expectedCredentialRevision', 'observationId', 'search', 'creatTm', 'screenColumns'}
 MAX_BYTES = 32 << 20
-SOURCE_ROOTS = ['cmd', 'internal', 'scripts', 'web/src', 'web/e2e', 'web/playwright.config.ts', 'web/package.json', 'web/package-lock.json', '.github/workflows']
+SOURCE_ROOTS = ['cmd', 'internal', 'scripts', 'web/src', 'web/e2e', 'web/playwright.config.ts', 'web/package.json', 'web/package-lock.json', '.github/workflows', 'go.mod', 'go.sum', 'Makefile']
 
 
 def checkout_provenance(root, run_id=None, run_attempt=None):

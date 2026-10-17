@@ -53,9 +53,9 @@ def specimen():
     cycles.update(queueSuccessAfterFirst='2003.000000',queueSuccessAfter='2004.000000')
     lock={'type':'transactionid','mode':'ShareLock','granted':False,'relation':None,'classid':None,'objid':None,'objsubid':None}
     session={'pid':300,'transaction':True,'state':'active','waitType':'Lock','blockers':[200],'locks':[lock],'queryKind':'activity','querySHA256':v.QUERY_HASHES['activity']}
-    cp={k:c['running']['database'][k] for k in ('taskID','kind','state','attempt','progress','snapshotCount','manifestCount','chunkCount','fencingToken','leaseOwnerSHA256')}
+    cp={k:c['running']['database'][k] for k in ('taskID','kind','state','attempt','progress','snapshotCount','manifestCount','chunkCount','fencingToken','leaseOwnerSHA256','resultVersion')}
     cp.update(workerIDSHA256='5'*64,applicationNameSHA256=pause['applicationNameSHA256'],leaseRemainingSeconds=30,databaseClock=1999,leaseUntilEpoch=2029,
-              allThreadsStopped=True,threadCount=6,ownedSessionCount=1,allowedActivityTransactions=1,unsafeTransactions=0,blockedOwnedBackends=1,
+              admissionSealed=True,stickyWitnessValid=True,allThreadsStopped=True,threadCount=6,ownedSessionCount=1,allowedActivityTransactions=1,unsafeTransactions=0,blockedOwnedBackends=1,
               activityLockReleased=True,observerStartedBeforeResume=True,checkpointCaught=True,observerStartedMonotonic=90,resumedForCheckpointMonotonic=100,
               checkpointObservedMonotonic=100.5,stopIssuedMonotonic=100.6,stopStartedMonotonic=100.6,barrierBackendPID=200,sessions=[session])
     data['worker'].update(checkpoint=cp,cycles=cycles,resume={'resumed':True,'runningStoppedSeconds':3,'watchdogExpired':False,'stopStartedMonotonic':100.6,'resumedMonotonic':103.6})
@@ -65,6 +65,18 @@ def specimen():
 class RunningEvidenceTests(unittest.TestCase):
     def check(self,data,files):
         v.validate(data,files.__getitem__,{'fixtureOnly':True})
+
+    def test_requires_joint_admission_witness_and_version(self):
+        for update in ({'admissionSealed': False}, {'stickyWitnessValid': False}, {'resultVersion': 999}):
+            data, files = specimen()
+            data['worker']['checkpoint'].update(update)
+            with self.assertRaises(ValueError):
+                self.check(data, files)
+        for key in ('admissionSealed', 'stickyWitnessValid', 'resultVersion'):
+            data, files = specimen()
+            del data['worker']['checkpoint'][key]
+            with self.assertRaises(ValueError):
+                self.check(data, files)
 
     def test_positive_independent_specimen(self):
         self.check(*specimen())

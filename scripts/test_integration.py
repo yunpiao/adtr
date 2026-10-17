@@ -13,6 +13,9 @@ IMAGE = "docker.io/library/postgres:17.6-alpine@sha256:ef257d85f76e48da1c6483245
 
 def main():
     args = parse_args()
+    # Real owned-child protocol tests are explicit CI work, never import-time contracts.
+    if args.suite in ("all", "non-auth"):
+        subprocess.run(["make", "test-owned-rescue-ci"], check=True)
     name = "adtr-test-" + uuid.uuid4().hex[:12]
     password = secrets.token_hex(24)
     env = dict(os.environ, POSTGRES_PASSWORD=password)

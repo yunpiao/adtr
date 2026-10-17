@@ -26,12 +26,186 @@ def session(pid=100):
 
 def task():
     return {'taskID': 'task-one', 'kind': 'user_assets.v3.export', 'state': 'running',
-            'attempt': 1, 'progress': 10, 'snapshotCount': 1, 'manifestCount': 0,
+            'attempt': 1, 'progress': 10, 'resultVersion': 2, 'snapshotCount': 1, 'manifestCount': 0,
             'chunkCount': 0, 'fencingToken': 1, 'leaseOwner': 'worker-0',
             'databaseClock': 100., 'leaseUntilEpoch': 130., 'leaseRemainingSeconds': 30.}
 
 
 class ContractTests(unittest.TestCase):
+    def test_runtime_projection_types_are_closed_and_never_freeze_whitelist(self):
+        shapes = {
+            'relation': lock('relation', 'AccessShareLock', relation='private_relation'),
+            'extend': lock('extend', 'ExclusiveLock', relation='private_relation'),
+            'page': lock('page', 'ShareLock', relation='private_relation'),
+            'tuple': lock('tuple', 'ExclusiveLock', relation='private_relation'),
+            'frozenid': lock('frozenid', 'ShareLock'),
+            'transactionid': lock('transactionid', 'ExclusiveLock'),
+            'virtualxid': lock('virtualxid', 'ExclusiveLock'),
+            'spectoken': lock('spectoken', 'ExclusiveLock', objid='1'),
+            'object': lock('object', 'AccessShareLock', classid='1', objid='2', objsubid=0),
+            'userlock': lock('userlock', 'ExclusiveLock', classid='0', objid='4294967295', objsubid=-32768),
+            'advisory': lock('advisory', 'ShareLock', classid='0', objid='1', objsubid=1),
+            'applytransaction': lock('applytransaction', 'ShareLock', objid='1', objsubid=32767),
+        }
+        self.assertEqual(set(shapes), g.RUNTIME_LOCK_TYPES)
+        for typ, value in shapes.items():
+            with self.subTest(typ=typ):
+                row = session(101) | {'query': 'private SQL', 'blockers': [], 'locks': [value]}
+                g.validate_running_observation([session(), row], 99)
+                with self.assertRaises(RuntimeError):
+                    g.validate_sessions([session(), row], 99)
+        for change in ({'type': 'private_unknown'}, {'mode': 'private_mode'}, {'granted': 1},
+                       {'relation': 'private_relation'}, {'classid': None}, {'classid': '01'},
+                       {'objid': '4294967296'}, {'objsubid': True}, {'objsubid': 32768}):
+            with self.subTest(change=change):
+                row = session(101) | {'blockers': [], 'locks': [shapes['object'] | change]}
+                with self.assertRaises(RuntimeError) as caught:
+                    g.validate_running_observation([session(), row], 99)
+                self.assertNotIn('private', json.dumps(g.failure_event('capture_readiness', caught.exception)))
+
+    def test_runtime_full_scan_does_not_hide_late_malformed_or_untrusted_rows(self):
+        busy = session(101) | {'query': 'private SQL', 'blockers': [], 'locks': [
+            lock('object', 'AccessShareLock', classid='1', objid='2', objsubid=0)]}
+        bad_rows = [session(102) | {'state': 4}, session(102) | {'blockers': [999]},
+            session(102) | {'locks': [lock('private_unknown', 'ShareLock')]},
+            session(102) | {'blockers': [103]}, session(100)]
+        for bad in bad_rows:
+            with self.assertRaises(RuntimeError):
+                g.validate_running_observation([session(), busy, bad], 99)
+        with self.assertRaises(RuntimeError):
+            g.validate_running_observation([session(), busy,
+                session(102) | {'blockers': [103]}, session(103) | {'blockers': [102]}], 99)
+
+    def test_owned_object_drains_after_pin_every_kind(self):
+        for kind in g.EXPORT_KINDS:
+            guard = self.guard(asset_kind=kind); guard.threads = Mock(return_value=['T'])
+            ready_frame = guard.controller.snapshot.return_value
+            busy_frame = copy.deepcopy(ready_frame)
+            busy_frame.update(status='draining', open=2)
+            busy_frame['records'].append({'generation': 3, 'state': 'open', 'backend': 101, 'candidate': None})
+            guard.controller.snapshot.side_effect = [busy_frame, ready_frame]
+            guard.controller.pin.return_value = busy_frame
+            running = task() | {'kind': g.export_kind(kind)[0]}
+            queued = running | {'state': 'queued', 'attempt': 0, 'snapshotCount': 0}
+            busy = session(101) | {'query': 'private SQL', 'blockers': [], 'locks': [
+                lock('object', 'AccessShareLock', classid='1', objid='2', objsubid=0)]}
+            observer, barrier = Mock(), Mock(pid=99)
+            observer.query.side_effect = [{'otherNonterminal': 0, 'journalCount': 0, 'task': queued, 'sessions': []},
+                {'task': running, 'sessions': [session(), busy]},
+                *[{'task': running, 'sessions': [session()]} for _ in range(3)]]
+            barrier.query.side_effect = [{'count': 1}, True]
+            with patch.object(g, 'Psql', side_effect=[observer, barrier]), patch.object(g.time, 'sleep'):
+                self.assertTrue(guard.checkpoint('task-one', 'worker')['admissionSealed'])
+            guard.controller.pin.assert_called_once()
+            guard.owned.process.send_signal.assert_called_once_with(signal.SIGSTOP)
+
+    def test_pending_and_cleanup_set_mismatch_wait_before_pin(self):
+        for pending in (False, True):
+            guard = self.guard(); guard.threads = Mock(return_value=['T'])
+            frame = guard.controller.snapshot.return_value
+            partial = copy.deepcopy(frame)
+            if pending:
+                partial['pending'] = 1
+                partial['records'].append({'generation': 3, 'state': 'pending', 'backend': 0, 'candidate': None})
+            guard.controller.snapshot.side_effect = [partial, frame]
+            busy = session(101) | {'query': '', 'transaction': False, 'state': None, 'blockers': [], 'locks': []}
+            rows = [session()] if pending else [session(), busy]
+            queued = task() | {'state': 'queued', 'attempt': 0, 'snapshotCount': 0}
+            observer, barrier = Mock(), Mock(pid=99)
+            observations = [{'otherNonterminal': 0, 'journalCount': 0, 'task': queued, 'sessions': []},
+                {'task': task(), 'sessions': rows}, *[{'task': task(), 'sessions': [session()]} for _ in range(3)]]
+            def observe(*args, **kwargs):
+                if len(observations) == 3:
+                    guard.controller.pin.assert_not_called()
+                return observations.pop(0)
+            observer.query.side_effect = observe
+            barrier.query.side_effect = [{'count': 1}, True]
+            with patch.object(g, 'Psql', side_effect=[observer, barrier]), patch.object(g.time, 'sleep'):
+                self.assertTrue(guard.checkpoint('task-one', 'worker')['checkpointCaught'])
+            guard.controller.pin.assert_called_once()
+
+    def test_sealed_cleanup_backend_waits_then_strictly_qualifies(self):
+        guard = self.guard(); guard.threads = Mock(return_value=['T'])
+        queued = task() | {'state': 'queued', 'attempt': 0, 'snapshotCount': 0}
+        busy = session(101) | {'query': 'private SQL', 'blockers': [], 'locks': [
+            lock('object', 'ShareLock', classid='1', objid='2', objsubid=0)]}
+        observer, barrier = Mock(), Mock(pid=99)
+        observer.query.side_effect = [{'otherNonterminal': 0, 'journalCount': 0, 'task': queued, 'sessions': []},
+            {'task': task(), 'sessions': [session()]},
+            {'task': task(), 'sessions': [session(), busy]},
+            *[{'task': task(), 'sessions': [session()]} for _ in range(3)]]
+        barrier.query.side_effect = [{'count': 1}, True]
+        with patch.object(g, 'Psql', side_effect=[observer, barrier]), patch.object(g.time, 'sleep'):
+            self.assertTrue(guard.checkpoint('task-one', 'worker')['checkpointCaught'])
+        guard.controller.pin.assert_called_once()
+        guard.owned.process.send_signal.assert_called_once_with(signal.SIGSTOP)
+
+    def test_poststop_object_backend_fails_without_capture_retry(self):
+        guard = self.guard(); guard.threads = Mock(return_value=['T'])
+        queued = task() | {'state': 'queued', 'attempt': 0, 'snapshotCount': 0}
+        busy = session(101) | {'query': 'private SQL', 'blockers': [], 'locks': [
+            lock('object', 'ShareLock', classid='1', objid='2', objsubid=0)]}
+        observer, barrier = Mock(), Mock(pid=99)
+        observer.query.side_effect = [{'otherNonterminal': 0, 'journalCount': 0, 'task': queued, 'sessions': []},
+            *[{'task': task(), 'sessions': [session()]} for _ in range(2)],
+            {'task': task(), 'sessions': [session(), busy]}]
+        barrier.query.side_effect = [{'count': 1}, True]
+        with patch.object(g, 'Psql', side_effect=[observer, barrier]):
+            with self.assertRaises(RuntimeError):
+                guard.checkpoint('task-one', 'worker')
+        guard.controller.pin.assert_called_once()
+        guard.owned.process.send_signal.assert_called_once_with(signal.SIGSTOP)
+        self.assertEqual(guard.owned.resume.call_count, 2)
+        self.assertEqual(observer.query.call_count, 4)
+
+    def test_registered_target_bad_chain_is_fatal_even_without_any_waiter(self):
+        for update in ({'blockers': []}, {'query': 'BEGIN'}, {'transaction': False}):
+            guard = self.guard(); guard.threads = Mock(return_value=['T'])
+            queued = task() | {'state': 'queued', 'attempt': 0, 'snapshotCount': 0}
+            observer, barrier = Mock(), Mock(pid=99)
+            observer.query.side_effect = [{'otherNonterminal': 0, 'journalCount': 0, 'task': queued, 'sessions': []},
+                {'task': task(), 'sessions': [session() | update]}]
+            barrier.query.return_value = {'count': 1}
+            with patch.object(g, 'Psql', side_effect=[observer, barrier]):
+                with self.assertRaises(RuntimeError):
+                    guard.checkpoint('task-one', 'worker')
+            guard.controller.pin.assert_not_called()
+            guard.owned.process.send_signal.assert_not_called()
+
+    def test_target_object_is_fatal_before_pin(self):
+        guard = self.guard(); guard.threads = Mock(return_value=['T'])
+        target = session()
+        target['locks'].append(lock('object', 'AccessShareLock', classid='1', objid='2', objsubid=0))
+        queued = task() | {'state': 'queued', 'attempt': 0, 'snapshotCount': 0}
+        observer, barrier = Mock(), Mock(pid=99)
+        observer.query.side_effect = [{'otherNonterminal': 0, 'journalCount': 0, 'task': queued, 'sessions': []},
+            {'task': task(), 'sessions': [target]}]
+        barrier.query.return_value = {'count': 1}
+        with patch.object(g, 'Psql', side_effect=[observer, barrier]):
+            with self.assertRaises(RuntimeError):
+                guard.checkpoint('task-one', 'worker')
+        guard.controller.pin.assert_not_called()
+        guard.owned.process.send_signal.assert_not_called()
+
+    def test_pinned_object_still_open_expires_without_stop(self):
+        guard = self.guard(); guard.threads = Mock(return_value=['T'])
+        frame = guard.controller.snapshot.return_value
+        frame.update(status='draining', open=2)
+        frame['records'].append({'generation': 3, 'state': 'closing', 'backend': 101, 'candidate': None})
+        busy = session(101) | {'blockers': [], 'locks': [lock('object', 'ShareLock', classid='1', objid='2', objsubid=0)]}
+        queued = task() | {'state': 'queued', 'attempt': 0, 'snapshotCount': 0}
+        observer, barrier = Mock(), Mock(pid=99)
+        observer.query.side_effect = [{'otherNonterminal': 0, 'journalCount': 0, 'task': queued, 'sessions': []},
+            {'task': task(), 'sessions': [session(), busy]}]
+        barrier.query.return_value = {'count': 1}
+        now = [0.]
+        with patch.object(g, 'Psql', side_effect=[observer, barrier]), patch.object(g.time, 'monotonic', side_effect=lambda: now[0]), patch.object(g.time, 'sleep', side_effect=lambda _: now.__setitem__(0, 1.5)):
+            with self.assertRaises(RuntimeError):
+                guard.checkpoint('task-one', 'worker')
+        guard.controller.pin.assert_called_once()
+        guard.owned.process.send_signal.assert_not_called()
+        self.assertEqual(guard.failure_diagnostic['lastNotReady']['reason'], 'registry_draining')
+
     def test_blocker_diagnostics_distinguish_three_fatal_paths(self):
         cases = {
             'outside_owned_sample': [session() | {'blockers': [999]}],
@@ -76,7 +250,7 @@ class ContractTests(unittest.TestCase):
         expected = {
             'validate_sessions': '4efb9b60ec57914d43c55c695e0916b07d71fbcd3f3cdac8c3cd06b630bbd092',
             'validate_checkpoint': '83ff1b7a711627ec7ee4e28761dde75f5e18ae3e81abb39927b8057022a06e74',
-            'checkpoint': '90a1f7723cbdb0f5edf0182bf8e14989bb3c1fd3e5b8c61e0ba38f71bd0fa9a2',
+            'checkpoint': '97f065b28d2c791bc20e006f55e5bbd9875bbde0970380f20e57662615f7c1ec',
         }
         actual = {node.name: hashlib.sha256(ast.get_source_segment(source, node).encode()).hexdigest()
                   for node in ast.walk(ast.parse(source)) if isinstance(node, ast.FunctionDef)
@@ -131,14 +305,14 @@ class ContractTests(unittest.TestCase):
             running = task() | {'kind': g.export_kind(kind)[0]}
             queued = running | {'state': 'queued', 'attempt': 0, 'snapshotCount': 0}
             observer, barrier = Mock(), Mock(pid=99)
-            observer.query.side_effect = [{'task': queued, 'sessions': []},
+            observer.query.side_effect = [{'otherNonterminal': 0, 'journalCount': 0, 'task': queued, 'sessions': []},
                 {'task': running, 'sessions': [session(), self.speculative_session()]},
                 {'task': running, 'sessions': [session()]},
-                {'task': running, 'sessions': [session()]}]
+                {'task': running, 'sessions': [session()]}, {'task': running, 'sessions': [session()]}]
             barrier.query.side_effect = [{'count': 1}, True]
             with patch.object(g, 'Psql', side_effect=[observer, barrier]), patch.object(g.time, 'sleep'):
                 self.assertTrue(guard.checkpoint('task-one', 'worker')['checkpointCaught'])
-            self.assertEqual(observer.query.call_count, 4)
+            self.assertEqual(observer.query.call_count, 5)
             guard.owned.process.send_signal.assert_called_once_with(signal.SIGSTOP)
             observer.close.assert_called_once(); barrier.close.assert_called_once()
 
@@ -148,7 +322,7 @@ class ContractTests(unittest.TestCase):
             running = task() | {'kind': g.export_kind(kind)[0]}
             queued = running | {'state': 'queued', 'attempt': 0, 'snapshotCount': 0}
             observer, barrier = Mock(), Mock(pid=99)
-            observer.query.side_effect = [{'task': queued, 'sessions': []},
+            observer.query.side_effect = [{'otherNonterminal': 0, 'journalCount': 0, 'task': queued, 'sessions': []},
                 {'task': running, 'sessions': [session(), self.speculative_session()]}]
             barrier.query.return_value = {'count': 1}
             now = [0.0]
@@ -162,7 +336,7 @@ class ContractTests(unittest.TestCase):
             self.assertEqual(guard.failure_diagnostic['reason'], 'capture_deadline_missed')
             self.assertEqual(guard.failure_diagnostic['lastNotReady'], {
                 'event': 'running_cancel_guard_failure', 'stage': 'capture',
-                'reason': 'speculative_insert_in_progress'})
+                'reason': 'registry_observation_incomplete'})
             self.assertNotIn('private', json.dumps(guard.failure_diagnostic))
             self.assertEqual(guard.owned.resume.call_count, 2)
             observer.close.assert_called_once(); barrier.close.assert_called_once()
@@ -173,15 +347,15 @@ class ContractTests(unittest.TestCase):
             running = task() | {'kind': g.export_kind(kind)[0]}
             queued = running | {'state': 'queued', 'attempt': 0, 'snapshotCount': 0}
             observer, barrier = Mock(), Mock(pid=99)
-            observer.query.side_effect = [{'task': queued, 'sessions': []},
+            observer.query.side_effect = [{'otherNonterminal': 0, 'journalCount': 0, 'task': queued, 'sessions': []},
                 {'task': running, 'sessions': [session()]},
-                {'task': running, 'sessions': [session(), self.speculative_session()]}]
+                {'task': running, 'sessions': [session()]}, {'task': running, 'sessions': [session(), self.speculative_session()]}]
             barrier.query.return_value = {'count': 1}
             with patch.object(g, 'Psql', side_effect=[observer, barrier]):
                 with self.assertRaises(RuntimeError):
                     guard.checkpoint('task-one', 'worker')
             guard.owned.process.send_signal.assert_called_once_with(signal.SIGSTOP)
-            self.assertEqual(observer.query.call_count, 3)
+            self.assertEqual(observer.query.call_count, 4)
             self.assertEqual(guard.owned.resume.call_count, 2)
             self.assertEqual(guard.failure_diagnostic['reason'], 'speculative_insert_in_progress')
             self.assertEqual(guard.failure_diagnostic['stage'], 'session_validation')
@@ -195,7 +369,7 @@ class ContractTests(unittest.TestCase):
             guard = self.guard(); guard.threads = Mock(return_value=['T'])
             queued = task() | {'state': 'queued', 'attempt': 0, 'snapshotCount': 0}
             observer, barrier = Mock(), Mock(pid=99)
-            observer.query.side_effect = [{'task': queued, 'sessions': []},
+            observer.query.side_effect = [{'otherNonterminal': 0, 'journalCount': 0, 'task': queued, 'sessions': []},
                 {'task': task() | update, 'sessions': [session(), self.speculative_session()]}]
             barrier.query.return_value = {'count': 1}
             with patch.object(g, 'Psql', side_effect=[observer, barrier]):
@@ -293,9 +467,84 @@ class ContractTests(unittest.TestCase):
         with patch.object(g, 'OwnedExportWorkerGuard') as factory:
             guard = g.RunningExportCancelGuard(Mock(), 'a'*32, '/fake/bin/adtr',
                 'adtr-auth-e2e-'+'a'*12, 'adtr-user-export-'+'a'*32, 'postgres://localhost/adtr_e2e', **options)
+        identity = {key: task()[key] for key in ('taskID', 'kind', 'attempt', 'leaseOwner', 'fencingToken', 'resultVersion')}
+        identity.update(kind=g.export_kind(options.get('asset_kind', 'user'))[0], generation=2, phase='first-fenced-progress-10')
+        frame = {'status': 'sealed', 'target': 2, 'pending': 0, 'open': 1,
+                 'records': [{'generation': 1, 'state': 'open', 'backend': 100, 'candidate': identity}]}
+        guard.controller = Mock()
+        guard.controller.snapshot.return_value = frame
+        guard.controller.pin.return_value = frame
+        guard.controller.after_stop.return_value = True
         guard.owned = factory.return_value
         guard.owned.assert_identity = Mock(return_value="T")
         return guard
+
+    def test_registry_binding_requires_every_authoritative_field(self):
+        guard = self.guard()
+        frame = guard.controller.snapshot.return_value
+        self.assertEqual(g.registered_candidate(frame, task(), [session()], 99), (2, 100))
+        for key, value in (('taskID', 'wrong'), ('kind', 'wrong'), ('attempt', 2),
+                           ('leaseOwner', 'worker-1'), ('fencingToken', 2), ('resultVersion', 3)):
+            changed = copy.deepcopy(frame)
+            changed['records'][0]['candidate'][key] = value
+            self.assertIsNone(g.registered_candidate(changed, task(), [session()], 99))
+        for update in ({'query': 'BEGIN'}, {'blockers': []}, {'transaction': False}):
+            with self.assertRaises(RuntimeError):
+                g.registered_candidate(frame, task(), [session() | update], 99)
+        duplicate = copy.deepcopy(frame)
+        duplicate['records'] *= 2
+        with self.assertRaises(RuntimeError):
+            g.registered_candidate(duplicate, task(), [session()], 99)
+        for rows in ([], [session(), session(101)], [session(101)]):
+            with self.assertRaises(RuntimeError):
+                g.validate_sealed_registry(frame, (2, 100), rows)
+        for update in ({'pending': 1}, {'open': 2}, {'status': 'draining'}, {'target': 3}):
+            with self.assertRaises(RuntimeError):
+                g.validate_sealed_registry(frame | update, (2, 100), [session()])
+
+    def test_stopped_witness_failure_continues_before_rescue_release(self):
+        guard = self.guard(); guard.threads = Mock(return_value=['T'])
+        queued = task() | {'state': 'queued', 'attempt': 0, 'snapshotCount': 0}
+        observer, barrier = Mock(), Mock(pid=99)
+        observer.query.side_effect = [{'otherNonterminal': 0, 'journalCount': 0, 'task': queued, 'sessions': []},
+            {'task': task(), 'sessions': [session()]}, {'task': task(), 'sessions': [session()]}]
+        barrier.query.return_value = {'count': 1}
+        events = []
+        guard.owned.resume.side_effect = lambda: events.append('cont')
+        guard.controller.resume_and_release.side_effect = lambda **kw: events.append(('release', kw['abort']))
+        guard.controller.after_stop.side_effect = RuntimeError('private frame must not escape')
+        with patch.object(g, 'Psql', side_effect=[observer, barrier]):
+            with self.assertRaisesRegex(RuntimeError, '^running checkpoint guard failed closed$'):
+                guard.checkpoint('task-one', 'worker')
+        self.assertEqual(events, ['cont', 'cont', ('release', True)])
+        self.assertNotIn('private', json.dumps(guard.failure_diagnostic))
+        self.assertEqual(observer.query.call_count, 3)
+        guard.owned.process.send_signal.assert_called_once_with(signal.SIGSTOP)
+
+    def test_no_controller_cannot_fall_back_to_legacy_capture(self):
+        guard = self.guard(); guard.controller = None
+        guard.threads = Mock(return_value=['T'])
+        with patch.object(g, 'Psql') as pg, self.assertRaises(RuntimeError):
+            guard.checkpoint('task-one', 'worker')
+        pg.assert_not_called()
+        guard.owned.process.send_signal.assert_not_called()
+        guard.owned.resume.assert_called_once()
+
+    def test_actual_journal_check_requires_closed_delivery_without_identity_output(self):
+        guard = self.guard(); guard.used = True; guard.journal_baseline = 4; guard.checkpoint_task_id = "task-one"
+        observer = Mock(); observer.query.return_value = {'count': 5, 'processCount': 1, 'closed': True, 'delivery': True, 'terminal': True}
+        with patch.object(g, 'Psql', return_value=observer), patch('builtins.print') as output:
+            guard.verify_journal_after_wait(0)
+        observer.query.assert_called_once_with(g.JOURNAL_PROOF_SQL.format(task_id="task-one"))
+        event = json.loads(output.call_args.args[0])
+        self.assertEqual(event, {'event': 'running_cancel_journal_verified',
+            'newQueueProgressEvents': 1, 'businessFieldsClosed': True, 'metadataFieldsClosed': True, 'finalDeliveryVerified': True})
+        for update in ({'count': 4}, {'count': 6}, {'processCount': 2}, {'closed': False},
+                       {'count': True}, {'candidate': 'private'}, {'delivery': False}, {'terminal': False}):
+            observer = Mock(); observer.query.return_value = {'count': 5, 'processCount': 1, 'closed': True, 'delivery': True, 'terminal': True} | update
+            with patch.object(g, 'Psql', return_value=observer), self.assertRaises(RuntimeError):
+                guard.verify_journal_after_wait(0)
+            observer.close.assert_called_once()
 
     def test_resume_records_real_monotonic_duration(self):
         guard = self.guard(); guard.stopped_at = 100.
@@ -355,10 +604,10 @@ class ContractTests(unittest.TestCase):
         guard.threads = Mock(return_value=['T']*4)
         observer, barrier = Mock(), Mock(pid=99)
         initial = task(); initial.update(state='queued', attempt=0, snapshotCount=0)
-        observer.query.side_effect = [{'task': initial, 'sessions': []}, RuntimeError('missed')]
+        observer.query.side_effect = [{'otherNonterminal': 0, 'journalCount': 0, 'task': initial, 'sessions': []}, RuntimeError('missed')]
         barrier.query.return_value = {'count': 1}
         events = []
-        observer.query.side_effect = lambda *a, **k: events.append('observe') or ({'task': initial, 'sessions': []} if len(events) == 1 else (_ for _ in ()).throw(RuntimeError('missed')))
+        observer.query.side_effect = lambda *a, **k: events.append('observe') or ({'otherNonterminal': 0, 'journalCount': 0, 'task': initial, 'sessions': []} if len(events) == 1 else (_ for _ in ()).throw(RuntimeError('missed')))
         guard.owned.resume.side_effect = lambda: events.append('resume')
         with patch.object(g, 'Psql', side_effect=[observer, barrier]):
             with self.assertRaises(RuntimeError):
@@ -372,9 +621,9 @@ class ContractTests(unittest.TestCase):
         guard = self.guard(); guard.threads = Mock(return_value=['T'] * 4)
         queued = task(); queued.update(state='queued', attempt=0, snapshotCount=0)
         observer, barrier = Mock(), Mock(pid=99)
-        observer.query.side_effect = [{'task': queued, 'sessions': []},
+        observer.query.side_effect = [{'otherNonterminal': 0, 'journalCount': 0, 'task': queued, 'sessions': []},
                                       {'task': task(), 'sessions': [session()]},
-                                      {'task': task(), 'sessions': [session()]}]
+                                      {'task': task(), 'sessions': [session()]}, {'task': task(), 'sessions': [session()]}]
         barrier.query.side_effect = [{'count': 1}, True]
         with patch.object(g, 'Psql', side_effect=[observer, barrier]):
             result = guard.checkpoint('task-one', 'worker')
@@ -403,7 +652,7 @@ class ContractTests(unittest.TestCase):
             queued = running | {'state': 'queued', 'attempt': 0, 'snapshotCount': 0}
             busy = {'task': running, 'sessions': [session(), self.busy_session()]}
             ready = {'task': running, 'sessions': [session()]}
-            samples = iter([{'task': queued, 'sessions': []}, busy, busy, ready, ready])
+            samples = iter([{'otherNonterminal': 0, 'journalCount': 0, 'task': queued, 'sessions': []}, busy, busy, ready, ready, ready])
             observer, barrier = Mock(), Mock(pid=99)
             events = []
             def observe(*args, **kwargs):
@@ -415,7 +664,7 @@ class ContractTests(unittest.TestCase):
             with patch.object(g, 'Psql', side_effect=[observer, barrier]), patch.object(g.time, 'sleep'):
                 result = guard.checkpoint('task-one', 'worker')
             self.assertTrue(result['checkpointCaught'])
-            self.assertEqual(events, ['observe'] * 4 + ['stop', 'observe'])
+            self.assertEqual(events, ['observe'] * 5 + ['stop', 'observe'])
             guard.owned.process.send_signal.assert_called_once_with(signal.SIGSTOP)
             self.assertIsNone(guard.failure_diagnostic)
             observer.close.assert_called_once(); barrier.close.assert_called_once()
@@ -424,7 +673,7 @@ class ContractTests(unittest.TestCase):
         guard = self.guard(); guard.threads = Mock(return_value=['T'])
         queued = task() | {'state': 'queued', 'attempt': 0, 'snapshotCount': 0}
         observer, barrier = Mock(), Mock(pid=99)
-        observer.query.side_effect = [{'task': queued, 'sessions': []},
+        observer.query.side_effect = [{'otherNonterminal': 0, 'journalCount': 0, 'task': queued, 'sessions': []},
             {'task': task(), 'sessions': [session(), self.busy_session()]}]
         barrier.query.return_value = {'count': 1}
         now = [0.0]
@@ -438,8 +687,7 @@ class ContractTests(unittest.TestCase):
         guard.owned.process.send_signal.assert_not_called()
         self.assertEqual(guard.failure_diagnostic['reason'], 'capture_deadline_missed')
         pending = guard.failure_diagnostic['lastNotReady']
-        self.assertEqual(pending['reason'], 'unsafe_transaction_query')
-        self.assertEqual(pending['lockSafetyCategory'], 'unsafe_relation')
+        self.assertEqual(pending['reason'], 'registry_observation_incomplete')
         self.assertNotIn('private', json.dumps(guard.failure_diagnostic))
         self.assertEqual(guard.owned.resume.call_count, 2)
         observer.close.assert_called_once(); barrier.close.assert_called_once()
@@ -453,22 +701,22 @@ class ContractTests(unittest.TestCase):
             unavailable = session(101) | {'state': None, 'query': '', 'transaction': False,
                                          'waitType': None, 'blockers': [], 'locks': []}
             observer, barrier = Mock(), Mock(pid=99)
-            observer.query.side_effect = [{'task': queued, 'sessions': []},
+            observer.query.side_effect = [{'otherNonterminal': 0, 'journalCount': 0, 'task': queued, 'sessions': []},
                 {'task': running, 'sessions': [session(), unavailable]},
                 {'task': running, 'sessions': [session()]},
-                {'task': running, 'sessions': [session()]}]
+                {'task': running, 'sessions': [session()]}, {'task': running, 'sessions': [session()]}]
             barrier.query.side_effect = [{'count': 1}, True]
             with patch.object(g, 'Psql', side_effect=[observer, barrier]), patch.object(g.time, 'sleep'):
                 self.assertTrue(guard.checkpoint('task-one', 'worker')['checkpointCaught'])
-            self.assertEqual(observer.query.call_count, 4)
+            self.assertEqual(observer.query.call_count, 5)
             guard.owned.process.send_signal.assert_called_once_with(signal.SIGSTOP)
             observer.close.assert_called_once(); barrier.close.assert_called_once()
 
-    def test_null_state_deadline_keeps_unavailable_reason_without_stop(self):
+    def test_null_target_is_fatal_before_pin_without_stop(self):
         guard = self.guard(); guard.threads = Mock(return_value=['T'])
         queued = task() | {'state': 'queued', 'attempt': 0, 'snapshotCount': 0}
         observer, barrier = Mock(), Mock(pid=99)
-        observer.query.side_effect = [{'task': queued, 'sessions': []},
+        observer.query.side_effect = [{'otherNonterminal': 0, 'journalCount': 0, 'task': queued, 'sessions': []},
             {'task': task(), 'sessions': [session() | {'state': None}]}]
         barrier.query.return_value = {'count': 1}
         now = [0.0]
@@ -480,8 +728,8 @@ class ContractTests(unittest.TestCase):
                 guard.checkpoint('task-one', 'worker')
         guard.owned.process.send_signal.assert_not_called()
         self.assertEqual(guard.failure_diagnostic, {'event': 'running_cancel_guard_failure',
-            'stage': 'capture', 'reason': 'capture_deadline_missed', 'lastNotReady': {
-                'event': 'running_cancel_guard_failure', 'stage': 'capture', 'reason': 'state_unavailable'}})
+            'stage': 'capture_readiness', 'reason': 'state_unavailable'})
+        guard.controller.pin.assert_not_called()
         self.assertEqual(guard.owned.resume.call_count, 2)
         observer.close.assert_called_once(); barrier.close.assert_called_once()
 
@@ -491,15 +739,15 @@ class ContractTests(unittest.TestCase):
             running = task() | {'kind': g.export_kind(kind)[0]}
             queued = running | {'state': 'queued', 'attempt': 0, 'snapshotCount': 0}
             observer, barrier = Mock(), Mock(pid=99)
-            observer.query.side_effect = [{'task': queued, 'sessions': []},
+            observer.query.side_effect = [{'otherNonterminal': 0, 'journalCount': 0, 'task': queued, 'sessions': []},
                 {'task': running, 'sessions': [session()]},
-                {'task': running, 'sessions': [session() | {'state': None}]}]
+                {'task': running, 'sessions': [session()]}, {'task': running, 'sessions': [session() | {'state': None}]}]
             barrier.query.return_value = {'count': 1}
             with patch.object(g, 'Psql', side_effect=[observer, barrier]):
                 with self.assertRaises(RuntimeError):
                     guard.checkpoint('task-one', 'worker')
             guard.owned.process.send_signal.assert_called_once_with(signal.SIGSTOP)
-            self.assertEqual(observer.query.call_count, 3)
+            self.assertEqual(observer.query.call_count, 4)
             self.assertEqual(guard.owned.resume.call_count, 2)
             self.assertEqual(guard.failure_diagnostic['reason'], 'state_unavailable')
             self.assertEqual(guard.failure_diagnostic['stage'], 'session_validation')
@@ -557,8 +805,8 @@ class ContractTests(unittest.TestCase):
         guard = self.guard(); guard.threads = Mock(return_value=['T'])
         queued = task() | {'state': 'queued', 'attempt': 0, 'snapshotCount': 0}
         observer, barrier = Mock(), Mock(pid=99)
-        observer.query.side_effect = [{'task': queued, 'sessions': []},
-            {'task': task(), 'sessions': [session()]}]
+        observer.query.side_effect = [{'otherNonterminal': 0, 'journalCount': 0, 'task': queued, 'sessions': []},
+            {'task': task(), 'sessions': [session()]}, {'task': task(), 'sessions': [session()]}]
         barrier.query.return_value = {'count': 1}
         now = [0.0]
         guard.owned.assert_identity.side_effect = lambda: now.__setitem__(0, 1.5)
@@ -603,7 +851,7 @@ class ContractTests(unittest.TestCase):
             guard = self.guard(); guard.threads = Mock(return_value=['T'])
             queued = task() | {'state': 'queued', 'attempt': 0, 'snapshotCount': 0}
             observer, barrier = Mock(), Mock(pid=99)
-            observer.query.side_effect = [{'task': queued, 'sessions': []}, sample]
+            observer.query.side_effect = [{'otherNonterminal': 0, 'journalCount': 0, 'task': queued, 'sessions': []}, sample]
             barrier.query.return_value = {'count': 1}
             with patch.object(g, 'Psql', side_effect=[observer, barrier]):
                 with self.assertRaises(RuntimeError):
@@ -619,15 +867,15 @@ class ContractTests(unittest.TestCase):
             running = task() | {'kind': g.export_kind(kind)[0]}
             queued = running | {'state': 'queued', 'attempt': 0, 'snapshotCount': 0}
             observer, barrier = Mock(), Mock(pid=99)
-            observer.query.side_effect = [{'task': queued, 'sessions': []},
+            observer.query.side_effect = [{'otherNonterminal': 0, 'journalCount': 0, 'task': queued, 'sessions': []},
                 {'task': running, 'sessions': [session()]},
-                {'task': running, 'sessions': [session(), self.busy_session()]}]
+                {'task': running, 'sessions': [session()]}, {'task': running, 'sessions': [session(), self.busy_session()]}]
             barrier.query.return_value = {'count': 1}
             with patch.object(g, 'Psql', side_effect=[observer, barrier]):
                 with self.assertRaises(RuntimeError):
                     guard.checkpoint('task-one', 'worker')
             guard.owned.process.send_signal.assert_called_once_with(signal.SIGSTOP)
-            self.assertEqual(observer.query.call_count, 3)
+            self.assertEqual(observer.query.call_count, 4)
             self.assertEqual(guard.owned.resume.call_count, 2)
             self.assertEqual(guard.failure_diagnostic['stage'], 'session_validation')
             self.assertEqual(guard.failure_diagnostic['reason'], 'unsafe_transaction_query')
@@ -652,7 +900,7 @@ class ContractTests(unittest.TestCase):
         guard = self.guard(); guard.threads = Mock(return_value=['T'])
         queued = task(); queued.update(state='queued', attempt=0, snapshotCount=0)
         observer, barrier = Mock(), Mock(pid=99)
-        observer.query.side_effect = [{'task': queued, 'sessions': []}, RuntimeError('missed')]
+        observer.query.side_effect = [{'otherNonterminal': 0, 'journalCount': 0, 'task': queued, 'sessions': []}, RuntimeError('missed')]
         barrier.query.return_value = {'count': 1}
         barrier.close.side_effect = RuntimeError('close failure')
         with patch.object(g, 'Psql', side_effect=[observer, barrier]):
@@ -727,7 +975,7 @@ class ContractTests(unittest.TestCase):
                 with self.subTest(kind=kind, field=field, value=value), self.assertRaises(RuntimeError):
                     g.validate_checkpoint(bad, 'task-one', 'worker', kind)
 
-    def test_complete_checkpoint_each_new_kind_and_transitive_blockers(self):
+    def test_registry_rejects_additional_transitive_backend_each_kind(self):
         for kind in ('group', 'computer'):
             guard = self.guard(asset_kind=kind); guard.threads = Mock(return_value=['T'] * 4)
             running = task() | {'kind': kind + '_assets.v3.export'}
@@ -736,16 +984,13 @@ class ContractTests(unittest.TestCase):
             rows[1]['blockers'] = [100]
             rows[1]['locks'][-1] = lock('tuple', 'ExclusiveLock', False, 'adtr.system_worker_activity')
             observer, barrier = Mock(), Mock(pid=99)
-            observer.query.side_effect = [{'task': queued, 'sessions': []},
-                {'task': running, 'sessions': rows}, {'task': running, 'sessions': rows}]
+            observer.query.side_effect = [{'otherNonterminal': 0, 'journalCount': 0, 'task': queued, 'sessions': []},
+                {'task': running, 'sessions': rows}, {'task': running, 'sessions': rows}, {'task': running, 'sessions': rows}]
             barrier.query.side_effect = [{'count': 1}, True]
             with patch.object(g, 'Psql', side_effect=[observer, barrier]):
-                result = guard.checkpoint('task-one', 'worker')
-            self.assertEqual(result['kind'], running['kind'])
-            self.assertEqual(result['blockedOwnedBackends'], 2)
-            self.assertTrue(result['allThreadsStopped'])
-            self.assertTrue(result['activityLockReleased'])
-            guard.owned.process.send_signal.assert_called_once_with(signal.SIGSTOP)
+                with self.assertRaises(RuntimeError):
+                    guard.checkpoint('task-one', 'worker')
+            guard.owned.process.send_signal.assert_not_called()
             observer.close.assert_called_once(); barrier.close.assert_called_once()
             for call in observer.query.call_args_list:
                 self.assertIn('adtr.' + kind + '_asset_export_snapshots', call.args[0])
@@ -768,7 +1013,7 @@ class ContractTests(unittest.TestCase):
             guard = self.guard(asset_kind=kind); guard.threads = Mock(return_value=['T'])
             queued = task() | {'kind': kind + '_assets.v3.export', 'state': 'queued', 'attempt': 0, 'snapshotCount': 0}
             observer, barrier = Mock(), Mock(pid=99)
-            observer.query.return_value = {'task': queued, 'sessions': []}
+            observer.query.return_value = {'otherNonterminal': 0, 'journalCount': 0, 'task': queued, 'sessions': []}
             barrier.query.return_value = {'count': 1}
             with patch.object(g, 'Psql', side_effect=[observer, barrier]), patch.object(g.time, 'monotonic', side_effect=[0., 0., 1.5, 1.5]):
                 with self.assertRaises(RuntimeError):
@@ -785,7 +1030,7 @@ class ContractTests(unittest.TestCase):
             running = task() | {'kind': kind + '_assets.v3.export'}
             queued = running | {'state': 'queued', 'attempt': 0, 'snapshotCount': 0}
             observer, barrier = Mock(), Mock(pid=99)
-            observer.query.side_effect = [{'task': queued, 'sessions': []}, {'task': running, 'sessions': [session()]}]
+            observer.query.side_effect = [{'otherNonterminal': 0, 'journalCount': 0, 'task': queued, 'sessions': []}, {'task': running, 'sessions': [session()]}, {'task': running, 'sessions': [session()]}]
             barrier.query.return_value = {'count': 1}
             with patch.object(g, 'Psql', side_effect=[observer, barrier]), patch.object(g.time, 'sleep'), patch.object(g.time, 'monotonic', side_effect=[0., 0., .1, .1, .1, .2, .6, .6]):
                 with self.assertRaises(RuntimeError):
@@ -1040,9 +1285,9 @@ class ContractTests(unittest.TestCase):
                 bad = session()
                 bad['locks'].append(lock('relation', 'private_mode_token', False, 'private.tenant'))
                 observer, barrier = Mock(), Mock(pid=99)
-                observer.query.side_effect = [{'task': queued, 'sessions': []},
+                observer.query.side_effect = [{'otherNonterminal': 0, 'journalCount': 0, 'task': queued, 'sessions': []},
                     {'task': running, 'sessions': [session()]},
-                    {'task': running, 'sessions': [bad]}]
+                    {'task': running, 'sessions': [session()]}, {'task': running, 'sessions': [bad]}]
                 barrier.query.return_value = {'count': 1}
                 events, lines = [], []
                 guard.owned.resume.side_effect = lambda: events.append('resume')
@@ -1096,9 +1341,9 @@ class ContractTests(unittest.TestCase):
                 bad = session()
                 bad['query'] = 'SELECT private_credential FROM private.tenant'
                 observer, barrier = Mock(), Mock(pid=99)
-                observer.query.side_effect = [{'task': queued, 'sessions': []},
+                observer.query.side_effect = [{'otherNonterminal': 0, 'journalCount': 0, 'task': queued, 'sessions': []},
                     {'task': running, 'sessions': [session()]},
-                    {'task': running, 'sessions': [bad]}]
+                    {'task': running, 'sessions': [session()]}, {'task': running, 'sessions': [bad]}]
                 barrier.query.return_value = {'count': 1}
                 events, lines = [], []
                 guard.owned.resume.side_effect = lambda: events.append('resume')

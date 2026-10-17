@@ -10,10 +10,11 @@ import (
 
 var errAdmissionClosed = errors.New("database admission closed")
 
-// Only package tests install a coordinator. No application installation API exists.
+// Application installation is restricted to the explicit CI bootstrap.
 var coordinator struct {
 	sync.Mutex
 	gate *lifecycleGate
+	used bool
 }
 
 type lifecycleGate struct {
@@ -24,6 +25,9 @@ type lifecycleGate struct {
 	tickets          map[uint64]*lifecycleTicket
 	changed          chan struct{}
 	seal             *sealAttempt
+	witness          invalidationWitness
+	revision         uint64
+	total            uint64
 }
 
 type lifecycleTicket struct {
@@ -37,6 +41,7 @@ type lifecycleTicket struct {
 
 func acquireLifecycle(ctx context.Context) (lifecyclePermit, error) {
 	coordinator.Lock()
+	coordinator.used = true
 	gate := coordinator.gate
 	coordinator.Unlock()
 	if gate == nil {
@@ -46,6 +51,7 @@ func acquireLifecycle(ctx context.Context) (lifecyclePermit, error) {
 }
 
 func (g *lifecycleGate) notifyLocked() {
+	g.revision++
 	if g.changed != nil {
 		close(g.changed)
 	}
@@ -80,6 +86,13 @@ func (g *lifecycleGate) acquire(ctx context.Context) (*lifecycleTicket, error) {
 			}
 			continue
 		}
+		if g.witness != nil && g.total >= 4096 {
+			g.markInvalidLocked()
+			g.notifyLocked()
+			g.unlockAndPublishInvalid()
+			return nil, errAdmissionClosed
+		}
+		g.total++
 		g.next++
 		if g.tickets == nil {
 			g.tickets = make(map[uint64]*lifecycleTicket)
@@ -120,13 +133,13 @@ func (t *lifecycleTicket) attach(conn *Conn, backend uint32) {
 	g.mu.Lock()
 	defer g.unlockAndPublishInvalid()
 	if t.state != 'p' || conn == nil || backend == 0 {
-		g.invalid = true
+		g.markInvalidLocked()
 		g.notifyLocked()
 		return
 	}
 	for _, other := range g.tickets {
 		if other != t && other.state == 'o' && (other.conn == conn || other.backend == backend) {
-			g.invalid = true
+			g.markInvalidLocked()
 			g.notifyLocked()
 			return
 		}
@@ -143,7 +156,7 @@ func (t *lifecycleTicket) failed() {
 	g := t.gate
 	g.mu.Lock()
 	defer g.unlockAndPublishInvalid()
-	g.invalid = true
+	g.markInvalidLocked()
 	if t.state == 'p' {
 		g.pending--
 	}
@@ -156,14 +169,14 @@ func (t *lifecycleTicket) closed(clean bool) {
 	g.mu.Lock()
 	defer g.unlockAndPublishInvalid()
 	if t.state != 'o' && t.state != 'x' {
-		g.invalid = true
+		g.markInvalidLocked()
 		g.notifyLocked()
 		return
 	}
-	g.open--
 	if !clean || (g.seal != nil && !g.seal.released && g.seal.target == t) {
-		g.invalid = true
+		g.markInvalidLocked()
 	}
+	g.open--
 	t.state = 'c'
 	t.registration = nil
 	g.notifyLocked()
@@ -174,13 +187,28 @@ func (t *lifecycleTicket) closingConnection() {
 	g.mu.Lock()
 	defer g.unlockAndPublishInvalid()
 	if t.state != 'o' {
-		g.invalid = true
+		g.markInvalidLocked()
 		g.notifyLocked()
 		return
 	}
-	t.state = 'x'
 	if g.seal != nil && !g.seal.released && g.seal.target == t {
-		g.invalid = true
+		g.markInvalidLocked()
 		g.notifyLocked()
+	}
+	t.state = 'x'
+	g.notifyLocked()
+}
+
+// The sticky store precedes every committed invalidation, including transport errors.
+type invalidationWitness interface{ invalidate() }
+
+func (g *lifecycleGate) markInvalidLocked() {
+	invalidateWitness(g.witness)
+	g.invalid = true
+}
+
+func invalidateWitness(w invalidationWitness) {
+	if w != nil {
+		w.invalidate()
 	}
 }

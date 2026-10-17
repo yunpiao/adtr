@@ -33,13 +33,13 @@ func (d Diagnostic) String() string { return fmt.Sprintf("%s: %s", d.Position, d
 // values, rather than just CallExprs. files and info must come from a successful
 // type check of the same package. Unknown protected operations are rejected.
 func Check(fset *token.FileSet, path string, files []*ast.File, info *types.Info) []Diagnostic {
-	var out []Diagnostic
+	out := criticalDeclarations(fset, path, files, info)
 	scanners := scanOnlyParameters(files, info)
 	emit := func(n ast.Node, reason string) { out = append(out, Diagnostic{fset.Position(n.Pos()), reason}) }
 	for _, file := range files {
 		for _, spec := range file.Imports {
 			imported, _ := strconv.Unquote(spec.Path.Value)
-			if imported == "unsafe" || imported == "plugin" || imported == "os/exec" || imported == "database/sql" || strings.HasPrefix(imported, pgx+"/pgxpool") || strings.HasPrefix(imported, pgx+"/stdlib") {
+			if (imported == "unsafe" && !(path == managed && filepath.Base(fset.Position(file.Pos()).Filename) == witnessSource && spec.Name == nil)) || imported == "plugin" || imported == "os/exec" || imported == "database/sql" || strings.HasPrefix(imported, pgx+"/pgxpool") || strings.HasPrefix(imported, pgx+"/stdlib") {
 				emit(spec, "unproved alternate database or unsafe import")
 			}
 		}
@@ -90,7 +90,7 @@ func Check(fset *token.FileSet, path string, files []*ast.File, info *types.Info
 							emit(id, "unreviewed network transport constructor or method")
 						}
 
-						if p == "unsafe" || p == "plugin" || p == "os/exec" || (p == "syscall" && !safeSystemObject(path, obj.Name()) && !safeSystemField(path, filepath.Base(fset.Position(file.Pos()).Filename), name, id, ancestors, info)) || (p == "reflect" && obj.Name() != "DeepEqual") || p == "database/sql" || strings.HasPrefix(p, pgx+"/pgxpool") || strings.HasPrefix(p, pgx+"/stdlib") {
+						if (p == "unsafe" && !witnessUnsafe(path, filepath.Base(fset.Position(file.Pos()).Filename), name, id, ancestors, info)) || p == "plugin" || p == "os/exec" || (p == "syscall" && !safeSystemObject(path, obj.Name()) && !safeSystemField(path, filepath.Base(fset.Position(file.Pos()).Filename), name, id, ancestors, info) && !witnessSyscall(path, filepath.Base(fset.Position(file.Pos()).Filename), name, id, ancestors, info)) || (p == "reflect" && obj.Name() != "DeepEqual") || p == "database/sql" || strings.HasPrefix(p, pgx+"/pgxpool") || strings.HasPrefix(p, pgx+"/stdlib") {
 							emit(id, "unproved reflective, unsafe, or alternate database route: "+p+"."+obj.Name())
 						}
 						if f, ok := obj.(*types.Func); ok && (p == pgx || p == pgx+"/pgconn") && rawResult(f.Type()) {

@@ -20,6 +20,13 @@ class IntegrationRunnerContract(unittest.TestCase):
     def quiet(self):
         return contextlib.redirect_stdout(io.StringIO())
 
+    def test_owned_rescue_runtime_is_required_in_non_auth_entry(self):
+        source = Path('scripts/test_integration.py').read_text()
+        self.assertIn('if args.suite in ("all", "non-auth"):', source)
+        self.assertIn('subprocess.run(["make", "test-owned-rescue-ci"], check=True)', source)
+        makefile = Path('Makefile').read_text()
+        self.assertIn('ADTR_RUN_OWNED_RESCUE_TESTS=1 python3 scripts/test_owned_rescue_runner_runtime.py', makefile)
+
     def test_partitions_are_disjoint_exhaustive_and_deterministic(self):
         shards = runner.partition_auth_tests(self.discovery)
         self.assertEqual(len(shards), runner.AUTH_SHARDS)
