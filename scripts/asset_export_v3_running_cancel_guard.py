@@ -77,6 +77,7 @@ FAILURE_REASONS = MappingProxyType({
     'missed actual activity checkpoint': 'activity_waiter_missing',
     'invalid owned session observation': 'invalid_session_observation',
     'owned backend state unavailable': 'state_unavailable',
+    'owned speculative insertion in progress': 'speculative_insert_in_progress',
     'nonidle unclassified owned session': 'nonidle_session',
 })
 FAILURE_STAGES = frozenset({'preflight', 'observer_open', 'initial_observation',
@@ -112,7 +113,8 @@ FREEZE_NOT_READY = frozenset({'unsafe owned transaction query',
     'unsafe owned relation lock', 'unsafe owned advisory lock',
     'unsafe virtual transaction lock', 'unsafe transaction lock', 'unsafe tuple lock',
     'nonidle unclassified owned session', 'unexpected barrier waiter',
-    'missed actual activity checkpoint', 'owned backend state unavailable'})
+    'missed actual activity checkpoint', 'owned backend state unavailable',
+    'owned speculative insertion in progress'})
 
 
 # PostgreSQL 17 lock names are diagnostic categories, NOT accepted lock types.
@@ -412,6 +414,7 @@ def validate_session_observation(sessions, lock_pid):
     observation_require(type(lock_pid) is int and lock_pid > 0, 'barrier_pid', lock_pid)
     pids = set()
     state_unavailable = False
+    speculative_insertion = False
     for row in sessions:
         observation_require(type(row) is dict and set(row) == {'pid', 'transaction', 'state',
             'query', 'waitType', 'blockers', 'locks'}, 'session_fields', row)
@@ -436,7 +439,18 @@ def validate_session_observation(sessions, lock_pid):
                 observation_require(type(lock[key]) is typ, 'lock_' + key, lock[key])
             for key, typ in (('relation', str), ('classid', str), ('objid', str), ('objsubid', int)):
                 observation_require(lock[key] is None or type(lock[key]) is typ, 'lock_' + key, lock[key])
-            if lock['type'] not in ('relation', 'advisory', 'virtualxid', 'transactionid', 'tuple'):
+            if lock['type'] == 'spectoken':
+                # PG17 speculative INSERT decision locks are transient, but are
+                # NEVER safe to freeze. Recognize only the exact projection;
+                # still scan every subsequent row/lock and the blocker graph.
+                token = lock['objid']
+                if not (lock['mode'] in ('ExclusiveLock', 'ShareLock') and
+                        all(lock[key] is None for key in ('relation', 'classid', 'objsubid')) and
+                        type(token) is str and re.fullmatch(r'[1-9][0-9]{0,9}', token) and
+                        int(token) <= 4294967295):
+                    raise unrecognized_lock_failure(lock['type'])
+                speculative_insertion = True
+            elif lock['type'] not in ('relation', 'advisory', 'virtualxid', 'transactionid', 'tuple'):
                 raise unrecognized_lock_failure(lock['type'])
     if not all(set(row['blockers']) <= pids | {lock_pid} for row in sessions):
         raise blocker_failure('outside_owned_sample')
@@ -448,6 +462,8 @@ def validate_session_observation(sessions, lock_pid):
                 resolved.add(row['pid'])
     if not pids <= resolved:
         raise blocker_failure('cyclic_owned_graph')
+    if speculative_insertion:
+        return RuntimeError('owned speculative insertion in progress')
     # PG17 STATE_UNDEFINED is SQL NULL. It is never a safe frozen state.
     # Finish the full scan first so it cannot conceal a later fatal observation.
     return RuntimeError('owned backend state unavailable') if state_unavailable else None

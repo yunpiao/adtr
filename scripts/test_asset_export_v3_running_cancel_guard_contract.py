@@ -83,6 +83,129 @@ class ContractTests(unittest.TestCase):
                   and node.name in expected}
         self.assertEqual(actual, expected)
 
+    def speculative_session(self, pid=101, **lock_fields):
+        return session(pid) | {'query': 'synthetic private SQL', 'blockers': [],
+            'locks': [lock('spectoken', 'ExclusiveLock', objid='1') | lock_fields]}
+
+    def test_speculative_projection_is_pending_never_strictly_safe(self):
+        for mode in ('ExclusiveLock', 'ShareLock'):
+            for granted in (True, False):
+                for token in ('1', '4294967295'):
+                    row = self.speculative_session(mode=mode, granted=granted, objid=token)
+                    rows = [session(), row]
+                    pending = g.freeze_readiness(rows, 99)
+                    self.assertEqual(str(pending), 'owned speculative insertion in progress')
+                    self.assertEqual(g.failure_event('capture_readiness', pending)['reason'],
+                                     'speculative_insert_in_progress')
+                    with self.assertRaises(RuntimeError):
+                        g.validate_sessions(rows, 99)
+                    known = row | {'query': g.ACTIVITY_SQL, 'blockers': [99]}
+                    with self.assertRaisesRegex(RuntimeError, '^unrecognized owned lock$'):
+                        g.validate_sessions([known], 99)
+        # Activity statistics need not be synchronous with the lock snapshot.
+        row = self.speculative_session() | {'transaction': False, 'state': None}
+        self.assertIsNotNone(g.freeze_readiness([session(), row], 99))
+
+    def test_speculative_malformed_projection_still_fails(self):
+        mutations = [{'mode': 'AccessShareLock'}, {'mode': 'private'}, {'relation': 'private'},
+            {'classid': '0'}, {'objsubid': 1}, {'objid': None}, {'objid': ''}, {'objid': '0'},
+            {'objid': '-1'}, {'objid': '+1'}, {'objid': '01'}, {'objid': '4294967296'},
+            {'objid': '9' * 100}, {'objid': '١'}, {'objid': 1}, {'granted': 'true'}]
+        for update in mutations:
+            with self.subTest(update=update), self.assertRaises(RuntimeError):
+                g.freeze_readiness([session(), self.speculative_session(**update)], 99)
+
+    def test_speculative_sample_does_not_hide_fatal_later_observations(self):
+        for update in ({'pid': True}, {'pid': 101}, {'query': None}, {'locks': [{}]},
+                {'locks': [lock('private', 'ShareLock')]}, {'locks': [lock('object', 'ShareLock')]},
+                {'blockers': [999]}, {'blockers': [102]}, {'state': 'private'}):
+            with self.subTest(update=update), self.assertRaises(RuntimeError):
+                g.freeze_readiness([self.speculative_session(), session(102) | update], 99)
+        with self.assertRaisesRegex(RuntimeError, 'unowned or cyclic'):
+            g.freeze_readiness([self.speculative_session(), session(102) | {'blockers': [103]},
+                                session(103) | {'blockers': [102]}], 99)
+
+    def test_speculative_transient_then_ready_single_stop_every_kind(self):
+        for kind in g.EXPORT_KINDS:
+            guard = self.guard(asset_kind=kind); guard.threads = Mock(return_value=['T'])
+            running = task() | {'kind': g.export_kind(kind)[0]}
+            queued = running | {'state': 'queued', 'attempt': 0, 'snapshotCount': 0}
+            observer, barrier = Mock(), Mock(pid=99)
+            observer.query.side_effect = [{'task': queued, 'sessions': []},
+                {'task': running, 'sessions': [session(), self.speculative_session()]},
+                {'task': running, 'sessions': [session()]},
+                {'task': running, 'sessions': [session()]}]
+            barrier.query.side_effect = [{'count': 1}, True]
+            with patch.object(g, 'Psql', side_effect=[observer, barrier]), patch.object(g.time, 'sleep'):
+                self.assertTrue(guard.checkpoint('task-one', 'worker')['checkpointCaught'])
+            self.assertEqual(observer.query.call_count, 4)
+            guard.owned.process.send_signal.assert_called_once_with(signal.SIGSTOP)
+            observer.close.assert_called_once(); barrier.close.assert_called_once()
+
+    def test_speculative_persistent_deadline_zero_stop_every_kind(self):
+        for kind in g.EXPORT_KINDS:
+            guard = self.guard(asset_kind=kind); guard.threads = Mock(return_value=['T'])
+            running = task() | {'kind': g.export_kind(kind)[0]}
+            queued = running | {'state': 'queued', 'attempt': 0, 'snapshotCount': 0}
+            observer, barrier = Mock(), Mock(pid=99)
+            observer.query.side_effect = [{'task': queued, 'sessions': []},
+                {'task': running, 'sessions': [session(), self.speculative_session()]}]
+            barrier.query.return_value = {'count': 1}
+            now = [0.0]
+            def sleep(_):
+                now[0] = 1.5
+            with patch.object(g, 'Psql', side_effect=[observer, barrier]), patch.object(g.time,
+                    'monotonic', side_effect=lambda: now[0]), patch.object(g.time, 'sleep', side_effect=sleep):
+                with self.assertRaises(RuntimeError):
+                    guard.checkpoint('task-one', 'worker')
+            guard.owned.process.send_signal.assert_not_called()
+            self.assertEqual(guard.failure_diagnostic['reason'], 'capture_deadline_missed')
+            self.assertEqual(guard.failure_diagnostic['lastNotReady'], {
+                'event': 'running_cancel_guard_failure', 'stage': 'capture',
+                'reason': 'speculative_insert_in_progress'})
+            self.assertNotIn('private', json.dumps(guard.failure_diagnostic))
+            self.assertEqual(guard.owned.resume.call_count, 2)
+            observer.close.assert_called_once(); barrier.close.assert_called_once()
+
+    def test_speculative_after_stop_fails_and_continues_without_retry_every_kind(self):
+        for kind in g.EXPORT_KINDS:
+            guard = self.guard(asset_kind=kind); guard.threads = Mock(return_value=['T'])
+            running = task() | {'kind': g.export_kind(kind)[0]}
+            queued = running | {'state': 'queued', 'attempt': 0, 'snapshotCount': 0}
+            observer, barrier = Mock(), Mock(pid=99)
+            observer.query.side_effect = [{'task': queued, 'sessions': []},
+                {'task': running, 'sessions': [session()]},
+                {'task': running, 'sessions': [session(), self.speculative_session()]}]
+            barrier.query.return_value = {'count': 1}
+            with patch.object(g, 'Psql', side_effect=[observer, barrier]):
+                with self.assertRaises(RuntimeError):
+                    guard.checkpoint('task-one', 'worker')
+            guard.owned.process.send_signal.assert_called_once_with(signal.SIGSTOP)
+            self.assertEqual(observer.query.call_count, 3)
+            self.assertEqual(guard.owned.resume.call_count, 2)
+            self.assertEqual(guard.failure_diagnostic['reason'], 'speculative_insert_in_progress')
+            self.assertEqual(guard.failure_diagnostic['stage'], 'session_validation')
+            self.assertIsNone(guard.stopped_at)
+            observer.close.assert_called_once(); barrier.close.assert_called_once()
+            self.assertEqual(barrier.query.call_count, 1)
+
+    def test_speculative_cannot_hide_candidate_identity_or_lease_failure(self):
+        for update in ({'taskID': 'wrong'}, {'kind': 'wrong'}, {'leaseRemainingSeconds': 20},
+                       {'leaseOwner': 'wrong'}, {'attempt': 2}, {'chunkCount': 1}):
+            guard = self.guard(); guard.threads = Mock(return_value=['T'])
+            queued = task() | {'state': 'queued', 'attempt': 0, 'snapshotCount': 0}
+            observer, barrier = Mock(), Mock(pid=99)
+            observer.query.side_effect = [{'task': queued, 'sessions': []},
+                {'task': task() | update, 'sessions': [session(), self.speculative_session()]}]
+            barrier.query.return_value = {'count': 1}
+            with patch.object(g, 'Psql', side_effect=[observer, barrier]):
+                with self.assertRaises(RuntimeError):
+                    guard.checkpoint('task-one', 'worker')
+            self.assertEqual(guard.failure_diagnostic['stage'], 'checkpoint_validation')
+            guard.owned.process.send_signal.assert_not_called()
+            self.assertEqual(observer.query.call_count, 2)
+            observer.close.assert_called_once(); barrier.close.assert_called_once()
+
     def test_four_activity_slots_are_checked(self):
         safe, blocked, transactions = g.validate_sessions([session(n) for n in range(100, 104)], 99)
         self.assertEqual((len(safe), blocked, transactions), (4, 4, 4))
