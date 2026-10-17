@@ -16,7 +16,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/jackc/pgx/v5"
+	"github.com/yunpiao/adtr/internal/dbadmission"
 	"github.com/yunpiao/adtr/internal/directoryassets"
 	"github.com/yunpiao/adtr/internal/domains"
 	"github.com/yunpiao/adtr/internal/schemaversion"
@@ -284,7 +284,7 @@ func (s *Service) handleDirectoryForProfile(ctx context.Context, r *http.Request
 	if kind == "" {
 		return nil, fail(404, "not_found")
 	}
-	conn, err := pgx.ConnectConfig(ctx, s.database.Copy())
+	conn, err := dbadmission.ConnectConfig(ctx, s.database.Copy())
 	if err != nil {
 		return nil, directorySchemaError(err)
 	}

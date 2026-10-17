@@ -126,6 +126,35 @@ func (s *Store) withTx(ctx context.Context, fn func(context.Context, pgx.Tx) err
 	return safeError(err)
 }
 
+// withActivityTx is the only consumer of a task activity candidate. Binding is
+// scoped to this existing physical connection and revoked on every return.
+func (s *Store) withActivityTx(ctx context.Context, workerID string, candidate tasks.ActivityCandidate, fn func(context.Context, pgx.Tx) error) error {
+	ctx, cancel := context.WithTimeout(ctx, databaseTimeout)
+	defer cancel()
+	conn, err := dbadmission.ConnectConfig(ctx, s.config.Copy())
+	if err != nil {
+		return safeError(err)
+	}
+	defer conn.Close(ctx)
+	release, err := tasks.BindActivityCandidate(candidate, conn, workerID)
+	if err != nil {
+		return safeError(err)
+	}
+	defer release()
+	tx, err := conn.Begin(ctx)
+	if err != nil {
+		return safeError(err)
+	}
+	defer tx.Rollback(ctx)
+	if err = tasks.CheckSchemaTx(ctx, tx, s.expectedSchema); err == nil {
+		err = fn(ctx, tx)
+	}
+	if err == nil {
+		err = tx.Commit(ctx)
+	}
+	return safeError(err)
+}
+
 // Persist records one actual sampler observation atomically. Unavailable
 // attempts are retained, with null values; no previous values are carried over.
 func (s *Store) Persist(ctx context.Context, snapshot Snapshot) error {

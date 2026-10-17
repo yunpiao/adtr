@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // Conn does not expose or embed the underlying connection. A transaction may
@@ -55,6 +56,11 @@ func connectWith(ctx context.Context, config *pgx.ConnConfig, connect func(conte
 
 func (c *Conn) Begin(ctx context.Context) (pgx.Tx, error) {
 	return c.raw.Begin(ctx)
+}
+
+// Exec preserves the native context, arguments, command tag and error unchanged.
+func (c *Conn) Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+	return c.raw.Exec(ctx, sql, args...)
 }
 
 func (c *Conn) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {

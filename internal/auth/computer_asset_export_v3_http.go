@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jackc/pgx/v5"
+	"github.com/yunpiao/adtr/internal/dbadmission"
 	"github.com/yunpiao/adtr/internal/domains"
 	"github.com/yunpiao/adtr/internal/schemaversion"
 	"github.com/yunpiao/adtr/internal/tasks"
@@ -218,7 +218,7 @@ func (s *Service) handleComputerAssetExportV3(ctx context.Context, r *http.Reque
 	failOut := func(err error) (*credentialUseResult, []byte, domains.ComputerAssetExportV3Artifact, error) {
 		return nil, nil, artifact, err
 	}
-	conn, err := pgx.ConnectConfig(ctx, s.database.Copy())
+	conn, err := dbadmission.ConnectConfig(ctx, s.database.Copy())
 	if err != nil {
 		return failOut(err)
 	}

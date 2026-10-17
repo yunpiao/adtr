@@ -19,6 +19,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/yunpiao/adtr/internal/credentialuse"
+	"github.com/yunpiao/adtr/internal/dbadmission"
 )
 
 type auditContextKey struct{}
@@ -153,7 +154,7 @@ func (s *Service) mfa(u *User, code string) bool {
 	return ok
 }
 func (s *Service) rate(ctx context.Context, bucket string, limit int) error {
-	conn, err := pgx.ConnectConfig(ctx, s.database.Copy())
+	conn, err := dbadmission.ConnectConfig(ctx, s.database.Copy())
 	if err != nil {
 		return err
 	}
@@ -251,7 +252,7 @@ func (s *Service) handle(ctx context.Context, r *http.Request, path string, in r
 			return nil, "", false, err
 		}
 	}
-	conn, err := pgx.ConnectConfig(ctx, s.database.Copy())
+	conn, err := dbadmission.ConnectConfig(ctx, s.database.Copy())
 	if err != nil {
 		return nil, "", false, err
 	}
@@ -534,7 +535,7 @@ func (s *Service) Bootstrap(ctx context.Context, username, password string) erro
 	if err != nil {
 		return err
 	}
-	conn, err := pgx.ConnectConfig(ctx, s.database.Copy())
+	conn, err := dbadmission.ConnectConfig(ctx, s.database.Copy())
 	if err != nil {
 		return errors.New("bootstrap database unavailable")
 	}
@@ -568,7 +569,7 @@ func (s *Service) recordFailure(ctx context.Context, path string) {
 	if s.database == nil {
 		return
 	}
-	conn, err := pgx.ConnectConfig(ctx, s.database.Copy())
+	conn, err := dbadmission.ConnectConfig(ctx, s.database.Copy())
 	if err != nil {
 		return
 	}

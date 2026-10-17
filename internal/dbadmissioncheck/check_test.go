@@ -5,6 +5,7 @@ import (
 	"go/parser"
 	"go/token"
 	"go/types"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -33,6 +34,9 @@ func fixtures(t *testing.T) fixtureImporter {
 	p, _ := fixtureCheck(t, pgx+"/pgconn", "pgconn.go", `package pgconn
  type Config struct { RuntimeParams map[string]string }
  type PgConn struct{}
+ type HijackedConn struct{}
+ func Construct(*HijackedConn)(*PgConn,error){return nil,nil}
+ func(p *PgConn)PID()uint32{return 1}
  func Connect(string)(*PgConn,error){return nil,nil}
  func ConnectConfig(*Config)(*PgConn,error){return nil,nil}
  func (p *PgConn) Close()error{return nil}
@@ -90,6 +94,28 @@ func TestTypedBoundaryCases(t *testing.T) {
 		{"inferred generic managed copy", `import m "github.com/yunpiao/adtr/internal/dbadmission";func clone[T any](v *T)T{return *v};func f(c *m.Conn){_=clone(c)}`, true},
 		{"explicit generic config copy", `import p "github.com/jackc/pgx/v5";func clone[T any](v *T)T{return *v};func f(c *p.ConnConfig){_=clone[p.ConnConfig](c)}`, true},
 		{"managed conversion", `import m "github.com/yunpiao/adtr/internal/dbadmission";type local m.Conn;func f(c *local){_=(*m.Conn)(c)}`, true},
+
+		{"implicit config boxing", `import p "github.com/jackc/pgx/v5";func f(c *p.ConnConfig){var x any=c;_=x}`, true},
+		{"implicit config assignment", `import p "github.com/jackc/pgx/v5";func f(c *p.ConnConfig){var x any;x=c;_=x}`, true},
+		{"implicit config argument", `import p "github.com/jackc/pgx/v5";func sink(any){};func f(c *p.ConnConfig){sink(c)}`, true},
+		{"variadic config argument", `import p "github.com/jackc/pgx/v5";func sink(...any){};func f(c *p.ConnConfig){sink(1,c)}`, true},
+		{"implicit config return", `import p "github.com/jackc/pgx/v5";func f(c *p.ConnConfig)any{return c}`, true},
+		{"nested config return", `import p "github.com/jackc/pgx/v5";func f(c *p.ConnConfig){_=func()any{return c}}`, true},
+		{"config slice boxing", `import p "github.com/jackc/pgx/v5";func f(c *p.ConnConfig){_=[]any{c}}`, true},
+		{"config map boxing", `import p "github.com/jackc/pgx/v5";func f(c *p.ConnConfig){_=map[string]any{"c":c}}`, true},
+		{"config struct boxing", `import p "github.com/jackc/pgx/v5";func f(c *p.ConnConfig){_=struct{C any}{C:c}}`, true},
+		{"config positional boxing", `import p "github.com/jackc/pgx/v5";func f(c *p.ConnConfig){_=struct{C any}{c}}`, true},
+		{"config channel boxing", `import p "github.com/jackc/pgx/v5";func f(c *p.ConnConfig,ch chan any){ch<-c}`, true},
+		{"transaction dynamic boxing", `import p "github.com/jackc/pgx/v5";func f(tx p.Tx){var x any=tx;_=x}`, true},
+		{"transaction same interface", `import p "github.com/jackc/pgx/v5";func sink(p.Tx){};func f(tx p.Tx){sink(tx)}`, false},
+		{"type assertion recovery", `import p "github.com/jackc/pgx/v5";func f(x any){_=x.(*p.ConnConfig)}`, true},
+		{"config allocation", `import p "github.com/jackc/pgx/v5";func f(){_=new(p.ConnConfig)}`, true},
+		{"reconstructed connection alias", `import p "github.com/jackc/pgx/v5/pgconn";var construct=p.Construct`, true},
+		{"reconstructed inferred connection", `import p "github.com/jackc/pgx/v5/pgconn";func f(){_,_=p.Construct(nil)}`, true},
+		{"tuple return boxing", `import p "github.com/jackc/pgx/v5";func source()(*p.ConnConfig,error){return nil,nil};func f()(any,error){return source()}`, true},
+		{"tuple argument boxing", `import p "github.com/jackc/pgx/v5";func source()(*p.ConnConfig,error){return nil,nil};func sink(any,error){};func f(){sink(source())}`, true},
+		{"tuple assignment boxing", `import p "github.com/jackc/pgx/v5";func source()(*p.ConnConfig,error){return nil,nil};func f(){var x any;var e error;x,e=source();_,_=x,e}`, true},
+		{"named callback boxing", `import p "github.com/jackc/pgx/v5";type callback func(any);func f(c *p.ConnConfig,sink callback){sink(c)}`, true},
 		{"config copy admitted", `import p "github.com/jackc/pgx/v5";import m "github.com/yunpiao/adtr/internal/dbadmission";func f(c *p.ConnConfig){conn,_:=m.ConnectConfig(c.Copy());defer conn.Close()}`, false},
 		{"managed method value", `import m "github.com/yunpiao/adtr/internal/dbadmission";func f(c *m.Conn){close:=c.Close;_=close()}`, false},
 		{"ordinary same names", `type Conn struct{};func(*Conn)Close(){};func Connect(){};func f(c *Conn){Connect();c.Close()}`, false},
@@ -148,15 +174,75 @@ func TestManagedCloseAllowance(t *testing.T) {
 		t.Fatal("raw methods outside exact wrapper must fail")
 	}
 }
-func TestStoreReadyUnknownDependenciesFail(t *testing.T) {
+func TestStoreAllDeclarationsChecked(t *testing.T) {
+	imp := fixtures(t)
 	for _, source := range []string{
-		`package store;func Ready(){helper()};func helper(){}`,
-		`package store;var callback=func(){};func Ready(){callback()}`,
-		`package store;func Ready(){};func init(){}`,
+		`package store; import p "github.com/jackc/pgx/v5";func Ready(){};func migrate(){_,_=p.Connect("")}`,
+		`package store; import p "github.com/jackc/pgx/v5";func Ready(){};func init(){_,_=p.Connect("")}`,
+		`package store; import p "github.com/jackc/pgx/v5";var connect=p.ConnectConfig;func Ready(){}`,
 	} {
-		_, ds := fixtureCheck(t, module+"/internal/store", "store.go", source, fixtureImporter{})
+		_, ds := fixtureCheck(t, module+"/internal/store", "store.go", source, imp)
 		if len(ds) == 0 {
-			t.Fatalf("unproved dependency accepted: %s", source)
+			t.Fatal("unchecked store declaration")
 		}
+	}
+}
+
+func TestConfigurationFactoryIsExact(t *testing.T) {
+	imp := fixtures(t)
+	for _, tc := range []struct {
+		path, file, source string
+		bad                bool
+	}{
+		{module + "/internal/runtime", "config.go", `package runtime;import p "github.com/jackc/pgx/v5";func LoadConfig(){_,_=p.ParseConfig("")}`, false},
+		{module + "/internal/runtime", "other.go", `package runtime;import p "github.com/jackc/pgx/v5";func LoadConfig(){_,_=p.ParseConfig("")}`, true},
+		{module + "/internal/runtime", "config.go", `package runtime;import p "github.com/jackc/pgx/v5";func Other(){_,_=p.ParseConfig("")}`, true},
+		{module + "/internal/runtime", "config.go", `package runtime;import p "github.com/jackc/pgx/v5";func LoadConfig(c *p.ConnConfig){c.Tracer=nil}`, true},
+	} {
+		_, ds := fixtureCheck(t, tc.path, tc.file, tc.source, imp)
+		if (len(ds) > 0) != tc.bad {
+			t.Fatalf("bad=%v diagnostics=%v", tc.bad, ds)
+		}
+	}
+}
+
+func TestActivityCallerBoundary(t *testing.T) {
+	imp := fixtures(t)
+	p, _ := fixtureCheck(t, module+"/internal/tasks", "fixture.go", `package tasks;func BindActivityCandidate(){}`, imp)
+	imp[module+"/internal/tasks"] = p
+	source := `package systemhealth;import "github.com/yunpiao/adtr/internal/tasks";type Store struct{};func (*Store) withActivityTx(){tasks.BindActivityCandidate()}`
+	for _, tc := range []struct {
+		path, file, source string
+		bad                bool
+	}{
+		{module + "/internal/systemhealth", "persistence_store.go", source, false},
+		{module + "/internal/systemhealth", "other.go", source, true},
+		{module + "/internal/auth", "persistence_store.go", source, true},
+		{module + "/internal/systemhealth", "persistence_store.go", strings.ReplaceAll(source, "withActivityTx()", "other()"), true},
+		{module + "/internal/systemhealth", "persistence_store.go", `package systemhealth;import "github.com/yunpiao/adtr/internal/tasks";var leak=tasks.BindActivityCandidate`, true},
+	} {
+		_, ds := fixtureCheck(t, tc.path, tc.file, tc.source, imp)
+		if (len(ds) > 0) != tc.bad {
+			t.Fatalf("bad=%v diagnostics=%v", tc.bad, ds)
+		}
+	}
+}
+
+func TestUnreviewedTransportAndImports(t *testing.T) {
+	imp := fixtures(t)
+	for _, path := range []string{"database/sql", "plugin", "os/exec", "unsafe"} {
+		p := types.NewPackage(path, path[strings.LastIndex(path, "/")+1:])
+		p.MarkComplete()
+		imp[path] = p
+		_, ds := fixtureCheck(t, module+"/internal/example", "example.go", "package example;import _ "+strconv.Quote(path), imp)
+		if len(ds) == 0 {
+			t.Fatalf("unreviewed blank import %s", path)
+		}
+	}
+	p, _ := fixtureCheck(t, "net", "net.go", `package net;func Dial(string,string){}`, imp)
+	imp["net"] = p
+	_, ds := fixtureCheck(t, module+"/internal/example", "example.go", `package example;import "net";var dial=net.Dial`, imp)
+	if len(ds) == 0 {
+		t.Fatal("transport alias escaped")
 	}
 }

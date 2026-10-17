@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jackc/pgx/v5"
+	"github.com/yunpiao/adtr/internal/dbadmission"
 	"github.com/yunpiao/adtr/internal/domains"
 	"github.com/yunpiao/adtr/internal/schemaversion"
 	"github.com/yunpiao/adtr/internal/tasks"
@@ -82,7 +82,7 @@ type domainSelectionResult struct {
 }
 
 func (s *Service) handleDomainSelection(ctx context.Context, r *http.Request, store *domains.Store, path string, f domains.SelectionFilter, in domains.SelectionInput) (*domainSelectionResult, error) {
-	conn, err := pgx.ConnectConfig(ctx, s.database.Copy())
+	conn, err := dbadmission.ConnectConfig(ctx, s.database.Copy())
 	if err != nil {
 		return nil, err
 	}

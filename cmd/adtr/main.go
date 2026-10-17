@@ -279,11 +279,12 @@ func run() (runErr error) {
 			return fmt.Errorf("worker identity unavailable")
 		}
 		workerOwner := hex.EncodeToString(identity[:])
-		activityRecorder := newWorkerActivityRecorder(func(c context.Context, a tasks.WorkerActivity) error {
+		candidateRecorder := newWorkerActivityCandidateRecorder(func(c context.Context, a tasks.WorkerActivity, candidate tasks.ActivityCandidate) error {
 			recordOperationalWorkerActivity(journal, a)
-			return healthStore.RecordWorkerCycle(c, a.WorkerID, systemhealth.WorkerCycle(a.Cycle), systemhealth.WorkerCycleStatus(a.Status), a.Code)
+			return healthStore.RecordWorkerCycleCandidate(c, a.WorkerID, systemhealth.WorkerCycle(a.Cycle), systemhealth.WorkerCycleStatus(a.Status), a.Code, candidate)
 		})
-		worker, workerErr := tasks.NewWorker(taskEngine, tasks.WorkerConfig{Owner: workerOwner, Concurrency: 4, PollInterval: 250 * time.Millisecond, OnActivity: activityRecorder, OnError: func(error) { fmt.Fprintln(os.Stderr, "task worker cycle failed") }})
+		activityRecorder := func(c context.Context, a tasks.WorkerActivity) { candidateRecorder(c, a, nil) }
+		worker, workerErr := tasks.NewWorker(taskEngine, tasks.WorkerConfig{Owner: workerOwner, Concurrency: 4, PollInterval: 250 * time.Millisecond, OnActivity: activityRecorder, OnActivityCandidate: candidateRecorder, OnError: func(error) { fmt.Fprintln(os.Stderr, "task worker cycle failed") }})
 		if workerErr != nil {
 			return workerErr
 		}

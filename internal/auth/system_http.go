@@ -17,8 +17,8 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/yunpiao/adtr/internal/dbadmission"
 	"github.com/yunpiao/adtr/internal/systemhealth"
 	"github.com/yunpiao/adtr/internal/tasks"
 )
@@ -305,7 +305,7 @@ func (s *Service) handleSystem(ctx context.Context, r *http.Request, store *syst
 	// means no authenticated answer; there is deliberately no cached identity.
 	gateCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
-	conn, err := pgx.ConnectConfig(gateCtx, s.database.Copy())
+	conn, err := dbadmission.ConnectConfig(gateCtx, s.database.Copy())
 	if err != nil {
 		return nil, fail(503, "database_unavailable")
 	}
