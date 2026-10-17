@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"testing"
@@ -54,7 +55,17 @@ func TestIntegrationApplicationNormalEOFLeavesRescueLive(t *testing.T) {
 	if err != nil {
 		t.Fatal("application install")
 	}
-	defer cleanup()
+	cleanupDone := make(chan struct{})
+	var cleanupOnce sync.Once
+	joinCleanup := func() {
+		cleanupOnce.Do(func() { go func() { cleanup(); close(cleanupDone) }() })
+		select {
+		case <-cleanupDone:
+		case <-time.After(2 * time.Second):
+			t.Error("controller cleanup did not join after transport failure")
+		}
+	}
+	defer joinCleanup()
 	if _, err := StartCIController(normal, rescue, page, endReader, nonce, nil); err == nil {
 		t.Fatal("second installation accepted")
 	}
@@ -171,4 +182,5 @@ func TestIntegrationApplicationNormalEOFLeavesRescueLive(t *testing.T) {
 	if atomic.LoadUint32(w.invalid) != 1 || closing {
 		t.Fatal("release erased failure or stayed closed")
 	}
+	joinCleanup()
 }

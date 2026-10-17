@@ -175,7 +175,7 @@ func TestFinalProtocolOrderingCannotBeWeakened(t *testing.T) {
 		{"queued prepare bypass", "serveApplicationNormal", "g.prepareQueuedSelection(r.Kind, r.BudgetMillis)", "g.prepareActivitySelection(r.Kind)"},
 		{"queued ACK omitted", "serveApplicationNormal", `send(r.Seq, "reply")`, `send(r.Seq, "invalid")`},
 		{"queued reopen omitted", "serveApplicationNormal", "g.completeQueuedSelection()", "g.completeFinalQuiesce()"},
-		{"queued failure unlock omitted", "recordApplicationFailure", "g.abortQueuedSelection()", "g.abortFinalQuiesce()"},
+		{"failure publisher reentry", "recordApplicationFailure", "g.invalidateTransport()", "g.invalidateTransport();g.abortQueuedSelection()"},
 		{"queued rescue unlock omitted", "serveApplicationRescue", "g.abortQueuedSelection()", "g.abortFinalQuiesce()"},
 		{"ACK omitted", "serveApplicationNormal", `writeFinalQuiesceFrame(file, g, r.Seq, "cancelled")`, `writeFinalQuiesceFrame(file, g, r.Seq, "drained")`},
 		{"reopen omitted", "serveApplicationNormal", "return g.completeFinalQuiesce()", "return nil"},

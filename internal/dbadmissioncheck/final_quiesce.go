@@ -236,8 +236,6 @@ var finalQuiesceBodies = map[string]struct{ file, body string }{
 	// EOF/partial/timeout cannot be relabelled by a later cleanup Close.
 	if !(stopping.Load() && errors.Is(original, os.ErrClosed)) {
 		g.invalidateTransport()
-		g.abortFinalQuiesce()
-		g.abortQueuedSelection()
 		if onFailure != nil {
 			onFailure()
 		}
@@ -502,7 +500,7 @@ func finalQuiesceDeclarations(fset *token.FileSet, path string, files []*ast.Fil
 					}
 				case *ast.SelectorExpr:
 					selected := info.Selections[x]
-					if selected != nil && selected.Kind() == types.FieldVal && finalQuiesceField(selected.Recv(), selected.Obj().Name()) && !exact && !(name == "lifecycleGate.acquire" && exactRecoveryFunction(path, filename, name, fn)) && !finalTransportCleanupField(path, filename, name, x, ancestors) {
+					if selected != nil && selected.Kind() == types.FieldVal && finalQuiesceField(selected.Recv(), selected.Obj().Name()) && !exact && !(name == "lifecycleGate.acquire" && exactRecoveryFunction(path, filename, name, fn)) && !exactTransportInvalidation(path, filename, name, fn) && !finalTransportCleanupField(path, filename, name, x, ancestors) {
 						emit(x, "final shutdown state or CancelFunc outside exact protocol ownership")
 					}
 				case *ast.CompositeLit:
@@ -537,7 +535,7 @@ func finalQuiesceDeclarations(fset *token.FileSet, path string, files []*ast.Fil
 					case "cancelFinalQuiesce", "completeFinalQuiesce":
 						allowed = exact && name == "serveApplicationNormal" && captureConsumerCall(x, ancestors, true)
 					case "abortFinalQuiesce":
-						allowed = exact && (name == "serveApplicationNormal" || name == "serveApplicationRescue" || name == "recordApplicationFailure") && captureConsumerCall(x, ancestors, true)
+						allowed = exact && (name == "serveApplicationNormal" || name == "serveApplicationRescue") && captureConsumerCall(x, ancestors, true)
 					case "finalDrainedLocked":
 						allowed = (exact && (name == "lifecycleGate.prepareFinalQuiesce" || name == "lifecycleGate.cancelFinalQuiesce" || name == "lifecycleGate.completeFinalQuiesce" || name == "writeFinalQuiesceFrame") || exactQueuedParkFunction(path, filename, name, fn) && (name == "lifecycleGate.prepareQueuedSelection" || name == "lifecycleGate.completeQueuedSelection" || name == "lifecycleGate.configureActivitySelection")) && directCallFor(x, ancestors) != nil
 					case "writeFinalQuiesceFrame":

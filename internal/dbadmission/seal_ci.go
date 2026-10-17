@@ -210,6 +210,17 @@ func (g *lifecycleGate) unlockAndPublishInvalid() {
 func (g *lifecycleGate) invalidateTransport() {
 	g.mu.Lock()
 	g.invalidateBecauseLocked(invalidTransport)
+	// A failed publication can enter here synchronously from publishInvalid.
+	// Release parked admissions without attempting publication on that same
+	// broken channel or waiting for our own in-progress publication to finish.
+	if g.finalParked {
+		g.finalQuiesce.state = "failed"
+		g.finalParked = false
+	}
+	if g.queuedParked {
+		g.queuedState = "failed"
+		g.queuedParked = false
+	}
 	g.notifyLocked()
 	g.mu.Unlock()
 }

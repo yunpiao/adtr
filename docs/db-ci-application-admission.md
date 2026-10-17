@@ -623,3 +623,26 @@ and before ARM it permanently aborts even if checkpoint processing has already
 started. The one authorized initial CONT is a direct synchronous checkpoint call,
 not a shared temporary flag that a concurrent watchdog could consume. A static
 contract scans all non-test Python scripts for that sole direct call.
+
+
+### Failed invalidation publication and synchronous transport cleanup
+
+The diagnostic CI run exposed a concrete recursive wait in
+`TestIntegrationApplicationNormalEOFLeavesRescueLive`: the normal EOF handler
+invalidated the gate, then an abort helper attempted an invalidation publication.
+The failed write synchronously reentered that handler and waited on the same
+`sync.Once` whose callback was still executing. The package's original ten-minute
+timeout stack established this cycle; the earlier job-level cancellations did not.
+
+Transport invalidation now keeps the original sticky-first transition and, under
+that same registry lock, marks only currently parked final/queued barriers failed
+and opens those gates. It never attempts another publication on the broken
+transport. The failure callback and descriptor Close retain their original order.
+Ordinary concurrent invalidators still wait for the single synchronous publication
+callback to finish; no background publication or sticky reset is introduced.
+The real EOF test still requires business cancellation, sticky failure, a working
+independent rescue ACK, and now an explicitly bounded controller cleanup join.
+
+This fixes the demonstrated publication recursion. It does not identify the
+initial cause of earlier browser-suite `finish_target` EOF observations. Signal
+registration lifetime changes remain a separate candidate.

@@ -239,8 +239,6 @@ func recordApplicationFailure(file *os.File, g *lifecycleGate, stopping *atomic.
 	// EOF/partial/timeout cannot be relabelled by a later cleanup Close.
 	if !(stopping.Load() && errors.Is(original, os.ErrClosed)) {
 		g.invalidateTransport()
-		g.abortFinalQuiesce()
-		g.abortQueuedSelection()
 		if onFailure != nil {
 			onFailure()
 		}

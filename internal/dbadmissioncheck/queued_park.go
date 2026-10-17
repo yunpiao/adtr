@@ -134,7 +134,7 @@ func queuedParkDeclarations(fset *token.FileSet, path string, files []*ast.File,
 				switch x := n.(type) {
 				case *ast.SelectorExpr:
 					selection := info.Selections[x]
-					if selection != nil && selection.Kind() == types.FieldVal && isNamed(selection.Recv(), managed, "lifecycleGate") && (selection.Obj().Name() == "queuedState" || selection.Obj().Name() == "queuedParked") && !exact && !(name == "lifecycleGate.acquire" && exactRecoveryFunction(path, filename, name, fn)) {
+					if selection != nil && selection.Kind() == types.FieldVal && isNamed(selection.Recv(), managed, "lifecycleGate") && (selection.Obj().Name() == "queuedState" || selection.Obj().Name() == "queuedParked") && !exact && !exactTransportInvalidation(path, filename, name, fn) && !(name == "lifecycleGate.acquire" && exactRecoveryFunction(path, filename, name, fn)) {
 						emit(x, "queued parking state outside its fixed prepare/configure/ACK/acquire path")
 					}
 				case *ast.CompositeLit:
@@ -162,7 +162,7 @@ func queuedParkDeclarations(fset *token.FileSet, path string, files []*ast.File,
 					case "prepareQueuedSelection", "completeQueuedSelection":
 						allowed = exactFinalQuiesceFunction(path, filename, name, fn) && name == "serveApplicationNormal" && directCallFor(x, ancestors) != nil
 					case "abortQueuedSelection":
-						allowed = exactFinalQuiesceFunction(path, filename, name, fn) && (name == "recordApplicationFailure" || name == "serveApplicationRescue") && directCallFor(x, ancestors) != nil
+						allowed = exactFinalQuiesceFunction(path, filename, name, fn) && name == "serveApplicationRescue" && directCallFor(x, ancestors) != nil
 					default:
 						protected = false
 					}
