@@ -189,6 +189,9 @@ func criticalDeclarations(fset *token.FileSet, path string, files []*ast.File, i
 					name = receiverName(fn.Recv.List[0].Type) + "." + name
 				}
 			}
+			if path == managed && name == "lifecycleGate.writeFinalInvalidationDiagnostic" && !(filename == "application_diagnostic_ci.go" && exactFinalDiagnosticWriter(fn)) {
+				emit(decl, "final diagnostic writer must only serialize its closed projection to stderr")
+			}
 			if path == managed && name == "lifecycleGate.invalidateBecauseLocked" && !(filename == "application_diagnostic_ci.go" && exactDiagnosticInvalidation(fn)) {
 				emit(decl, "diagnostic invalidator must preserve sticky-first and first-reason-only ordering")
 			}
@@ -270,6 +273,9 @@ func criticalDeclarations(fset *token.FileSet, path string, files []*ast.File, i
 						return true
 					}
 					pkg := obj.Pkg().Path()
+					if function, ok := obj.(*types.Func); ok && pkg == managed && finalDiagnosticOperation(function) && !allowedFinalDiagnosticCaller(path, filename, name, function.Name(), x, ancestors, info) {
+						emit(x, "final diagnostic capability outside its exact reviewed caller")
+					}
 					if function, ok := obj.(*types.Func); ok && pkg == managed && protectedSelectionOperation(function) && !allowedSelectionCaller(path, filename, name, function.Name(), x, ancestors) {
 						emit(x, "activity selection capability outside its exact synchronous caller")
 					}

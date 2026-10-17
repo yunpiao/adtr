@@ -147,3 +147,92 @@ func TestDiagnosticPhaseAndUnknownInvalidAreNeverNone(t *testing.T) {
 		t.Fatal("unknown invalid mislabeled valid")
 	}
 }
+
+func TestFinalInvalidationProjectionRejectsUnknownData(t *testing.T) {
+	g := &lifecycleGate{}
+	d := g.finalInvalidationDiagnostic()
+	if d.Event != "owned_ci_first_invalidation" || d.Reason != "none" || d.Phase != "open" {
+		t.Fatal("fresh diagnostic changed")
+	}
+	g.firstInvalidReason = invalidationReason("private SQL nonce identity")
+	g.firstInvalidPhase = "private phase"
+	raw, err := json.Marshal(g.finalInvalidationDiagnostic())
+	if err != nil || string(raw) != `{"event":"owned_ci_first_invalidation","reason":"unknown","phase":"unknown"}` {
+		t.Fatal("unknown diagnostic leaked")
+	}
+}
+
+func TestResumeReleaseOrderingPreservesFirstInvalidation(t *testing.T) {
+	for _, releaseFirst := range []bool{false, true} {
+		witness := &diagnosticWitness{}
+		g := &lifecycleGate{witness: witness}
+		ticket, err := g.acquire(context.Background())
+		if err != nil {
+			t.Fatal("fixture admission failed")
+		}
+		conn := attachTestTicket(ticket)
+		revoke, err := g.register(conn, testSealIdentity())
+		if err != nil {
+			t.Fatal("fixture registration failed")
+		}
+		if g.pin(1, g.candidates()[0].generation, nil) != nil || g.frame(1).Status != "sealed" {
+			t.Fatal("fixture not sealed")
+		}
+		if releaseFirst && g.release(1) != nil {
+			t.Fatal("release failed")
+		}
+		// Deterministic resumed business completion before/after controller release.
+		revoke()
+		ticket.closingConnection()
+		ticket.closed(true)
+		storesBeforeRelease := witness.stores
+		if g.release(1) != nil {
+			t.Fatal("release acknowledgement failed")
+		}
+		if witness.stores != storesBeforeRelease || (releaseFirst && witness.stores != 0) || (!releaseFirst && witness.stores == 0) {
+			t.Fatal("sticky write history changed")
+		}
+		d := g.finalInvalidationDiagnostic()
+		if releaseFirst {
+			if g.invalid || d.Reason != "none" || d.Phase != "released" {
+				t.Fatal("release-first became invalid")
+			}
+		} else if !g.invalid || d.Reason != "target_revoked" || d.Phase != "sealed" || g.frame(1).Status != "released" {
+			t.Fatal("release acknowledgement erased earlier invalidation")
+		}
+	}
+}
+
+func TestCancelledWaiterReleaseOrderingPreservesFirstInvalidation(t *testing.T) {
+	for _, releaseFirst := range []bool{false, true} {
+		g, generation := newSealProtocolTestGate()
+		witness := &diagnosticWitness{}
+		g.witness = witness
+		if g.pin(1, generation, nil) != nil {
+			t.Fatal("fixture pin failed")
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		if releaseFirst && g.release(1) != nil {
+			t.Fatal("fixture release failed")
+		}
+		if _, err := g.acquire(ctx); err != context.Canceled {
+			t.Fatal("wait cancellation changed")
+		}
+		storesBeforeRelease := witness.stores
+		if g.release(1) != nil {
+			t.Fatal("release acknowledgement failed")
+		}
+		if witness.stores != storesBeforeRelease || (releaseFirst && witness.stores != 0) || (!releaseFirst && witness.stores == 0) {
+			t.Fatal("sticky write history changed")
+		}
+		d := g.finalInvalidationDiagnostic()
+		if releaseFirst {
+			if g.invalid || d.Reason != "none" {
+				t.Fatal("released waiter invalidated old epoch")
+			}
+		} else if !g.invalid || d.Reason != "wait_cancelled" || d.Phase != "sealed" {
+			t.Fatal("waiter cancellation lost first cause")
+		}
+	}
+}

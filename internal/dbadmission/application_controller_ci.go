@@ -118,9 +118,13 @@ func StartCIController(normal, rescue, witness *os.File, nonce [16]byte, onFailu
 	coordinator.used = true
 	coordinator.gate = g
 	var stopping atomic.Bool
-	var stopOnce sync.Once
+	var stopOnce, reportOnce sync.Once
 	var wg sync.WaitGroup
-	cleanup := func() { stopOnce.Do(func() { stopping.Store(true); normal.Close(); rescue.Close() }); wg.Wait() }
+	cleanup := func() {
+		stopOnce.Do(func() { stopping.Store(true); normal.Close(); rescue.Close() })
+		wg.Wait()
+		reportOnce.Do(func() { g.writeFinalInvalidationDiagnostic() })
+	}
 	// Each channel has one reader. Normal EOF cannot close the rescue channel.
 	wg.Add(2)
 	go func() { defer wg.Done(); serveApplicationNormal(normal, g, &stopping, onFailure) }()

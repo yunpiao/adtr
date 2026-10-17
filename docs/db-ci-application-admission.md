@@ -334,3 +334,39 @@ local exit-zero, sticky category, controller-invalid/released flags and cleanup
 stage. A malformed page is `other`, never a clear witness. This diagnostic sends
 no control request, preserves the original acceptance expression and cleanup
 order, and does not make successful process exit equivalent to valid capture.
+
+### Post-resume first-cause evidence
+
+Run 39049952677 passed the user/computer browser assertions but rejected the
+final witness: exitZero=true, sticky=set, controllerInvalid=false, released=true,
+cleanup=completed. Group instead observed configure acknowledgement EOF before
+capture. These are separate failures; process exit and browser success do not
+identify the first sticky write. The worker now emits one bounded closed
+first-reason/phase snapshot after both controller goroutines join on cleanup.
+The runner extracts only that exact event from the private combined worker log
+after Wait. Missing, duplicated or malformed evidence remains unknown.
+
+The current protocol contains a demonstrated ordering hazard: it rolls back the
+PostgreSQL barrier while every worker thread is stopped, then resumes the worker
+before release acknowledgement. A target may revoke/close before release and
+set sticky even though release later succeeds. A deterministic contract checks
+both orderings and proves release cannot erase the earlier invalidation. This
+is a source-supported candidate for the observed sticky, not a claim that the
+new CI recorded that particular first cause.
+
+Holding the barrier longer alone is insufficient: the original 2s callback
+context may expire during STOP, and the barrier's existing 8s idle transaction
+timeout is below the full 10s stop ceiling. Any future recovery change must
+account for both limits without changing the 1.5s capture window or weakening
+strict eligibility. No such protocol change is included in this diagnostic
+candidate.
+Ordinary admission waiters are another independent resumed-ordering hazard:
+their 2s/5s contexts may already be cancelled when execution resumes, and they
+can reach the existing wait-cancel invalidation before release is processed.
+The new deterministic waiter ordering contract preserves both the context error
+and sticky history; isolating only the target's context would not solve this.
+
+The final event has fixed bounded content, but its synchronous stderr write is
+not a bounded transport protocol: an OS or disk stall can delay shutdown. In
+these owned CI runs stderr is the existing private temporary log file. The
+post-Wait extractor never echoes that file and missing output remains unknown.

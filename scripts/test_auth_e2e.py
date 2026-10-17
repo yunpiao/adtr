@@ -410,6 +410,7 @@ def main():
                     owned_ci_worker.close_after_wait()
                 except (OSError, RuntimeError, subprocess.TimeoutExpired):
                     shutdown_error = RuntimeError("owned CI final witness or cleanup failed")
+                owned_ci_worker.report_first_invalidation_after_wait(logs)
             if running_cancel_guard is not None and worker is not None and worker.returncode is not None:
                 try:
                     running_cancel_guard.cleanup_activity_fixture_after_wait(worker.returncode)

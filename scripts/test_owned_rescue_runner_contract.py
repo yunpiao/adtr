@@ -214,6 +214,7 @@ RUNNER_DELTAS = [('from user_asset_export_v3_terminal_ci import SUITES as EXPORT
   '                    owned_ci_worker.close_after_wait()\n'
   '                except (OSError, RuntimeError, subprocess.TimeoutExpired):\n'
   '                    shutdown_error = RuntimeError("owned CI final witness or cleanup failed")\n'
+  '                owned_ci_worker.report_first_invalidation_after_wait(logs)\n'
   '            if running_cancel_guard is not None and worker is not None and worker.returncode is '
   'not None:\n'
   '                try:\n'
@@ -451,6 +452,60 @@ class Contracts(unittest.TestCase):
         self.assertEqual(events[-1], ('close', 70))
         self.assertIsNone(owner.witness)
         self.assertIsNone(owner.page_fd)
+
+    def test_first_invalidation_projection_is_exact_bounded_and_private(self):
+        import io
+        event = dict(event=r.FINAL_INVALIDATION_EVENT, reason='unclean_close', phase='sealed')
+        line = json.dumps(event) + '\n'
+        logs = io.StringIO('private SQL nonce credentials\n' + line)
+        logs.seek(7)
+        self.assertEqual(r.first_invalidation_projection(logs), event)
+        self.assertEqual(logs.tell(), 7)
+        bad = [line + line, line.rstrip(), 'prefix ' + line, '',
+               json.dumps(event | {'private': 'secret'}) + '\n',
+               json.dumps(event | {'reason': 'secret'}) + '\n',
+               json.dumps(event | {'phase': True}) + '\n',
+               '{"event":"owned_ci_first_invalidation","reason":"none","reason":"abort","phase":"open"}\n',
+               ' ' * 1024 + line]
+        for text in bad:
+            result = r.first_invalidation_projection(io.StringIO(text))
+            self.assertEqual(result, dict(event=r.FINAL_INVALIDATION_EVENT, reason='unknown', phase='unknown'))
+            self.assertNotIn('secret', json.dumps(result))
+        with patch.object(r, 'MAX_FINAL_LOG_BYTES', len(line) - 1):
+            self.assertEqual(r.first_invalidation_projection(io.StringIO(line))['reason'], 'unknown')
+        broken = Mock(); broken.tell.return_value = 17
+        broken.read.side_effect = RuntimeError('private failure')
+        self.assertEqual(r.first_invalidation_projection(broken)['reason'], 'unknown')
+        self.assertEqual(broken.seek.call_args.args, (17,))
+
+    def test_first_invalidation_is_once_only_after_worker_wait(self):
+        import io
+        owner = r.OwnedCIWorker(); owner.process = Mock(returncode=None)
+        logs = io.StringIO(json.dumps(dict(event=r.FINAL_INVALIDATION_EVENT,
+                                          reason='abort', phase='released')) + '\n')
+        with patch.object(r.sys, 'stderr', io.StringIO()) as output:
+            owner.report_first_invalidation_after_wait(logs)
+            self.assertEqual(output.getvalue(), '')
+            self.assertEqual(logs.tell(), 0)
+            owner.process.returncode = 1
+            owner.report_first_invalidation_after_wait(logs)
+            owner.report_first_invalidation_after_wait(logs)
+            self.assertEqual(len(output.getvalue().splitlines()), 1)
+            self.assertEqual(json.loads(output.getvalue())['reason'], 'abort')
+        owner = r.OwnedCIWorker(); owner.process = Mock(returncode=0)
+        with patch('builtins.print', side_effect=RuntimeError('private output failure')):
+            owner.report_first_invalidation_after_wait(logs)
+        source = Path(__file__).with_name('test_auth_e2e.py').read_text()
+        tree = ast.parse(source)
+        calls = [node for node in ast.walk(tree) if isinstance(node, ast.Call)
+                 and isinstance(node.func, ast.Attribute)
+                 and node.func.attr == 'report_first_invalidation_after_wait']
+        self.assertEqual(len(calls), 1)
+        wait_loop = next(node for node in ast.walk(tree) if isinstance(node, ast.For)
+                         and ast.unparse(node.target) == '(label, process)')
+        self.assertLess(wait_loop.end_lineno, calls[0].lineno)
+        self.assertLess(source.index('report_first_invalidation_after_wait(logs)'),
+                        source.index('logs.close()'))
 
     def test_final_state_is_closed_post_wait_and_preserves_failure(self):
         import io

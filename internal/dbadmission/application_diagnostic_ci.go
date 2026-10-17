@@ -2,6 +2,11 @@
 
 package dbadmission
 
+import (
+	"encoding/json"
+	"os"
+)
+
 // These compile-time categories describe the first invalidating branch only.
 // They never contain an error string, connection identity or SQL text.
 type invalidationReason string
@@ -71,4 +76,37 @@ func (g *lifecycleGate) applicationDiagnostic(seq uint64) applicationDiagnostic 
 		}
 	}
 	return applicationDiagnostic{2, 1, seq, "diagnostic", reason, phase, g.pending, g.open, g.total, len(g.tickets)}
+}
+
+// Shutdown diagnostics carry only a closed first-cause snapshot. A missing
+// event (for example, forced termination) is not evidence of a valid witness.
+type finalInvalidationDiagnostic struct {
+	Event  string `json:"event"`
+	Reason string `json:"reason"`
+	Phase  string `json:"phase"`
+}
+
+func (g *lifecycleGate) finalInvalidationDiagnostic() finalInvalidationDiagnostic {
+	d := g.applicationDiagnostic(0)
+	reason := "unknown"
+	switch d.Reason {
+	case "none", invalidCapacity, invalidConnectFailed, invalidConnectState,
+		invalidDuplicateBackend, invalidCloseState, invalidUncleanClose,
+		invalidTargetClosed, invalidTargetClosing, invalidTargetRevoked,
+		invalidWaitCancelled, invalidTransport, invalidRecordCapacity, invalidAbort, invalidExplicit:
+		reason = string(d.Reason)
+	}
+	phase := "unknown"
+	switch d.Phase {
+	case "open", "draining", "sealed", "released":
+		phase = d.Phase
+	}
+	return finalInvalidationDiagnostic{"owned_ci_first_invalidation", reason, phase}
+}
+
+func (g *lifecycleGate) writeFinalInvalidationDiagnostic() {
+	data, err := json.Marshal(g.finalInvalidationDiagnostic())
+	if err == nil {
+		_, _ = os.Stderr.Write(append(data, '\n'))
+	}
 }

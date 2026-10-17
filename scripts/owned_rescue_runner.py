@@ -324,6 +324,45 @@ DIAGNOSTIC_REASONS = frozenset({'none', 'capacity', 'connect_failed', 'invalid_c
 DIAGNOSTIC_PHASES = frozenset({'open', 'draining', 'sealed', 'released'})
 
 
+FINAL_INVALIDATION_EVENT = 'owned_ci_first_invalidation'
+MAX_FINAL_LOG_BYTES = 8 << 20
+
+
+def first_invalidation_projection(logs):
+    """Bounded private-log read; return only exact enum fields, never raw content."""
+    unavailable = {'event': FINAL_INVALIDATION_EVENT, 'reason': 'unknown', 'phase': 'unknown'}
+    position = None
+    try:
+        logs.flush()
+        position = logs.tell()
+        logs.seek(0)
+        text = logs.read(MAX_FINAL_LOG_BYTES + 1)
+        if type(text) is not str or len(text.encode('utf-8')) > MAX_FINAL_LOG_BYTES:
+            return unavailable
+        candidates = [line for line in text.splitlines(keepends=True) if FINAL_INVALIDATION_EVENT in line]
+        if (len(candidates) != 1 or not candidates[0].endswith('\n')
+                or len(candidates[0].encode('utf-8')) > 1024):
+            return unavailable
+        frame = json.loads(candidates[0], object_pairs_hook=_unique_object,
+                           parse_constant=lambda _: _fail())
+        if (type(frame) is not dict or set(frame) != {'event', 'reason', 'phase'}
+                or frame['event'] != FINAL_INVALIDATION_EVENT
+                or type(frame['reason']) is not str
+                or frame['reason'] not in DIAGNOSTIC_REASONS | {'unknown'}
+                or type(frame['phase']) is not str
+                or frame['phase'] not in DIAGNOSTIC_PHASES | {'unknown'}):
+            return unavailable
+        return {'event': FINAL_INVALIDATION_EVENT, 'reason': frame['reason'], 'phase': frame['phase']}
+    except Exception:
+        return unavailable
+    finally:
+        if position is not None:
+            try:
+                logs.seek(position)
+            except Exception:
+                pass
+
+
 def diagnostic_projection(frame, seq):
     fields = {'version', 'epoch', 'seq', 'kind', 'reason', 'phase',
               'pending', 'open', 'total', 'retained'}
@@ -656,6 +695,19 @@ class OwnedCIWorker:
         except Exception:
             pass  # Optional evidence must not interrupt owned cleanup.
         return report
+
+    def report_first_invalidation_after_wait(self, logs):
+        """Optional final evidence only; never changes qualification or cleanup."""
+        with self._final_state_lock:
+            if (self.process is None or type(self.process.returncode) is not int
+                    or getattr(self, '_first_invalidation_reported', False)):
+                return
+            self._first_invalidation_reported = True
+        report = first_invalidation_projection(logs)
+        try:
+            print(json.dumps(report, separators=(',', ':')), file=sys.stderr, flush=True)
+        except Exception:
+            pass
 
     def stop_rescuer(self):
         if self.rescuer is None:
