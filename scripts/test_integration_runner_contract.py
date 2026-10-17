@@ -100,10 +100,10 @@ class IntegrationRunnerContract(unittest.TestCase):
         with patch.object(runner.subprocess, "check_output", side_effect=["\n".join(packages), self.discovery]), self.quiet():
             commands = runner.test_commands(runner.parse_args([]), self.env)
         self.assertEqual(len(commands), 3 + runner.AUTH_SHARDS)
-        self.assertEqual(commands[0][-2:], [packages[0], packages[2]])
-        self.assertNotIn(runner.AUTH_PACKAGE, commands[0])
-        self.assertEqual(commands[1], [self.env["GO"], "test", "-race", "-count=1",
-                                      "-tags=integration,adtr_ci_dbadmission", "-timeout=10m",
+        self.assertEqual(commands[1][-2:], [packages[0], packages[2]])
+        self.assertNotIn(runner.AUTH_PACKAGE, commands[1])
+        self.assertEqual(commands[0], [self.env["GO"], "test", "-race", "-count=1",
+                                      "-tags=integration,adtr_ci_dbadmission", "-timeout=10m", "-v",
                                       "./internal/dbadmission"])
         self.assertTrue(all(command[-1] == runner.AUTH_PACKAGE for command in commands[3:]))
 
@@ -126,9 +126,24 @@ class IntegrationRunnerContract(unittest.TestCase):
         with patch.object(runner.subprocess, "check_output", return_value="\n".join(packages)), self.quiet():
             commands = runner.test_commands(runner.parse_args(["--suite", "non-auth"]), self.env)
         self.assertEqual(len(commands), 3)
-        self.assertEqual(commands[1], [self.env["GO"], "test", "-race", "-count=1",
-                                      "-tags=integration,adtr_ci_dbadmission", "-timeout=10m",
+        self.assertEqual(commands[0], [self.env["GO"], "test", "-race", "-count=1",
+                                      "-tags=integration,adtr_ci_dbadmission", "-timeout=10m", "-v",
                                       "./internal/dbadmission"])
+
+    def test_admission_diagnostics_run_first_without_changing_other_groups_or_budgets(self):
+        packages = [runner.AUTH_PACKAGE, "example/one", "example/two"]
+        with patch.object(runner.subprocess, "check_output", return_value="\n".join(packages)), self.quiet():
+            commands = runner.test_commands(runner.parse_args(["--suite", "non-auth"]), self.env)
+        self.assertEqual(commands[1], [self.env["GO"], "test", *runner.TEST_FLAGS,
+                                      "-v", "example/one", "example/two"])
+        self.assertEqual(commands[0][-2:], ["-v", "./internal/dbadmission"])
+        self.assertNotIn("-run", commands[0])
+        self.assertNotIn("-skip", commands[0])
+        self.assertTrue(all(command.count("-race") == 1 and command.count("-count=1") == 1
+                            and command.count("-timeout=10m") == 1 for command in commands))
+        workflow = Path('.github/workflows/ci.yml').read_text()
+        contracts = re.split(r'\n  [A-Za-z][A-Za-z0-9_-]*:', workflow.split('  contracts:\n', 1)[1], maxsplit=1)[0]
+        self.assertIn('timeout-minutes: 20', contracts)
 
     def test_non_auth_rejects_incomplete_or_duplicate_package_discovery(self):
         for output in ("", "example/other", runner.AUTH_PACKAGE,
