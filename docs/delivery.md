@@ -577,3 +577,20 @@ Refs #50 / AD-F-158 / DTL-036。迁移18新增有界冻结目标、原接受回�
   所有原不支持的锁仍立即失败，即使属于 PG 的已知类别；不输出 SQL、名称、参数或 ID。
 - 原 `validate_sessions`、`validate_checkpoint` 保持不变；固定捕获窗口、单次 STOP、严格停后验证与清理均保留。
   本地只执行禁止进程/网络/信号的离线 Python 契约；真实 PG 与三种导出需由新 head CI 验证。
+
+### PR168 后续：blocker 拒绝点闭集细分
+
+- 精确远程基线 `e1689acc6bf482c3ca4eeb465a913d5a8c91ad80`，树
+  `01d2f82fbe262b202c86a0e3833415140a517c27`。run `39005521837` 的 user
+  job `117317157083` 报 `capture_readiness/unowned_barrier_blocker`；group/computer 成功。
+  安全产物 `12091286378` 未提供具体拒绝点；API/worker 均退出 0，无 forced kill/panic。
+- 同一个旧 reason 有三条路径，离线合成分别复现：blocker 不在 owned 样本/barrier 集合、
+  owned 图存在环、完整预扫通过但严格 activity 到 barrier 的链不成立。
+  新 `blockerCheck` 分别为 `outside_owned_sample`、`cyclic_owned_graph`、`strict_barrier_chain`。
+  全部仍立即失败，不进入未就绪重采样，不输出 PID、SQL 或原值；字段仅绑定原精确拒绝 reason。
+- [PG17.6 状态快照](https://github.com/postgres/postgres/blob/REL_17_6/src/backend/utils/activity/backend_status.c#L650-L674)
+  与 [逐调用 blocker 快照](https://github.com/postgres/postgres/blob/REL_17_6/src/backend/utils/adt/lockfuncs.c#L443-L452)
+  分别采集；后者[单次保证瞬时自洽](https://github.com/postgres/postgres/blob/REL_17_6/src/backend/storage/lmgr/lock.c#L3571-L3580)。
+  跨来源/跨调用可能出现时间差，但本次没有证据确认 race，也没有证据确认外部会话。
+  worker appname 来自专属 nonce DSN，barrier PID 来自持续 psql 自报，尚未发现身份取错的代码证据。
+- 新契约覆盖三路拒绝、隐私闭集及严格 validator/checkpoint 函数字节保真；捕获时序与清理不变。

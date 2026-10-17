@@ -32,6 +32,57 @@ def task():
 
 
 class ContractTests(unittest.TestCase):
+    def test_blocker_diagnostics_distinguish_three_fatal_paths(self):
+        cases = {
+            'outside_owned_sample': [session() | {'blockers': [999]}],
+            'cyclic_owned_graph': [session() | {'blockers': [101]}, session(101) | {'blockers': [100]}],
+            'strict_barrier_chain': [session(), session(101) | {'query': g.SCHEMA_SQL,
+                'blockers': [102], 'locks': []}, session(102) | {'query': '', 'transaction': False,
+                'state': 'idle', 'waitType': None, 'blockers': [], 'locks': []}],
+        }
+        for check, rows in cases.items():
+            with self.subTest(check=check), self.assertRaisesRegex(RuntimeError,
+                    '^unowned or cyclic barrier blocker$') as caught:
+                g.freeze_readiness(rows, 99)
+            self.assertEqual(g.failure_event('capture_readiness', caught.exception), {
+                'event': 'running_cancel_guard_failure', 'stage': 'capture_readiness',
+                'reason': 'unowned_barrier_blocker', 'blockerCheck': check})
+        self.assertNotIn('unowned or cyclic barrier blocker', g.FREEZE_NOT_READY)
+        self.assertIsNone(g.validate_session_observation(cases['strict_barrier_chain'], 99))
+        with self.assertRaisesRegex(RuntimeError, 'unowned or cyclic'):
+            g.validate_sessions(cases['strict_barrier_chain'], 99)
+
+    def test_blocker_diagnostic_privacy_and_exact_reason_binding(self):
+        for detail in ({'blockerCheck': 'private SQL PID secret'},
+                {'blockerCheck': 'outside_owned_sample', 'pid': 999},
+                {'blockerCheck': []}, {'blockerCheck': None}, 'private'):
+            error = RuntimeError('unowned or cyclic barrier blocker'); error.blocker_diagnostic = detail
+            self.assertEqual(set(g.failure_event('capture_readiness', error)), {'event', 'stage', 'reason'})
+        for error in (RuntimeError('private'), ValueError('unowned or cyclic barrier blocker'),
+                      RuntimeError('unowned or cyclic barrier blocker', 'private')):
+            error.blocker_diagnostic = {'blockerCheck': 'strict_barrier_chain'}
+            self.assertNotIn('blockerCheck', g.failure_event('capture_readiness', error))
+        error = RuntimeError('unowned or cyclic barrier blocker')
+        with patch.object(g, 'validate_sessions', side_effect=error):
+            with self.assertRaises(RuntimeError) as caught:
+                g.freeze_readiness([session()], 99)
+        self.assertIs(caught.exception, error)
+        self.assertEqual(error.blocker_diagnostic, {'blockerCheck': 'strict_barrier_chain'})
+
+    def test_blocker_diagnostics_preserve_strict_guard_function_bytes(self):
+        import ast
+        import hashlib
+        source = Path(g.__file__).read_text()
+        expected = {
+            'validate_sessions': '4efb9b60ec57914d43c55c695e0916b07d71fbcd3f3cdac8c3cd06b630bbd092',
+            'validate_checkpoint': '83ff1b7a711627ec7ee4e28761dde75f5e18ae3e81abb39927b8057022a06e74',
+            'checkpoint': '90a1f7723cbdb0f5edf0182bf8e14989bb3c1fd3e5b8c61e0ba38f71bd0fa9a2',
+        }
+        actual = {node.name: hashlib.sha256(ast.get_source_segment(source, node).encode()).hexdigest()
+                  for node in ast.walk(ast.parse(source)) if isinstance(node, ast.FunctionDef)
+                  and node.name in expected}
+        self.assertEqual(actual, expected)
+
     def test_four_activity_slots_are_checked(self):
         safe, blocked, transactions = g.validate_sessions([session(n) for n in range(100, 104)], 99)
         self.assertEqual((len(safe), blocked, transactions), (4, 4, 4))

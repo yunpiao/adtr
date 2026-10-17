@@ -119,6 +119,7 @@ FREEZE_NOT_READY = frozenset({'unsafe owned transaction query',
 LOCK_TYPE_CATEGORIES = frozenset({'relation', 'extend', 'frozenid', 'page',
     'tuple', 'transactionid', 'virtualxid', 'spectoken', 'object', 'userlock',
     'advisory', 'applytransaction', 'other'})
+BLOCKER_CHECKS = frozenset({'outside_owned_sample', 'cyclic_owned_graph', 'strict_barrier_chain'})
 OBSERVATION_FAILURE_VALUES = MappingProxyType({
     'observationCheck': frozenset({'sessions', 'barrier_pid', 'session_fields',
         'pid', 'transaction', 'state_type', 'state_value', 'query', 'wait_type',
@@ -142,6 +143,12 @@ def unrecognized_lock_failure(typ):
     error = RuntimeError('unrecognized owned lock')
     error.lock_diagnostic = {'lockTypeCategory': typ if type(typ) is str and
                              typ in LOCK_TYPE_CATEGORIES else 'other'}
+    return error
+
+
+def blocker_failure(check):
+    error = RuntimeError('unowned or cyclic barrier blocker')
+    error.blocker_diagnostic = {'blockerCheck': check}
     return error
 
 
@@ -228,6 +235,10 @@ def failure_event(stage, error):
     detail = getattr(error, 'lock_diagnostic', None) if reason == 'unrecognized_lock' else None
     if (type(detail) is dict and set(detail) == {'lockTypeCategory'} and
             type(detail['lockTypeCategory']) is str and detail['lockTypeCategory'] in LOCK_TYPE_CATEGORIES):
+        event.update(detail)
+    detail = getattr(error, 'blocker_diagnostic', None) if reason == 'unowned_barrier_blocker' else None
+    if (type(detail) is dict and set(detail) == {'blockerCheck'} and
+            type(detail['blockerCheck']) is str and detail['blockerCheck'] in BLOCKER_CHECKS):
         event.update(detail)
     pending = getattr(error, 'last_not_ready_error', None) if reason == 'capture_deadline_missed' else None
     if (type(pending) is RuntimeError and len(pending.args) == 1 and
@@ -427,15 +438,16 @@ def validate_session_observation(sessions, lock_pid):
                 observation_require(lock[key] is None or type(lock[key]) is typ, 'lock_' + key, lock[key])
             if lock['type'] not in ('relation', 'advisory', 'virtualxid', 'transactionid', 'tuple'):
                 raise unrecognized_lock_failure(lock['type'])
-    require(all(set(row['blockers']) <= pids | {lock_pid} for row in sessions),
-            'unowned or cyclic barrier blocker')
+    if not all(set(row['blockers']) <= pids | {lock_pid} for row in sessions):
+        raise blocker_failure('outside_owned_sample')
     # Acyclic owned chains must resolve to an unblocked owned backend or barrier.
     resolved = {lock_pid}
     for _ in sessions:
         for row in sessions:
             if set(row['blockers']) <= resolved:
                 resolved.add(row['pid'])
-    require(pids <= resolved, 'unowned or cyclic barrier blocker')
+    if not pids <= resolved:
+        raise blocker_failure('cyclic_owned_graph')
     # PG17 STATE_UNDEFINED is SQL NULL. It is never a safe frozen state.
     # Finish the full scan first so it cannot conceal a later fatal observation.
     return RuntimeError('owned backend state unavailable') if state_unavailable else None
@@ -448,6 +460,11 @@ def freeze_readiness(sessions, lock_pid):
     try:
         validate_sessions(sessions, lock_pid)
     except RuntimeError as error:
+        # Full shape/ownership/acyclic preflight already passed. This identifies
+        # the strict validator's distinct chain refusal; it remains fatal.
+        if (type(error) is RuntimeError and len(error.args) == 1 and
+                type(error.args[0]) is str and error.args[0] == 'unowned or cyclic barrier blocker'):
+            error.blocker_diagnostic = {'blockerCheck': 'strict_barrier_chain'}
         if (type(error) is not RuntimeError or len(error.args) != 1 or
                 type(error.args[0]) is not str or error.args[0] not in FREEZE_NOT_READY):
             raise
