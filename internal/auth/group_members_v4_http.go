@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/jackc/pgx/v5"
+	"github.com/yunpiao/adtr/internal/dbadmission"
 	"github.com/yunpiao/adtr/internal/domains"
 	"github.com/yunpiao/adtr/internal/schemaversion"
 	"github.com/yunpiao/adtr/internal/tasks"
@@ -104,7 +104,7 @@ func (s *Service) writeGroupMembersV4Error(w http.ResponseWriter, ctx context.Co
 }
 
 func (s *Service) handleGroupMembersV4(ctx context.Context, r *http.Request, store *domains.Store, f domains.GroupMembersV4Input) (*credentialUseResult, error) {
-	conn, err := pgx.ConnectConfig(ctx, s.database.Copy())
+	conn, err := dbadmission.ConnectConfig(ctx, s.database.Copy())
 	if err != nil {
 		return nil, directorySchemaError(err)
 	}

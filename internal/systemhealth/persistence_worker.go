@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/yunpiao/adtr/internal/tasks"
 )
 
 func validWorkerCycle(workerID string, cycle WorkerCycle, status WorkerCycleStatus, code string) bool {
@@ -27,13 +28,32 @@ func validWorkerCycle(workerID string, cycle WorkerCycle, status WorkerCycleStat
 // records a successful executor lease renewal/checkpoint, not business progress.
 // A standalone timer must never call this method to manufacture healthy state.
 func (s *Store) RecordWorkerCycle(ctx context.Context, workerID string, cycle WorkerCycle, status WorkerCycleStatus, code string) error {
+	return s.recordWorkerCycle(ctx, workerID, cycle, status, code, nil)
+}
+
+// RecordWorkerCycleCandidate forwards opaque candidate identity only to this
+// health activity connection; ordinary observations keep the original path.
+func (s *Store) RecordWorkerCycleCandidate(ctx context.Context, workerID string, cycle WorkerCycle, status WorkerCycleStatus, code string, candidate tasks.ActivityCandidate) error {
+	return s.recordWorkerCycle(ctx, workerID, cycle, status, code, candidate)
+}
+
+func (s *Store) recordWorkerCycle(ctx context.Context, workerID string, cycle WorkerCycle, status WorkerCycleStatus, code string, candidate tasks.ActivityCandidate) error {
 	if cycle == WorkerScheduler && s.expectedSchema < 8 {
 		return problem(400, "unsupported_worker_cycle")
 	}
 	if !validWorkerCycle(workerID, cycle, status, code) {
 		return problem(400, "invalid_worker_activity")
 	}
-	return s.withTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+	transaction := s.withTx
+	if candidate != nil {
+		if cycle != WorkerQueue || status != WorkerCycleProgress || code != "" {
+			return problem(400, "invalid_worker_activity")
+		}
+		transaction = func(c context.Context, fn func(context.Context, pgx.Tx) error) error {
+			return s.withActivityTx(c, workerID, candidate, fn)
+		}
+	}
+	return transaction(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `WITH observed AS (SELECT clock_timestamp() AS at)
 INSERT INTO adtr.system_worker_activity(tenant_id,worker_id,cycle,status,error_code,last_activity_at,last_success_at)
 SELECT $1,$2,$3,$4,$5,at,CASE WHEN $4='success' THEN at ELSE NULL END FROM observed

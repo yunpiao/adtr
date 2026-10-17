@@ -3,7 +3,7 @@ package auth
 import (
 	"context"
 	"encoding/json"
-	"github.com/jackc/pgx/v5"
+	"github.com/yunpiao/adtr/internal/dbadmission"
 	"github.com/yunpiao/adtr/internal/domains"
 	"github.com/yunpiao/adtr/internal/schemaversion"
 	"github.com/yunpiao/adtr/internal/tasks"
@@ -96,7 +96,7 @@ func (s *Service) writeUserAssetV3Error(w http.ResponseWriter, ctx context.Conte
 }
 
 func (s *Service) handleUserAssetV3(ctx context.Context, r *http.Request, store *domains.Store, detail bool, f domains.UserAssetsV2Filter, in domains.UserAssetV2Input) (*credentialUseResult, error) {
-	conn, err := pgx.ConnectConfig(ctx, s.database.Copy())
+	conn, err := dbadmission.ConnectConfig(ctx, s.database.Copy())
 	if err != nil {
 		return nil, directorySchemaError(err)
 	}

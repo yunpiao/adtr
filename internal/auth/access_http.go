@@ -19,6 +19,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/yunpiao/adtr/internal/credentialuse"
+	"github.com/yunpiao/adtr/internal/dbadmission"
 )
 
 // ServeAccessHTTP reuses durable identity, session and CSRF protections.
@@ -191,7 +192,7 @@ func (s *Service) handleAccess(ctx context.Context, r *http.Request, path string
 			return nil, false, e
 		}
 	}
-	conn, e := pgx.ConnectConfig(ctx, s.database.Copy())
+	conn, e := dbadmission.ConnectConfig(ctx, s.database.Copy())
 	if e != nil {
 		return nil, false, e
 	}

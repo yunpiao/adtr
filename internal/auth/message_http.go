@@ -14,7 +14,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/jackc/pgx/v5"
+	"github.com/yunpiao/adtr/internal/dbadmission"
 	"github.com/yunpiao/adtr/internal/messagecore"
 	"github.com/yunpiao/adtr/internal/messages"
 )
@@ -263,7 +263,7 @@ func messageHTTPError(err error) (int, string) {
 	return 503, "messages_unavailable"
 }
 func (s *Service) handleMessage(ctx context.Context, r *http.Request, store *messages.Store, path string, in messageInput) (any, error) {
-	conn, err := pgx.ConnectConfig(ctx, s.database.Copy())
+	conn, err := dbadmission.ConnectConfig(ctx, s.database.Copy())
 	if err != nil {
 		return nil, err
 	}

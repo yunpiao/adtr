@@ -20,8 +20,25 @@ import (
 )
 
 type listedPackage struct {
-	ImportPath, Dir, Export    string
-	GoFiles, CgoFiles, Imports []string
+	ImportPath, Dir, Export                                      string
+	GoFiles, CgoFiles, Imports                                   []string
+	SFiles, CFiles, CXXFiles, SwigFiles, SwigCXXFiles, SysoFiles []string
+	Standard                                                     bool
+	Module                                                       *listedModule
+}
+
+type listedModule struct {
+	Path, Version string
+	Replace       *listedModule
+}
+
+// Versions are paired with the go.mod/go.sum review tripwire below. Any newly
+// imported external module, including a blank-import driver, fails closed.
+var reviewedModules = map[string]string{
+	"github.com/jackc/pgx/v5":        "v5.11.0",
+	"github.com/jackc/pgpassfile":    "v1.0.0",
+	"github.com/jackc/pgservicefile": "v0.0.0-20240606120523-5a60cdf6a761",
+	"golang.org/x/text":              "v0.29.0",
 }
 
 // This test deliberately uses the running Go toolchain's export data, not a
@@ -67,7 +84,26 @@ func checkRepositoryBuild(t *testing.T, tags string) {
 		}
 		return os.Open(p.Export)
 	})
-	queue := []string{module + "/internal/tasks", module + "/internal/schedules", module + "/internal/messages", module + "/internal/systemhealth", module + "/internal/operationallogs", module + "/internal/domains", module + "/internal/store", managed}
+	externalBytes, err := os.ReadFile("testdata/external_packages.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	external := map[string]bool{}
+	for _, path := range strings.Fields(string(externalBytes)) {
+		external[path] = true
+	}
+	queue := []string{module + "/cmd/adtr"}
+	for path, p := range packages {
+		if strings.HasPrefix(path, module+"/") {
+			continue
+		}
+		if p.Standard {
+			continue
+		}
+		if !reviewedExternal(p, external) {
+			t.Fatalf("UNPROVEN external dependency %s: review database constructors and initialization before changing the module allowlist", path)
+		}
+	}
 	seen := map[string]bool{}
 	for len(queue) > 0 {
 		path := queue[0]
@@ -80,8 +116,8 @@ func checkRepositoryBuild(t *testing.T, tags string) {
 		if !ok {
 			t.Fatalf("required boundary package absent: %s", path)
 		}
-		if len(p.CgoFiles) > 0 {
-			t.Fatalf("unproved cgo in %s", path)
+		if foreignCode(p) {
+			t.Fatalf("unproved cgo, assembly or foreign code in %s", path)
 		}
 		var files []*ast.File
 		for _, name := range p.GoFiles {
@@ -99,57 +135,29 @@ func checkRepositoryBuild(t *testing.T, tags string) {
 		for _, d := range Check(fset, path, files, info) {
 			t.Error(d.String())
 		}
-		// Include module imports even when only their init functions are used.
-		if path != module+"/internal/store" {
-			for _, dep := range p.Imports {
-				if strings.HasPrefix(dep, module+"/") {
-					queue = append(queue, dep)
-				}
+		// The actual production build graph includes blank imports and init dependencies.
+		for _, dep := range p.Imports {
+			if strings.HasPrefix(dep, module+"/") {
+				queue = append(queue, dep)
 			}
 		}
-		// Follow typed object references in checked declarations. In particular,
-		// store's migration-only auth imports do not silently enlarge this slice.
-		for _, f := range files {
-			for _, decl := range f.Decls {
-				if path == module+"/internal/store" {
-					fn, ok := decl.(*ast.FuncDecl)
-					if !ok || fn.Name.Name != "Ready" {
-						continue
-					}
-				}
-				ast.Inspect(decl, func(n ast.Node) bool {
-					id, ok := n.(*ast.Ident)
-					if !ok {
-						return true
-					}
-					o := info.Uses[id]
-					if o == nil || o.Pkg() == nil {
-						return true
-					}
-					dep := o.Pkg().Path()
-					if dep != path && strings.HasPrefix(dep, module+"/") {
-						queue = append(queue, dep)
-					}
-					return true
-				})
-			}
-		}
+
 	}
 	names := make([]string, 0, len(seen))
 	for name := range seen {
 		names = append(names, name)
 	}
 	sort.Strings(names)
-	t.Logf("typed slice packages: %s; store: Ready only; complete worker closure: UNPROVEN", strings.Join(names, ", "))
+	t.Logf("typed complete binary packages: %s; dynamic/external behavior closure: UNPROVEN", strings.Join(names, ", "))
 	if CompleteWorkerClosure {
 		t.Fatal("this slice cannot authorize a gate without a separate complete-worker proof")
 	}
 }
 
-// The bootstrap mixes worker, API, bootstrap and migration branches. Until a
-// sound entrypoint/dispatch proof exists, any production wiring change must
-// fail for review, including added source files. This tripwire is intentionally
-// conservative and is not presented as a dynamic call-graph proof.
+// The entire binary is typed above. These reviewed wiring, factory, transport
+// and private-wrapper sources additionally fail closed on changes (including
+// added files); typed API membership alone cannot prove their internal behavior.
+// This tripwire is not presented as a dynamic call-graph proof.
 func TestWorkerWiringRequiresBoundaryReview(t *testing.T) {
 	root := filepath.Join("..", "..")
 	manifestBytes, err := os.ReadFile("testdata/worker_wiring.sha256")
@@ -165,7 +173,7 @@ func TestWorkerWiringRequiresBoundaryReview(t *testing.T) {
 		expected[parts[1]] = parts[0]
 	}
 	actual := map[string]string{}
-	for _, dir := range []string{"cmd/adtr", "internal/runtime", "internal/store"} {
+	for _, dir := range []string{"cmd/adtr", "internal/runtime", "internal/store", "internal/ldapconnection", "internal/dbadmission"} {
 		entries, e := os.ReadDir(filepath.Join(root, dir))
 		if e != nil {
 			t.Fatal(e)
@@ -184,7 +192,7 @@ func TestWorkerWiringRequiresBoundaryReview(t *testing.T) {
 		}
 	}
 	// External dependency/toolchain changes also invalidate this reviewed slice.
-	for _, name := range []string{"go.mod", "go.sum"} {
+	for _, name := range []string{"go.mod", "go.sum", "internal/tasks/worker.go", "internal/tasks/activity_candidate.go", "internal/tasks/activity_candidate_ci.go", "internal/tasks/activity_candidate_default.go", "internal/systemhealth/persistence_store.go", "internal/systemhealth/persistence_worker.go"} {
 		b, e := os.ReadFile(filepath.Join(root, name))
 		if e != nil {
 			t.Fatal(e)
@@ -202,4 +210,32 @@ func TestWorkerWiringRequiresBoundaryReview(t *testing.T) {
 			t.Errorf("UNPROVEN removed worker wiring source %s", path)
 		}
 	}
+}
+
+func reviewedExternal(p listedPackage, packages map[string]bool) bool {
+	return !foreignCode(p) && packages[p.ImportPath] && p.Module != nil && p.Module.Replace == nil && reviewedModules[p.Module.Path] == p.Module.Version
+}
+
+func TestExternalDependencyReviewFailsClosed(t *testing.T) {
+	allowed := map[string]bool{pgx: true}
+	cases := []struct {
+		p    listedPackage
+		want bool
+	}{
+		{listedPackage{ImportPath: pgx, Module: &listedModule{Path: pgx, Version: "v5.11.0"}}, true},
+		{listedPackage{ImportPath: pgx + "/stdlib", Module: &listedModule{Path: pgx, Version: "v5.11.0"}}, false},
+		{listedPackage{ImportPath: "example.com/unknown/driver", Module: &listedModule{Path: "example.com/unknown", Version: "v1.0.0"}}, false},
+		{listedPackage{ImportPath: pgx}, false},
+		{listedPackage{ImportPath: pgx, Module: &listedModule{Path: pgx, Version: "v5.12.0"}}, false},
+		{listedPackage{ImportPath: pgx, Module: &listedModule{Path: pgx, Version: "v5.11.0", Replace: &listedModule{Path: "local"}}}, false},
+	}
+	for _, tc := range cases {
+		if got := reviewedExternal(tc.p, allowed); got != tc.want {
+			t.Fatalf("dependency %s accepted=%v want=%v", tc.p.ImportPath, got, tc.want)
+		}
+	}
+}
+
+func foreignCode(p listedPackage) bool {
+	return len(p.CgoFiles)+len(p.SFiles)+len(p.CFiles)+len(p.CXXFiles)+len(p.SwigFiles)+len(p.SwigCXXFiles)+len(p.SysoFiles) > 0
 }

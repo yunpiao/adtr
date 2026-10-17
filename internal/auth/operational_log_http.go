@@ -15,7 +15,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/jackc/pgx/v5"
+	"github.com/yunpiao/adtr/internal/dbadmission"
 	"github.com/yunpiao/adtr/internal/operationallogs"
 	"github.com/yunpiao/adtr/internal/schemaversion"
 	"github.com/yunpiao/adtr/internal/tasks"
@@ -186,7 +186,7 @@ func (s *Service) serveOperationalLogs(w http.ResponseWriter, r *http.Request, e
 	write(w, 200, out.value)
 }
 func (s *Service) handleOperationalLogs(ctx context.Context, r *http.Request, engine *tasks.Engine, path string, route taskRoute, in operationalLogRequest, filter operationallogs.Filter, history operationallogs.HistoryFilter, taskID string) (*credentialUseResult, []byte, error) {
-	conn, e := pgx.ConnectConfig(ctx, s.database.Copy())
+	conn, e := dbadmission.ConnectConfig(ctx, s.database.Copy())
 	if e != nil {
 		return nil, nil, fail(503, "schema_unavailable")
 	}

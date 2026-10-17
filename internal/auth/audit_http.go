@@ -15,8 +15,8 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/yunpiao/adtr/internal/audit"
+	"github.com/yunpiao/adtr/internal/dbadmission"
 	"github.com/yunpiao/adtr/internal/tasks"
 )
 
@@ -234,7 +234,7 @@ func (s *Service) serveAudit(w http.ResponseWriter, r *http.Request, engine *tas
 	write(w, 200, value)
 }
 func (s *Service) handleAudit(ctx context.Context, r *http.Request, engine *tasks.Engine, path string, route auditRoute, in auditRequest, f audit.Filter, taskID string, historyFilter audit.HistoryFilter) (any, []byte, error) {
-	conn, err := pgx.ConnectConfig(ctx, s.database.Copy())
+	conn, err := dbadmission.ConnectConfig(ctx, s.database.Copy())
 	if err != nil {
 		return nil, nil, err
 	}
