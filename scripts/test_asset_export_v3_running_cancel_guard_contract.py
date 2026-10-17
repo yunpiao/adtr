@@ -215,6 +215,157 @@ class ContractTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             guard.checkpoint('task-one', 'worker')
 
+    def busy_session(self):
+        row = session(101)
+        row.update(query='synthetic private query', state='idle in transaction',
+                   waitType='Client', blockers=[],
+                   locks=[lock('relation', 'RowShareLock', relation='private.tenant')])
+        return row
+
+    def test_busy_owned_transaction_waits_before_single_stop_for_all_kinds(self):
+        for kind in g.EXPORT_KINDS:
+            guard = self.guard(asset_kind=kind); guard.threads = Mock(return_value=['T'])
+            running = task() | {'kind': g.export_kind(kind)[0]}
+            queued = running | {'state': 'queued', 'attempt': 0, 'snapshotCount': 0}
+            busy = {'task': running, 'sessions': [session(), self.busy_session()]}
+            ready = {'task': running, 'sessions': [session()]}
+            samples = iter([{'task': queued, 'sessions': []}, busy, busy, ready, ready])
+            observer, barrier = Mock(), Mock(pid=99)
+            events = []
+            def observe(*args, **kwargs):
+                events.append('observe')
+                return next(samples)
+            observer.query.side_effect = observe
+            barrier.query.side_effect = [{'count': 1}, True]
+            guard.owned.process.send_signal.side_effect = lambda _: events.append('stop')
+            with patch.object(g, 'Psql', side_effect=[observer, barrier]), patch.object(g.time, 'sleep'):
+                result = guard.checkpoint('task-one', 'worker')
+            self.assertTrue(result['checkpointCaught'])
+            self.assertEqual(events, ['observe'] * 4 + ['stop', 'observe'])
+            guard.owned.process.send_signal.assert_called_once_with(signal.SIGSTOP)
+            self.assertIsNone(guard.failure_diagnostic)
+            observer.close.assert_called_once(); barrier.close.assert_called_once()
+
+    def test_persistent_busy_deadline_keeps_closed_diagnostic_without_stop(self):
+        guard = self.guard(); guard.threads = Mock(return_value=['T'])
+        queued = task() | {'state': 'queued', 'attempt': 0, 'snapshotCount': 0}
+        observer, barrier = Mock(), Mock(pid=99)
+        observer.query.side_effect = [{'task': queued, 'sessions': []},
+            {'task': task(), 'sessions': [session(), self.busy_session()]}]
+        barrier.query.return_value = {'count': 1}
+        now = [0.0]
+        def sleep(_):
+            now[0] = 1.5
+        with patch.object(g, 'Psql', side_effect=[observer, barrier]), \
+                patch.object(g.time, 'monotonic', side_effect=lambda: now[0]), \
+                patch.object(g.time, 'sleep', side_effect=sleep):
+            with self.assertRaises(RuntimeError):
+                guard.checkpoint('task-one', 'worker')
+        guard.owned.process.send_signal.assert_not_called()
+        self.assertEqual(guard.failure_diagnostic['reason'], 'capture_deadline_missed')
+        pending = guard.failure_diagnostic['lastNotReady']
+        self.assertEqual(pending['reason'], 'unsafe_transaction_query')
+        self.assertEqual(pending['lockSafetyCategory'], 'unsafe_relation')
+        self.assertNotIn('private', json.dumps(guard.failure_diagnostic))
+        self.assertEqual(guard.owned.resume.call_count, 2)
+        observer.close.assert_called_once(); barrier.close.assert_called_once()
+        self.assertEqual(barrier.query.call_count, 1)
+
+    def test_deadline_is_checked_again_immediately_before_stop(self):
+        guard = self.guard(); guard.threads = Mock(return_value=['T'])
+        queued = task() | {'state': 'queued', 'attempt': 0, 'snapshotCount': 0}
+        observer, barrier = Mock(), Mock(pid=99)
+        observer.query.side_effect = [{'task': queued, 'sessions': []},
+            {'task': task(), 'sessions': [session()]}]
+        barrier.query.return_value = {'count': 1}
+        now = [0.0]
+        guard.owned.assert_identity.side_effect = lambda: now.__setitem__(0, 1.5)
+        with patch.object(g, 'Psql', side_effect=[observer, barrier]), \
+                patch.object(g.time, 'monotonic', side_effect=lambda: now[0]):
+            with self.assertRaises(RuntimeError):
+                guard.checkpoint('task-one', 'worker')
+        guard.owned.process.send_signal.assert_not_called()
+        self.assertEqual(guard.failure_diagnostic['reason'], 'capture_deadline_missed')
+        observer.close.assert_called_once(); barrier.close.assert_called_once()
+
+    def test_complete_prescan_does_not_hide_invalid_later_sample_behind_busy_query(self):
+        mutations = [lambda row: row.update(pid=True), lambda row: row.update(pid=100),
+            lambda row: row.update(blockers=[999]), lambda row: row.update(blockers=[102]),
+            lambda row: row.update(blockers=[False]), lambda row: row.update(locks=None),
+            lambda row: row.update(query=None), lambda row: row.update(transaction=1),
+            lambda row: row.update(state='private'), lambda row: row.update(waitType='private'),
+            lambda row: row.update(locks=[lock('private', 'ShareLock')]),
+            lambda row: row.update(locks=[lock('relation', 'ShareLock', granted='private')]),
+            lambda row: row.update(locks=[lock('relation', 'ShareLock', relation=[])]),
+            lambda row: row.update(locks=[{}]), lambda row: row.pop('state')]
+        for mutation in mutations:
+            bad = session(102); mutation(bad)
+            with self.subTest(mutation=mutation), self.assertRaises(RuntimeError):
+                g.freeze_readiness([session(), self.busy_session(), bad], 99)
+        first, second = session(102), session(103)
+        first['blockers'], second['blockers'] = [103], [102]
+        with self.assertRaisesRegex(RuntimeError, 'unowned or cyclic'):
+            g.freeze_readiness([self.busy_session(), first, second], 99)
+        self.assertIsNotNone(g.freeze_readiness([], 99))
+        self.assertIsNone(g.freeze_readiness([session()], 99))
+
+    def test_invalid_sample_or_checkpoint_fails_before_stop_without_retry(self):
+        bad = session(102); bad['blockers'] = [999]
+        samples = [
+            {'task': task(), 'sessions': [session(), self.busy_session(), bad]},
+            {'task': task() | {'leaseRemainingSeconds': 20}, 'sessions': [session()]},
+            {'task': task() | {'taskID': 'wrong'}, 'sessions': [session()]},
+            {'task': task() | {'kind': 'wrong'}, 'sessions': [session()]},
+        ]
+        for sample in samples:
+            guard = self.guard(); guard.threads = Mock(return_value=['T'])
+            queued = task() | {'state': 'queued', 'attempt': 0, 'snapshotCount': 0}
+            observer, barrier = Mock(), Mock(pid=99)
+            observer.query.side_effect = [{'task': queued, 'sessions': []}, sample]
+            barrier.query.return_value = {'count': 1}
+            with patch.object(g, 'Psql', side_effect=[observer, barrier]):
+                with self.assertRaises(RuntimeError):
+                    guard.checkpoint('task-one', 'worker')
+            guard.owned.process.send_signal.assert_not_called()
+            self.assertEqual(observer.query.call_count, 2)
+            self.assertEqual(guard.owned.resume.call_count, 2)
+            observer.close.assert_called_once(); barrier.close.assert_called_once()
+
+    def test_ready_before_stop_but_busy_after_stop_fails_without_reopening_capture(self):
+        for kind in g.EXPORT_KINDS:
+            guard = self.guard(asset_kind=kind); guard.threads = Mock(return_value=['T'])
+            running = task() | {'kind': g.export_kind(kind)[0]}
+            queued = running | {'state': 'queued', 'attempt': 0, 'snapshotCount': 0}
+            observer, barrier = Mock(), Mock(pid=99)
+            observer.query.side_effect = [{'task': queued, 'sessions': []},
+                {'task': running, 'sessions': [session()]},
+                {'task': running, 'sessions': [session(), self.busy_session()]}]
+            barrier.query.return_value = {'count': 1}
+            with patch.object(g, 'Psql', side_effect=[observer, barrier]):
+                with self.assertRaises(RuntimeError):
+                    guard.checkpoint('task-one', 'worker')
+            guard.owned.process.send_signal.assert_called_once_with(signal.SIGSTOP)
+            self.assertEqual(observer.query.call_count, 3)
+            self.assertEqual(guard.owned.resume.call_count, 2)
+            self.assertEqual(guard.failure_diagnostic['stage'], 'session_validation')
+            self.assertEqual(guard.failure_diagnostic['reason'], 'unsafe_transaction_query')
+            self.assertIsNone(guard.stopped_at)
+            observer.close.assert_called_once(); barrier.close.assert_called_once()
+
+    def test_readiness_only_catches_exact_freeze_predicate_errors(self):
+        class DerivedError(RuntimeError):
+            pass
+        for error in (RuntimeError('private unexpected'), DerivedError('unsafe owned transaction query'),
+                      ValueError('private'), KeyError('query')):
+            with patch.object(g, 'validate_sessions', side_effect=error):
+                with self.assertRaises(type(error)):
+                    g.freeze_readiness([session()], 99)
+        error = RuntimeError('missed two-second activity checkpoint')
+        error.last_not_ready_error = RuntimeError('private sensitive')
+        self.assertNotIn('lastNotReady', g.failure_event('capture', error))
+        error.last_not_ready_error = error
+        self.assertNotIn('lastNotReady', g.failure_event('capture', error))
+
     def test_barrier_cleanup_failure_still_closes_observer(self):
         guard = self.guard(); guard.threads = Mock(return_value=['T'])
         queued = task(); queued.update(state='queued', attempt=0, snapshotCount=0)

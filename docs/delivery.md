@@ -1,5 +1,36 @@
 # 交付台账与工作约定
 
+### 2026-10-17 running-cancel 全会话冻结前就绪预检候选
+
+基线PR167 head `abddb252`（完整发布SHA由远程提交记录核对），本地同树提交
+`5ad803998fce88d638199543620f5e305fb84ab9`、tree
+`db5458b3481e7670cb7c4cb599945c5a2470542e`。
+[run38997385830](https://github.com/yunpiao/adtr/actions/runs/38997385830) 的computer
+job `117293165648` 记录other/idle-in-transaction/Client/unsafe_relation；安全artifact
+`12088272241`。本轮user/group通过，说明该捕获问题并非user专有；具体事务来源仍未知。
+
+候选修复已确认的捕获门槛缺口：运行期先完整检查所有owned会话/锁的结构、类型、
+PID唯一性、blocker归属及无环，防止首条busy语句遮住后续非法样本。
+未知锁类型、外部blocker、重复PID、结构/身份/观察异常立即失败。
+目标进入首个snapshot边界后，先调用原checkpoint验证，再以原validate_sessions
+对完整原样样本预检。仅固定的严格冻结谓词拒绝可视为尚未就绪，继续原捕获循环；
+other和unsafe_relation不会被认定安全，也不会作为成功冻结证据。
+
+1.5秒deadline从原resume点计算，绝不重置或延长；mutex内SIGSTOP前再次检查deadline。
+超时保留最后闭集lastNotReady诊断并失败，不输出SQL/参数/ID或异常原值。
+仅在完整样本已满足原冻结规则时发出一次STOP；全线程停止后重新观察并执行原严格
+checkpoint/session验证。停后任何失败立即CONT清理，不重新解冻捕获。
+SQL/关系/锁白名单、租约门槛、冻结后严格验证、barrier释放及清理保持。
+
+新增预检用于避免已明确观察到其他事务仍忙时立即冻结；删除会恢复原捕获竞态。
+副作用是就绪可能更晚，繁忙样本可能耗尽原截止时间而失败；观察至STOP的剩余竞态
+仍通过停后严格复核拒绝，不能声称消除全部不稳定性。
+
+离线66项契约通过（guard49项），含三kind忙到安全只STOP一次、持续忙超时无STOP、
+发信号前到期、首个busy遮挡后续坏样本、目标身份/租约错误、预检安全但停后变坏立即
+清理，以及诊断隐私和未知异常传播。原validate_sessions/validate_checkpoint逐字节
+保持。Node/Go/PostgreSQL/browser未本地运行，独立审及精确head CI仍待完成。
+
 ### 2026-10-17 running-cancel 持锁类别补充诊断候选
 
 PR167 head `b7c6e1703179637874c70c096dcdf5e67721123f` 的
