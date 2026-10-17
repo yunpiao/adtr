@@ -104,9 +104,42 @@ func (g *lifecycleGate) finalInvalidationDiagnostic() finalInvalidationDiagnosti
 	return finalInvalidationDiagnostic{"owned_ci_first_invalidation", reason, phase}
 }
 
+type uncleanCloseDiagnostic struct {
+	Event         string `json:"event"`
+	AlreadyClosed bool   `json:"alreadyClosed"`
+	CloseFailed   bool   `json:"closeFailed"`
+	CleanupDone   bool   `json:"cleanupDone"`
+	Role          string `json:"role"`
+}
+
+func (g *lifecycleGate) uncleanCloseDiagnostic() *uncleanCloseDiagnostic {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.firstInvalidReason != invalidUncleanClose || g.firstUncleanClose == nil {
+		return nil
+	}
+	d := *g.firstUncleanClose
+	if d.Event != "owned_ci_first_unclean_close" || (d.Role != "epoch_target" && d.Role != "other") {
+		return nil
+	}
+	return &d
+}
+
+func (g *lifecycleGate) writeUncleanCloseDiagnostic() {
+	d := g.uncleanCloseDiagnostic()
+	if d == nil {
+		return
+	}
+	data, err := json.Marshal(d)
+	if err == nil {
+		_, _ = os.Stderr.Write(append(data, '\n'))
+	}
+}
+
 func (g *lifecycleGate) writeFinalInvalidationDiagnostic() {
 	data, err := json.Marshal(g.finalInvalidationDiagnostic())
 	if err == nil {
 		_, _ = os.Stderr.Write(append(data, '\n'))
 	}
+	g.writeUncleanCloseDiagnostic()
 }

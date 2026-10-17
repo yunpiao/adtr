@@ -457,3 +457,26 @@ is selected by the existing tagged cmd integration group. Offline tests cover
 missing/incorrect identity witnesses, delivery counters, event counts, closed
 fields, and read/close failures. New Go/PG behavior requires the new exact-tree
 CI run; the prior group configure EOF remains independently unexplained.
+
+### Distinguishing an unclean native close
+
+Run 39056130393 completed the user and computer jobs including final journal
+proof. Group passed its browser but failed the final witness with first cause
+`unclean_close` in phase `released`. That aggregate cause does not identify
+which close fact failed or whether the connection was the pinned target.
+
+The fixed pgx v5.11 source makes a normal `PgConn.Close` close `CleanupDone`
+before returning. Its already-closed path returns immediately, while a preceding
+`asyncClose` can still be cleaning up after cancellation. Therefore the existing
+check is not demonstrably a false positive, and waiting or ignoring the flag
+would not repair an already-unobserved native close.
+
+The CI-only final diagnostic now preserves the first unclean close's three
+existing facts (`alreadyClosed`, `closeFailed`, `cleanupDone`) and its relationship
+to the epoch target (`epoch_target` or `other`). It carries no errors, SQL,
+backend identifiers, or task identities. The original clean predicate, sticky
+failure, and return value stay unchanged. Missing or malformed detail is unknown.
+A real PostgreSQL regression waits until its query is observed in `PgSleep`
+before cancellation, distinguishing actual dispatched-query cleanup from an
+already-cancelled context rejected before dispatch. The group run's precise
+native-close trigger remains unverified until this evidence is collected.

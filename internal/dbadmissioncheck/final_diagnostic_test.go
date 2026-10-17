@@ -21,11 +21,12 @@ func TestFinalDiagnosticCapabilityIsExact(t *testing.T) {
 	}
 	writer := `package dbadmission
  import("encoding/json";"os")
- type lifecycleGate struct{}
+ type lifecycleGate struct{writeUncleanCloseDiagnostic func()}
  func(g *lifecycleGate)finalInvalidationDiagnostic()struct{}{return struct{}{}}
  func(g *lifecycleGate)writeFinalInvalidationDiagnostic(){
  data,err:=json.Marshal(g.finalInvalidationDiagnostic())
  if err==nil{_,_=os.Stderr.Write(append(data,'\n'))}
+ g.writeUncleanCloseDiagnostic()
  }
  `
 	caller := `package dbadmission;import "sync";func StartCIController(g *lifecycleGate){var reportOnce sync.Once;cleanup:=func(){reportOnce.Do(func(){g.writeFinalInvalidationDiagnostic()})};cleanup()}`

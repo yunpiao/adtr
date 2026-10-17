@@ -135,7 +135,7 @@ func captureEndDeclarations(fset *token.FileSet, path string, files []*ast.File,
 						emit(x, "capture-end preparation outside exact controller startup")
 					}
 					if obj.Name() == "captureObligationsEndedLocked" && sig.Recv() != nil && isNamed(sig.Recv().Type(), managed, "lifecycleGate") {
-						allowed := path == managed && ((filename == "lifecycle_ci.go" && (name == "lifecycleTicket.closed" || name == "lifecycleTicket.closingConnection")) || (filename == "seal_ci.go" && (name == "lifecycleGate.registerActivityRow" || name == "lifecycleGate.invalidateWaitLocked")))
+						allowed := path == managed && ((filename == "lifecycle_ci.go" && (name == "lifecycleTicket.closedObserved" || name == "lifecycleTicket.closingConnection")) || (filename == "seal_ci.go" && (name == "lifecycleGate.registerActivityRow" || name == "lifecycleGate.invalidateWaitLocked")))
 						if !allowed || !captureConsumerCall(x, ancestors, name == "lifecycleGate.registerActivityRow") {
 							emit(x, "capture-end authorization outside the four reviewed liveness call sites")
 						}

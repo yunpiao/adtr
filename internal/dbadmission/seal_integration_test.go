@@ -290,9 +290,45 @@ func TestSealIntegrationCanceledQueryCleanupPoisonsAttempt(t *testing.T) {
 	if g.pin(1, g.candidates()[0].generation, nil) != nil {
 		t.Fatal("pin failed")
 	}
-	queryCtx, stopQuery := context.WithTimeout(ctx, 20*time.Millisecond)
-	_, queryErr := other.Exec(queryCtx, "SELECT pg_sleep(60)")
+	queryCtx, stopQuery := context.WithCancel(ctx)
+	queryDone := make(chan error, 1)
+	go func() {
+		_, e := other.Exec(queryCtx, "SELECT pg_sleep(60)")
+		queryDone <- e
+	}()
+	joined := false
+	defer func() {
+		stopQuery()
+		if !joined {
+			select {
+			case <-queryDone:
+			case <-ctx.Done():
+				t.Error("cancelled query cleanup deadline")
+			}
+		}
+	}()
+	// Observe a genuinely dispatched server query before cancelling. An already
+	// expired context can be rejected without native close and is a different case.
+	dispatched := false
+	for !dispatched && ctx.Err() == nil {
+		if observer.QueryRow(ctx, "SELECT EXISTS(SELECT FROM pg_stat_activity WHERE pid=$1::int AND wait_event='PgSleep')", otherPID).Scan(&dispatched) != nil {
+			t.Fatal("query dispatch observation failed")
+		}
+		if !dispatched {
+			time.Sleep(time.Millisecond)
+		}
+	}
+	if !dispatched {
+		t.Fatal("query did not dispatch")
+	}
 	stopQuery()
+	var queryErr error
+	select {
+	case queryErr = <-queryDone:
+		joined = true
+	case <-ctx.Done():
+		t.Fatal("cancelled query join deadline")
+	}
 	if queryErr == nil {
 		t.Fatal("canceled query unexpectedly completed")
 	}
@@ -302,6 +338,10 @@ func TestSealIntegrationCanceledQueryCleanupPoisonsAttempt(t *testing.T) {
 	// Regardless of whether pgx has finished native close, wrapper Close must
 	// account for its exact CleanupDone result and retain failure information.
 	_ = other.Close(ctx)
+	dirty := g.uncleanCloseDiagnostic()
+	if dirty == nil || !dirty.AlreadyClosed || dirty.CloseFailed || dirty.Role != "other" {
+		t.Fatal("native cancellation close facts unavailable")
+	}
 	select {
 	case <-other.raw.PgConn().CleanupDone():
 	case <-ctx.Done():

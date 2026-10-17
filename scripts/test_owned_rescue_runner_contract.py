@@ -538,6 +538,62 @@ class Contracts(unittest.TestCase):
         self.assertIsNone(owner.witness)
         self.assertIsNone(owner.page_fd)
 
+    def test_first_unclean_projection_is_closed_and_never_guesses_booleans(self):
+        import io
+        event = dict(event=r.FIRST_UNCLEAN_EVENT, alreadyClosed=False, closeFailed=True,
+                     cleanupDone=False, role='epoch_target')
+        line = json.dumps(event) + '\n'
+        logs = io.StringIO(line); logs.seek(3)
+        self.assertEqual(r.first_unclean_projection(logs), event)
+        self.assertEqual(logs.tell(), 3)
+        bad = [line + line, line.rstrip(), '', 'prefix ' + line, ' ' * 1024 + line,
+               json.dumps(event | {'private': 'secret'}) + '\n',
+               json.dumps(event | {'role': 'private identity'}) + '\n',
+               line.replace('"alreadyClosed": false', '"alreadyClosed": false, "alreadyClosed": true'),
+               '\udcff' + line]
+        for key in ('alreadyClosed', 'closeFailed', 'cleanupDone'):
+            for value in (0, 1, None, 'false', {}, 'unknown'):
+                bad.append(json.dumps(event | {key: value}) + '\n')
+        for key in event:
+            bad.append(json.dumps({k: v for k, v in event.items() if k != key}) + '\n')
+        unknown = dict(event=r.FIRST_UNCLEAN_EVENT, alreadyClosed='unknown',
+                       closeFailed='unknown', cleanupDone='unknown', role='unknown')
+        for text in bad:
+            self.assertEqual(r.first_unclean_projection(io.StringIO(text)), unknown)
+        with patch.object(r, 'MAX_FINAL_LOG_BYTES', len(line) - 1):
+            self.assertEqual(r.first_unclean_projection(io.StringIO(line)), unknown)
+        broken = Mock(); broken.tell.return_value = 5
+        broken.read.side_effect = RuntimeError('private details')
+        self.assertEqual(r.first_unclean_projection(broken), unknown)
+        self.assertEqual(broken.seek.call_args.args, (5,))
+
+    def test_first_unclean_print_requires_matching_first_cause_wait_and_once(self):
+        import io
+        detail = dict(event=r.FIRST_UNCLEAN_EVENT, alreadyClosed=True, closeFailed=False,
+                      cleanupDone=True, role='other')
+        for reason in ('unclean_close', 'target_revoked'):
+            first = dict(event=r.FINAL_INVALIDATION_EVENT, reason=reason, phase='released')
+            for missing in (False, True):
+                logs = io.StringIO(json.dumps(first) + '\n' +
+                                   ('' if missing else json.dumps(detail) + '\n'))
+                owner = r.OwnedCIWorker(); owner.process = Mock(returncode=None)
+                with patch.object(r.sys, 'stderr', io.StringIO()) as output:
+                    owner.report_first_invalidation_after_wait(logs)
+                    self.assertEqual(logs.tell(), 0)
+                    self.assertEqual(output.getvalue(), '')
+                    owner.process.returncode = 1
+                    owner.report_first_invalidation_after_wait(logs)
+                    owner.report_first_invalidation_after_wait(logs)
+                    rows = [json.loads(line) for line in output.getvalue().splitlines()]
+                self.assertEqual(rows[0], first)
+                self.assertEqual(len(rows), 2 if reason == 'unclean_close' else 1)
+                if reason == 'unclean_close':
+                    if missing:
+                        self.assertEqual(rows[1]['role'], 'unknown')
+                        self.assertEqual(rows[1]['alreadyClosed'], 'unknown')
+                    else:
+                        self.assertEqual(rows[1], detail)
+
     def test_final_journal_private_projection_is_strict_and_post_wait(self):
         import io
         stats = dict(event=r.FINAL_JOURNAL_EVENT, processIDSHA256='ab' * 32,

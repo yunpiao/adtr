@@ -92,7 +92,7 @@ func TestCaptureEndConsumersAreLimited(t *testing.T) {
 		name, file, source string
 		bad                bool
 	}{
-		{"clean close", "lifecycle_ci.go", `func(t *lifecycleTicket)closed(){_=t.gate.captureObligationsEndedLocked()}`, false},
+		{"clean close", "lifecycle_ci.go", `func(t *lifecycleTicket)closedObserved(){_=t.gate.captureObligationsEndedLocked()}`, false},
 		{"closing", "lifecycle_ci.go", `func(t *lifecycleTicket)closingConnection(){_=t.gate.captureObligationsEndedLocked()}`, false},
 		{"revoke closure", "seal_ci.go", `func(g *lifecycleGate)registerActivityRow()func(){return func(){_=g.captureObligationsEndedLocked()}}`, false},
 		{"wait cancel", "seal_ci.go", `func(g *lifecycleGate)invalidateWaitLocked(){_=g.captureObligationsEndedLocked()}`, false},

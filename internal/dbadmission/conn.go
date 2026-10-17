@@ -21,11 +21,16 @@ type Conn struct {
 	closed bool
 }
 
+// closeObservation contains only already-computed close facts, never errors or identity.
+type closeObservation struct {
+	alreadyClosed, closeFailed, cleanupDone bool
+}
+
 type lifecyclePermit interface {
 	connected(*Conn)
 	closingConnection()
 	failed()
-	closed(clean bool)
+	closedObserved(closeObservation)
 }
 
 // ConnectConfig obtains admission before calling pgx, including its initialization.
@@ -90,6 +95,6 @@ func (c *Conn) Close(ctx context.Context) error {
 		cleanupDone = true
 	default:
 	}
-	c.permit.closed(!alreadyClosed && err == nil && cleanupDone)
+	c.permit.closedObserved(closeObservation{alreadyClosed, err != nil, cleanupDone})
 	return err
 }

@@ -36,6 +36,7 @@ type lifecycleGate struct {
 	total                                                      uint64
 	firstInvalidReason                                         invalidationReason
 	firstInvalidPhase                                          string
+	firstUncleanClose                                          *uncleanCloseDiagnostic
 }
 
 type lifecycleTicket struct {
@@ -172,7 +173,8 @@ func (t *lifecycleTicket) failed() {
 	g.notifyLocked()
 }
 
-func (t *lifecycleTicket) closed(clean bool) {
+func (t *lifecycleTicket) closedObserved(observation closeObservation) {
+	clean := !observation.alreadyClosed && !observation.closeFailed && observation.cleanupDone
 	g := t.gate
 	g.mu.Lock()
 	defer g.unlockAndPublishInvalid()
@@ -186,7 +188,15 @@ func (t *lifecycleTicket) closed(clean bool) {
 	prunable := clean && !g.invalid && t.registration == nil &&
 		(g.seal == nil || g.seal.target != t)
 	if !clean {
+		first := g.firstInvalidReason == ""
 		g.invalidateBecauseLocked(invalidUncleanClose)
+		if first {
+			role := "other"
+			if g.seal != nil && g.seal.target == t {
+				role = "epoch_target"
+			}
+			g.firstUncleanClose = &uncleanCloseDiagnostic{"owned_ci_first_unclean_close", observation.alreadyClosed, observation.closeFailed, observation.cleanupDone, role}
+		}
 	} else if g.seal != nil && !g.seal.released && g.seal.target == t && !g.captureObligationsEndedLocked() {
 		g.invalidateBecauseLocked(invalidTargetClosed)
 	}
