@@ -17,14 +17,14 @@ func TestActivityCandidateHealthOnlyFourSlots(t *testing.T) {
 		t.Run(kindName, func(t *testing.T) {
 			f := newHealthFixture(t)
 			f.exec(tasks.Schema)
-			started := make(chan struct{}, 4)
+			started := make(chan string, 4)
 			releaseWork := make(chan struct{})
-			kind := tasks.Kind{Name: kindName, Version: 1, Platform: true, MaxAttempts: 1,
+			kind := tasks.Kind{Name: kindName, Version: 1, Platform: false, MaxAttempts: 1,
 				Lease: 30 * time.Second, Heartbeat: time.Second, Timeout: 10 * time.Second,
 				RetryBase: 10 * time.Millisecond, RetryCap: time.Second, ReplaySafe: true,
 				Validate: func(json.RawMessage) (json.RawMessage, error) { return []byte(`{}`), nil },
 				Execute: func(ctx context.Context, ex tasks.Execution) tasks.Outcome {
-					started <- struct{}{}
+					started <- ex.Task.LeaseOwner
 					select {
 					case <-releaseWork:
 					case <-ctx.Done():
@@ -43,7 +43,13 @@ func TestActivityCandidateHealthOnlyFourSlots(t *testing.T) {
 			if err != nil {
 				t.Fatal("candidate registry failed")
 			}
-			engine, err := tasks.New(f.cfg, registry, func(context.Context, pgx.Tx, tasks.Principal, tasks.Scope, tasks.Action) (string, error) {
+			// Claim permits one live lease per tenant/domain. Configure four
+			// independent synthetic domains rather than four jobs in platform.
+			domains := map[string]bool{"one": true, "two": true, "three": true, "four": true}
+			engine, err := tasks.New(f.cfg, registry, func(_ context.Context, _ pgx.Tx, p tasks.Principal, scope tasks.Scope, _ tasks.Action) (string, error) {
+				if p.TenantID != OwnerTenantID || p.ActorID != 1 || !domains[scope.DomainID] || scope.TaskName != kindName || scope.Platform {
+					return "", tasks.ErrAuthorization
+				}
 				return "synthetic-epoch", nil
 			}, 7)
 			if err != nil {
@@ -51,11 +57,15 @@ func TestActivityCandidateHealthOnlyFourSlots(t *testing.T) {
 			}
 			for _, key := range []string{"one", "two", "three", "four"} {
 				if err := f.transact(func(tx pgx.Tx) error {
-					_, err := engine.SubmitTx(f.ctx, tx, tasks.Principal{TenantID: OwnerTenantID, ActorID: 1}, tasks.SubmitInput{TaskName: kindName, DomainID: "platform", PayloadVersion: 1, Payload: []byte(`{}`), IdempotencyKey: key})
+					_, err := engine.SubmitTx(f.ctx, tx, tasks.Principal{TenantID: OwnerTenantID, ActorID: 1}, tasks.SubmitInput{TaskName: kindName, DomainID: key, PayloadVersion: 1, Payload: []byte(`{}`), IdempotencyKey: key})
 					return err
 				}); err != nil {
 					t.Fatal("candidate submission failed")
 				}
+			}
+			var taskCount, domainCount int
+			if err := f.db.QueryRow(f.ctx, "SELECT count(*), count(DISTINCT domain_id) FROM adtr.tasks").Scan(&taskCount, &domainCount); err != nil || taskCount != 4 || domainCount != 4 {
+				t.Fatal("four independent domain tasks required")
 			}
 			results := make(chan bool, 4)
 			ctx, cancel := context.WithCancel(f.ctx)
@@ -80,12 +90,20 @@ func TestActivityCandidateHealthOnlyFourSlots(t *testing.T) {
 			done := make(chan error, 1)
 			go func() { done <- worker.Run(ctx) }()
 			defer func() { cancel(); <-done }()
+			expectedSlots := map[string]bool{"candidate-worker-0": true, "candidate-worker-1": true, "candidate-worker-2": true, "candidate-worker-3": true}
 			for count := 0; count < 4; count++ {
 				select {
-				case <-started:
+				case owner := <-started:
+					if !expectedSlots[owner] {
+						t.Fatal("duplicate or unexpected candidate worker slot")
+					}
+					delete(expectedSlots, owner)
 				case <-time.After(5 * time.Second):
 					t.Fatal("four concurrent slots did not start")
 				}
+			}
+			if len(expectedSlots) != 0 {
+				t.Fatal("candidate worker slot coverage incomplete")
 			}
 			close(releaseWork)
 			for count := 0; count < 4; count++ {
