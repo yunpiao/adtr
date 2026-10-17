@@ -143,7 +143,7 @@ func TestFinalProtocolCompleteBodiesMatchProduction(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			file, err := parser.ParseFile(token.NewFileSet(), expected.file, data, 0)
+			file, err := parser.ParseFile(token.NewFileSet(), expected.file, data, parser.ParseComments)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -191,6 +191,39 @@ func TestFinalProtocolOrderingCannotBeWeakened(t *testing.T) {
 			}
 			if exactFinalQuiesceFunction(managed, expected.file, tc.function, file.Decls[0].(*ast.FuncDecl)) {
 				t.Fatal("protocol weakening accepted")
+			}
+		})
+	}
+}
+
+func TestFinalRequestCommentsCannotChangeProtocolSyntax(t *testing.T) {
+	expected := finalQuiesceBodies["readApplicationRequest"]
+	for _, tc := range []struct {
+		name, old, new string
+		matches        bool
+	}{
+		{"reviewed declaration comment", "", "", true},
+		{"changed declaration comment", "// JSON duplicate keys are not permitted, even when values are equal.", "// Same closed duplicate-key policy.", true},
+		{"block declaration comment", "// JSON duplicate keys are not permitted, even when values are equal.", "/* Same closed duplicate-key policy. */", true},
+		{"duplicate keys still rejected", "!ok || seen[s]", "!ok && seen[s]", false},
+		{"exact fields still required", "len(fields) != len(expected)", "len(fields) > len(expected)", false},
+		{"line bound still required", "len(line) > limit", "len(line) < limit", false},
+		{"comment-like literal retained", `"op": true`, `"//op": true`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := expected.body
+			if tc.old != "" {
+				body = strings.Replace(body, tc.old, tc.new, 1)
+				if body == expected.body {
+					t.Fatal("mutation unchanged")
+				}
+			}
+			file, err := parser.ParseFile(token.NewFileSet(), expected.file, "package actual;func actual()"+body, parser.ParseComments)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := exactFinalQuiesceFunction(managed, expected.file, "readApplicationRequest", file.Decls[0].(*ast.FuncDecl)); got != tc.matches {
+				t.Fatalf("matches=%v want=%v", got, tc.matches)
 			}
 		})
 	}

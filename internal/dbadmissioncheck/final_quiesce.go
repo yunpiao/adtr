@@ -443,7 +443,20 @@ const finalQuiesceType = "struct {\n\tstate    string\n\tdeadline time.Time\n\ts
 
 func exactFinalQuiesceFunction(path, file, name string, fn *ast.FuncDecl) bool {
 	expected, ok := finalQuiesceBodies[name]
-	return ok && path == managed && file == expected.file && captureBodyMatches(fn, expected.body)
+	if !ok || path != managed || file != expected.file || fn == nil || fn.Body == nil {
+		return false
+	}
+	if name == "readApplicationRequest" {
+		// Repository parsing attaches the duplicate-key comment to a local
+		// GenDecl.Doc. Normalize only this reader to the comment-free parse mode
+		// used by its fixed body, retaining every statement and literal value.
+		parsed, err := parser.ParseFile(token.NewFileSet(), "actual.go", "package expected;func expected()"+sourceText(fn.Body), 0)
+		if err != nil {
+			return false
+		}
+		fn = parsed.Decls[0].(*ast.FuncDecl)
+	}
+	return captureBodyMatches(fn, expected.body)
 }
 func finalQuiesceDeclarations(fset *token.FileSet, path string, files []*ast.File, info *types.Info) []Diagnostic {
 	var out []Diagnostic
