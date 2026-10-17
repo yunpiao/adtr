@@ -32,6 +32,63 @@ def task():
 
 
 class ContractTests(unittest.TestCase):
+    def test_all_registry_and_checkpoint_require_messages_have_closed_reasons(self):
+        import ast
+        tree = ast.parse(Path(g.__file__).read_text())
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef) and node.name in ('registered_candidate', 'registry_matches_pg', 'validate_sealed_registry', 'checkpoint'):
+                for call in ast.walk(node):
+                    if isinstance(call, ast.Call) and isinstance(call.func, ast.Name) and call.func.id == 'require':
+                        message = call.args[1]
+                        self.assertIsInstance(message, ast.Constant)
+                        self.assertIn(message.value, g.FAILURE_REASONS)
+
+    def test_controller_diagnostics_accept_only_exact_type_and_closed_fields(self):
+        error = g.ControlFailure('private SQL credential environment')
+        detail = {'operation': 'snapshot', 'step': 'receive', 'cause': 'deadline'}
+        error.control_diagnostic = detail
+        self.assertEqual(g.failure_event('registry_snapshot', error), {
+            'event': 'running_cancel_guard_failure', 'stage': 'registry_snapshot',
+            'reason': 'controller_failure', **detail})
+        class Derived(g.ControlFailure):
+            pass
+        for value in (Derived('private'), RuntimeError('private'), ValueError('private')):
+            value.control_diagnostic = detail
+            result = g.failure_event('registry_snapshot', value)
+            self.assertEqual(result['reason'], 'unclassified')
+            self.assertNotIn('operation', result)
+        for bad in (detail | {'private': 'private'}, detail | {'cause': 'x' * 100000},
+                    detail | {'step': False}, {'operation': 'snapshot'}, ['private']):
+            error.control_diagnostic = bad
+            result = g.failure_event('registry_snapshot', error)
+            self.assertEqual(result['reason'], 'unclassified')
+            self.assertNotIn('private', json.dumps(result))
+
+    def test_deadline_has_bounded_observation_count_and_last_wait(self):
+        for missing_candidate in (False, True):
+            guard = self.guard(); guard.threads = Mock(return_value=['T'])
+            queued = task() | {'state': 'queued', 'attempt': 0, 'snapshotCount': 0}
+            if missing_candidate:
+                guard.controller.snapshot.return_value['records'][0]['candidate'] = None
+            observer, barrier = Mock(), Mock(pid=99)
+            observer.query.side_effect = [{'otherNonterminal': 0, 'journalCount': 0, 'task': queued, 'sessions': []},
+                {'task': task() if missing_candidate else queued, 'sessions': [session()]}]
+            barrier.query.return_value = {'count': 1}
+            now = [0.]
+            with patch.object(g, 'Psql', side_effect=[observer, barrier]), patch.object(g.time, 'monotonic', side_effect=lambda: now[0]), patch.object(g.time, 'sleep', side_effect=lambda _: now.__setitem__(0, 1.5)):
+                with self.assertRaises(RuntimeError):
+                    guard.checkpoint('task-one', 'worker')
+            event = guard.failure_diagnostic
+            self.assertEqual(event['reason'], 'capture_deadline_missed')
+            self.assertEqual(event['observations'], 1)
+            self.assertEqual(event['lastNotReady']['reason'], 'candidate_absent' if missing_candidate else 'task_boundary_pending')
+            guard.controller.pin.assert_not_called()
+            guard.owned.process.send_signal.assert_not_called()
+        for count in (True, -1, 1000001, 'private', {'private': 1}):
+            error = RuntimeError('missed two-second activity checkpoint')
+            error.capture_observations = count
+            self.assertNotIn('observations', g.failure_event('capture', error))
+
     def test_runtime_projection_types_are_closed_and_never_freeze_whitelist(self):
         shapes = {
             'relation': lock('relation', 'AccessShareLock', relation='private_relation'),
@@ -250,7 +307,7 @@ class ContractTests(unittest.TestCase):
         expected = {
             'validate_sessions': '4efb9b60ec57914d43c55c695e0916b07d71fbcd3f3cdac8c3cd06b630bbd092',
             'validate_checkpoint': '83ff1b7a711627ec7ee4e28761dde75f5e18ae3e81abb39927b8057022a06e74',
-            'checkpoint': '97f065b28d2c791bc20e006f55e5bbd9875bbde0970380f20e57662615f7c1ec',
+            'checkpoint': '5e919a44e16be3010201fceef9a13f1ccf2494870c0cb6f18464b54c08b284e2',
         }
         actual = {node.name: hashlib.sha256(ast.get_source_segment(source, node).encode()).hexdigest()
                   for node in ast.walk(ast.parse(source)) if isinstance(node, ast.FunctionDef)
@@ -728,7 +785,7 @@ class ContractTests(unittest.TestCase):
                 guard.checkpoint('task-one', 'worker')
         guard.owned.process.send_signal.assert_not_called()
         self.assertEqual(guard.failure_diagnostic, {'event': 'running_cancel_guard_failure',
-            'stage': 'capture_readiness', 'reason': 'state_unavailable'})
+            'stage': 'candidate_strict', 'reason': 'state_unavailable'})
         guard.controller.pin.assert_not_called()
         self.assertEqual(guard.owned.resume.call_count, 2)
         observer.close.assert_called_once(); barrier.close.assert_called_once()

@@ -502,6 +502,81 @@ class Contracts(unittest.TestCase):
         self.assertLess(source.index('owned_ci_worker.report_failure_diagnostic()'),
                         source.index('diagnostics.snapshot(server, worker)'))
 
+    def test_control_failure_records_real_operation_step_and_enum_cause(self):
+        def failure(cause):
+            try:
+                r._fail(cause)
+            except r.ControlFailure as error:
+                return error
+        for operation in ('snapshot', 'pin'):
+            for method, step, cause in (('send', 'send', r.ControlCause.DEADLINE),
+                                        ('receive', 'receive', r.ControlCause.EOF),
+                                        ('receive', 'receive', r.ControlCause.PARTIAL),
+                                        ('receive', 'receive', r.ControlCause.TRANSPORT)):
+                with self.subTest(operation=operation, step=step, cause=cause):
+                    c = controller()
+                    getattr(c.normal, method).side_effect = failure(cause)
+                    with self.assertRaises(r.ControlFailure) as caught:
+                        (c.snapshot(123.0) if operation == 'snapshot' else c.pin(7, 123.0))
+                    self.assertEqual(caught.exception.control_diagnostic,
+                                     {'operation': operation, 'step': step, 'cause': cause.value})
+                    self.assertTrue(c.invalid)
+                    self.assertEqual(c.normal.send.call_args.args[1], 123.0)
+                    self.assertEqual(c.normal.send.call_count, 1)
+        c = controller(); c.armed = False
+        c.supervisor.receive.side_effect = failure(r.ControlCause.DEADLINE)
+        with self.assertRaises(r.ControlFailure) as caught:
+            c.arm(123.0)
+        self.assertEqual(caught.exception.control_diagnostic,
+                         {'operation': 'arm', 'step': 'receive', 'cause': 'deadline'})
+        c.supervisor.send.assert_called_once()
+        c = controller(); c.normal.receive.return_value = frame() | {'private': 'SQL identity'}
+        with self.assertRaises(r.ControlFailure) as caught:
+            c.snapshot(123.0)
+        self.assertEqual(caught.exception.control_diagnostic,
+                         {'operation': 'snapshot', 'step': 'schema', 'cause': 'frame'})
+
+    def test_control_failure_never_copies_text_subclass_or_unbounded_cause(self):
+        class Forged(r.ControlFailure):
+            pass
+        for error in (r.ControlFailure('private SQL'), Forged('private SQL')):
+            for raw in ('private' * 10000, {'private': 'identity'}, r.ControlCause.EOF):
+                error.control_cause = raw
+                c = controller(); c.normal.receive.side_effect = error
+                with self.assertRaises(r.ControlFailure) as caught:
+                    c.snapshot(123.0)
+                cause = 'eof' if type(error) is r.ControlFailure and raw is r.ControlCause.EOF else 'other'
+                self.assertEqual(caught.exception.control_diagnostic,
+                                 {'operation': 'snapshot', 'step': 'receive', 'cause': cause})
+                self.assertEqual(caught.exception.args, ('owned CI worker control unavailable',))
+        with self.assertRaises(r.ControlFailure) as caught:
+            r._fail('private arbitrary input')
+        self.assertIs(caught.exception.control_cause, r.ControlCause.OTHER)
+        self.assertNotIn('private', str(caught.exception))
+        with self.assertRaises(TypeError):
+            r.CONTROL_DIAGNOSTIC_VALUES['cause'] = frozenset({'private'})
+
+    def test_transport_cause_comes_from_failure_branch_not_later_clock(self):
+        for chunks, cause in (([b''], 'eof'), ([b'{', b''], 'partial')):
+            c = self.channel()
+            with patch.object(c, '_ready'), patch.object(r.os, 'read', side_effect=chunks), \
+                    patch.object(r.time, 'monotonic', return_value=0):
+                with self.assertRaises(r.ControlFailure) as caught:
+                    c.receive(1)
+            self.assertEqual(caught.exception.control_cause.value, cause)
+        c = self.channel()
+        with patch.object(r.time, 'monotonic', return_value=2):
+            with self.assertRaises(r.ControlFailure) as caught:
+                c.receive(1)
+        self.assertIs(caught.exception.control_cause, r.ControlCause.DEADLINE)
+        c = controller(); c.normal.drain.return_value = []
+        with patch.object(r.time, 'monotonic', return_value=2):
+            with self.assertRaises(r.ControlFailure) as caught:
+                c.after_stop(1)
+        self.assertEqual(caught.exception.control_diagnostic,
+                         {'operation': 'after_stop', 'step': 'state', 'cause': 'deadline'})
+        c.normal.send.assert_not_called()
+
     def test_exact_runner_delta_and_mutations(self):
         import hashlib
         source = Path(__file__).with_name('test_auth_e2e.py').read_text()

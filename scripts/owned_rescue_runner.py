@@ -4,6 +4,8 @@ No attach API: the runner creates the worker, anonymous page and rescue sibling.
 Runtime tests involving processes/signals run only in the isolated Linux CI job.
 """
 import json
+from enum import Enum
+from types import MappingProxyType
 import mmap
 import os
 from pathlib import Path
@@ -21,15 +23,49 @@ class ControlFailure(RuntimeError):
     """Closed diagnostic: never expose frame data or process environment."""
 
 
-def _fail():
-    raise ControlFailure('owned CI worker control unavailable')
+class ControlOperation(Enum):
+    ARM = 'arm'
+    SNAPSHOT = 'snapshot'
+    PIN = 'pin'
+    AFTER_STOP = 'after_stop'
+
+
+class ControlStep(Enum):
+    SEND = 'send'
+    RECEIVE = 'receive'
+    SCHEMA = 'schema'
+    REPLY = 'reply'
+    STATE = 'state'
+
+
+class ControlCause(Enum):
+    DEADLINE = 'deadline'
+    EOF = 'eof'
+    PARTIAL = 'partial'
+    FRAME = 'frame'
+    STATE = 'state'
+    TRANSPORT = 'transport'
+    OTHER = 'other'
+
+
+CONTROL_DIAGNOSTIC_VALUES = MappingProxyType({
+    'operation': frozenset(value.value for value in ControlOperation),
+    'step': frozenset(value.value for value in ControlStep),
+    'cause': frozenset(value.value for value in ControlCause),
+})
+
+
+def _fail(cause=ControlCause.OTHER):
+    error = ControlFailure('owned CI worker control unavailable')
+    error.control_cause = cause if type(cause) is ControlCause else ControlCause.OTHER
+    raise error
 
 
 def _unique_object(pairs):
     value = {}
     for key, item in pairs:
         if key in value:
-            _fail()
+            _fail(ControlCause.FRAME)
         value[key] = item
     return value
 
@@ -55,62 +91,66 @@ class PipeChannel:
     def _ready(self, fd, writing, deadline):
         while True:
             left = deadline - time.monotonic()
-            if self.failed or fd is None or left <= 0:
-                _fail()
+            if self.failed or fd is None:
+                _fail(ControlCause.STATE)
+            if left <= 0:
+                _fail(ControlCause.DEADLINE)
             try:
                 ready = select.select([] if writing else [fd], [fd] if writing else [], [], left)
                 if ready[1 if writing else 0]:
                     return
-                _fail()
+                _fail(ControlCause.DEADLINE)
             except InterruptedError:
                 continue
             except (OSError, ValueError):
-                _fail()
+                _fail(ControlCause.TRANSPORT)
 
     def send(self, frame, deadline):
         data = json.dumps(frame, separators=(',', ':'), allow_nan=False).encode('ascii') + b'\n'
         if len(data) > self.write_limit:
-            _fail()
+            _fail(ControlCause.FRAME)
         # One bounded write. Partial socket writes fail permanently; no replay.
         if not self.write_lock.acquire(timeout=max(0, deadline - time.monotonic())):
-            _fail()
+            _fail(ControlCause.DEADLINE)
         try:
             while True:
                 self._ready(self.write_fd, True, deadline)
                 try:
                     if os.write(self.write_fd, data) != len(data):
                         self.failed = True
-                        _fail()
+                        _fail(ControlCause.PARTIAL)
                     return
                 except BlockingIOError:
                     continue
                 except OSError:
                     self.failed = True
-                    _fail()
+                    _fail(ControlCause.TRANSPORT)
         finally:
             self.write_lock.release()
 
     def receive(self, deadline):
         while True:
-            if self.failed or time.monotonic() >= deadline:
-                _fail()
+            if self.failed:
+                _fail(ControlCause.STATE)
+            if time.monotonic() >= deadline:
+                _fail(ControlCause.DEADLINE)
             if b'\n' in self.buffer:
                 raw, _, rest = self.buffer.partition(b'\n')
                 self.buffer = bytearray(rest)
                 if len(raw) + 1 > self.LIMIT:
-                    _fail()
+                    _fail(ControlCause.FRAME)
                 try:
                     result = json.loads(raw, object_pairs_hook=_unique_object,
-                                        parse_constant=lambda _: _fail())
+                                        parse_constant=lambda _: _fail(ControlCause.FRAME))
                 except (ValueError, UnicodeError):
                     self.failed = True
-                    _fail()
+                    _fail(ControlCause.FRAME)
                 if not isinstance(result, dict):
-                    _fail()
+                    _fail(ControlCause.FRAME)
                 return result
             if len(self.buffer) >= self.LIMIT:
                 self.failed = True
-                _fail()
+                _fail(ControlCause.FRAME)
             self._ready(self.read_fd, False, deadline)
             try:
                 chunk = os.read(self.read_fd, self.LIMIT)
@@ -118,10 +158,10 @@ class PipeChannel:
                 continue
             except OSError:
                 self.failed = True
-                _fail()
+                _fail(ControlCause.TRANSPORT)
             if not chunk:
                 self.failed = True  # EOF and half frame are permanently invalid.
-                _fail()
+                _fail(ControlCause.PARTIAL if self.buffer else ControlCause.EOF)
             self.buffer.extend(chunk)
 
     def drain(self):
@@ -129,7 +169,7 @@ class PipeChannel:
         frames = []
         while True:
             if self.failed or self.read_fd is None:
-                _fail()
+                _fail(ControlCause.STATE)
             if b'\n' in self.buffer:
                 frames.append(self.receive(time.monotonic() + .01))
                 continue
@@ -138,18 +178,18 @@ class PipeChannel:
             except BlockingIOError:
                 if self.buffer:
                     self.failed = True
-                    _fail()
+                    _fail(ControlCause.PARTIAL)
                 return frames
             except OSError:
                 self.failed = True
-                _fail()
+                _fail(ControlCause.TRANSPORT)
             if not chunk:
                 self.failed = True
-                _fail()
+                _fail(ControlCause.PARTIAL if self.buffer else ControlCause.EOF)
             self.buffer.extend(chunk)
             if len(self.buffer) > self.LIMIT and b'\n' not in self.buffer:
                 self.failed = True
-                _fail()
+                _fail(ControlCause.FRAME)
 
     def close(self):
         self.failed = True
@@ -231,16 +271,16 @@ def _frame(frame, seq=None):
             or frame['kind'] not in ('reply', 'ready', 'invalid')
             or frame['status'] not in ('open', 'draining', 'sealed', 'invalid', 'released')
             or not isinstance(frame['records'], list) or len(frame['records']) > 128):
-        _fail()
+        _fail(ControlCause.FRAME)
     if seq is not None and frame['seq'] != seq:
-        _fail()
+        _fail(ControlCause.FRAME)
     seen = set()
     for record in frame['records']:
         if (not isinstance(record, dict) or set(record) != {'generation', 'state', 'backend', 'candidate'}
                 or not _int(record['generation'], 1) or record['generation'] in seen
                 or record['state'] not in ('pending', 'open', 'closing')
                 or not _int(record['backend']) or record['backend'] > 2 ** 32 - 1):
-            _fail()
+            _fail(ControlCause.FRAME)
         seen.add(record['generation'])
         candidate = record['candidate']
         if candidate is not None:
@@ -252,7 +292,7 @@ def _frame(frame, seq=None):
                     or not all(isinstance(candidate[k], str) and 0 < len(candidate[k]) <= 256
                                for k in ('taskID', 'kind', 'leaseOwner'))
                     or candidate['phase'] != 'first-fenced-progress-10'):
-                _fail()
+                _fail(ControlCause.FRAME)
     return frame
 
 
@@ -303,9 +343,19 @@ class WorkerController:
         self.armed = self.released = False
         self.mutex = threading.RLock()
 
-    def _latch(self):
+    def _latch(self, operation=None, step=ControlStep.STATE, cause=ControlCause.STATE):
         self.invalid = True
-        _fail()
+        error = ControlFailure('owned CI worker control unavailable')
+        if (type(operation) is ControlOperation and type(step) is ControlStep
+                and type(cause) is ControlCause):
+            error.control_diagnostic = {'operation': operation.value,
+                                        'step': step.value, 'cause': cause.value}
+        raise error
+
+    @staticmethod
+    def _cause(error):
+        cause = getattr(error, 'control_cause', None) if type(error) is ControlFailure else None
+        return cause if type(cause) is ControlCause else ControlCause.OTHER
 
     def ready(self, deadline):
         try:
@@ -318,36 +368,51 @@ class WorkerController:
             self._latch()
 
     def arm(self, deadline):
+        operation = ControlOperation.ARM
         with self.mutex:
             if self.invalid or self.armed or self.released:
-                self._latch()
+                self._latch(operation)
+            step = ControlStep.SEND
             try:
                 self.supervisor.send({'version': 2, 'epoch': 1, 'op': 'arm',
                                       'deadline': deadline}, deadline)
-                if self.supervisor.receive(deadline) != {'version': 2, 'epoch': 1, 'status': 'armed'}:
-                    self._latch()
+                step = ControlStep.RECEIVE
+                response = self.supervisor.receive(deadline)
+                step = ControlStep.REPLY
+                if response != {'version': 2, 'epoch': 1, 'status': 'armed'}:
+                    _fail(ControlCause.FRAME)
                 self.armed = True
-            except (OSError, ControlFailure):
-                self._latch()
+            except ControlFailure as error:
+                self._latch(operation, step, self._cause(error))
+            except OSError:
+                self._latch(operation, step, ControlCause.TRANSPORT)
 
     def _request(self, op, deadline, target=None):
+        operation = ControlOperation(op)
         with self.mutex:
             if self.invalid or not self.armed or self.released:
-                self._latch()
+                self._latch(operation)
             self.seq += 1
             request = {'version': 2, 'epoch': 1, 'seq': self.seq, 'op': op}
             if target is not None:
                 if not _int(target, 1):
-                    self._latch()
+                    self._latch(operation, ControlStep.SCHEMA, ControlCause.FRAME)
                 request['target'] = target
+            step = ControlStep.SEND
             try:
                 self.normal.send(request, deadline)
-                frame = _frame(self.normal.receive(deadline), self.seq)
+                step = ControlStep.RECEIVE
+                response = self.normal.receive(deadline)
+                step = ControlStep.SCHEMA
+                frame = _frame(response, self.seq)
+                step = ControlStep.REPLY
                 if frame['kind'] != 'reply' or frame['status'] in ('invalid', 'released'):
-                    self._latch()
+                    _fail(ControlCause.STATE)
                 return frame
-            except (OSError, ControlFailure):
-                self._latch()
+            except ControlFailure as error:
+                self._latch(operation, step, self._cause(error))
+            except OSError:
+                self._latch(operation, step, ControlCause.TRANSPORT)
 
     def snapshot(self, deadline):
         return self._request('snapshot', deadline)
@@ -357,21 +422,32 @@ class WorkerController:
 
     def after_stop(self, deadline):
         """Caller MUST establish all owned threads T before entering this method."""
+        operation = ControlOperation.AFTER_STOP
         with self.mutex:
-            if self.invalid or not self.armed or self.released or time.monotonic() >= deadline:
-                self._latch()
+            if self.invalid or not self.armed or self.released:
+                self._latch(operation)
+            if time.monotonic() >= deadline:
+                self._latch(operation, ControlStep.STATE, ControlCause.DEADLINE)
+            step = ControlStep.RECEIVE
             try:
                 # No requests to a stopped process. Unsolicited/partial/EOF fails.
                 if self.normal.drain():
-                    self._latch()
+                    _fail(ControlCause.FRAME)
+                step = ControlStep.SCHEMA
                 first = self.witness[:]
                 second = self.witness[:]
                 expected = HEADER.pack(b'ADTRGATE', 1, PAGE_SIZE, 1, 0, 1, self.nonce)
                 if (first != second or len(first) != PAGE_SIZE or first[:HEADER.size] != expected
-                        or any(first[HEADER.size:]) or time.monotonic() >= deadline):
-                    self._latch()
-            except (OSError, ValueError, ControlFailure):
-                self._latch()
+                        or any(first[HEADER.size:])):
+                    _fail(ControlCause.FRAME)
+                if time.monotonic() >= deadline:
+                    _fail(ControlCause.DEADLINE)
+            except ControlFailure as error:
+                self._latch(operation, step, self._cause(error))
+            except OSError:
+                self._latch(operation, step, ControlCause.TRANSPORT)
+            except ValueError:
+                self._latch(operation, step, ControlCause.OTHER)
             return True
 
     def resume_and_release(self, abort=False):

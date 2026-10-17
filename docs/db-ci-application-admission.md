@@ -185,3 +185,26 @@ rebind and pin, release replay, retained limits, counter overflow and publicatio
 in flight. Existing real-PG tests additionally require clean Close to reclaim its
 ticket and native error closure to retain it. Exact-tree CI must still verify that
 fixture processing and the full capture/rescue chain now complete.
+
+### Capture-path closed diagnostics
+
+After reclamation, all three actual suites passed the fixture boundary that had
+exhausted capacity. Capture then failed: two reported `capture_readiness` with an
+unclassified reason, and one reported the unchanged capture deadline without a
+last-wait category. The existing sanitizer omitted registry/candidate fixed
+messages and treated the controller's exact ControlFailure subclass as unknown;
+these events therefore did not establish which capture check failed.
+
+The guard now maps every existing registry/checkpoint require message and uses
+closed substages for registry snapshot/matching, candidate binding/strict checks,
+pin and sealed observation. Deadline evidence includes the count of completed PG
+observations and the last fixed wait reason, including a pending task boundary or
+missing candidate. No additional observation or control request is issued.
+
+Controller diagnostics are accepted only from the exact owned ControlFailure
+class and an exact three-field mapping of enum-produced operation, step and cause.
+Unknown subclasses, malformed mappings, extra fields and arbitrary strings remain
+unclassified. Neither exception arguments nor private frames are serialized. This
+instrumentation retains the original absolute capture deadline, refusal behavior
+and recovery order. The next exact-tree CI must distinguish a target-chain mismatch,
+registry inconsistency, protocol rejection, or a checkpoint that never became ready.

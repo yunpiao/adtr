@@ -22,6 +22,7 @@ from urllib.parse import parse_qsl, urlsplit
 from types import MappingProxyType
 
 from user_asset_export_v3_worker_guard import OwnedExportWorkerGuard
+from owned_rescue_runner import ControlFailure, CONTROL_DIAGNOSTIC_VALUES
 
 ACTIVITY_SQL = """WITH observed AS (SELECT clock_timestamp() AS at)
 INSERT INTO adtr.system_worker_activity(tenant_id,worker_id,cycle,status,error_code,last_activity_at,last_success_at)
@@ -81,11 +82,40 @@ FAILURE_REASONS = MappingProxyType({
     'owned registry observation incomplete': 'registry_observation_incomplete',
     'owned connections still draining': 'registry_draining',
     'nonidle unclassified owned session': 'nonidle_session',
+    'invalid registry state': 'registry_state_invalid',
+    'ambiguous candidate identity': 'candidate_ambiguous',
+    'invalid candidate phase': 'candidate_phase_invalid',
+    'candidate backend unavailable': 'candidate_backend_unavailable',
+    'candidate activity chain mismatch': 'candidate_chain_mismatch',
+    'invalid registry counts': 'registry_counts_invalid',
+    'registry counts disagree': 'registry_counts_disagree',
+    'invalid registry record': 'registry_record_invalid',
+    'invalid registry generation': 'registry_generation_invalid',
+    'invalid registry lifecycle': 'registry_lifecycle_invalid',
+    'invalid pending registry entry': 'registry_pending_invalid',
+    'invalid registry backend': 'registry_backend_invalid',
+    'invalid registry candidate': 'registry_candidate_invalid',
+    'invalid registry candidate values': 'registry_candidate_values_invalid',
+    'registry not sealed for target': 'registry_target_unsealed',
+    'registry did not drain': 'registry_not_drained',
+    'registry target changed': 'registry_target_changed',
+    'registry and owned backends differ': 'registry_backend_set_mismatch',
+    'checkpoint may only run once': 'checkpoint_reused',
+    'CI admission controller required': 'controller_missing',
+    'invalid journal baseline': 'journal_baseline_invalid',
+    'checkpoint task is not isolated': 'checkpoint_not_isolated',
+    'stopped controller witness invalid': 'stopped_witness_invalid',
+    'stopped candidate identity changed': 'stopped_candidate_changed',
+    'pinned candidate changed': 'pinned_candidate_changed',
+    'checkpoint task boundary pending': 'task_boundary_pending',
+    'owned candidate registration absent': 'candidate_absent',
 })
 FAILURE_STAGES = frozenset({'preflight', 'observer_open', 'initial_observation',
     'initial_boundary', 'barrier_open', 'barrier_lock', 'resume', 'capture', 'capture_readiness',
     'stop_identity', 'stop_signal', 'all_threads', 'stopped_observation',
     'checkpoint_validation', 'session_validation', 'capture_window',
+    'registry_snapshot', 'registry_match', 'candidate_binding', 'candidate_strict',
+    'registry_pin', 'sealed_observation', 'sealed_registry',
     'barrier_release', 'cleanup', 'http_request'})
 RELATION_FAILURE_VALUES = MappingProxyType({
     'subreason': frozenset({'relation_not_allowlisted', 'lock_not_granted', 'mode_not_allowlisted'}),
@@ -221,6 +251,12 @@ def failure_event(stage, error):
     event = {'event': 'running_cancel_guard_failure',
              'stage': stage if stage in FAILURE_STAGES else 'unclassified',
              'reason': reason}
+    control = getattr(error, 'control_diagnostic', None) if type(error) is ControlFailure else None
+    if (type(control) is dict and set(control) == set(CONTROL_DIAGNOSTIC_VALUES) and
+            all(type(control[key]) is str and control[key] in values
+                for key, values in CONTROL_DIAGNOSTIC_VALUES.items())):
+        event['reason'] = 'controller_failure'
+        event.update({key: control[key] for key in CONTROL_DIAGNOSTIC_VALUES})
     detail = getattr(error, 'relation_diagnostic', None) if reason == 'unsafe_relation_lock' else None
     if (type(detail) is dict and set(detail) == set(RELATION_FAILURE_VALUES) | {'granted'}
             and type(detail['granted']) is bool and all(type(detail[key]) is str
@@ -246,8 +282,11 @@ def failure_event(stage, error):
         event.update(detail)
     pending = getattr(error, 'last_not_ready_error', None) if reason == 'capture_deadline_missed' else None
     if (type(pending) is RuntimeError and len(pending.args) == 1 and
-            type(pending.args[0]) is str and pending.args[0] in FREEZE_NOT_READY | {'owned registry observation incomplete', 'owned connections still draining'}):
+            type(pending.args[0]) is str and pending.args[0] in FREEZE_NOT_READY | {'owned registry observation incomplete', 'owned connections still draining', 'checkpoint task boundary pending', 'owned candidate registration absent'}):
         event['lastNotReady'] = failure_event('capture', pending)
+    observations = getattr(error, 'capture_observations', None) if reason == 'capture_deadline_missed' else None
+    if type(observations) is int and 0 <= observations <= 1000000:
+        event['observations'] = observations
     return event
 
 
@@ -811,9 +850,11 @@ class RunningExportCancelGuard:
             sealed_frame = None
             sample = None
             last_not_ready = None
+            observations = 0
             stage = 'capture'
             while time.monotonic() < deadline:
                 sample = observer.query(self.observe_sql(task_id), timeout=.5)
+                observations += 1
                 stage = 'capture_readiness'
                 pending = validate_running_observation(sample['sessions'], lock.pid)
                 if pending is not None:
@@ -823,25 +864,30 @@ class RunningExportCancelGuard:
                 if task and task['state'] == 'running' and task['progress'] == 10 and task['snapshotCount'] == 1:
                     stage = 'checkpoint_validation'
                     validate_checkpoint(task, task_id, worker_id, self.asset_kind)
-                    stage = 'capture_readiness'
+                    stage = 'registry_snapshot'
                     frame = self.controller.snapshot(deadline)
+                    stage = 'registry_match'
                     if not registry_matches_pg(frame, sample['sessions']):
                         last_not_ready = RuntimeError('owned registry observation incomplete')
                         stage = 'capture'
                         time.sleep(.002)
                         continue
                     if candidate is None:
+                        stage = 'candidate_binding'
                         candidate = registered_candidate(frame, task, sample['sessions'], lock.pid)
                         if candidate is None:
+                            last_not_ready = RuntimeError('owned candidate registration absent')
                             time.sleep(.002)
                             continue
                         # Only this exact existing candidate may be pinned. Its
                         # singleton sample must pass the unchanged strict rules.
+                        stage = 'candidate_strict'
                         target = next(row for row in sample['sessions'] if row['pid'] == candidate[1])
                         target_pending = validate_session_observation([target], lock.pid)
                         if target_pending is not None:
                             raise target_pending
                         validate_sessions([target], lock.pid)
+                        stage = 'registry_pin'
                         frame = self.controller.pin(candidate[0], deadline)
                     if frame['status'] != 'sealed':
                         last_not_ready = RuntimeError('owned connections still draining')
@@ -850,10 +896,13 @@ class RunningExportCancelGuard:
                         continue
                     # Admission remains shut. Re-sample PG after the registry
                     # sealed reply, then demand a complete bidirectional set.
+                    stage = 'sealed_observation'
                     sample = observer.query(self.observe_sql(task_id), timeout=.5)
+                    observations += 1
                     task = sample['task']
                     validate_checkpoint(task, task_id, worker_id, self.asset_kind)
                     validate_running_observation(sample['sessions'], lock.pid)
+                    stage = 'sealed_registry'
                     if not registry_matches_pg(frame, sample['sessions']):
                         last_not_ready = RuntimeError('owned registry observation incomplete')
                         stage = 'capture'
@@ -875,15 +924,19 @@ class RunningExportCancelGuard:
                         if issued >= deadline:
                             expired = RuntimeError('missed two-second activity checkpoint')
                             expired.last_not_ready_error = last_not_ready
+                            expired.capture_observations = observations
                             raise expired
                         self.stopped_at = issued
                         stage = 'stop_signal'
                         self.owned.process.send_signal(signal.SIGSTOP)
                     break
+                else:
+                    last_not_ready = RuntimeError('checkpoint task boundary pending')
                 time.sleep(.002)
             else:
                 expired = RuntimeError('missed two-second activity checkpoint')
                 expired.last_not_ready_error = last_not_ready
+                expired.capture_observations = observations
                 raise expired
             stage = 'all_threads'
             while time.monotonic() < issued + .5:
