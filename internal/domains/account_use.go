@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/yunpiao/adtr/internal/dbadmission"
 	"github.com/yunpiao/adtr/internal/schemaversion"
 	"github.com/yunpiao/adtr/internal/tasks"
 )
@@ -157,7 +158,7 @@ func (s *Store) ReconcileReservedAccountUses(ctx context.Context, cfg *pgx.ConnC
 	}
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	conn, err := pgx.ConnectConfig(ctx, cfg)
+	conn, err := dbadmission.ConnectConfig(ctx, cfg)
 	if err != nil {
 		return 0, err
 	}
@@ -206,7 +207,7 @@ func (s *Store) ReconcileReservedAccountUses(ctx context.Context, cfg *pgx.ConnC
 	return total, nil
 }
 
-func reconcileReservedAccountUse(ctx context.Context, conn *pgx.Conn, tenant, id string) (bool, error) {
+func reconcileReservedAccountUse(ctx context.Context, conn *dbadmission.Conn, tenant, id string) (bool, error) {
 	ctx, cancel := context.WithTimeout(ctx, time.Second)
 	defer cancel()
 	tx, err := conn.Begin(ctx)

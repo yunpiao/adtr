@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/yunpiao/adtr/internal/dbadmission"
 	"github.com/yunpiao/adtr/internal/tasks"
 )
 
@@ -13,7 +14,7 @@ const PollInterval = time.Second
 const CandidateLimit = 32
 const operationTimeout = 5 * time.Second
 
-func closeConnection(conn *pgx.Conn) {
+func closeConnection(conn *dbadmission.Conn) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	_ = conn.Close(ctx)
@@ -55,7 +56,7 @@ func (e *Engine) Tick(ctx context.Context) (int, error) {
 func (e *Engine) candidates(parent context.Context) ([]candidate, error) {
 	ctx, cancel := context.WithTimeout(parent, operationTimeout)
 	defer cancel()
-	conn, err := pgx.ConnectConfig(ctx, e.database.Copy())
+	conn, err := dbadmission.ConnectConfig(ctx, e.database.Copy())
 	if err != nil {
 		return nil, err
 	}
@@ -95,7 +96,7 @@ func (e *Engine) candidates(parent context.Context) ([]candidate, error) {
 func (e *Engine) admit(parent context.Context, c candidate) (bool, error) {
 	ctx, cancel := context.WithTimeout(parent, operationTimeout)
 	defer cancel()
-	conn, err := pgx.ConnectConfig(ctx, e.database.Copy())
+	conn, err := dbadmission.ConnectConfig(ctx, e.database.Copy())
 	if err != nil {
 		return false, err
 	}

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/yunpiao/adtr/internal/dbadmission"
 )
 
 type Engine struct {
@@ -441,7 +442,7 @@ func (e *Engine) RecoverTx(ctx context.Context, tx pgx.Tx, p Principal, id, key 
 func (e *Engine) transaction(ctx context.Context, fn func(context.Context, pgx.Tx) error) error {
 	ctx, cancel := operationContext(ctx)
 	defer cancel()
-	conn, err := pgx.ConnectConfig(ctx, e.database.Copy())
+	conn, err := dbadmission.ConnectConfig(ctx, e.database.Copy())
 	if err != nil {
 		return err
 	}
@@ -534,7 +535,7 @@ const operationTimeout = 5 * time.Second
 func operationContext(parent context.Context) (context.Context, context.CancelFunc) {
 	return context.WithTimeout(parent, operationTimeout)
 }
-func closeTaskConnection(conn *pgx.Conn) {
+func closeTaskConnection(conn *dbadmission.Conn) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	_ = conn.Close(ctx)

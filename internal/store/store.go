@@ -9,6 +9,7 @@ import (
 	"github.com/yunpiao/adtr/internal/audit"
 	"github.com/yunpiao/adtr/internal/auth"
 	"github.com/yunpiao/adtr/internal/credentialuse"
+	"github.com/yunpiao/adtr/internal/dbadmission"
 	"github.com/yunpiao/adtr/internal/domains"
 	"github.com/yunpiao/adtr/internal/messages"
 	"github.com/yunpiao/adtr/internal/operationaccounts"
@@ -23,7 +24,7 @@ const SchemaVersion = schemaversion.Current
 
 // Ready checks the schema, not just the TCP port. Each probe owns its connection.
 func Ready(ctx context.Context, config *pgx.ConnConfig) error {
-	conn, err := pgx.ConnectConfig(ctx, config.Copy())
+	conn, err := dbadmission.ConnectConfig(ctx, config.Copy())
 	if err != nil {
 		return errors.New("database unavailable")
 	}
@@ -47,7 +48,7 @@ func migrateTo(ctx context.Context, config *pgx.ConnConfig, target int) error {
 	if target < 1 || target > SchemaVersion {
 		return errors.New("unsupported migration target")
 	}
-	conn, err := pgx.ConnectConfig(ctx, config.Copy())
+	conn, err := dbadmission.ConnectConfig(ctx, config.Copy())
 	if err != nil {
 		return errors.New("migration connection failed")
 	}

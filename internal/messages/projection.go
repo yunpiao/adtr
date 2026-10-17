@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"github.com/jackc/pgx/v5"
+	"github.com/yunpiao/adtr/internal/dbadmission"
 	"os"
 	"time"
 )
@@ -84,7 +85,7 @@ func (s *Store) CleanupOnce(ctx context.Context) error {
 func (s *Store) transaction(parent context.Context, work func(context.Context, pgx.Tx) error) error {
 	ctx, cancel := context.WithTimeout(parent, CycleTimeout)
 	defer cancel()
-	conn, err := pgx.ConnectConfig(ctx, s.database)
+	conn, err := dbadmission.ConnectConfig(ctx, s.database)
 	if err != nil {
 		return err
 	}
