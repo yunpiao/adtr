@@ -439,6 +439,21 @@ class Contracts(unittest.TestCase):
             with self.assertRaises(r.ControlFailure):
                 r.diagnostic_projection(frame | mutation, 1)
 
+    def test_diagnostic_lifetime_total_may_exceed_retained_capacity(self):
+        # Pruned clean tickets leave a monotonic lifetime count; the live
+        # retained budget is a separate number, never a cap on total.
+        frame = {'version': 2, 'epoch': 1, 'seq': 1, 'kind': 'diagnostic',
+                 'reason': 'none', 'phase': 'open', 'pending': 0,
+                 'open': 1, 'total': 4097, 'retained': 1}
+        for total in (4097, 65536, 2 ** 64 - 1):
+            with self.subTest(total=total):
+                result = r.diagnostic_projection(frame | {'total': total}, 1)
+                self.assertEqual(result['total'], total)
+                self.assertEqual(result['retained'], 1)
+        for total in (2 ** 64, 2 ** 64 + 1, -1, True, '4097'):
+            with self.subTest(total=total), self.assertRaises(r.ControlFailure):
+                r.diagnostic_projection(frame | {'total': total}, 1)
+
     def test_failed_fixture_diagnostic_unarmed_running_only(self):
         import io
         import threading

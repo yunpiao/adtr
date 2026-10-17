@@ -69,6 +69,12 @@ func TestIntegrationWholeConnectionIncludesSecondTransaction(t *testing.T) {
 	if err := conn.Close(ctx); err != nil || !g.locallyDrained() {
 		t.Fatal("repeat wrapper Close changed accounting")
 	}
+	g.mu.Lock()
+	retained := len(g.tickets)
+	g.mu.Unlock()
+	if retained != 0 {
+		t.Fatal("clean Close and CleanupDone did not prune ticket")
+	}
 	for {
 		var present bool
 		if err := observer.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE pid=$1)", backend).Scan(&present); err != nil {
@@ -104,5 +110,11 @@ func TestIntegrationNativeBeginFailureCannotProveDrain(t *testing.T) {
 	_ = conn.Close(ctx)
 	if g.locallyDrained() {
 		t.Fatal("native error close counted as clean drain")
+	}
+	g.mu.Lock()
+	retained := len(g.tickets)
+	g.mu.Unlock()
+	if retained != 1 {
+		t.Fatal("native error ticket was pruned")
 	}
 }

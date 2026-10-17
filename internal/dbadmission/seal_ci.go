@@ -49,6 +49,12 @@ func (g *lifecycleGate) register(conn *Conn, identity ActivityIdentity) (func(),
 		g.mu.Unlock()
 		return nil, errSealProtocol
 	}
+	if g.next == ^uint64(0) {
+		g.invalidateBecauseLocked(invalidCapacity)
+		g.notifyLocked()
+		g.unlockAndPublishInvalid()
+		return nil, errSealProtocol
+	}
 	g.next++
 	registration := &activityRegistration{identity: identity, backend: ticket.backend, generation: g.next}
 	ticket.registration = registration

@@ -61,21 +61,20 @@ func TestDiagnosticFirstCauseStickyOrderAndClosedOutput(t *testing.T) {
 	}
 }
 
-func TestDiagnosticCapacityDoesNotRaiseOrResetLimit(t *testing.T) {
+func TestDiagnosticRetainedCapacityDoesNotRaiseOrResetLimit(t *testing.T) {
 	g := &lifecycleGate{witness: &diagnosticWitness{}}
 	for i := 0; i < 4096; i++ {
 		ticket, err := g.acquire(context.Background())
 		if err != nil {
 			t.Fatal("capacity changed")
 		}
-		attachTestTicket(ticket)
-		ticket.closed(true)
+		_ = ticket // Pending startup retains its place in the bounded registry.
 	}
 	if _, err := g.acquire(context.Background()); err != errAdmissionClosed {
 		t.Fatal("limit no longer fails closed")
 	}
 	d := g.applicationDiagnostic(1)
-	if d.Reason != invalidCapacity || d.Total != 4096 || d.Retained != 4096 || d.Open != 0 || d.Pending != 0 || d.Phase != "open" {
+	if d.Reason != invalidCapacity || d.Total != 4096 || d.Retained != 4096 || d.Open != 0 || d.Pending != 4096 || d.Phase != "open" {
 		t.Fatal("capacity evidence unavailable")
 	}
 	if _, err := g.acquire(context.Background()); err != errAdmissionClosed {

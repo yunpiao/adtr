@@ -88,7 +88,7 @@ func (g *lifecycleGate) acquire(ctx context.Context) (*lifecycleTicket, error) {
 			}
 			continue
 		}
-		if g.witness != nil && g.total >= 4096 {
+		if (g.witness != nil && len(g.tickets) >= 4096) || g.next == ^uint64(0) || g.total == ^uint64(0) {
 			g.invalidateBecauseLocked(invalidCapacity)
 			g.notifyLocked()
 			g.unlockAndPublishInvalid()
@@ -175,6 +175,10 @@ func (t *lifecycleTicket) closed(clean bool) {
 		g.notifyLocked()
 		return
 	}
+	// Inspect registration before clearing it. A closed candidate or any epoch
+	// target remains retained; its release callback/ACK may still refer to it.
+	prunable := clean && !g.invalid && t.registration == nil &&
+		(g.seal == nil || g.seal.target != t)
 	if !clean {
 		g.invalidateBecauseLocked(invalidUncleanClose)
 	} else if g.seal != nil && !g.seal.released && g.seal.target == t {
@@ -183,6 +187,14 @@ func (t *lifecycleTicket) closed(clean bool) {
 	g.open--
 	t.state = 'c'
 	t.registration = nil
+	if prunable {
+		// No invalid publisher exists while !g.invalid. The mutex serializes
+		// closure with pin, registration and complete snapshots. Preserve the
+		// ticket's unique generation/state for any stale local handle.
+		delete(g.tickets, t.generation)
+		t.conn = nil
+		t.backend = 0
+	}
 	g.notifyLocked()
 }
 

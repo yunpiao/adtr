@@ -71,10 +71,10 @@ overall failed test. Capture-time proof is not permission to suppress that
 terminal result. Final witness validation happens only after worker Wait.
 Simultaneous loss of both parent and rescuer is not claimed recoverable here.
 
-This is a finite CI process: at most 4096 lifetime tickets may be allocated.
-Closed ticket references are retained until process exit, preserving replay and
-identity consistency within this hard bound; long-running production installation
-would require a separately reviewed reclamation policy. The child's page stays
+This is a finite CI process: at most 4096 tickets may remain retained at once.
+Proven clean, unregistered, non-epoch terminal tickets are reclaimed as detailed
+below; unresolved and epoch-referenced tickets remain until process exit.
+Long-running production installation is outside this CI-only policy. The child's page stays
 mapped to process exit so invalidators never retain an unmapped pointer. The
 parent disposes its mapping only after Wait.
 
@@ -136,11 +136,12 @@ are immediate and no further capture attempt is allowed.
 
 PR173's first application run reached worker readiness in all three running-cancel
 suites, then fixture directory tasks remained queued. The worker was still alive
-before cleanup; its cleanup exit code was 1. These facts do not identify the first
-invalidating branch. The lifetime allocation limit of 4096 is a source-supported
+before cleanup; its cleanup exit code was 1. At that point those facts did not identify the first
+invalidating branch. The lifetime allocation limit of 4096 was a source-supported
 hypothesis because four 250 ms polling slots and background work continually open
 connections during the multi-minute fixture. Failed connection startup or unclean
-connection closure can also invalidate the same pre-pin gate.
+connection closure can also invalidate the same pre-pin gate; the subsequent
+closed diagnosis below confirmed the capacity branch for these failures.
 
 The private normal channel therefore supports a separate `diagnostic` operation.
 It returns only the first closed reason, its phase and current pending/open/total/
@@ -154,5 +155,33 @@ only while the worker is alive, unarmed, unreleased, identity-verified and all i
 threads are running. Otherwise it records `unavailable` and proceeds to cleanup.
 It never waits for this request on a stopped worker, uses the sole reader mutex
 and sequence, and prints only the closed fields. The diagnostic is not admission
-or capture evidence. Neither the 4096 limit, sticky failure policy nor fixture's
-30-second expectation is changed; the next exact-tree CI must establish the cause.
+or capture evidence. That diagnostic-only change preserved the 4096 limit, sticky failure policy and
+fixture's 30-second expectation. The subsequent exact-tree CI established the cause below.
+
+### Confirmed retained-ticket exhaustion and safe reclamation
+
+The next PR173 run recorded the same first cause in all three real suites:
+capacity, phase open, pending/open zero, total/retained 4096. This establishes
+that completed lifetimes retained by the registry exhausted its cumulative cap
+before capture. The capacity now remains 4096 retained tickets, rather than 4096
+successful lifetime allocations. The cumulative diagnostic count remains monotonic
+and may exceed 4096; both it and the shared generation counter fail closed before
+uint64 overflow.
+
+A ticket is reclaimed only on the existing clean Close result (native connection
+was not already closed, Close returned no error and CleanupDone is complete),
+while the gate is valid, its original registration is nil and it is not the target
+of any epoch, including a released epoch. Under the same registry mutex, accounting
+and terminal state are updated, the ticket is deleted, and connection/backend
+references are cleared. Failed, dirty, active, pending, closing, still-registered
+and epoch-target tickets remain retained. Invalidation is permanent; an in-flight
+invalid publisher therefore prevents reclamation. Neither the sticky bit nor the
+first failure is cleared.
+
+A revoked but never-pinned candidate may be reclaimed after clean Close. Its stale
+release closure only compares the old ticket's registration pointer, and cannot
+change a new ticket; generations never repeat. Tests cover stale revoke, attempted
+rebind and pin, release replay, retained limits, counter overflow and publication
+in flight. Existing real-PG tests additionally require clean Close to reclaim its
+ticket and native error closure to retain it. Exact-tree CI must still verify that
+fixture processing and the full capture/rescue chain now complete.
