@@ -4,6 +4,9 @@ No attach API: the runner creates the worker, anonymous page and rescue sibling.
 Runtime tests involving processes/signals run only in the isolated Linux CI job.
 """
 import json
+import base64
+import hashlib
+import re
 from enum import Enum
 from types import MappingProxyType
 import mmap
@@ -25,6 +28,9 @@ class ControlFailure(RuntimeError):
 
 class ControlOperation(Enum):
     ARM = 'arm'
+    PREPARE_SELECTION = 'prepare_selection'
+    CONFIGURE_TARGET = 'configure_target'
+    FINISH_TARGET = 'finish_target'
     SNAPSHOT = 'snapshot'
     PIN = 'pin'
     AFTER_STOP = 'after_stop'
@@ -286,11 +292,13 @@ def _frame(frame, seq=None):
         if candidate is not None:
             if (not isinstance(candidate, dict) or set(candidate) != {
                     'generation', 'taskID', 'kind', 'attempt', 'leaseOwner',
-                    'fencingToken', 'resultVersion', 'phase'}
+                    'fencingToken', 'resultVersion', 'phase', 'activityKey'}
                     or not all(_int(candidate[k], 1) for k in (
                         'generation', 'attempt', 'fencingToken', 'resultVersion'))
                     or not all(isinstance(candidate[k], str) and 0 < len(candidate[k]) <= 256
                                for k in ('taskID', 'kind', 'leaseOwner'))
+                    or type(candidate['activityKey']) is not str
+                    or re.fullmatch(r'[a-z0-9_-]{1,64}', candidate['activityKey']) is None
                     or candidate['phase'] != 'first-fenced-progress-10'):
                 _fail(ControlCause.FRAME)
     return frame
@@ -341,6 +349,7 @@ class WorkerController:
         self.seq = 0
         self.invalid = False
         self.armed = self.released = False
+        self.selection_prepared = self.target_sent = self.target_finished = False
         self.mutex = threading.RLock()
 
     def _latch(self, operation=None, step=ControlStep.STATE, cause=ControlCause.STATE):
@@ -367,6 +376,77 @@ class WorkerController:
         except (OSError, ControlFailure):
             self._latch()
 
+    def _configuration_ack(self, deadline, operation):
+        step = ControlStep.RECEIVE
+        try:
+            response = self.normal.receive(deadline)
+            step = ControlStep.SCHEMA
+            frame = _frame(response, self.seq)
+            step = ControlStep.REPLY
+            if frame['kind'] != 'reply' or frame['status'] != 'open':
+                _fail(ControlCause.STATE)
+            return frame
+        except ControlFailure as error:
+            self._latch(operation, step, self._cause(error))
+        except OSError:
+            self._latch(operation, step, ControlCause.TRANSPORT)
+
+    def prepare_selection(self, kind, deadline):
+        """Live-worker handshake before the existing queued pause."""
+        operation = ControlOperation.PREPARE_SELECTION
+        with self.mutex:
+            if self.invalid or self.armed or self.released or self.selection_prepared:
+                self._latch(operation)
+            if type(kind) is not str or kind not in (
+                    'user_assets.v3.export', 'group_assets.v3.export',
+                    'computer_assets.v3.export'):
+                self._latch(operation, ControlStep.SCHEMA, ControlCause.FRAME)
+            self.selection_prepared = True  # No replay even if send/ACK fails.
+            self.seq += 1
+            try:
+                self.normal.send({'version': 2, 'epoch': 1, 'seq': self.seq,
+                                  'op': 'prepare_selection', 'kind': kind}, deadline)
+            except ControlFailure as error:
+                self._latch(operation, ControlStep.SEND, self._cause(error))
+            except OSError:
+                self._latch(operation, ControlStep.SEND, ControlCause.TRANSPORT)
+            return self._configuration_ack(deadline, operation)
+
+    def prepare_target(self, task_id, worker_id, deadline):
+        """Queue one frame while stopped; NEVER wait for the stopped worker."""
+        operation = ControlOperation.CONFIGURE_TARGET
+        with self.mutex:
+            if (self.invalid or self.armed or self.released or not self.selection_prepared
+                    or self.target_sent):
+                self._latch(operation)
+            if (type(task_id) is not str or re.fullmatch(r'[A-Za-z0-9_.:-]{1,128}', task_id) is None
+                    or type(worker_id) is not str
+                    or re.fullmatch(r'[a-z0-9_-]{1,64}', worker_id) is None):
+                self._latch(operation, ControlStep.SCHEMA, ControlCause.FRAME)
+            self.target_sent = True
+            self.seq += 1
+            try:
+                self.normal.send({'version': 2, 'epoch': 1, 'seq': self.seq,
+                                  'op': 'configure_target', 'taskID': task_id,
+                                  'workerID': worker_id}, deadline)
+            except ControlFailure as error:
+                self._latch(operation, ControlStep.SEND, self._cause(error))
+            except OSError:
+                self._latch(operation, ControlStep.SEND, ControlCause.TRANSPORT)
+            digest = hashlib.sha256(b'adtr-ci-activity-v1\x00' + self.nonce + b'\x00'
+                                    + task_id.encode('utf-8')).digest()
+            return 'ci-activity-' + base64.b32encode(digest).decode('ascii').lower().rstrip('=')
+
+    def finish_target(self, deadline):
+        """Read the queued configuration ACK after CONT, within the original deadline."""
+        operation = ControlOperation.FINISH_TARGET
+        with self.mutex:
+            if (self.invalid or not self.armed or self.released or not self.target_sent
+                    or self.target_finished):
+                self._latch(operation)
+            self.target_finished = True
+            return self._configuration_ack(deadline, operation)
+
     def arm(self, deadline):
         operation = ControlOperation.ARM
         with self.mutex:
@@ -390,7 +470,8 @@ class WorkerController:
     def _request(self, op, deadline, target=None):
         operation = ControlOperation(op)
         with self.mutex:
-            if self.invalid or not self.armed or self.released:
+            if (self.invalid or not self.armed or self.released
+                    or (self.target_sent and not self.target_finished)):
                 self._latch(operation)
             self.seq += 1
             request = {'version': 2, 'epoch': 1, 'seq': self.seq, 'op': op}
@@ -552,11 +633,11 @@ class OwnedCIWorker:
         locked = False
         try:
             c = self.controller
-            if (c is None or c.armed or c.released or self.process.poll() is not None
+            if (c is None or c.armed or c.released or c.target_sent or self.process.poll() is not None
                     or not self.identity.threads_running()):
                 _fail()
             locked = c.mutex.acquire(timeout=.02)
-            if not locked or c.armed or c.released or not self.identity.threads_running():
+            if not locked or c.armed or c.released or c.target_sent or not self.identity.threads_running():
                 _fail()
             deadline = time.monotonic() + .2
             c.seq += 1

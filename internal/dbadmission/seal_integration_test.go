@@ -64,7 +64,7 @@ func TestSealIntegrationExistingTargetAndSecondBegin(t *testing.T) {
 		t.Fatal("target connect failed")
 	}
 	defer target.Close(context.Background())
-	release, err := RegisterActivityIdentity(target, testSealIdentity())
+	release, _, err := RegisterActivityIdentity(target, testSealIdentity(), "candidate-worker")
 	if err != nil {
 		t.Fatal("candidate failed")
 	}
@@ -236,7 +236,7 @@ func TestSealIntegrationCanceledQueryCleanupPoisonsAttempt(t *testing.T) {
 		t.Fatal("target failed")
 	}
 	defer target.Close(context.Background())
-	revoke, err := RegisterActivityIdentity(target, testSealIdentity())
+	revoke, _, err := RegisterActivityIdentity(target, testSealIdentity(), "candidate-worker")
 	if err != nil {
 		t.Fatal("registration failed")
 	}

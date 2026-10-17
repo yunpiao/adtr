@@ -270,6 +270,9 @@ func criticalDeclarations(fset *token.FileSet, path string, files []*ast.File, i
 						return true
 					}
 					pkg := obj.Pkg().Path()
+					if function, ok := obj.(*types.Func); ok && pkg == managed && protectedSelectionOperation(function) && !allowedSelectionCaller(path, filename, name, function.Name(), x, ancestors) {
+						emit(x, "activity selection capability outside its exact synchronous caller")
+					}
 					if function, ok := obj.(*types.Func); ok && pkg == managed {
 						signature := callableSignature(function.Type())
 						if signature != nil && signature.Recv() != nil && isNamed(signature.Recv().Type(), managed, "lifecycleGate") {
@@ -421,4 +424,38 @@ func constantInvalidationCall(id *ast.Ident, ancestors []ast.Node, info *types.I
 }
 func exactDiagnosticInvalidation(fn *ast.FuncDecl) bool {
 	return fn != nil && fn.Body != nil && len(fn.Body.List) == 3 && compactSource(fn.Body.List[0]) == "phase:=g.diagnosticPhaseLocked()" && compactSource(fn.Body.List[1]) == "g.markInvalidLocked()" && compactSource(fn.Body.List[2]) == `ifg.firstInvalidReason==""{g.firstInvalidReason=reasong.firstInvalidPhase=phase}`
+}
+
+func protectedSelectionOperation(function *types.Func) bool {
+	signature := callableSignature(function.Type())
+	if signature == nil {
+		return false
+	}
+	if signature.Recv() == nil {
+		return function.Name() == "activityRowKey"
+	}
+	if !isNamed(signature.Recv().Type(), managed, "lifecycleGate") {
+		return false
+	}
+	switch function.Name() {
+	case "prepareActivitySelection", "configureActivitySelection", "awaitActivitySelection", "registerActivityRow":
+		return true
+	}
+	return false
+}
+func allowedSelectionCaller(path, file, function, operation string, id *ast.Ident, ancestors []ast.Node) bool {
+	if path != managed || directCallFor(id, ancestors) == nil {
+		return false
+	}
+	switch operation {
+	case "prepareActivitySelection", "configureActivitySelection":
+		return file == "application_controller_ci.go" && function == "serveApplicationNormal"
+	case "awaitActivitySelection":
+		return file == "activity_selection_ci.go" && function == "AwaitActivitySelection"
+	case "registerActivityRow":
+		return file == "activity_identity_ci.go" && function == "RegisterActivityIdentity"
+	case "activityRowKey":
+		return file == "activity_selection_ci.go" && function == "lifecycleGate.configureActivitySelection"
+	}
+	return false
 }

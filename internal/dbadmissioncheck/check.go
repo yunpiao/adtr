@@ -82,7 +82,7 @@ func Check(fset *token.FileSet, path string, files []*ast.File, info *types.Info
 					obj := info.Uses[id]
 					if obj != nil && obj.Pkg() != nil {
 						p := obj.Pkg().Path()
-						if protectedActivityOperation(p, obj.Name()) && !allowedActivityCaller(path, filepath.Base(fset.Position(file.Pos()).Filename), name, p, obj.Name()) {
+						if protectedActivityOperation(p, obj.Name()) && (!allowedActivityCaller(path, filepath.Base(fset.Position(file.Pos()).Filename), name, p, obj.Name()) || ((obj.Name() == "AwaitActivityCandidate" || obj.Name() == "AwaitActivitySelection") && directCallFor(id, ancestors) == nil)) {
 							emit(id, "activity identity mint or registration outside exact caller")
 						}
 
@@ -407,14 +407,16 @@ func configurationReadField(name string) bool {
 }
 
 func protectedActivityOperation(path, name string) bool {
-	return (path == module+"/internal/tasks" && (name == "mintActivityCandidate" || name == "BindActivityCandidate")) || (path == managed && name == "RegisterActivityIdentity")
+	return (path == module+"/internal/tasks" && (name == "mintActivityCandidate" || name == "BindActivityCandidate" || name == "AwaitActivityCandidate")) || (path == managed && (name == "RegisterActivityIdentity" || name == "AwaitActivitySelection"))
 }
 func allowedActivityCaller(path, file, function, target, operation string) bool {
 	switch operation {
 	case "mintActivityCandidate":
 		return target == module+"/internal/tasks" && path == target && file == "activity_candidate_ci.go" && function == "Engine.withActivityCandidate"
-	case "BindActivityCandidate":
+	case "BindActivityCandidate", "AwaitActivityCandidate":
 		return target == module+"/internal/tasks" && path == module+"/internal/systemhealth" && file == "persistence_store.go" && function == "Store.withActivityTx"
+	case "AwaitActivitySelection":
+		return target == managed && path == module+"/internal/tasks" && file == "activity_candidate_ci.go" && function == "AwaitActivityCandidate"
 	case "RegisterActivityIdentity":
 		return target == managed && path == module+"/internal/tasks" && file == "activity_candidate_ci.go" && function == "BindActivityCandidate"
 	}

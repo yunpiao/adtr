@@ -1,10 +1,11 @@
 """CI-only, first-asset-export checkpoint barrier. Never imported by production.
 
-Only SELECT FOR UPDATE of the pre-existing owned queue activity row mutates
-lock state. Persistent psql sessions avoid docker startup in the 2s callback.
+A nonce/task-specific synthetic failure row isolates the CI activity barrier.
+Only its exact owned row is inserted, locked and removed after worker Wait. Persistent psql sessions avoid docker startup in the 2s callback.
 All identifiers are validated; credentials are never accepted or serialized.
 """
 import hashlib
+import base64
 import hmac
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
@@ -86,6 +87,11 @@ FAILURE_REASONS = MappingProxyType({
     'ambiguous candidate identity': 'candidate_ambiguous',
     'invalid candidate phase': 'candidate_phase_invalid',
     'candidate backend unavailable': 'candidate_backend_unavailable',
+    'activity selection not prepared': 'activity_selection_unprepared',
+    'activity selection preparation failed': 'activity_selection_failed',
+    'activity fixture insertion failed': 'activity_fixture_failed',
+    'activity alias mismatch': 'activity_alias_mismatch',
+    'activity fixture cleanup failed': 'activity_cleanup_failed',
     'candidate activity chain mismatch': 'candidate_chain_mismatch',
     'candidate activity not ready': 'candidate_activity_pending',
     'selected candidate changed': 'selected_candidate_changed',
@@ -679,11 +685,12 @@ def candidate_identity(frame, task, sessions):
         if candidate is None:
             continue
         if all(candidate[key] == task[key] for key in keys):
-            require(candidate['phase'] == 'first-fenced-progress-10', 'invalid candidate phase')
+            require(candidate['phase'] == 'first-fenced-progress-10' and
+                    type(candidate['activityKey']) is str and re.fullmatch('[a-z0-9_-]{1,64}', candidate['activityKey']), 'invalid candidate phase')
             require(record['state'] == 'open' and record['backend'] in by_pid,
                     'candidate backend unavailable')
             matches.append((candidate['generation'], record['backend'], record['generation'],
-                            *(candidate[key] for key in keys), candidate['phase']))
+                            *(candidate[key] for key in keys), candidate['phase'], candidate['activityKey']))
     require(len(matches) <= 1, 'ambiguous candidate identity')
     return matches[0] if matches else None
 
@@ -693,10 +700,12 @@ def activity_direct(row, lock_pid):
             row['transaction'] is True and lock_pid in row['blockers'])
 
 
-def registered_candidate(frame, task, sessions, lock_pid):
+def registered_candidate(frame, task, sessions, lock_pid, activity_key=None):
     identity = candidate_identity(frame, task, sessions)
     if identity is None:
         return None
+    if activity_key is not None:
+        require(identity[-1] == activity_key, 'activity alias mismatch')
     row = next(row for row in sessions if row['pid'] == identity[1])
     require(activity_direct(row, lock_pid), 'candidate activity chain mismatch')
     return identity[:2]
@@ -764,12 +773,13 @@ def registry_matches_pg(frame, sessions):
         candidate = record['candidate']
         if candidate is not None:
             require(type(candidate) is dict and set(candidate) == {'generation', 'taskID', 'kind', 'attempt',
-                    'leaseOwner', 'fencingToken', 'resultVersion', 'phase'}, 'invalid registry candidate')
+                    'leaseOwner', 'fencingToken', 'resultVersion', 'phase', 'activityKey'}, 'invalid registry candidate')
             require(all(type(candidate[k]) is int and candidate[k] > 0 for k in
                         ('generation', 'attempt', 'fencingToken', 'resultVersion')) and
                     candidate['generation'] not in registrations and
                     all(type(candidate[k]) is str and 0 < len(candidate[k]) <= 256 for k in
-                        ('taskID', 'kind', 'leaseOwner')) and candidate['phase'] == 'first-fenced-progress-10',
+                        ('taskID', 'kind', 'leaseOwner')) and candidate['phase'] == 'first-fenced-progress-10' and
+                    type(candidate['activityKey']) is str and re.fullmatch('[a-z0-9_-]{1,64}', candidate['activityKey']),
                     'invalid registry candidate values')
             registrations.add(candidate['generation'])
     require(frame['pending'] == pending and frame['open'] == opened, 'registry counts disagree')
@@ -799,6 +809,11 @@ class RunningExportCancelGuard:
         self.controller = controller
         self.journal_baseline = None
         self.checkpoint_task_id = None
+        self.prepared = False
+        self.activity_key = None
+        self.activity_fixture_created = False
+        self.activity_owner = None
+        self.nonce = bytes.fromhex(nonce)
         self.owned = OwnedExportWorkerGuard(process, nonce, binary, proc_root)
         require(application_name == 'adtr-user-export-' + nonce and re.fullmatch('[0-9a-f]{32}', nonce), 'invalid application identity')
         self.application_name, self.container = application_name, database_container
@@ -869,10 +884,58 @@ class RunningExportCancelGuard:
  'classid',l.classid::text,'objid',l.objid::text,'objsubid',l.objsubid)) FROM pg_locks l WHERE l.pid=a.pid),'[]'::jsonb)))
  FROM pg_stat_activity a WHERE datname=current_database() AND application_name='{self.application_name}'),'[]'::jsonb))"""
 
+    def prepare(self):
+        require(not self.prepared and not self.used and self.controller is not None,
+                'activity selection preparation failed')
+        require(all(state not in ('T', 't') for state in self.threads()), 'activity selection preparation failed')
+        observer = Psql(self.container, True)
+        try:
+            count = observer.query("SELECT to_json(count(*)) FROM adtr.tasks WHERE state IN ('queued','running','retry_wait','cancel_requested')")
+            require(type(count) is int and count == 0, 'activity selection preparation failed')
+        finally:
+            observer.close()
+        self.controller.prepare_selection(export_kind(self.asset_kind)[0], time.monotonic() + 2.0)
+        self.prepared = True
+        return {'prepared': True}
+
+    def prepare_activity_fixture(self, observer, task_id, worker_id):
+        key = self.controller.prepare_target(task_id, worker_id, time.monotonic() + .5)
+        expected = 'ci-activity-' + base64.b32encode(hashlib.sha256(
+            b'adtr-ci-activity-v1\x00' + self.nonce + b'\x00' + task_id.encode('utf-8')).digest()).decode('ascii').lower().rstrip('=')
+        require(type(key) is str and key == expected and len(key) == 64 and key != worker_id,
+                'activity alias mismatch')
+        self.activity_key, self.activity_owner = key, worker_id
+        # A committed synthetic FAILURE sentinel never fabricates healthy state.
+        # An existing/colliding row is never overwritten or later deleted.
+        count = observer.query("WITH inserted AS (INSERT INTO adtr.system_worker_activity(tenant_id,worker_id,cycle,status,error_code,last_success_at) VALUES('default','" + key + "','queue','failure','cycle_failed',NULL) RETURNING 1) SELECT to_json(count(*)) FROM inserted")
+        require(type(count) is int and count == 1, 'activity fixture insertion failed')
+        self.activity_fixture_created = True
+
+    def cleanup_activity_fixture_after_wait(self, worker_exit_code):
+        if not self.activity_fixture_created:
+            return
+        require(type(worker_exit_code) is int and self.owned.process.poll() is not None,
+                'activity fixture cleanup failed')
+        key, owner = identifier(self.activity_key), identifier(self.activity_owner)
+        # identifier validates in place and returns the string.
+        observer = Psql(self.container, True)
+        try:
+            count = observer.query("WITH removed AS (DELETE FROM adtr.system_worker_activity WHERE tenant_id='default' AND worker_id='" + key + "' AND cycle='queue' AND last_success_at IS NULL AND ((status='failure' AND error_code='cycle_failed') OR (status='progress' AND error_code='')) RETURNING 1) SELECT to_json(count(*)) FROM removed")
+            require(type(count) is int and count == 1, 'activity fixture cleanup failed')
+            verified = observer.query("SELECT jsonb_build_object('remaining',(SELECT count(*) FROM adtr.system_worker_activity WHERE tenant_id='default' AND worker_id='" + key + "'),'ordinary',(SELECT count(*) FROM adtr.system_worker_activity WHERE tenant_id='default' AND worker_id='" + owner + "' AND cycle='queue'))")
+            require(type(verified) is dict and set(verified) == {'remaining', 'ordinary'} and
+                    all(type(verified[key]) is int for key in verified) and
+                    verified == {'remaining': 0, 'ordinary': 1},
+                    'activity fixture cleanup failed')
+            self.activity_fixture_created = False
+        finally:
+            observer.close()
+
     def checkpoint(self, task_id, worker_id):
         identifier(task_id); identifier(worker_id)
         require(not self.used and not self.failed, 'checkpoint may only run once')
         self.used = True
+        require(self.prepared, 'activity selection not prepared')
         require(all(s == 'T' for s in self.threads()), 'initial strict queued pause required')
         lock = observer = None
         stage = 'observer_open'
@@ -890,10 +953,11 @@ class RunningExportCancelGuard:
             require(initial['task'] and initial['task']['kind'] == export_kind(self.asset_kind)[0] and initial['task']['state'] == 'queued' and initial['task']['attempt'] == 0
                     and initial['task']['snapshotCount'] == 0 and
                     all(not s['transaction'] for s in initial['sessions']), 'initial queued transaction-free boundary missed')
+            self.prepare_activity_fixture(observer, task_id, worker_id)
             stage = 'barrier_open'
             lock = Psql(self.container, False)
             stage = 'barrier_lock'
-            locked = lock.query("BEGIN; SELECT jsonb_build_object('count',count(*)) FROM (SELECT worker_id FROM adtr.system_worker_activity WHERE tenant_id='default' AND worker_id='" + worker_id + "' AND cycle='queue' FOR UPDATE) owned")
+            locked = lock.query("BEGIN; SELECT jsonb_build_object('count',count(*)) FROM (SELECT worker_id FROM adtr.system_worker_activity WHERE tenant_id='default' AND worker_id='" + self.activity_key + "' AND cycle='queue' FOR UPDATE) owned")
             require(locked['count'] == 1, 'exact pre-existing activity row required')
             observer_started = time.monotonic()
             stage = 'resume'
@@ -901,6 +965,7 @@ class RunningExportCancelGuard:
             resumed = time.monotonic()
             deadline = resumed + 1.5  # fail closed before the production 2s callback expires
             self.controller.arm(deadline)
+            self.controller.finish_target(deadline)
             candidate = None
             selected_identity = None
             sealed_frame = None
@@ -944,6 +1009,7 @@ class RunningExportCancelGuard:
                             last_not_ready = RuntimeError('owned candidate registration absent')
                             time.sleep(.002)
                             continue
+                        require(identity[-1] == self.activity_key, 'activity alias mismatch')
                         if selected_identity is None:
                             selected_identity = identity
                         require(identity == selected_identity, 'selected candidate changed')
@@ -987,7 +1053,7 @@ class RunningExportCancelGuard:
                         stage = 'capture'
                         time.sleep(.002)
                         continue
-                    require(registered_candidate(frame, task, sample['sessions'], lock.pid) == candidate,
+                    require(registered_candidate(frame, task, sample['sessions'], lock.pid, self.activity_key) == candidate,
                             'pinned candidate changed')
                     validate_sealed_registry(frame, candidate, sample['sessions'])
                     sealed_frame = frame
@@ -1035,7 +1101,7 @@ class RunningExportCancelGuard:
                 raise pending
             sessions, blocked, txs = validate_sessions(sample['sessions'], lock.pid)
             validate_sealed_registry(sealed_frame, candidate, sample['sessions'])
-            require(registered_candidate(sealed_frame, sample['task'], sample['sessions'], lock.pid) == candidate,
+            require(registered_candidate(sealed_frame, sample['task'], sample['sessions'], lock.pid, self.activity_key) == candidate,
                     'stopped candidate identity changed')
             stage = 'capture_window'
             require(time.monotonic() < deadline, 'activity checkpoint exceeded safe callback window')
@@ -1105,7 +1171,9 @@ class RunningExportCancelGuard:
                     length = int(self.headers.get('Content-Length', '0'))
                     require(0 < length <= 1024 and self.headers.get('Transfer-Encoding') is None, 'invalid control body')
                     data = json.loads(self.rfile.read(length))
-                    if self.path == '/checkpoint' and set(data) == {'taskID', 'workerID'}:
+                    if self.path == '/prepare' and data == {}:
+                        result = guard.prepare()
+                    elif self.path == '/checkpoint' and set(data) == {'taskID', 'workerID'}:
                         result = guard.checkpoint(data['taskID'], data['workerID'])
                     elif self.path == '/resume' and data == {}:
                         result = guard.resume()

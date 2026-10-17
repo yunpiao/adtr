@@ -38,12 +38,12 @@ func TestActivityCandidateRealCommittedAttempt(t *testing.T) {
 				if !ok || f.snapshot(task.ID).ResultVersion != lease.Task.ResultVersion+1 || f.snapshot(task.ID).Progress != 10 {
 					t.Fatal("candidate preceded durable fenced commit")
 				}
-				release, err := BindActivityCandidate(candidate, conn, "candidate-worker")
+				release, _, err := BindActivityCandidate(candidate, conn, "candidate-worker")
 				if err != nil {
 					t.Fatal("candidate bind failed")
 				}
 				defer release()
-				if _, err := BindActivityCandidate(candidate, conn, "candidate-worker"); err == nil {
+				if _, _, err := BindActivityCandidate(candidate, conn, "candidate-worker"); err == nil {
 					t.Fatal("candidate bound twice")
 				}
 			}
@@ -64,7 +64,7 @@ func TestActivityCandidateRealCommittedAttempt(t *testing.T) {
 			}
 			// This synthetic commit intentionally has no exporter snapshot table:
 			// the proof is candidate identity, never snapshot/capture eligibility.
-			if _, err := BindActivityCandidate(seen, conn, "candidate-worker"); err == nil {
+			if _, _, err := BindActivityCandidate(seen, conn, "candidate-worker"); err == nil {
 				t.Fatal("callback-return candidate remained eligible")
 			}
 			if _, err := e.withActivityCandidate(f.ctx, lease, version, nil, activity); err == nil || calls != 1 {
@@ -123,7 +123,7 @@ func TestActivityCandidateRevokedWhenCallbackSkipsOrPanics(t *testing.T) {
 			if seen == nil || !seen.revoked || seen.consumed || panicked != panicCallback {
 				t.Fatal("unconsumed callback candidate survived its scope")
 			}
-			if _, err := BindActivityCandidate(seen, nil, "candidate-worker"); err == nil {
+			if _, _, err := BindActivityCandidate(seen, nil, "candidate-worker"); err == nil {
 				t.Fatal("returned callback candidate was reusable")
 			}
 		})

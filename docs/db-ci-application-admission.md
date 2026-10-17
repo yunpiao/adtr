@@ -236,3 +236,58 @@ classify only query/state/wait enums, transaction boolean, and blocker category
 from the already sampled data. No identifier, query text, new RPC, or extra window
 is introduced. Actual CI must determine whether early observation or an indirect
 chain caused the recorded failures.
+
+### Selected-task CI activity row (shared-row obstruction)
+
+Run 39041724007 established a persistent indirect owned activity chain for the
+computer and user cases (238 and 243 observations respectively); neither pinned
+or stopped the worker. The group case expired while sending a snapshot request,
+which does not independently establish that chain. A shared activity-row barrier
+can hold an earlier ordinary callback while the target waits behind it. Requiring
+all non-target lifetimes to close while holding that barrier is then unsatisfiable.
+
+The three CI suites now prepare selection while the worker is live, before the
+existing queued pause. Preparation requires no nonterminal tasks and receives an
+ACK. Only candidate-bearing health callbacks await configuration, before any
+connection/ticket/BEGIN; ordinary queue/recovery/scheduler/heartbeat calls retain
+the original path. Once the task is created during queued STOP, the parent sends
+one configuration without waiting for a stopped process. After CONT, configuration
+ACK and all capture work share the unchanged absolute 1.5-second window. Invalid,
+repeated, cancelled, or broken configuration fails closed. A candidate that was
+waiting during preparation but does not match the selected task invalidates the
+attempt; ordinary unselected callbacks are not made barrier participants.
+
+For an installed controller and the selected, consumed authoritative proof only,
+the actual activity SQL receives a 64-byte key:
+`ci-activity-` plus lowercase, unpadded Base32 of SHA-256 over the fixed bytes
+`adtr-ci-activity-v1\0`, the 16-byte launch nonce, `\0`, and the UTF-8 task ID.
+Python and Go share a fixed cross-language vector. The original worker owner still
+checks slot ownership. Task/kind/attempt/fence/commit-version/phase remain unchanged.
+The registration generation includes the actual SQL key in private IPC; the parent
+independently derives and matches it. Configuration cannot be replayed after a
+registration has consumed the selection. Journal events, throttling, callback
+identity, default builds, and tagged builds without an installed controller keep
+the original worker identity. This is an explicit CI parameter variant, not a
+claim that production writes use the alias.
+
+Before CONT, the harness commits one synthetic `failure/cycle_failed` queue row,
+rejecting any insertion collision without overwriting it. It then locks exactly
+that row. All ordinary activity writes remain on their original row and can finish;
+the target uses the unchanged ACTIVITY_SQL, transaction and schema-check sequence.
+No SQL or frozen lock allowlist is enlarged. The original strict direct-chain,
+unique retained target, complete PG/registry equality, all-thread STOP and sticky
+checks remain necessary. The sentinel deliberately causes the real health reader
+to report `unavailable/worker_cycle_failed` during this isolated CI interval; it
+must not fabricate success or bypass existing health assertions. The new PG
+health test checks that exact side effect and restoration after precise removal.
+
+After worker Wait, including failure paths, cleanup removes only the successfully
+inserted nonce/task alias in tenant `default`, cycle `queue`, verifies no alias row
+remains and the original queue row still exists. An insertion that failed or whose
+success was not confirmed grants no cleanup ownership. The isolated test database
+is still torn down by the existing runner. Guard diagnostics and journal verification expose only closed categories/counts,
+never the alias, task identity or SQL parameters. The existing health API does
+return the opaque alias in its workerId field while the fixture row exists; this
+explicit CI read-side effect is removed by cleanup, not hidden by a reader change. Real PG tests
+contrast shared-row indirect blocking with isolated-row ordinary completion and
+unique-target drain; real three-kind CI remains the application-level acceptance.

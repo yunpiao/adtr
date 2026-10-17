@@ -92,16 +92,46 @@ func TestIntegrationApplicationNormalEOFLeavesRescueLive(t *testing.T) {
 		diagnostic.Reason != "none" || diagnostic.Phase != "open" || diagnostic.Total != 0 || diagnostic.Retained != 0 || diagnostic.Pending != 0 || diagnostic.Open != 0 {
 		t.Fatal("fresh diagnostic values")
 	}
+
+	if writeApplicationFrame(parent, applicationRequest{Version: 2, Epoch: 1, Seq: 2, Op: "prepare_selection", Kind: testSealIdentity().Kind}, 1024) != nil {
+		t.Fatal("prepare send")
+	}
+	if f := read(); f.Seq != 2 || f.Kind != "reply" || f.Status != "open" {
+		t.Fatal("prepare ack")
+	}
+	waiting := make(chan error, 1)
+	waitCtx, waitCancel := context.WithTimeout(context.Background(), time.Second)
+	defer waitCancel()
+	go func() { waiting <- AwaitActivitySelection(waitCtx, testSealIdentity()) }()
+	select {
+	case <-waiting:
+		t.Fatal("prepare did not await")
+	case <-time.After(20 * time.Millisecond):
+	}
+	if writeApplicationFrame(parent, applicationRequest{Version: 2, Epoch: 1, Seq: 3, Op: "configure_target", TaskID: testSealIdentity().TaskID, WorkerID: "private-worker"}, 1024) != nil {
+		t.Fatal("configure send")
+	}
+	if f := read(); f.Seq != 3 || f.Kind != "reply" || f.Status != "open" {
+		t.Fatal("configure ack")
+	}
+	select {
+	case err := <-waiting:
+		if err != nil {
+			t.Fatal("configured wait")
+		}
+	case <-waitCtx.Done():
+		t.Fatal("configure did not wake")
+	}
 	ticket, err := g.acquire(context.Background())
 	if err != nil {
 		t.Fatal("admission")
 	}
 	conn := attachTestTicket(ticket)
-	if _, err = g.register(conn, testSealIdentity()); err != nil {
+	if _, key, e := g.registerActivityRow(conn, testSealIdentity(), "private-worker"); e != nil || key != activityRowKey(nonce, testSealIdentity().TaskID) {
 		t.Fatal("registration")
 	}
 	generation := g.candidates()[0].generation
-	if writeApplicationFrame(parent, applicationRequest{Version: 2, Epoch: 1, Seq: 2, Op: "pin", Target: generation}, 1024) != nil {
+	if writeApplicationFrame(parent, applicationRequest{Version: 2, Epoch: 1, Seq: 4, Op: "pin", Target: generation}, 1024) != nil {
 		t.Fatal("pin send")
 	}
 	if f := read(); f.Status != "sealed" || f.Target != generation {

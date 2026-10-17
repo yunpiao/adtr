@@ -30,7 +30,7 @@ func TestActivityCandidateMintBoundariesAndPrivacy(t *testing.T) {
 			}
 		}
 		proof.revoke()
-		if _, err := BindActivityCandidate(proof, nil, "private-worker"); err == nil {
+		if _, _, err := BindActivityCandidate(proof, nil, "private-worker"); err == nil {
 			t.Fatal("revoked candidate consumed")
 		}
 	}
@@ -63,13 +63,13 @@ func TestActivityCandidateMintBoundariesAndPrivacy(t *testing.T) {
 
 func TestActivityCandidateWrongWorkerConsumesOnce(t *testing.T) {
 	proof := mintActivityCandidate(candidateLease("user_assets.v3.export"), 1, 2, 10, true)
-	if _, err := BindActivityCandidate(proof, nil, "another-worker"); err == nil {
+	if _, _, err := BindActivityCandidate(proof, nil, "another-worker"); err == nil {
 		t.Fatal("wrong worker bound candidate")
 	}
 	if !proof.consumed {
 		t.Fatal("failed bind left reusable candidate")
 	}
-	if _, err := BindActivityCandidate(proof, nil, "private-worker"); err == nil {
+	if _, _, err := BindActivityCandidate(proof, nil, "private-worker"); err == nil {
 		t.Fatal("consumed candidate reused")
 	}
 }

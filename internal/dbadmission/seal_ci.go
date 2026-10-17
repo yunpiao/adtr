@@ -42,21 +42,38 @@ func (g *lifecycleGate) candidates() []sealSnapshot {
 	return result
 }
 
-func (g *lifecycleGate) register(conn *Conn, identity ActivityIdentity) (func(), error) {
+func (g *lifecycleGate) registerActivityRow(conn *Conn, identity ActivityIdentity, workerID string) (func(), string, error) {
 	g.mu.Lock()
 	ticket, ok := conn.permit.(*lifecycleTicket)
 	if !ok || ticket.gate != g || ticket.conn != conn || ticket.state != 'o' || ticket.backend == 0 || ticket.registration != nil || g.invalid || g.closing {
 		g.mu.Unlock()
-		return nil, errSealProtocol
+		return nil, "", errSealProtocol
 	}
 	if g.next == ^uint64(0) {
 		g.invalidateBecauseLocked(invalidCapacity)
 		g.notifyLocked()
 		g.unlockAndPublishInvalid()
-		return nil, errSealProtocol
+		return nil, "", errSealProtocol
+	}
+	key := workerID
+	if g.application && g.selection == 1 {
+		g.invalidateBecauseLocked(invalidExplicit)
+		g.notifyLocked()
+		g.unlockAndPublishInvalid()
+		return nil, "", errSealProtocol
+	}
+	if g.application && g.selection == 2 && identity.TaskID == g.selectionTask {
+		if identity.Kind != g.selectionKind || workerID != g.selectionOwner || g.selectionConsumed {
+			g.invalidateBecauseLocked(invalidExplicit)
+			g.notifyLocked()
+			g.unlockAndPublishInvalid()
+			return nil, "", errSealProtocol
+		}
+		key = g.selectionKey
+		g.selectionConsumed = true
 	}
 	g.next++
-	registration := &activityRegistration{identity: identity, backend: ticket.backend, generation: g.next}
+	registration := &activityRegistration{identity: identity, backend: ticket.backend, generation: g.next, activityKey: key}
 	ticket.registration = registration
 	g.notifyLocked()
 	g.mu.Unlock()
@@ -71,7 +88,7 @@ func (g *lifecycleGate) register(conn *Conn, identity ActivityIdentity) (func(),
 		}
 		ticket.registration = nil
 		g.notifyLocked()
-	}, nil
+	}, key, nil
 }
 
 func (g *lifecycleGate) pin(epoch, generation uint64, publish func()) error {

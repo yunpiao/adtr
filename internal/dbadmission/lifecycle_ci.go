@@ -18,18 +18,23 @@ var coordinator struct {
 }
 
 type lifecycleGate struct {
-	mu                 sync.Mutex
-	closing, invalid   bool
-	pending, open      int
-	next               uint64
-	tickets            map[uint64]*lifecycleTicket
-	changed            chan struct{}
-	seal               *sealAttempt
-	witness            invalidationWitness
-	revision           uint64
-	total              uint64
-	firstInvalidReason invalidationReason
-	firstInvalidPhase  string
+	application                                                bool
+	nonce                                                      [16]byte
+	selection                                                  int
+	selectionConsumed                                          bool
+	selectionKind, selectionTask, selectionOwner, selectionKey string
+	mu                                                         sync.Mutex
+	closing, invalid                                           bool
+	pending, open                                              int
+	next                                                       uint64
+	tickets                                                    map[uint64]*lifecycleTicket
+	changed                                                    chan struct{}
+	seal                                                       *sealAttempt
+	witness                                                    invalidationWitness
+	revision                                                   uint64
+	total                                                      uint64
+	firstInvalidReason                                         invalidationReason
+	firstInvalidPhase                                          string
 }
 
 type lifecycleTicket struct {

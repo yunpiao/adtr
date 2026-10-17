@@ -17,6 +17,7 @@ test("real group snapshot running export accepts cancellation then clears all ar
   let downloads = 0;
   page.on("download", () => { downloads++; });
   await chooseColumns(page, safeColumns);
+  expect(await runningGuard("prepare")).toEqual({ prepared: true });
   const pause = await pauseOwnedExportWorker();
   let checkpointStarted = false, resumed = false;
   try {

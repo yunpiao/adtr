@@ -105,6 +105,11 @@ class IntegrationRunnerContract(unittest.TestCase):
                                       "-tags=integration,adtr_ci_dbadmission", "-timeout=10m",
                                       "-run", "^TestActivityCandidate", "./internal/tasks",
                                       "./internal/systemhealth", "./cmd/adtr"])
+        source = Path('internal/systemhealth/activity_alias_health_integration_test.go').read_text()
+        names = re.findall(r'^func (Test\w+)\(t \*testing.T\)', source, re.M)
+        self.assertEqual(names, ['TestActivityCandidateSentinelHealthSideEffectAndExactCleanup'])
+        pattern = commands[2][commands[2].index('-run') + 1]
+        self.assertTrue(all(re.search(pattern, name) for name in names))
 
     def test_non_auth_always_includes_tagged_lifecycle_contracts(self):
         packages = [runner.AUTH_PACKAGE, "example/internal/service"]

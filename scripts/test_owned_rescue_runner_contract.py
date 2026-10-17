@@ -214,6 +214,13 @@ RUNNER_DELTAS = [('from user_asset_export_v3_terminal_ci import SUITES as EXPORT
   '                    owned_ci_worker.close_after_wait()\n'
   '                except (OSError, RuntimeError, subprocess.TimeoutExpired):\n'
   '                    shutdown_error = RuntimeError("owned CI final witness or cleanup failed")\n'
+  '            if running_cancel_guard is not None and worker is not None and worker.returncode is '
+  'not None:\n'
+  '                try:\n'
+  '                    '
+  'running_cancel_guard.cleanup_activity_fixture_after_wait(worker.returncode)\n'
+  '                except Exception:\n'
+  '                    shutdown_error = RuntimeError("owned CI activity fixture cleanup failed")\n'
   '            if running_cancel_guard is not None and shutdown_error is None:\n'
   '                try:\n'
   "                    # The worker's successful Wait includes journal.Close/drain.\n"
@@ -252,6 +259,78 @@ class Contracts(unittest.TestCase):
     def channel(self):
         with patch.object(r.os, 'set_blocking'):
             return r.PipeChannel(51, 51)
+
+    def test_selection_configure_split_ack_keeps_original_deadline(self):
+        c = controller(); c.armed = False
+        c.normal.receive.side_effect = [frame(), dict(frame(), seq=2)]
+        c.prepare_selection('user_assets.v3.export', 20)
+        c.normal.receive.assert_called_once_with(20)
+        alias = c.prepare_target('task-1', 'worker-1', 21)
+        self.assertEqual(len(alias), 64)
+        self.assertRegex(alias, r'^ci-activity-[a-z2-7]{52}$')
+        import hashlib, base64
+        expected = base64.b32encode(hashlib.sha256(
+            b'adtr-ci-activity-v1\x00' + bytes(16) + b'\x00task-1').digest())
+        self.assertEqual(alias, 'ci-activity-' + expected.decode().lower().rstrip('='))
+        c.normal.receive.assert_called_once_with(20)  # Stopped worker cannot ACK.
+        self.assertEqual(c.normal.send.call_args.args, ({'version': 2, 'epoch': 1,
+            'seq': 2, 'op': 'configure_target', 'taskID': 'task-1', 'workerID': 'worker-1'}, 21))
+        c.supervisor.receive.return_value = {'version': 2, 'epoch': 1, 'status': 'armed'}
+        c.arm(22)
+        c.finish_target(22)
+        self.assertEqual(c.normal.receive.call_args.args, (22,))
+        self.assertEqual(c.normal.send.call_count, 2)
+        with self.assertRaises(r.ControlFailure):
+            c.finish_target(22)
+        self.assertEqual(c.normal.receive.call_count, 2)
+
+    def test_activity_alias_matches_go_fixed_vector(self):
+        c = controller(); c.armed = False; c.selection_prepared = True
+        c.nonce = bytes(range(16))
+        self.assertEqual(c.prepare_target('task-one', 'worker-one', 2),
+                         'ci-activity-xjhrbwphlzfwschmfnm4kqsunp2qeowpnarubert6q2qx5ospmha')
+        c.normal.receive.assert_not_called()
+
+    def test_configuration_rejects_replay_bad_schema_and_overtaking(self):
+        for kind in ('unknown', True, 'x' * 10000):
+            c = controller(); c.armed = False
+            with self.assertRaises(r.ControlFailure): c.prepare_selection(kind, 2)
+            c.normal.send.assert_not_called()
+        for bad in ('', 'private\nvalue', 'x' * 129, True):
+            c = controller(); c.armed = False; c.selection_prepared = True
+            with self.assertRaises(r.ControlFailure): c.prepare_target(bad, 'worker', 2)
+            c.normal.send.assert_not_called()
+        for bad in ('x' * 65, 'Upper', 'worker.dot', True):
+            c = controller(); c.armed = False; c.selection_prepared = True
+            with self.assertRaises(r.ControlFailure): c.prepare_target('task', bad, 2)
+            c.normal.send.assert_not_called()
+        c = controller(); c.armed = False; c.selection_prepared = True
+        c.prepare_target('task', 'worker', 2)
+        with self.assertRaises(r.ControlFailure): c.prepare_target('task', 'worker', 2)
+        c.normal.send.assert_called_once(); c.normal.receive.assert_not_called()
+        c = controller(); c.target_sent = True
+        with self.assertRaises(r.ControlFailure): c.snapshot(2)
+        c.normal.send.assert_not_called()
+        for response in (dict(frame(), seq=99), dict(frame(), private='secret'),
+                         dict(frame(), status='draining')):
+            c = controller(); c.target_sent = True; c.seq = 1
+            c.normal.receive.return_value = response
+            with self.assertRaises(r.ControlFailure) as caught: c.finish_target(2)
+            self.assertEqual(caught.exception.control_diagnostic['operation'], 'finish_target')
+            self.assertNotIn('secret', str(caught.exception))
+
+    def test_candidate_activity_key_is_required_closed_and_bounded(self):
+        candidate = dict(generation=1, taskID='task', kind='user_assets.v3.export',
+                         attempt=1, leaseOwner='worker', fencingToken=1,
+                         resultVersion=1, phase='first-fenced-progress-10', activityKey='key')
+        value = frame(); value['records'] = [dict(generation=1, state='open', backend=123,
+                                                  candidate=candidate)]
+        self.assertIs(r._frame(value, 1), value)
+        for bad in ('', 'x' * 65, 'private\nvalue', 'Upper', 'key.dot', True):
+            candidate['activityKey'] = bad
+            with self.assertRaises(r.ControlFailure): r._frame(value, 1)
+        del candidate['activityKey']
+        with self.assertRaises(r.ControlFailure): r._frame(value, 1)
 
     def test_close_same_socket_fd_once(self):
         c = self.channel()
@@ -387,6 +466,36 @@ class Contracts(unittest.TestCase):
         self.assertEqual(events[:2], ['cont-confirmed', 'abort'])
         self.assertIn(signal.SIGTERM, events)
 
+    def test_activity_fixture_cleanup_runs_after_wait_even_on_prior_failure(self):
+        source = Path(__file__).with_name('test_auth_e2e.py').read_text()
+        tree = ast.parse(source)
+        gate = next(node for node in ast.walk(tree) if isinstance(node, ast.If)
+                    and ast.unparse(node.test) == 'running_cancel_guard is not None and worker is not None and (worker.returncode is not None)')
+        wait_loop = next(node for node in ast.walk(tree) if isinstance(node, ast.For)
+                         and ast.unparse(node.target) == '(label, process)')
+        final_witness = source.index('owned_ci_worker.close_after_wait()')
+        cleanup = source.index('running_cancel_guard.cleanup_activity_fixture_after_wait(worker.returncode)')
+        proof = source.index('running_cancel_guard.verify_journal_after_wait(worker.returncode)')
+        self.assertLess(wait_loop.end_lineno, gate.lineno)
+        self.assertLess(final_witness, cleanup); self.assertLess(cleanup, proof)
+        code = compile(ast.fix_missing_locations(ast.Module(body=[gate], type_ignores=[])),
+                       '<activity-cleanup-contract>', 'exec')
+        for returncode in (None, 0, 1, -9):
+            for failure in (None, RuntimeError('private sensitive details')):
+                guard = Mock(); guard.cleanup_activity_fixture_after_wait.side_effect = failure
+                prior = RuntimeError('prior failure')
+                scope = dict(running_cancel_guard=guard, worker=Mock(returncode=returncode),
+                             shutdown_error=prior)
+                exec(code, scope)
+                if returncode is None:
+                    guard.cleanup_activity_fixture_after_wait.assert_not_called()
+                else:
+                    guard.cleanup_activity_fixture_after_wait.assert_called_once_with(returncode)
+                if returncode is not None and failure:
+                    self.assertEqual(str(scope['shutdown_error']), 'owned CI activity fixture cleanup failed')
+                else:
+                    self.assertIs(scope['shutdown_error'], prior)
+
     def test_journal_proof_must_run_after_wait_before_database_cleanup(self):
         source = Path(__file__).with_name('test_auth_e2e.py').read_text()
         tree = ast.parse(source)
@@ -474,6 +583,13 @@ class Contracts(unittest.TestCase):
         self.assertEqual(owner.controller.normal.send.call_args.args[0]['op'], 'diagnostic')
         self.assertFalse(owner.controller.armed)
         self.assertFalse(owner.controller.invalid)
+        owner.controller.target_sent = True
+        owner.controller.normal.reset_mock()
+        with patch.object(r.sys, 'stderr', io.StringIO()):
+            self.assertEqual(owner.report_failure_diagnostic()['reason'], 'unavailable')
+        owner.controller.normal.send.assert_not_called()
+        owner.controller.normal.receive.assert_not_called()
+        owner.controller.target_sent = False
         for armed, running, exited in ((True, True, None), (False, False, None), (False, True, 1)):
             owner.controller.armed = armed
             owner.identity.threads_running.return_value = running

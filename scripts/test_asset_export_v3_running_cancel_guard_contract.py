@@ -89,6 +89,68 @@ class ContractTests(unittest.TestCase):
             error.capture_observations = count
             self.assertNotIn('observations', g.failure_event('capture', error))
 
+    def test_prepare_is_live_only_isolated_and_once(self):
+        guard = self.guard(); guard.prepared = False; guard.threads = Mock(return_value=['R'])
+        observer = Mock(); observer.query.return_value = 0
+        with patch.object(g, 'Psql', return_value=observer):
+            self.assertEqual(guard.prepare(), {'prepared': True})
+            with self.assertRaises(RuntimeError): guard.prepare()
+        guard.controller.prepare_selection.assert_called_once()
+        for states, count in ((['T'], 0), (['R'], 1), (['R'], True)):
+            guard = self.guard(); guard.prepared = False; guard.threads = Mock(return_value=states)
+            observer = Mock(); observer.query.return_value = count
+            with patch.object(g, 'Psql', return_value=observer), self.assertRaises(RuntimeError): guard.prepare()
+            guard.controller.prepare_selection.assert_not_called()
+
+    def test_activity_fixture_key_binding_collision_and_exact_wait_cleanup(self):
+        import base64, hashlib
+        guard = self.guard(); guard.activity_fixture_created = False
+        expected = 'ci-activity-' + base64.b32encode(hashlib.sha256(
+            b'adtr-ci-activity-v1\x00' + guard.nonce + b'\x00task-one').digest()).decode().lower().rstrip('=')
+        guard.controller.prepare_target.return_value = expected
+        observer = Mock(); observer.query.return_value = 1
+        g.RunningExportCancelGuard.prepare_activity_fixture(guard, observer, 'task-one', 'worker')
+        self.assertTrue(guard.activity_fixture_created)
+        insert = observer.query.call_args.args[0]
+        self.assertIn("'failure','cycle_failed',NULL", insert)
+        self.assertNotIn('ON CONFLICT', insert)
+        self.assertEqual(guard.activity_key, expected)
+        cleanup = Mock(); cleanup.query.side_effect = [1, {'remaining': 0, 'ordinary': 1}]
+        guard.owned.process.poll.return_value = 1
+        with patch.object(g, 'Psql', return_value=cleanup): guard.cleanup_activity_fixture_after_wait(1)
+        self.assertFalse(guard.activity_fixture_created)
+        self.assertIn("tenant_id='default'", cleanup.query.call_args_list[0].args[0])
+        self.assertIn("AND cycle='queue'", cleanup.query.call_args_list[0].args[0])
+        for result in (0, True, RuntimeError('private collision')):
+            guard.activity_fixture_created = False
+            observer = Mock()
+            if isinstance(result, Exception): observer.query.side_effect = result
+            else: observer.query.return_value = result
+            with self.assertRaises(RuntimeError):
+                g.RunningExportCancelGuard.prepare_activity_fixture(guard, observer, 'task-one', 'worker')
+            with patch.object(g, 'Psql') as connection:
+                guard.cleanup_activity_fixture_after_wait(1)
+            connection.assert_not_called()
+        guard.controller.prepare_target.return_value = 'ci-wrong-nonce'
+        observer = Mock()
+        with self.assertRaises(RuntimeError):
+            g.RunningExportCancelGuard.prepare_activity_fixture(guard, observer, 'task-one', 'worker')
+        observer.query.assert_not_called()
+
+    def test_wrong_bound_activity_key_fails_before_pin(self):
+        guard = self.guard(); guard.controller.snapshot.return_value['records'][0]['candidate']['activityKey'] = 'other-key'
+        with self.assertRaises(RuntimeError): self.run_candidate_samples(guard, [[session()]])
+        self.assertEqual(guard.failure_diagnostic['reason'], 'activity_alias_mismatch')
+        guard.controller.pin.assert_not_called()
+        guard.owned.process.send_signal.assert_not_called()
+
+    def test_three_specs_prepare_before_initial_pause(self):
+        root = Path(g.__file__).resolve().parents[1]
+        for kind in g.EXPORT_KINDS:
+            source = (root / 'web/e2e' / (kind + '-asset-export-v3-running-cancel.spec.ts')).read_text()
+            self.assertLess(source.index('runningGuard("prepare")'), source.index('await pauseOwnedExportWorker()'))
+            self.assertLess(source.index('await pauseOwnedExportWorker()'), source.index('await createExport('))
+
     def run_candidate_samples(self, guard, rows, frames=None, expire=False):
         guard.threads = Mock(return_value=['T'])
         running = task() | {'kind': g.export_kind(guard.asset_kind)[0]}
@@ -428,7 +490,7 @@ class ContractTests(unittest.TestCase):
         expected = {
             'validate_sessions': '4efb9b60ec57914d43c55c695e0916b07d71fbcd3f3cdac8c3cd06b630bbd092',
             'validate_checkpoint': '83ff1b7a711627ec7ee4e28761dde75f5e18ae3e81abb39927b8057022a06e74',
-            'checkpoint': '0a692e55ef373d58e28b64a6913ea4986f9aed5078ee8af72cc98f2d870f62fc',
+            'checkpoint': 'b8a9236573af194818fcdbf1b32767d7d81bbd04c0d6d090e3719e4fa6905eeb',
         }
         actual = {node.name: hashlib.sha256(ast.get_source_segment(source, node).encode()).hexdigest()
                   for node in ast.walk(ast.parse(source)) if isinstance(node, ast.FunctionDef)
@@ -646,9 +708,12 @@ class ContractTests(unittest.TestCase):
             guard = g.RunningExportCancelGuard(Mock(), 'a'*32, '/fake/bin/adtr',
                 'adtr-auth-e2e-'+'a'*12, 'adtr-user-export-'+'a'*32, 'postgres://localhost/adtr_e2e', **options)
         identity = {key: task()[key] for key in ('taskID', 'kind', 'attempt', 'leaseOwner', 'fencingToken', 'resultVersion')}
-        identity.update(kind=g.export_kind(options.get('asset_kind', 'user'))[0], generation=2, phase='first-fenced-progress-10')
+        identity.update(activityKey='ci-fixture-key', kind=g.export_kind(options.get('asset_kind', 'user'))[0], generation=2, phase='first-fenced-progress-10')
         frame = {'status': 'sealed', 'target': 2, 'pending': 0, 'open': 1,
                  'records': [{'generation': 1, 'state': 'open', 'backend': 100, 'candidate': identity}]}
+        guard.prepared = True
+        guard.activity_key = "ci-fixture-key"
+        guard.prepare_activity_fixture = Mock()
         guard.controller = Mock()
         guard.controller.snapshot.return_value = frame
         guard.controller.pin.return_value = frame
@@ -1092,7 +1157,7 @@ class ContractTests(unittest.TestCase):
         self.assertNotIn('UPDATE adtr.tasks', source)
         self.assertNotIn('SET lease_', source)
         self.assertNotIn('pg_terminate_backend', source)
-        self.assertIn("worker_id='\" + worker_id", source)
+        self.assertIn("worker_id='\" + self.activity_key", source)
         self.assertIn("AND cycle='queue' FOR UPDATE", source)
         self.assertIn("hmac.compare_digest", source)
         self.assertIn("ThreadingHTTPServer(('127.0.0.1', 0)", source)

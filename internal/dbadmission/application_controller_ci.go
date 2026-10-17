@@ -26,6 +26,7 @@ type applicationCandidate struct {
 	FencingToken  int64  `json:"fencingToken"`
 	ResultVersion int64  `json:"resultVersion"`
 	Phase         string `json:"phase"`
+	ActivityKey   string `json:"activityKey"`
 }
 type applicationRecord struct {
 	Generation uint64                `json:"generation"`
@@ -46,11 +47,14 @@ type applicationFrame struct {
 	Records  []applicationRecord `json:"records"`
 }
 type applicationRequest struct {
-	Version int    `json:"version"`
-	Epoch   uint64 `json:"epoch"`
-	Seq     uint64 `json:"seq"`
-	Op      string `json:"op"`
-	Target  uint64 `json:"target,omitempty"`
+	Version  int    `json:"version"`
+	Epoch    uint64 `json:"epoch"`
+	Seq      uint64 `json:"seq"`
+	Op       string `json:"op"`
+	Target   uint64 `json:"target,omitempty"`
+	Kind     string `json:"kind,omitempty"`
+	TaskID   string `json:"taskID,omitempty"`
+	WorkerID string `json:"workerID,omitempty"`
 }
 
 func (g *lifecycleGate) applicationSnapshot(seq uint64, kind string) (applicationFrame, error) {
@@ -72,7 +76,7 @@ func (g *lifecycleGate) applicationSnapshot(seq uint64, kind string) (applicatio
 		r := applicationRecord{Generation: t.generation, State: state, Backend: t.backend}
 		if a := t.registration; a != nil {
 			id := a.identity
-			r.Candidate = &applicationCandidate{a.generation, id.TaskID, id.Kind, id.Attempt, id.LeaseOwner, id.FencingToken, id.ResultVersion, id.Phase}
+			r.Candidate = &applicationCandidate{a.generation, id.TaskID, id.Kind, id.Attempt, id.LeaseOwner, id.FencingToken, id.ResultVersion, id.Phase, a.activityKey}
 		}
 		f.Records = append(f.Records, r)
 	}
@@ -110,7 +114,7 @@ func StartCIController(normal, rescue, witness *os.File, nonce [16]byte, onFailu
 	if err != nil {
 		return nil, err
 	}
-	g := &lifecycleGate{witness: w}
+	g := &lifecycleGate{witness: w, application: true, nonce: nonce}
 	coordinator.used = true
 	coordinator.gate = g
 	var stopping atomic.Bool
@@ -190,8 +194,22 @@ func readApplicationRequest(reader *bufio.Reader, limit int, last uint64) (appli
 			return r, errSealProtocol
 		}
 	}
-	if len(fields) < 4 {
+	expected := map[string]bool{"version": true, "epoch": true, "seq": true, "op": true}
+	switch r.Op {
+	case "pin":
+		expected["target"] = true
+	case "prepare_selection":
+		expected["kind"] = true
+	case "configure_target":
+		expected["taskID"], expected["workerID"] = true, true
+	}
+	if len(fields) != len(expected) {
 		return r, errSealProtocol
+	}
+	for field := range fields {
+		if !expected[field] {
+			return r, errSealProtocol
+		}
 	}
 	return r, nil
 }
@@ -232,7 +250,18 @@ func serveApplicationNormal(file *os.File, g *lifecycleGate, stopping *atomic.Bo
 			return
 		}
 		last = r.Seq
+		if r.Op != "prepare_selection" && r.Op != "configure_target" && (r.Kind != "" || r.TaskID != "" || r.WorkerID != "") {
+			return
+		}
 		switch r.Op {
+		case "prepare_selection":
+			if r.Target != 0 || r.TaskID != "" || r.WorkerID != "" || g.prepareActivitySelection(r.Kind) != nil {
+				return
+			}
+		case "configure_target":
+			if r.Target != 0 || r.Kind != "" || g.configureActivitySelection(r.TaskID, r.WorkerID) != nil {
+				return
+			}
 		case "diagnostic":
 			if r.Target != 0 {
 				return
@@ -278,7 +307,7 @@ func serveApplicationRescue(file *os.File, g *lifecycleGate, stopping *atomic.Bo
 			return
 		}
 		last = r.Seq
-		if r.Target != 0 {
+		if r.Target != 0 || r.Kind != "" || r.TaskID != "" || r.WorkerID != "" {
 			return
 		}
 		switch r.Op {
