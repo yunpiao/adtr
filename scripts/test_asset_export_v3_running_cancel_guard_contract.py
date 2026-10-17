@@ -144,6 +144,25 @@ class ContractTests(unittest.TestCase):
             g.RunningExportCancelGuard.prepare_activity_fixture(guard, 'task-one', 'worker')
         connect.assert_not_called()
 
+    def test_resume_scopes_exact_original_and_alias_without_relaxing_initial_pause(self):
+        root = Path(g.__file__).resolve().parents[1]
+        for kind in g.EXPORT_KINDS:
+            source = (root / f'web/e2e/{kind}-asset-export-v3-terminal-helpers.ts').read_text()
+            pause = source.split('export async function pauseOwnedExportWorker()', 1)[1].split('export async function restoreOwnedExportWorker()', 1)[0]
+            resume = source.split('export async function resumeOwnedExportWorker(', 1)[1]
+            self.assertIn('await queueActivity()', pause)
+            self.assertNotIn('queueActivity(scope)', pause)
+            self.assertIn('expect(value.count).toBe(1)', source)
+            self.assertIn('if (scope) assertActivityScope(value.scope)', source)
+            self.assertIn("worker_id NOT IN ('${scope.workerID}','${scope.alias}')", source)
+            self.assertIn("min(extract(epoch FROM last_success_at)) FILTER (WHERE worker_id='${scope.workerID}')", source)
+            self.assertIn('activityAlias(w.nonce, activityTaskID)', resume)
+            self.assertEqual(resume.count('await queueActivity(scope)'), 4)
+            self.assertIn('Number(queue.success) > Number(pause.queueSuccessBefore)', resume)
+            self.assertIn('Number(queue.success) > Number(first.success)', resume)
+            spec = (root / f'web/e2e/{kind}-asset-export-v3-running-cancel.spec.ts').read_text()
+            self.assertIn('resumeOwnedExportWorker(context, pause, taskID)', spec)
+
     def test_wrong_bound_activity_key_fails_before_pin(self):
         guard = self.guard(); guard.controller.snapshot.return_value['records'][0]['candidate']['activityKey'] = 'other-key'
         with self.assertRaises(RuntimeError): self.run_candidate_samples(guard, [[session()]])

@@ -452,6 +452,64 @@ class Contracts(unittest.TestCase):
         self.assertIsNone(owner.witness)
         self.assertIsNone(owner.page_fd)
 
+    def test_final_state_is_closed_post_wait_and_preserves_failure(self):
+        import io
+        class Page:
+            def __init__(self, data): self.data = data
+            def __getitem__(self, key): return self.data[key]
+            def close(self): pass
+        def owner_for(data, invalid=False, released=False):
+            owner = r.OwnedCIWorker(); owner.process = Mock(returncode=0)
+            owner.controller = controller(); owner.controller.invalid = invalid
+            owner.controller.released = released
+            owner.witness = Page(data); owner.identity = None
+            owner.fds = set(); owner.page_fd = None; owner.stop_rescuer = Mock()
+            return owner
+        original = controller().witness
+        for offset, value, sticky in ((24, 0, 'clear'), (24, 1, 'set'),
+                                      (24, 2, 'other'), (28, 0, 'other'),
+                                      (0, 0, 'other'), (100, 1, 'other')):
+            data = bytearray(original); data[offset] = value
+            owner = owner_for(data)
+            with patch.object(r.sys, 'stderr', io.StringIO()) as output:
+                if sticky == 'clear': owner.close_after_wait()
+                else:
+                    with self.assertRaises(r.ControlFailure): owner.close_after_wait()
+                report = json.loads(output.getvalue())
+            self.assertEqual(report, dict(event='owned_ci_final_state', exitZero=True,
+                sticky=sticky, controllerInvalid=False, released=False, cleanup='completed'))
+        owner = owner_for(original, invalid=True, released=True)
+        owner.process.returncode = 1
+        with patch.object(r.sys, 'stderr', io.StringIO()) as output:
+            with self.assertRaises(r.ControlFailure): owner.close_after_wait()
+            report = json.loads(output.getvalue())
+            self.assertEqual(report['sticky'], 'clear')
+            self.assertTrue(report['controllerInvalid']); self.assertTrue(report['released'])
+            self.assertFalse(report['exitZero'])
+            # Repeated cleanup may still fail, but cannot emit a second projection.
+            with self.assertRaises(Exception): owner.close_after_wait()
+            self.assertEqual(len(output.getvalue().splitlines()), 1)
+        owner = owner_for(original); owner.process.returncode = None
+        with patch.object(r.sys, 'stderr', io.StringIO()) as output:
+            with self.assertRaises(r.ControlFailure): owner.close_after_wait()
+            self.assertEqual(output.getvalue(), '')
+        owner = owner_for(original); owner.identity = Mock()
+        owner.identity.close.side_effect = RuntimeError('private identity')
+        with patch.object(r.sys, 'stderr', io.StringIO()) as output:
+            with self.assertRaisesRegex(RuntimeError, 'private identity'): owner.close_after_wait()
+            self.assertEqual(json.loads(output.getvalue())['cleanup'], 'identity')
+            self.assertNotIn('private', output.getvalue())
+        owner = owner_for(original); owner.controller = None
+        with patch.object(r.sys, 'stderr', io.StringIO()) as output:
+            owner.close_after_wait()
+            report = json.loads(output.getvalue())
+            self.assertEqual(report['controllerInvalid'], 'unknown')
+            self.assertEqual(report['released'], 'unknown')
+            self.assertEqual(report['sticky'], 'unavailable')
+        owner = owner_for(original, invalid=True)
+        with patch('builtins.print', side_effect=RuntimeError('private output failure')):
+            with self.assertRaises(r.ControlFailure): owner.close_after_wait()
+
     def test_parentdeath_half_frame_and_prearm_share_recovery(self):
         supervisor, rescue, identity = Mock(), Mock(), Mock()
         supervisor.receive.side_effect = r.ControlFailure()

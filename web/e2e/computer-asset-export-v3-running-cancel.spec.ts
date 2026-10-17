@@ -88,7 +88,7 @@ test("real computer snapshot running export accepts cancellation then clears all
     const recovered = await receiptAndDetail(page, setup.actorId, taskID);
     expect(recovered.detail).toMatchObject({ downloadReady: false, downloadStatus: "cancelled", task: { state: "cancelled" } });
     const unavailable = await unavailableDownload(context, taskID);
-    const cycles = await resumeOwnedExportWorker(context, pause);
+    const cycles = await resumeOwnedExportWorker(context, pause, taskID);
     expect(cycles.sameIdentity).toBe(true);
     const postResume = { ...await receiptAndDetail(page, setup.actorId, taskID), database: await terminalExport(taskID), unavailableDownload: await unavailableDownload(context, taskID) };
     expect(postResume.database).toEqual(database);

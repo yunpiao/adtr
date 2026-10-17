@@ -573,6 +573,7 @@ def _socket_pair():
 
 class OwnedCIWorker:
     """Direct Popen owner. Witness remains valid until worker Wait completes."""
+    _final_state_lock = threading.Lock()
     @classmethod
     def spawn(cls, args, env, stdout, stderr, binary):
         self = cls()
@@ -666,23 +667,64 @@ class OwnedCIWorker:
     def close_after_wait(self):
         if self.process is not None and self.process.returncode is None:
             _fail()
-        self.stop_rescuer()
-        final_invalid = False
-        if self.controller is not None and self.controller.armed:
-            expected = HEADER.pack(b'ADTRGATE', 1, PAGE_SIZE, 1, 0, 1, self.controller.nonce)
-            page = self.witness[:]
-            final_invalid = (self.controller.invalid or len(page) != PAGE_SIZE
-                or page[:HEADER.size] != expected or any(page[HEADER.size:]))
-        if self.identity is not None:
-            self.identity.close(); self.identity = None
-        for fd in list(self.fds):
-            os.close(fd); self.fds.remove(fd)
-        if self.witness is not None:
-            self.witness.close(); self.witness = None
-        if self.page_fd is not None:
-            os.close(self.page_fd); self.page_fd = None
-        if final_invalid:
-            _fail()
+        report = None
+        with self._final_state_lock:
+            if (self.process is not None and type(self.process.returncode) is int
+                    and not getattr(self, '_final_state_reported', False)):
+                self._final_state_reported = True
+                report = {'event': 'owned_ci_final_state', 'exitZero': self.process.returncode == 0,
+                          'sticky': 'unavailable', 'controllerInvalid': 'unknown',
+                          'released': 'unknown', 'cleanup': 'rescuer'}
+                if type(self.controller) is WorkerController:
+                    for field, attribute in (('controllerInvalid', 'invalid'), ('released', 'released')):
+                        value = getattr(self.controller, attribute, None)
+                        if type(value) is bool:
+                            report[field] = value
+        try:
+            self.stop_rescuer()
+            final_invalid = False
+            if report is not None:
+                report['cleanup'] = 'other'
+            if self.controller is not None and self.controller.armed:
+                expected = HEADER.pack(b'ADTRGATE', 1, PAGE_SIZE, 1, 0, 1, self.controller.nonce)
+                page = self.witness[:]
+                final_invalid = (self.controller.invalid or len(page) != PAGE_SIZE
+                    or page[:HEADER.size] != expected or any(page[HEADER.size:]))
+                if report is not None:
+                    # Classification cannot change the existing acceptance predicate.
+                    report['sticky'] = 'other'
+                    if (len(page) == PAGE_SIZE and page[:24] == expected[:24]
+                            and page[28:HEADER.size] == expected[28:HEADER.size]
+                            and not any(page[HEADER.size:])):
+                        bit = int.from_bytes(page[24:28], 'little')
+                        if bit in (0, 1):
+                            report['sticky'] = 'set' if bit else 'clear'
+            if report is not None:
+                report['cleanup'] = 'identity'
+            if self.identity is not None:
+                self.identity.close(); self.identity = None
+            if report is not None:
+                report['cleanup'] = 'fd'
+            for fd in list(self.fds):
+                os.close(fd); self.fds.remove(fd)
+            if report is not None:
+                report['cleanup'] = 'witness'
+            if self.witness is not None:
+                self.witness.close(); self.witness = None
+            if report is not None:
+                report['cleanup'] = 'page_fd'
+            if self.page_fd is not None:
+                os.close(self.page_fd); self.page_fd = None
+            if report is not None:
+                report['cleanup'] = 'completed'
+            if final_invalid:
+                _fail()
+        finally:
+            if report is not None:
+                try:
+                    print(json.dumps(report, separators=(',', ':')), file=sys.stderr, flush=True)
+                except Exception:
+                    pass  # Diagnostic output must never replace cleanup/qualification errors.
 
     def shutdown(self):
         if self.process is not None and self.process.poll() is None:

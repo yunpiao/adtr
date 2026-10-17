@@ -307,3 +307,30 @@ checks are unchanged. A real Python Psql regression in the existing disposable
 CI PostgreSQL container covers these actual options and fixture methods before
 browser validation; offline contracts also require the connection modes at
 each call site. The new regression's runtime outcome remains subject to CI.
+
+### Resume-time activity row scope
+
+Run 39048248387 passed capture and reached terminal cancellation checks before
+user/computer resume-cycle verification failed with two queue rows rather than
+one. The existing helper counted the whole queue table, while the approved CI
+alias intentionally remains until worker Wait. Running-cancel verification now
+uses the same authenticated launch nonce and target task to derive that exact
+alias privately. Each queue sample must contain exactly one original owner row,
+exactly one expected alias row and zero other queue rows. Both increasing success
+timestamps still come exclusively from the original owner. The initial queued
+pause and other suites retain the original whole-table single-row assertion.
+A prefix match or a relaxed count is never sufficient. The opaque alias is
+already visible through the CI health row; this helper also places it in its
+existing local docker/psql query argument, visible to local process inspection.
+It is not added to test evidence or diagnostic output. Post-Wait cleanup still
+requires deleting only the owned alias and retaining the original row.
+
+The reported final witness/cleanup failure remains a separate unverified cause;
+this row-selection correction does not waive final sticky, worker exit, cleanup
+or journal acknowledgement requirements.
+
+After the worker's completed Wait, `owned_ci_final_state` reports only existing
+local exit-zero, sticky category, controller-invalid/released flags and cleanup
+stage. A malformed page is `other`, never a clear witness. This diagnostic sends
+no control request, preserves the original acceptance expression and cleanup
+order, and does not make successful process exit equivalent to valid capture.
