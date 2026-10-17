@@ -119,6 +119,9 @@ func Check(fset *token.FileSet, path string, files []*ast.File, info *types.Info
 							if path == managed && filepath.Base(fset.Position(file.Pos()).Filename) == "activity_identity_ci.go" && name == "RegisterActivityIdentity" && (sel.Sel.Name == "IsClosed" || sel.Sel.Name == "PgConn" || sel.Sel.Name == "PID") {
 								allowed = true
 							}
+							if path == managed && filepath.Base(fset.Position(file.Pos()).Filename) == "lifecycle_ci.go" && name == "lifecycleTicket.connected" && lifecycleBackendRead(fn, sel, ancestors, info) {
+								allowed = true
+							}
 							if !allowed {
 								emit(sel, "raw connection method or transaction Conn escape")
 							}
@@ -576,4 +579,69 @@ func safeSystemField(path, file, function string, id *ast.Ident, ancestors []ast
 		}
 	}
 	return true
+}
+
+// connected may observe only the backend identity of its own managed parameter.
+// The raw getter must be consumed immediately by PID; neither method values nor
+// a standalone PgConn result receive an exception, even in this method.
+func lifecycleBackendRead(fn *ast.FuncDecl, sel *ast.SelectorExpr, ancestors []ast.Node, info *types.Info) bool {
+	if fn == nil || len(fn.Type.Params.List) != 1 || len(fn.Type.Params.List[0].Names) != 1 || !isNamed(info.TypeOf(fn.Type.Params.List[0].Type), managed, "Conn") {
+		return false
+	}
+	param := info.Defs[fn.Type.Params.List[0].Names[0]]
+	var pid *ast.SelectorExpr
+	switch sel.Sel.Name {
+	case "PgConn":
+		if len(ancestors) < 3 {
+			return false
+		}
+		call, ok := ancestors[len(ancestors)-2].(*ast.CallExpr)
+		outer, selector := ancestors[len(ancestors)-3].(*ast.SelectorExpr)
+		if !ok || !selector || call.Fun != sel || len(call.Args) != 0 || outer.X != call {
+			return false
+		}
+		pid = outer
+	case "PID":
+		pid = sel
+	default:
+		return false
+	}
+	if pid.Sel.Name != "PID" {
+		return false
+	}
+	// Locate the parent of the outer selector and require an immediate invocation.
+	found := false
+	for i, n := range ancestors {
+		if n == pid && i > 0 {
+			call, ok := ancestors[i-1].(*ast.CallExpr)
+			found = ok && call.Fun == pid && len(call.Args) == 0
+		}
+	}
+	if !found {
+		return false
+	}
+	for _, n := range ancestors {
+		switch n.(type) {
+		case *ast.FuncLit, *ast.GoStmt, *ast.DeferStmt:
+			return false
+		}
+	}
+	getter, ok := pid.X.(*ast.CallExpr)
+	if !ok || len(getter.Args) != 0 {
+		return false
+	}
+	method, ok := getter.Fun.(*ast.SelectorExpr)
+	if !ok || method.Sel.Name != "PgConn" {
+		return false
+	}
+	raw, ok := method.X.(*ast.SelectorExpr)
+	if !ok || raw.Sel.Name != "raw" {
+		return false
+	}
+	base, ok := raw.X.(*ast.Ident)
+	if !ok || info.Uses[base] != param {
+		return false
+	}
+	rawSelection, getSelection, pidSelection := info.Selections[raw], info.Selections[method], info.Selections[pid]
+	return rawSelection != nil && rawSelection.Kind() == types.FieldVal && isNamed(rawSelection.Recv(), managed, "Conn") && getSelection != nil && getSelection.Kind() == types.MethodVal && isNamed(getSelection.Recv(), pgx, "Conn") && pidSelection != nil && pidSelection.Kind() == types.MethodVal && isNamed(pidSelection.Recv(), pgx+"/pgconn", "PgConn")
 }

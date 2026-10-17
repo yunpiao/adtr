@@ -337,3 +337,46 @@ func TestFilesystemObservationFieldsAreExactReadOnly(t *testing.T) {
 		})
 	}
 }
+
+func TestLifecycleBackendObservationIsExact(t *testing.T) {
+	imp := fixtures(t)
+	for _, tc := range []struct {
+		name, file, method, body string
+		bad                      bool
+	}{
+		{"direct backend identity", "lifecycle_ci.go", "connected", `_=conn.raw.PgConn().PID()`, false},
+		{"wrong file", "other.go", "connected", `_=conn.raw.PgConn().PID()`, true},
+		{"wrong method", "lifecycle_ci.go", "other", `_=conn.raw.PgConn().PID()`, true},
+		{"raw getter escape", "lifecycle_ci.go", "connected", `_=conn.raw.PgConn()`, true},
+		{"raw getter method value", "lifecycle_ci.go", "connected", `_=conn.raw.PgConn`, true},
+		{"PID method value", "lifecycle_ci.go", "connected", `_=conn.raw.PgConn().PID`, true},
+		{"raw close", "lifecycle_ci.go", "connected", `_=conn.raw.Close()`, true},
+		{"raw closed check", "lifecycle_ci.go", "connected", `_=conn.raw.IsClosed()`, true},
+		{"aliased parameter", "lifecycle_ci.go", "connected", `alias:=conn;_=alias.raw.PgConn().PID()`, true},
+		{"closure capture", "lifecycle_ci.go", "connected", `func(){_=conn.raw.PgConn().PID()}()`, true},
+		{"deferred observation", "lifecycle_ci.go", "connected", `defer conn.raw.PgConn().PID()`, true},
+		{"async observation", "lifecycle_ci.go", "connected", `go conn.raw.PgConn().PID()`, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fs := token.NewFileSet()
+			wrapper, err := parser.ParseFile(fs, "conn.go", `package dbadmission;import p "github.com/jackc/pgx/v5";type Conn struct{raw *p.Conn}`, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			file, err := parser.ParseFile(fs, tc.file, `package dbadmission;type lifecycleTicket struct{};func(t *lifecycleTicket) `+tc.method+`(conn *Conn){`+tc.body+`}`, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			info := &types.Info{Types: map[ast.Expr]types.TypeAndValue{}, Uses: map[*ast.Ident]types.Object{}, Defs: map[*ast.Ident]types.Object{}, Selections: map[*ast.SelectorExpr]*types.Selection{}}
+			cfg := types.Config{Importer: imp}
+			files := []*ast.File{wrapper, file}
+			if _, err = cfg.Check(managed, fs, files, info); err != nil {
+				t.Fatalf("fixture type check: %v", err)
+			}
+			ds := Check(fs, managed, files, info)
+			if (len(ds) > 0) != tc.bad {
+				t.Fatalf("bad=%v diagnostics=%v", tc.bad, ds)
+			}
+		})
+	}
+}
