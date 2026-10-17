@@ -146,7 +146,7 @@ func captureEndDeclarations(fset *token.FileSet, path string, files []*ast.File,
 						break
 					}
 					protected := (isNamed(selection.Recv(), managed, "sealAttempt") && selection.Obj().Name() == "captureEnded") || (isNamed(selection.Recv(), managed, "lifecycleGate") && selection.Obj().Name() == "captureEndFD")
-					if protected && !reader && !captureEndCleanup(path, filename, name, x, ancestors) {
+					if protected && !reader && !captureEndCleanup(path, filename, name, x, ancestors) && !observedBirthCapture(path, filename, name, x, ancestors, info) {
 						emit(x, "capture-end state or descriptor escapes the unique reviewed consumer")
 					}
 				case *ast.StarExpr:

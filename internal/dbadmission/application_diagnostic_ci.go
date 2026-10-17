@@ -142,4 +142,5 @@ func (g *lifecycleGate) writeFinalInvalidationDiagnostic() {
 		_, _ = os.Stderr.Write(append(data, '\n'))
 	}
 	g.writeUncleanCloseDiagnostic()
+	g.writeUncleanOperationDiagnostic()
 }

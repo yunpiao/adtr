@@ -39,3 +39,38 @@ The baseline fixed-source audit covers the prior exact tree. This slice changes 
 Before application wiring, additionally prove current cfg/closure/boxed-value flows, native pgx startup/fallback/auxiliary cleanup accounting, exact candidate-plus-task resultVersion and snapshot/lock-chain selection, all owned-backend equality, actual three-kind five-second heartbeat behavior within the unchanged 1.5-second capture window, and real resumed cancellation/lease outcomes. Main's journal isolation must be exercised with a nonnil candidate, beyond nil-token coalescing tests.
 
 The future parent must retain one absolute capture deadline and one STOP, inspect buffered INVALID/EOF/partial frames after all threads stop, run unchanged strict PG validation, and CONT before admission release on every recovery path. The existing parent-thread watchdog does not survive parent death. The separate helper rescue proof is a prerequisite, not an installed production supervisor.
+
+## Same-connection operation diagnostics
+
+The normal Worker.Run shutdown counterexample passed the controlled tagged CI
+suite on run 39062068286. Four empty-queue slots and recovery had five dispatched
+queries blocked at the migration lock; cancellation returned normally while pgx
+had already marked the native connections closed. CleanupDone and backend absence
+were subsequently verified. This establishes that normal cancellation can produce
+native asynchronous close, but does not identify the operation behind the two
+actual running-cancel failures in that run.
+
+The CI-only operation observer adds evidence without changing the dirty-close
+acceptance rule. With no existing tracer, it copies the connection configuration
+and installs a QueryTracer covering Conn and delegated Tx queries. Existing
+tracers remain untouched; absent records mean unobserved, not error-free. The
+default build returns the original configuration unchanged. The observer retains
+only the first failing operation and the first failing operation observed with a
+closed native connection. The latter is an association, not necessarily the cause
+of closure: a later rollback can observe a connection closed by an earlier error.
+SQL, parameters, error objects, and identities are not retained in these records.
+
+Returned errors are classified independently before sampling the original query
+context. Cancellation matches require the corresponding context state and error
+sentinel; a network error with a cancelled context remains an other error. Root
+context and lifecycle phases are snapshots, not causal shutdown proof. In
+particular birthCaptureEnded is the already-consumed authorization cache at
+connection birth: false does not prove that the parent never committed capture.
+The two records are immutable so rollback cannot overwrite earlier evidence.
+
+After Wait, only closed categories and booleans are projected from the private
+log. Missing, duplicate, malformed, or excessive records produce unknown evidence.
+The original sticky failure remains fatal. Any future recovery rule still needs
+same-connection cancellation evidence, a correctly bound post-capture lifetime,
+actual CleanupDone and backend disappearance, and unchanged business/journal
+terminal proofs; this diagnostic change supplies no such exemption.

@@ -43,7 +43,7 @@ func connectWith(ctx context.Context, config *pgx.ConnConfig, connect func(conte
 	if err != nil {
 		return nil, err
 	}
-	raw, err := connect(ctx, config)
+	raw, err := connect(ctx, observeLifecycleConfig(config, permit))
 	if err != nil || raw == nil {
 		if permit != nil {
 			// A failed startup may leave asynchronous cleanup. Never claim drain.

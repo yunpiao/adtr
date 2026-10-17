@@ -290,10 +290,14 @@ func TestSealIntegrationCanceledQueryCleanupPoisonsAttempt(t *testing.T) {
 	if g.pin(1, g.candidates()[0].generation, nil) != nil {
 		t.Fatal("pin failed")
 	}
+	tx, err := other.Begin(ctx)
+	if err != nil {
+		t.Fatal("other transaction failed")
+	}
 	queryCtx, stopQuery := context.WithCancel(ctx)
 	queryDone := make(chan error, 1)
 	go func() {
-		_, e := other.Exec(queryCtx, "SELECT pg_sleep(60)")
+		_, e := tx.Exec(queryCtx, "SELECT pg_sleep(60)")
 		queryDone <- e
 	}()
 	joined := false
@@ -335,12 +339,24 @@ func TestSealIntegrationCanceledQueryCleanupPoisonsAttempt(t *testing.T) {
 	if g.frame(1).Status == "sealed" {
 		t.Fatal("asynchronous cleanup counted as drained")
 	}
+	// A later rollback on the dead connection must not replace the dispatched
+	// operation observation. Tx.Exec uses the same connection query tracer.
+	_ = tx.Rollback(ctx)
 	// Regardless of whether pgx has finished native close, wrapper Close must
 	// account for its exact CleanupDone result and retain failure information.
 	_ = other.Close(ctx)
 	dirty := g.uncleanCloseDiagnostic()
 	if dirty == nil || !dirty.AlreadyClosed || dirty.CloseFailed || dirty.Role != "other" {
 		t.Fatal("native cancellation close facts unavailable")
+	}
+	operation := g.uncleanOperationDiagnostic()
+	if operation == nil || operation.BirthPhase != "open" || operation.BirthCaptureEnded || operation.FirstError == nil || operation.FirstNativeClosedError == nil {
+		t.Fatal("same connection operation observations unavailable")
+	}
+	for _, observed := range []*operationErrorDiagnostic{operation.FirstError, operation.FirstNativeClosedError} {
+		if observed.Operation != "statement" || observed.ContextState != "canceled" || observed.ErrorCategory != "canceled" || !observed.ErrorMatchesContext || !observed.NativeClosedAtEnd || !observed.ConnectionMatched {
+			t.Fatal("canceled Tx operation facts changed or overwritten by rollback")
+		}
 	}
 	select {
 	case <-other.raw.PgConn().CleanupDone():

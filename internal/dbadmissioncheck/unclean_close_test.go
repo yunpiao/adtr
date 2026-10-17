@@ -10,6 +10,7 @@ func uncleanFixtures(t *testing.T) (string, fixtureImporter) {
 	t.Helper()
 	imp := fixtureImporter{}
 	for path, source := range map[string]string{
+		"context":       `package context;type Context interface{Err()error;Value(any)any};var Canceled,DeadlineExceeded error`,
 		"sync":          `package sync;type Mutex struct{};func(*Mutex)Lock(){};func(*Mutex)Unlock(){}`,
 		"encoding/json": `package json;func Marshal(any)([]byte,error){return nil,nil}`,
 		"os":            `package os;type File struct{};var Stderr *File;func(*File)Write([]byte)(int,error){return 0,nil}`,
@@ -25,11 +26,11 @@ func uncleanFixtures(t *testing.T) (string, fixtureImporter) {
 	if start < 0 {
 		t.Fatal("unclean diagnostic absent")
 	}
-	source := `package dbadmission;import("encoding/json";"os";"sync")
+	source := `package dbadmission;import("encoding/json";"os";"sync";"context")
  type invalidationReason string;const invalidUncleanClose invalidationReason="unclean_close"
- type lifecycleGate struct{mu sync.Mutex;firstInvalidReason invalidationReason;firstUncleanClose *uncleanCloseDiagnostic;seal *sealAttempt;invalidateBecauseLocked func(invalidationReason)}
+ type lifecycleGate struct{mu sync.Mutex;firstUncleanOperation *uncleanOperationDiagnostic;workerContext context.Context;writeUncleanOperationDiagnostic func();firstInvalidReason invalidationReason;firstUncleanClose *uncleanCloseDiagnostic;seal *sealAttempt;invalidateBecauseLocked func(invalidationReason)}
  type sealAttempt struct{target *lifecycleTicket}
- type lifecycleTicket struct{gate *lifecycleGate}
+ type lifecycleTicket struct{gate *lifecycleGate;birthPhase string;birthCaptureEnded bool;firstOperationError,firstNativeClosedError *operationErrorDiagnostic}
  type closeObservation struct{alreadyClosed,closeFailed,cleanupDone bool}
  func(g *lifecycleGate)finalInvalidationDiagnostic()struct{}{return struct{}{}}
  ` + string(data)[start:]
@@ -55,7 +56,7 @@ func TestUncleanDiagnosticProjectionIsClosed(t *testing.T) {
 			if tc.bad && tc.source == original {
 				t.Fatal("mutation unchanged")
 			}
-			ds := checkCaptureFiles(t, map[string]string{"application_diagnostic_ci.go": tc.source}, imp)
+			ds := checkUncleanFiles(t, map[string]string{"application_diagnostic_ci.go": tc.source}, imp)
 			if (len(ds) > 0) != tc.bad {
 				t.Fatalf("bad=%v diagnostics=%v", tc.bad, ds)
 			}
@@ -76,7 +77,7 @@ func TestUncleanFirstRecordFollowsStickyInvalidation(t *testing.T) {
 		{"omit sticky", "lifecycle_ci.go", strings.Replace(uncleanCaptureBody, "g.invalidateBecauseLocked(invalidUncleanClose)", "", 1), true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			ds := checkCaptureFiles(t, map[string]string{"application_diagnostic_ci.go": original, tc.file: prefix + tc.body + "}"}, imp)
+			ds := checkUncleanFiles(t, map[string]string{"application_diagnostic_ci.go": original, tc.file: prefix + tc.body + "}"}, imp)
 			if (len(ds) > 0) != tc.bad {
 				t.Fatalf("bad=%v diagnostics=%v", tc.bad, ds)
 			}
@@ -97,10 +98,15 @@ func TestObservedCloseHasOnlyManagedCaller(t *testing.T) {
 		{"caller alias", "conn.go", strings.Replace(native, "c.permit.closedObserved(closeObservation", "f:=c.permit.closedObserved;f(closeObservation", 1), true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			ds := checkCaptureFiles(t, map[string]string{"application_diagnostic_ci.go": original, tc.file: tc.source}, imp)
+			ds := checkUncleanFiles(t, map[string]string{"application_diagnostic_ci.go": original, tc.file: tc.source}, imp)
 			if (len(ds) > 0) != tc.bad {
 				t.Fatalf("bad=%v diagnostics=%v", tc.bad, ds)
 			}
 		})
 	}
+}
+
+func checkUncleanFiles(t *testing.T, sources map[string]string, imp fixtureImporter) []Diagnostic {
+	sources[observationSource] = `package dbadmission;import "context";type operationErrorDiagnostic ` + observationTypes["operationErrorDiagnostic"] + `;type uncleanOperationDiagnostic ` + observationTypes["uncleanOperationDiagnostic"] + `;func diagnosticContextState(ctx context.Context)string ` + observationBodies["diagnosticContextState"]
+	return checkCaptureFiles(t, sources, imp)
 }

@@ -411,6 +411,70 @@ def first_unclean_projection(logs):
                 pass
 
 
+UNCLEAN_OPERATION_EVENT = 'owned_ci_unclean_operation'
+OPERATION_PHASES = frozenset({'open', 'draining', 'sealed', 'released', 'unknown'})
+OPERATION_CONTEXTS = frozenset({'active', 'canceled', 'deadline_exceeded', 'other', 'unknown'})
+
+
+def unclean_operation_projection(logs):
+    """Project only closed operation diagnostics; malformed evidence is not null."""
+    unknown = {'event': UNCLEAN_OPERATION_EVENT, 'birthPhase': 'unknown',
+               'birthCaptureEnded': 'unknown', 'firstError': 'unknown',
+               'firstNativeClosedError': 'unknown', 'rootAtClose': 'unknown'}
+    position = None
+    try:
+        logs.flush()
+        position = logs.tell()
+        logs.seek(0)
+        text = logs.read(MAX_FINAL_LOG_BYTES + 1)
+        if type(text) is not str or len(text.encode('utf-8')) > MAX_FINAL_LOG_BYTES:
+            return unknown
+        candidates = [line for line in text.splitlines(keepends=True) if UNCLEAN_OPERATION_EVENT in line]
+        if (len(candidates) != 1 or not candidates[0].endswith('\n')
+                or len(candidates[0].encode('utf-8')) > 1024):
+            return unknown
+        frame = json.loads(candidates[0], object_pairs_hook=_unique_object,
+                           parse_constant=lambda _: _fail())
+        if (type(frame) is not dict or set(frame) != set(unknown)
+                or frame['event'] != UNCLEAN_OPERATION_EVENT
+                or type(frame['birthPhase']) is not str or frame['birthPhase'] not in OPERATION_PHASES
+                or type(frame['birthCaptureEnded']) is not bool
+                or type(frame['rootAtClose']) is not str or frame['rootAtClose'] not in OPERATION_CONTEXTS):
+            return unknown
+        fields = {'operation', 'startPhase', 'endPhase', 'contextState', 'errorCategory',
+                  'errorMatchesContext', 'nativeClosedAtEnd', 'rootContextState', 'connectionMatched'}
+        records = {}
+        for key in ('firstError', 'firstNativeClosedError'):
+            record = frame[key]
+            if record is None:
+                records[key] = None
+                continue
+            if (type(record) is not dict or set(record) != fields
+                    or type(record['operation']) is not str
+                    or record['operation'] not in ('begin', 'commit', 'rollback', 'statement')
+                    or any(type(record[k]) is not str or record[k] not in OPERATION_PHASES
+                           for k in ('startPhase', 'endPhase'))
+                    or any(type(record[k]) is not str or record[k] not in OPERATION_CONTEXTS
+                           for k in ('contextState', 'rootContextState'))
+                    or type(record['errorCategory']) is not str
+                    or record['errorCategory'] not in ('none', 'canceled', 'deadline_exceeded', 'other')
+                    or any(type(record[k]) is not bool for k in
+                           ('errorMatchesContext', 'nativeClosedAtEnd', 'connectionMatched'))):
+                return unknown
+            records[key] = {field: record[field] for field in fields}
+        return {'event': UNCLEAN_OPERATION_EVENT, 'birthPhase': frame['birthPhase'],
+                'birthCaptureEnded': frame['birthCaptureEnded'],
+                'rootAtClose': frame['rootAtClose'], **records}
+    except Exception:
+        return unknown
+    finally:
+        if position is not None:
+            try:
+                logs.seek(position)
+            except Exception:
+                pass
+
+
 FINAL_JOURNAL_EVENT = 'owned_ci_final_journal'
 FINAL_JOURNAL_COUNTS = frozenset({'accepted', 'acknowledged', 'rejected', 'queueFull',
                                   'writeFailures', 'unacknowledged', 'abandoned'})
@@ -852,6 +916,11 @@ class OwnedCIWorker:
             detail = first_unclean_projection(logs)
             try:
                 print(json.dumps(detail, separators=(',', ':')), file=sys.stderr, flush=True)
+            except Exception:
+                pass
+            operation = unclean_operation_projection(logs)
+            try:
+                print(json.dumps(operation, separators=(',', ':')), file=sys.stderr, flush=True)
             except Exception:
                 pass
 

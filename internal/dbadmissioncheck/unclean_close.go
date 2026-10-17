@@ -28,6 +28,7 @@ const uncleanCaptureBody = `{
  role := "other"
  if g.seal != nil && g.seal.target == t { role = "epoch_target" }
  g.firstUncleanClose = &uncleanCloseDiagnostic{"owned_ci_first_unclean_close", observation.alreadyClosed, observation.closeFailed, observation.cleanupDone, role}
+ g.firstUncleanOperation = &uncleanOperationDiagnostic{"owned_ci_unclean_operation", t.birthPhase, t.birthCaptureEnded, t.firstOperationError, t.firstNativeClosedError, diagnosticContextState(g.workerContext)}
  }
 }`
 

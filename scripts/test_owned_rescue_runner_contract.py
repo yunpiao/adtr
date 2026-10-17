@@ -538,6 +538,55 @@ class Contracts(unittest.TestCase):
         self.assertIsNone(owner.witness)
         self.assertIsNone(owner.page_fd)
 
+    def test_unclean_operation_projection_preserves_null_and_rejects_nested_noise(self):
+        import io
+        record = dict(operation='statement', startPhase='draining', endPhase='released',
+                      contextState='deadline_exceeded', errorCategory='deadline_exceeded',
+                      errorMatchesContext=False, nativeClosedAtEnd=False,
+                      rootContextState='deadline_exceeded', connectionMatched=False)
+        event = dict(event=r.UNCLEAN_OPERATION_EVENT, birthPhase='released',
+                     birthCaptureEnded=False, firstError=record,
+                     firstNativeClosedError=record.copy(), rootAtClose='deadline_exceeded')
+        line = json.dumps(event, separators=(',', ':')) + '\n'
+        self.assertLessEqual(len(line.encode()), 1024)
+        logs = io.StringIO(line); logs.seek(8)
+        self.assertEqual(r.unclean_operation_projection(logs), event)
+        self.assertEqual(logs.tell(), 8)
+        nulls = event | {'firstError': None, 'firstNativeClosedError': None}
+        self.assertEqual(r.unclean_operation_projection(io.StringIO(json.dumps(nulls) + '\n')), nulls)
+        bad = [line + line, line.rstrip(), '', 'prefix ' + line, ' ' * 1024 + line,
+               json.dumps(event | {'extra': ''}) + '\n',
+               json.dumps(event | {'birthCaptureEnded': 1}) + '\n',
+               json.dumps(event | {'birthPhase': 'private'}) + '\n',
+               json.dumps(event | {'rootAtClose': True}) + '\n',
+               line.replace('"operation":"statement"', '"operation":"statement","operation":"begin"', 1),
+               '\udcff' + line]
+        for name in ('firstError', 'firstNativeClosedError'):
+            for value in ('unknown', {}, [], False, record | {'private': 'secret'},
+                          record | {'operation': 'query'}, record | {'startPhase': 'private'},
+                          record | {'contextState': None}, record | {'errorCategory': 'unknown'},
+                          record | {'rootContextState': False}):
+                bad.append(json.dumps(event | {name: value}) + '\n')
+            for key in ('errorMatchesContext', 'nativeClosedAtEnd', 'connectionMatched'):
+                for value in (0, 1, 'false', None):
+                    bad.append(json.dumps(event | {name: record | {key: value}}) + '\n')
+            for key in record:
+                bad.append(json.dumps(event | {name: {k: v for k, v in record.items() if k != key}}) + '\n')
+        for key in event:
+            bad.append(json.dumps({k: v for k, v in event.items() if k != key}) + '\n')
+        for text in bad:
+            result = r.unclean_operation_projection(io.StringIO(text))
+            self.assertEqual(result['firstError'], 'unknown')
+            self.assertEqual(result['firstNativeClosedError'], 'unknown')
+            self.assertEqual(result['birthCaptureEnded'], 'unknown')
+            self.assertNotIn('secret', json.dumps(result))
+        with patch.object(r, 'MAX_FINAL_LOG_BYTES', len(line) - 1):
+            self.assertEqual(r.unclean_operation_projection(io.StringIO(line))['firstError'], 'unknown')
+        broken = Mock(); broken.tell.return_value = 11
+        broken.read.side_effect = RuntimeError('private details')
+        self.assertEqual(r.unclean_operation_projection(broken)['firstError'], 'unknown')
+        self.assertEqual(broken.seek.call_args.args, (11,))
+
     def test_first_unclean_projection_is_closed_and_never_guesses_booleans(self):
         import io
         event = dict(event=r.FIRST_UNCLEAN_EVENT, alreadyClosed=False, closeFailed=True,
@@ -571,11 +620,14 @@ class Contracts(unittest.TestCase):
         import io
         detail = dict(event=r.FIRST_UNCLEAN_EVENT, alreadyClosed=True, closeFailed=False,
                       cleanupDone=True, role='other')
+        operation = dict(event=r.UNCLEAN_OPERATION_EVENT, birthPhase='open',
+                         birthCaptureEnded=False, firstError=None,
+                         firstNativeClosedError=None, rootAtClose='active')
         for reason in ('unclean_close', 'target_revoked'):
             first = dict(event=r.FINAL_INVALIDATION_EVENT, reason=reason, phase='released')
             for missing in (False, True):
                 logs = io.StringIO(json.dumps(first) + '\n' +
-                                   ('' if missing else json.dumps(detail) + '\n'))
+                                   ('' if missing else json.dumps(detail) + '\n' + json.dumps(operation) + '\n'))
                 owner = r.OwnedCIWorker(); owner.process = Mock(returncode=None)
                 with patch.object(r.sys, 'stderr', io.StringIO()) as output:
                     owner.report_first_invalidation_after_wait(logs)
@@ -586,7 +638,13 @@ class Contracts(unittest.TestCase):
                     owner.report_first_invalidation_after_wait(logs)
                     rows = [json.loads(line) for line in output.getvalue().splitlines()]
                 self.assertEqual(rows[0], first)
-                self.assertEqual(len(rows), 2 if reason == 'unclean_close' else 1)
+                self.assertEqual(len(rows), 3 if reason == 'unclean_close' else 1)
+                if reason == 'unclean_close':
+                    self.assertEqual(rows[2]['event'], r.UNCLEAN_OPERATION_EVENT)
+                    if missing:
+                        self.assertEqual(rows[2]['firstError'], 'unknown')
+                    else:
+                        self.assertEqual(rows[2], operation)
                 if reason == 'unclean_close':
                     if missing:
                         self.assertEqual(rows[1]['role'], 'unknown')

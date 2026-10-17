@@ -37,6 +37,7 @@ func Check(fset *token.FileSet, path string, files []*ast.File, info *types.Info
 	out = append(out, captureEndDeclarations(fset, path, files, info)...)
 	out = append(out, journalFinalDeclarations(fset, path, files, info)...)
 	out = append(out, uncleanCloseDeclarations(fset, path, files, info)...)
+	out = append(out, operationObservationDeclarations(fset, path, files, info)...)
 	scanners := scanOnlyParameters(files, info)
 	emit := func(n ast.Node, reason string) { out = append(out, Diagnostic{fset.Position(n.Pos()), reason}) }
 	for _, file := range files {
@@ -110,7 +111,7 @@ func Check(fset *token.FileSet, path string, files []*ast.File, info *types.Info
 						if (p == pgx || p == pgx+"/pgconn") && strings.HasPrefix(obj.Name(), "ParseConfig") && !(factory && p == pgx && obj.Name() == "ParseConfig") {
 							emit(id, "configuration reparsing is outside the admitted configuration boundary")
 						}
-						if _, ok := obj.(*types.TypeName); ok && rawType(obj.Type()) && !trusted && !nilConn {
+						if _, ok := obj.(*types.TypeName); ok && rawType(obj.Type()) && !trusted && !nilConn && !(exactObserverFunction(path, filepath.Base(fset.Position(file.Pos()).Filename), name, fn) && (name == "operationObserver.TraceQueryStart" || name == "operationObserver.TraceQueryEnd")) {
 							emit(id, "raw database connection type escapes the managed boundary")
 						}
 					}
@@ -125,11 +126,14 @@ func Check(fset *token.FileSet, path string, files []*ast.File, info *types.Info
 							if path == managed && filepath.Base(fset.Position(file.Pos()).Filename) == "lifecycle_ci.go" && name == "lifecycleTicket.connected" && lifecycleBackendRead(fn, sel, ancestors, info) {
 								allowed = true
 							}
+							if exactObserverFunction(path, filepath.Base(fset.Position(file.Pos()).Filename), name, fn) && name == "operationObserver.TraceQueryEnd" && sourceText(sel) == "conn.IsClosed" && s.Kind() == types.MethodVal && isNamed(s.Recv(), pgx, "Conn") {
+								allowed = true
+							}
 							if !allowed {
 								emit(sel, "raw connection method or transaction Conn escape")
 							}
 						}
-						if protectedConfig(s.Recv()) && !((s.Kind() != types.FieldVal && sel.Sel.Name == "Copy") || (factory && s.Kind() == types.FieldVal && configurationReadField(sel.Sel.Name))) {
+						if protectedConfig(s.Recv()) && !observedTracerField(path, filepath.Base(fset.Position(file.Pos()).Filename), name, fn, sel) && !((s.Kind() != types.FieldVal && sel.Sel.Name == "Copy") || (factory && s.Kind() == types.FieldVal && configurationReadField(sel.Sel.Name))) {
 							emit(sel, "configuration field access or unknown configuration operation")
 						}
 					}
@@ -177,7 +181,7 @@ func Check(fset *token.FileSet, path string, files []*ast.File, info *types.Info
 					case *ast.AssignStmt:
 						for _, lhs := range x.Lhs {
 							if sel, ok := lhs.(*ast.SelectorExpr); ok {
-								if selection := info.Selections[sel]; selection != nil && protectedConfig(selection.Recv()) {
+								if selection := info.Selections[sel]; selection != nil && protectedConfig(selection.Recv()) && !observedTracerField(path, filepath.Base(fset.Position(file.Pos()).Filename), name, fn, sel) {
 									emit(lhs, "configuration field replacement is forbidden")
 								}
 							}

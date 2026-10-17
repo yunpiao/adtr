@@ -37,15 +37,21 @@ type lifecycleGate struct {
 	firstInvalidReason                                         invalidationReason
 	firstInvalidPhase                                          string
 	firstUncleanClose                                          *uncleanCloseDiagnostic
+	firstUncleanOperation                                      *uncleanOperationDiagnostic
+	workerContext                                              context.Context
 }
 
 type lifecycleTicket struct {
-	gate         *lifecycleGate
-	generation   uint64
-	state        byte
-	conn         *Conn
-	backend      uint32
-	registration *activityRegistration
+	gate                   *lifecycleGate
+	generation             uint64
+	state                  byte
+	conn                   *Conn
+	backend                uint32
+	registration           *activityRegistration
+	birthPhase             string
+	birthCaptureEnded      bool
+	firstOperationError    *operationErrorDiagnostic
+	firstNativeClosedError *operationErrorDiagnostic
 }
 
 func acquireLifecycle(ctx context.Context) (lifecyclePermit, error) {
@@ -106,7 +112,7 @@ func (g *lifecycleGate) acquire(ctx context.Context) (*lifecycleTicket, error) {
 		if g.tickets == nil {
 			g.tickets = make(map[uint64]*lifecycleTicket)
 		}
-		ticket := &lifecycleTicket{gate: g, generation: g.next, state: 'p'}
+		ticket := &lifecycleTicket{gate: g, generation: g.next, state: 'p', birthPhase: g.diagnosticPhaseLocked(), birthCaptureEnded: g.seal != nil && g.seal.captureEnded}
 		g.tickets[ticket.generation] = ticket
 		g.pending++
 		g.notifyLocked()
@@ -196,6 +202,7 @@ func (t *lifecycleTicket) closedObserved(observation closeObservation) {
 				role = "epoch_target"
 			}
 			g.firstUncleanClose = &uncleanCloseDiagnostic{"owned_ci_first_unclean_close", observation.alreadyClosed, observation.closeFailed, observation.cleanupDone, role}
+			g.firstUncleanOperation = &uncleanOperationDiagnostic{"owned_ci_unclean_operation", t.birthPhase, t.birthCaptureEnded, t.firstOperationError, t.firstNativeClosedError, diagnosticContextState(g.workerContext)}
 		}
 	} else if g.seal != nil && !g.seal.released && g.seal.target == t && !g.captureObligationsEndedLocked() {
 		g.invalidateBecauseLocked(invalidTargetClosed)
