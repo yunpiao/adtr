@@ -296,13 +296,15 @@ func TestFinalQuiesceDrainedPredicateIncludesRetainedStatesAndActiveOperations(t
 }
 
 func TestFinalQuiesceCancelRechecksDeadlineDrainAndRoot(t *testing.T) {
-	for _, kind := range []string{"expired", "root_cancelled", "pending", "retained_q", "active_operation", "sticky", "stop_did_not_cancel", "stop_completed_after_deadline"} {
+	for _, kind := range []string{"expired", "root_cancelled", "pending", "retained_q", "active_operation", "explicit_sticky", "transport_sticky", "stop_did_not_cancel", "stop_completed_after_deadline"} {
 		t.Run(kind, func(t *testing.T) {
 			g, cancelRoot, calls := finalQuiesceFixture(t)
 			if g.prepareFinalQuiesce(5000) != nil {
 				t.Fatal("empty fixture prepare failed")
 			}
 			wantCalls := int32(0)
+			wantParked := true
+			wantReason := invalidExplicit
 			switch kind {
 			case "expired":
 				g.finalQuiesce.deadline = time.Now().Add(-time.Second)
@@ -314,8 +316,15 @@ func TestFinalQuiesceCancelRechecksDeadlineDrainAndRoot(t *testing.T) {
 				g.tickets[1] = &lifecycleTicket{gate: g, state: 'q'}
 			case "active_operation":
 				g.tickets[1] = &lifecycleTicket{gate: g, state: 'r', operationInFlight: 1}
-			case "sticky":
+			case "explicit_sticky":
+				g.invalidate()
+			case "transport_sticky":
 				g.invalidateTransport()
+				wantParked = false
+				wantReason = invalidTransport
+				if g.finalParked || g.finalQuiesce.state != "failed" {
+					t.Fatal("transport failure did not atomically fail and unpark final admission")
+				}
 			case "stop_did_not_cancel":
 				wantCalls = 1
 				g.finalQuiesce.stop = func() { calls.Add(1) }
@@ -329,11 +338,23 @@ func TestFinalQuiesceCancelRechecksDeadlineDrainAndRoot(t *testing.T) {
 					g.mu.Unlock()
 				}
 			}
-			if g.cancelFinalQuiesce() == nil || !g.invalid || !g.finalParked || calls.Load() != wantCalls {
-				t.Fatal("changed final-cancel precondition produced success")
+			if err := g.cancelFinalQuiesce(); err != errSealProtocol {
+				t.Fatal("changed final-cancel precondition did not return the protocol rejection")
 			}
-			if kind == "sticky" && g.firstInvalidReason != invalidTransport {
-				t.Fatal("cancel replaced original sticky cause")
+			if !g.invalid {
+				t.Fatal("rejected final cancellation did not retain sticky invalidation")
+			}
+			if calls.Load() != wantCalls {
+				t.Fatal("rejected final cancellation invoked an unexpected number of root cancellations")
+			}
+			if g.finalParked != wantParked {
+				t.Fatal("rejected final cancellation changed the expected admission park state")
+			}
+			if (kind == "explicit_sticky" || kind == "transport_sticky") && g.firstInvalidReason != wantReason {
+				t.Fatal("cancel replaced the original sticky cause")
+			}
+			if kind == "transport_sticky" && g.finalQuiesce.state != "failed" {
+				t.Fatal("rejected final cancellation changed the transport-failed state")
 			}
 			g.abortFinalQuiesce()
 			if g.finalParked || !g.invalid {
