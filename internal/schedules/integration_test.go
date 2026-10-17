@@ -29,6 +29,14 @@ type fixture struct {
 	principal tasks.Principal
 }
 
+// Fixture connections intentionally remain native pgx connections for seeding
+// and probes. Their cleanup is independent of the managed worker connection API.
+func closeFixtureConnection(conn *pgx.Conn) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_ = conn.Close(ctx)
+}
+
 func newFixture(t *testing.T) *fixture {
 	t.Helper()
 	dsn := os.Getenv("ADTR_TEST_DATABASE_URL")
@@ -75,7 +83,7 @@ func newFixture(t *testing.T) *fixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { schedules.IntegrationCloseConnection(db) })
+	t.Cleanup(func() { closeFixtureConnection(db) })
 	f := &fixture{t: t, ctx: ctx, cfg: cfg, db: db, principal: tasks.Principal{TenantID: "synthetic", ActorID: 41}}
 	f.exec(`CREATE TABLE adtr.synthetic_schedule_grants(tenant_id text NOT NULL,actor_id bigint NOT NULL,epoch text NOT NULL,allowed boolean NOT NULL DEFAULT true,PRIMARY KEY(tenant_id,actor_id)); INSERT INTO adtr.synthetic_schedule_grants VALUES('synthetic',41,'epoch-1',true);`)
 	f.queue, err = tasks.New(cfg, tasks.ProductionRegistry(), syntheticAuthorizer, schedules.SchemaVersion)
@@ -122,7 +130,7 @@ func (f *fixture) transact(fn func(pgx.Tx) error) error {
 	if err != nil {
 		return err
 	}
-	defer schedules.IntegrationCloseConnection(conn)
+	defer closeFixtureConnection(conn)
 	tx, err := conn.Begin(f.ctx)
 	if err != nil {
 		return err
@@ -368,7 +376,7 @@ func TestScheduleSchemaGateAndImmutableEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer schedules.IntegrationCloseConnection(conn)
+	defer closeFixtureConnection(conn)
 	tx, err := conn.Begin(f.ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -460,7 +468,7 @@ func TestSchedulerNeverHoldsScheduleWhileWaitingForTenant(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer schedules.IntegrationCloseConnection(probe)
+	defer closeFixtureConnection(probe)
 	deadline := time.NewTimer(2 * time.Second)
 	defer deadline.Stop()
 	ticker := time.NewTicker(10 * time.Millisecond)
