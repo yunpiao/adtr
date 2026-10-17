@@ -82,10 +82,22 @@ class IntegrationRunnerContract(unittest.TestCase):
         packages = ["example/cmd/service", runner.AUTH_PACKAGE, "example/internal/newpackage"]
         with patch.object(runner.subprocess, "check_output", side_effect=["\n".join(packages), self.discovery]), self.quiet():
             commands = runner.test_commands(runner.parse_args([]), self.env)
-        self.assertEqual(len(commands), 1 + runner.AUTH_SHARDS)
+        self.assertEqual(len(commands), 2 + runner.AUTH_SHARDS)
         self.assertEqual(commands[0][-2:], [packages[0], packages[2]])
         self.assertNotIn(runner.AUTH_PACKAGE, commands[0])
-        self.assertTrue(all(command[-1] == runner.AUTH_PACKAGE for command in commands[1:]))
+        self.assertEqual(commands[1], [self.env["GO"], "test", "-race", "-count=1",
+                                      "-tags=integration,adtr_ci_dbadmission", "-timeout=10m",
+                                      "./internal/dbadmission"])
+        self.assertTrue(all(command[-1] == runner.AUTH_PACKAGE for command in commands[2:]))
+
+    def test_non_auth_always_includes_tagged_lifecycle_contracts(self):
+        packages = [runner.AUTH_PACKAGE, "example/internal/service"]
+        with patch.object(runner.subprocess, "check_output", return_value="\n".join(packages)), self.quiet():
+            commands = runner.test_commands(runner.parse_args(["--suite", "non-auth"]), self.env)
+        self.assertEqual(len(commands), 2)
+        self.assertEqual(commands[1], [self.env["GO"], "test", "-race", "-count=1",
+                                      "-tags=integration,adtr_ci_dbadmission", "-timeout=10m",
+                                      "./internal/dbadmission"])
 
     def test_non_auth_rejects_incomplete_or_duplicate_package_discovery(self):
         for output in ("", "example/other", runner.AUTH_PACKAGE,

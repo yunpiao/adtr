@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/yunpiao/adtr/internal/dbadmission"
 	"github.com/yunpiao/adtr/internal/tasks"
 )
 
@@ -83,7 +84,7 @@ func (s *Store) Append(ctx context.Context, e Event, o RecorderObservation) (Eve
 	}
 	ctx, cancel := context.WithTimeout(ctx, appendTimeout)
 	defer cancel()
-	conn, err := pgx.ConnectConfig(ctx, s.config.Copy())
+	conn, err := dbadmission.ConnectConfig(ctx, s.config.Copy())
 	if err != nil {
 		return definite(err)
 	}

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/yunpiao/adtr/internal/dbadmission"
 	"github.com/yunpiao/adtr/internal/tasks"
 )
 
@@ -106,7 +107,7 @@ func (s *Store) requireTx(ctx context.Context, tx pgx.Tx) error {
 func (s *Store) withTx(ctx context.Context, fn func(context.Context, pgx.Tx) error) error {
 	ctx, cancel := context.WithTimeout(ctx, databaseTimeout)
 	defer cancel()
-	conn, err := pgx.ConnectConfig(ctx, s.config.Copy())
+	conn, err := dbadmission.ConnectConfig(ctx, s.config.Copy())
 	if err != nil {
 		return safeError(err)
 	}

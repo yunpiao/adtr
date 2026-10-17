@@ -55,7 +55,10 @@ def test_commands(args, env):
         if not packages:
             raise ValueError("non-auth package discovery must be nonempty")
         commands.append([go, "test", *TEST_FLAGS, "-v", *packages])
-        print(f"Non-auth integration: {len(packages)} packages", flush=True)
+        commands.append([go, "test", "-race", "-count=1",
+                         "-tags=integration,adtr_ci_dbadmission", "-timeout=10m",
+                         "./internal/dbadmission"])
+        print(f"Non-auth integration: {len(packages)} packages plus admission verification", flush=True)
     if args.suite in ("all", "auth"):
         output = subprocess.check_output(
             [go, "test", *TEST_FLAGS, "-list", ".", AUTH_PACKAGE], env=env, text=True)
