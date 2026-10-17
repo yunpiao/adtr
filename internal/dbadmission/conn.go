@@ -47,7 +47,7 @@ func connectWith(ctx context.Context, config *pgx.ConnConfig, connect func(conte
 	if err != nil || raw == nil {
 		if permit != nil {
 			// A failed startup may leave asynchronous cleanup. Never claim drain.
-			permit.failed()
+			observeLifecycleConnectFailure(ctx, permit, err, raw == nil)
 		}
 		if err == nil {
 			err = errors.New("database connection unavailable")

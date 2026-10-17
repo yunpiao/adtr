@@ -36,6 +36,7 @@ type lifecycleGate struct {
 	total                                                      uint64
 	firstInvalidReason                                         invalidationReason
 	firstInvalidPhase                                          string
+	firstConnectFailure                                        *connectFailureDiagnostic
 	firstUncleanClose                                          *uncleanCloseDiagnostic
 	firstUncleanOperation                                      *uncleanOperationDiagnostic
 	workerContext                                              context.Context

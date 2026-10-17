@@ -27,3 +27,14 @@ func TestDefaultConnectDelegatesUnchanged(t *testing.T) {
 		t.Fatal("default delegate contract failed")
 	}
 }
+
+func TestDefaultConnectNilNativeStillFails(t *testing.T) {
+	calls := 0
+	conn, err := connectWith(context.Background(), &pgx.ConnConfig{}, func(context.Context, *pgx.ConnConfig) (*pgx.Conn, error) {
+		calls++
+		return nil, nil
+	})
+	if conn != nil || err == nil || calls != 1 {
+		t.Fatal("nil native default failure changed")
+	}
+}

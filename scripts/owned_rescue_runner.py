@@ -416,6 +416,53 @@ OPERATION_PHASES = frozenset({'open', 'draining', 'sealed', 'released', 'unknown
 OPERATION_CONTEXTS = frozenset({'active', 'canceled', 'deadline_exceeded', 'other', 'unknown'})
 
 
+FIRST_CONNECT_EVENT = 'owned_ci_first_connect_failure'
+
+
+def first_connect_projection(logs):
+    """Diagnostic only: neither a network category nor context state grants recovery."""
+    unknown = {'event': FIRST_CONNECT_EVENT, 'birthPhase': 'unknown',
+               'birthCaptureEnded': 'unknown', 'birthRecoveryAuthorized': 'unknown',
+               'failurePhase': 'unknown', 'contextState': 'unknown',
+               'errorCategory': 'unknown', 'errorMatchesContext': 'unknown',
+               'rootContextState': 'unknown', 'rawNil': 'unknown'}
+    position = None
+    try:
+        logs.flush()
+        position = logs.tell()
+        logs.seek(0)
+        text = logs.read(MAX_FINAL_LOG_BYTES + 1)
+        if type(text) is not str or len(text.encode('utf-8')) > MAX_FINAL_LOG_BYTES:
+            return unknown
+        candidates = [line for line in text.splitlines(keepends=True) if FIRST_CONNECT_EVENT in line]
+        if (len(candidates) != 1 or not candidates[0].endswith('\n')
+                or len(candidates[0].encode('utf-8')) > 1024):
+            return unknown
+        frame = json.loads(candidates[0], object_pairs_hook=_unique_object,
+                           parse_constant=lambda _: _fail())
+        if (type(frame) is not dict or set(frame) != set(unknown)
+                or frame['event'] != FIRST_CONNECT_EVENT
+                or any(type(frame[key]) is not str or frame[key] not in OPERATION_PHASES
+                       for key in ('birthPhase', 'failurePhase'))
+                or any(type(frame[key]) is not str or frame[key] not in OPERATION_CONTEXTS
+                       for key in ('contextState', 'rootContextState'))
+                or type(frame['errorCategory']) is not str
+                or frame['errorCategory'] not in ('none', 'canceled', 'deadline_exceeded',
+                                                  'authentication', 'network_error', 'other')
+                or any(type(frame[key]) is not bool for key in
+                       ('birthCaptureEnded', 'birthRecoveryAuthorized', 'errorMatchesContext', 'rawNil'))):
+            return unknown
+        return {key: frame[key] for key in unknown}
+    except Exception:
+        return unknown
+    finally:
+        if position is not None:
+            try:
+                logs.seek(position)
+            except Exception:
+                pass
+
+
 def unclean_operation_projection(logs):
     """Project only closed operation diagnostics; malformed evidence is not null."""
     unknown = {'event': UNCLEAN_OPERATION_EVENT, 'birthPhase': 'unknown',
@@ -958,6 +1005,12 @@ class OwnedCIWorker:
             print(json.dumps(report, separators=(',', ':')), file=sys.stderr, flush=True)
         except Exception:
             pass
+        if report['reason'] == 'connect_failed':
+            detail = first_connect_projection(logs)
+            try:
+                print(json.dumps(detail, separators=(',', ':')), file=sys.stderr, flush=True)
+            except Exception:
+                pass
         if report['reason'] == 'unclean_close':
             detail = first_unclean_projection(logs)
             try:

@@ -39,6 +39,7 @@ func Check(fset *token.FileSet, path string, files []*ast.File, info *types.Info
 	out = append(out, uncleanCloseDeclarations(fset, path, files, info)...)
 	out = append(out, operationObservationDeclarations(fset, path, files, info)...)
 	out = append(out, recoveryDeclarations(fset, path, files, info)...)
+	out = append(out, connectFailureDeclarations(fset, path, files, info)...)
 	scanners := scanOnlyParameters(files, info)
 	emit := func(n ast.Node, reason string) { out = append(out, Diagnostic{fset.Position(n.Pos()), reason}) }
 	for _, file := range files {

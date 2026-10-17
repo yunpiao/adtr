@@ -7,14 +7,20 @@ import (
 
 func finalDiagnosticOperation(function *types.Func) bool {
 	signature := callableSignature(function.Type())
-	return signature != nil && signature.Recv() != nil && isNamed(signature.Recv().Type(), managed, "lifecycleGate") && (function.Name() == "writeRecoveryCleanupDiagnostic" || function.Name() == "writeFinalInvalidationDiagnostic" || function.Name() == "finalInvalidationDiagnostic" || function.Name() == "writeUncleanCloseDiagnostic" || function.Name() == "uncleanCloseDiagnostic" || function.Name() == "writeUncleanOperationDiagnostic" || function.Name() == "uncleanOperationDiagnostic")
+	return signature != nil && signature.Recv() != nil && isNamed(signature.Recv().Type(), managed, "lifecycleGate") && (function.Name() == "writeConnectFailureDiagnostic" || function.Name() == "connectFailureDiagnostic" || function.Name() == "writeRecoveryCleanupDiagnostic" || function.Name() == "writeFinalInvalidationDiagnostic" || function.Name() == "finalInvalidationDiagnostic" || function.Name() == "writeUncleanCloseDiagnostic" || function.Name() == "uncleanCloseDiagnostic" || function.Name() == "writeUncleanOperationDiagnostic" || function.Name() == "uncleanOperationDiagnostic")
 }
 func exactFinalDiagnosticWriter(fn *ast.FuncDecl) bool {
-	return fn != nil && fn.Body != nil && len(fn.Body.List) == 4 && compactSource(fn.Body.List[0]) == "data,err:=json.Marshal(g.finalInvalidationDiagnostic())" && compactSource(fn.Body.List[1]) == `iferr==nil{_,_=os.Stderr.Write(append(data,'\n'))}` && compactSource(fn.Body.List[2]) == "g.writeUncleanCloseDiagnostic()" && compactSource(fn.Body.List[3]) == "g.writeUncleanOperationDiagnostic()"
+	return fn != nil && fn.Body != nil && len(fn.Body.List) == 5 && compactSource(fn.Body.List[0]) == "data,err:=json.Marshal(g.finalInvalidationDiagnostic())" && compactSource(fn.Body.List[1]) == `iferr==nil{_,_=os.Stderr.Write(append(data,'\n'))}` && compactSource(fn.Body.List[2]) == "g.writeUncleanCloseDiagnostic()" && compactSource(fn.Body.List[3]) == "g.writeUncleanOperationDiagnostic()" && compactSource(fn.Body.List[4]) == "g.writeConnectFailureDiagnostic()"
 }
 func allowedFinalDiagnosticCaller(path, file, function, operation string, id *ast.Ident, ancestors []ast.Node, info *types.Info) bool {
 	if path != managed {
 		return false
+	}
+	if operation == "writeConnectFailureDiagnostic" {
+		return file == "application_diagnostic_ci.go" && function == "lifecycleGate.writeFinalInvalidationDiagnostic" && directCallFor(id, ancestors) != nil
+	}
+	if operation == "connectFailureDiagnostic" {
+		return file == connectFailureSource && function == "lifecycleGate.writeConnectFailureDiagnostic" && directCallFor(id, ancestors) != nil
 	}
 	if operation == "writeUncleanOperationDiagnostic" {
 		return file == "application_diagnostic_ci.go" && function == "lifecycleGate.writeFinalInvalidationDiagnostic" && directCallFor(id, ancestors) != nil

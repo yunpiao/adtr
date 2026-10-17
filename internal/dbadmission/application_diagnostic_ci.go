@@ -143,4 +143,5 @@ func (g *lifecycleGate) writeFinalInvalidationDiagnostic() {
 	}
 	g.writeUncleanCloseDiagnostic()
 	g.writeUncleanOperationDiagnostic()
+	g.writeConnectFailureDiagnostic()
 }

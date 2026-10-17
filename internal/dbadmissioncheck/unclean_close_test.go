@@ -28,7 +28,7 @@ func uncleanFixtures(t *testing.T) (string, fixtureImporter) {
 	}
 	source := `package dbadmission;import("encoding/json";"os";"sync";"context")
  type invalidationReason string;const invalidUncleanClose invalidationReason="unclean_close"
- type lifecycleGate struct{mu sync.Mutex;firstUncleanOperation *uncleanOperationDiagnostic;workerContext context.Context;writeUncleanOperationDiagnostic func();firstInvalidReason invalidationReason;firstUncleanClose *uncleanCloseDiagnostic;seal *sealAttempt;invalidateBecauseLocked func(invalidationReason)}
+ type lifecycleGate struct{mu sync.Mutex;firstUncleanOperation *uncleanOperationDiagnostic;workerContext context.Context;writeUncleanOperationDiagnostic func();writeConnectFailureDiagnostic func();firstInvalidReason invalidationReason;firstUncleanClose *uncleanCloseDiagnostic;seal *sealAttempt;invalidateBecauseLocked func(invalidationReason)}
  type sealAttempt struct{target *lifecycleTicket}
  type lifecycleTicket struct{gate *lifecycleGate;birthPhase string;birthCaptureEnded bool;firstOperationError,firstNativeClosedError *operationErrorDiagnostic}
  type closeObservation struct{alreadyClosed,closeFailed,cleanupDone bool}

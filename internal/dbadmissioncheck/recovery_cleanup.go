@@ -435,7 +435,7 @@ func recoveryDeclarations(fset *token.FileSet, path string, files []*ast.File, i
 					}
 				case *ast.SelectorExpr:
 					selection := info.Selections[x]
-					if selection != nil && selection.Kind() == types.FieldVal && recoveryField(selection.Recv(), selection.Obj().Name()) && !exact && !observer && !uncleanCapture(path, filename, name, ancestors) {
+					if selection != nil && selection.Kind() == types.FieldVal && recoveryField(selection.Recv(), selection.Obj().Name()) && !exact && !observer && !(name == "lifecycleTicket.failedObserved" && exactConnectFailureFunction(path, filename, name, fn)) && !uncleanCapture(path, filename, name, ancestors) {
 						emit(x, "recovery qualification or observation escapes its fixed producer/consumer")
 					}
 				case *ast.StarExpr:

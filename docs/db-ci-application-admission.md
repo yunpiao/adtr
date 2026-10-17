@@ -480,3 +480,43 @@ A real PostgreSQL regression waits until its query is observed in `PgSleep`
 before cancellation, distinguishing actual dispatched-query cleanup from an
 already-cancelled context rejected before dispatch. The group run's precise
 native-close trigger remains unverified until this evidence is collected.
+
+### Failed connection diagnostics remain a hard failure
+
+Run 39069124191's user job reached browser success but failed the final witness
+with `connect_failed` in `released`. The existing failure branch handles either
+a non-nil error or a nil returned native connection. It does not establish why
+startup failed, and query tracing cannot describe a connection that never
+finished startup. This is a separate case from a qualified, already-connected
+post-release query cancellation.
+
+The CI-only `owned_ci_first_connect_failure` record observes that same failed
+Connect invocation: ticket birth phase, cached birth capture-end status,
+immutable birth recovery authorization, failure phase, original context status,
+returned-error category, context-error match, root-context status, and whether
+the native return was nil. Error classification precedes context sampling.
+Cancellation and deadline categories use `errors.Is`; authentication uses a
+`PgError` in SQLSTATE class 28; `network_error` denotes a `net.Error` in the error
+chain. All other errors remain `other`. No original error, address, SQLSTATE,
+DSN, credentials, or identity is retained or emitted.
+
+A joined/fallback connection error can contain multiple underlying errors.
+The category and context match report association, not a unique cause or proof
+that no network/authentication failure occurred. A later context cancellation
+cannot rewrite the immutable record. A cached birth-capture value of false does
+not prove that the parent never committed authorization. Missing or malformed
+records remain unknown. Every failed connection still enters the original
+permanent invalid state, regardless of category; no recovery qualification is
+added. The default build performs only the original failed-permit notification.
+The additional CI diagnostic work and synchronous stderr output retain the
+existing allocation, locking, and OS/disk blocking boundaries.
+
+The integration regression first verifies the configured owned PostgreSQL
+fixture is live. It then distinguishes cancellation rejected by admission
+(no native connector call or connect-failure record) from cancellation injected
+immediately after admission and before the real `pgx.ConnectConfig` call. The
+latter must preserve pgx's exact returned error and classify its cancellation
+chain while still setting sticky failure. This exercises actual connector
+behavior, not an established backend or an in-flight authentication failure;
+it does not identify the historical user job's failure. The existing whole
+`dbadmission` integration group selects this test without a name filter.

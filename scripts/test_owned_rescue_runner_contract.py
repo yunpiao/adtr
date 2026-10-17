@@ -544,6 +544,72 @@ class Contracts(unittest.TestCase):
         self.assertIsNone(owner.witness)
         self.assertIsNone(owner.page_fd)
 
+    def test_first_connect_projection_is_closed_and_independent_of_eligibility(self):
+        import io
+        event = dict(event=r.FIRST_CONNECT_EVENT, birthPhase='released',
+                     birthCaptureEnded=False, birthRecoveryAuthorized=True,
+                     failurePhase='released', contextState='canceled',
+                     errorCategory='network_error', errorMatchesContext=False,
+                     rootContextState='active', rawNil=True)
+        line = json.dumps(event) + '\n'
+        logs = io.StringIO(line); logs.seek(4)
+        self.assertEqual(r.first_connect_projection(logs), event)
+        self.assertEqual(logs.tell(), 4)
+        for category in ('none', 'canceled', 'deadline_exceeded', 'authentication', 'network_error', 'other'):
+            value = event | {'errorCategory': category}
+            self.assertEqual(r.first_connect_projection(io.StringIO(json.dumps(value) + '\n')), value)
+        bad = [line + line, line.rstrip(), '', 'prefix ' + line, ' ' * 1024 + line,
+               json.dumps(event | {'private': 'secret'}) + '\n',
+               json.dumps(event | {'errorCategory': 'network'}) + '\n',
+               json.dumps(event | {'birthPhase': 'private'}) + '\n',
+               json.dumps(event | {'failurePhase': True}) + '\n',
+               json.dumps(event | {'contextState': None}) + '\n',
+               json.dumps(event | {'rootContextState': 'private'}) + '\n',
+               line.replace('"rawNil": true', '"rawNil": true, "rawNil": false'),
+               '\udcff' + line]
+        for key in ('birthCaptureEnded', 'birthRecoveryAuthorized', 'errorMatchesContext', 'rawNil'):
+            for value in (0, 1, None, 'false', {}):
+                bad.append(json.dumps(event | {key: value}) + '\n')
+        for key in event:
+            bad.append(json.dumps({k: v for k, v in event.items() if k != key}) + '\n')
+        for text in bad:
+            result = r.first_connect_projection(io.StringIO(text))
+            self.assertEqual(set(result), set(event))
+            self.assertEqual(result['event'], r.FIRST_CONNECT_EVENT)
+            self.assertTrue(all(value == 'unknown' for key, value in result.items() if key != 'event'))
+        with patch.object(r, 'MAX_FINAL_LOG_BYTES', len(line) - 1):
+            self.assertEqual(r.first_connect_projection(io.StringIO(line))['rawNil'], 'unknown')
+        broken = Mock(); broken.tell.return_value = 13
+        broken.read.side_effect = RuntimeError('private details')
+        self.assertEqual(r.first_connect_projection(broken)['rawNil'], 'unknown')
+        self.assertEqual(broken.seek.call_args.args, (13,))
+
+    def test_connect_detail_print_requires_matching_first_cause_and_wait_once(self):
+        import io
+        detail = dict(event=r.FIRST_CONNECT_EVENT, birthPhase='open',
+                      birthCaptureEnded=False, birthRecoveryAuthorized=False,
+                      failurePhase='open', contextState='active', errorCategory='authentication',
+                      errorMatchesContext=False, rootContextState='active', rawNil=True)
+        for reason in ('connect_failed', 'target_revoked'):
+            first = dict(event=r.FINAL_INVALIDATION_EVENT, reason=reason, phase='open')
+            for missing in (False, True):
+                logs = io.StringIO(json.dumps(first) + '\n' +
+                                   ('' if missing else json.dumps(detail) + '\n'))
+                owner = r.OwnedCIWorker(); owner.process = Mock(returncode=None)
+                with patch.object(r.sys, 'stderr', io.StringIO()) as output:
+                    owner.report_first_invalidation_after_wait(logs)
+                    self.assertEqual(logs.tell(), 0)
+                    self.assertEqual(output.getvalue(), '')
+                    owner.process.returncode = 1
+                    owner.report_first_invalidation_after_wait(logs)
+                    owner.report_first_invalidation_after_wait(logs)
+                    rows = [json.loads(line) for line in output.getvalue().splitlines()]
+                self.assertEqual(rows[0], first)
+                self.assertEqual(len(rows), 2 if reason == 'connect_failed' else 1)
+                if reason == 'connect_failed':
+                    if missing: self.assertEqual(rows[1]['rawNil'], 'unknown')
+                    else: self.assertEqual(rows[1], detail)
+
     def test_unclean_operation_projection_preserves_null_and_rejects_nested_noise(self):
         import io
         record = dict(operation='statement', startPhase='draining', endPhase='released',

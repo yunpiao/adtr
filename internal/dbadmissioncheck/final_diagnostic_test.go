@@ -21,13 +21,14 @@ func TestFinalDiagnosticCapabilityIsExact(t *testing.T) {
 	}
 	writer := `package dbadmission
  import("encoding/json";"os";"sync")
- type lifecycleGate struct{mu sync.Mutex;captureEndFD int;finishRecoveryCleanup func();writeUncleanCloseDiagnostic func();writeUncleanOperationDiagnostic func();writeRecoveryCleanupDiagnostic func()}
+ type lifecycleGate struct{mu sync.Mutex;captureEndFD int;finishRecoveryCleanup func();writeUncleanCloseDiagnostic func();writeUncleanOperationDiagnostic func();writeConnectFailureDiagnostic func();writeRecoveryCleanupDiagnostic func()}
  func(g *lifecycleGate)finalInvalidationDiagnostic()struct{}{return struct{}{}}
  func(g *lifecycleGate)writeFinalInvalidationDiagnostic(){
  data,err:=json.Marshal(g.finalInvalidationDiagnostic())
  if err==nil{_,_=os.Stderr.Write(append(data,'\n'))}
  g.writeUncleanCloseDiagnostic()
  g.writeUncleanOperationDiagnostic()
+ g.writeConnectFailureDiagnostic()
  }
  `
 	caller := `package dbadmission;import "sync";type shutdownFlag struct{};func(*shutdownFlag)Store(bool){};type closer struct{};func(*closer)Close(){};func StartCIController(g *lifecycleGate){var stopOnce,reportOnce,recoveryOnce sync.Once;var wg sync.WaitGroup;var stopping shutdownFlag;normal,rescue,captureEnd:=&closer{},&closer{},&closer{};cleanup:=func()` + recoveryCleanupBody + `;cleanup()}`
