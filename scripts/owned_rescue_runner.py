@@ -630,6 +630,8 @@ class WorkerController:
         self.invalid = False
         self.armed = self.released = False
         self.capture_deadline = None
+        self.final_deadline = None
+        self.final_prepared = self.final_cancel_attempted = False
         self.commit_attempted = self.committed = False
         self.selection_prepared = self.target_sent = self.target_finished = False
         self.mutex = threading.RLock()
@@ -813,6 +815,50 @@ class WorkerController:
                 self._latch(operation, step, self._cause(error))
             except OSError:
                 self._latch(operation, step, ControlCause.TRANSPORT)
+
+    def final_shutdown(self, deadline, *, cancel=False):
+        """One terminal quiesce handshake; both phases share the worker grace."""
+        with self.mutex:
+            try:
+                if (self.invalid or not self.armed or not self.committed or not self.released
+                        or type(deadline) not in (int, float)):
+                    _fail()
+                remaining = deadline - time.monotonic()
+                if not 0 < remaining <= 30:
+                    _fail(ControlCause.DEADLINE)
+                if cancel:
+                    if (not self.final_prepared or self.final_cancel_attempted
+                            or deadline != self.final_deadline):
+                        _fail()
+                    self.final_cancel_attempted = True
+                else:
+                    if self.final_deadline is not None:
+                        _fail()
+                    self.final_deadline = deadline
+                self.seq += 1
+                request = {'version': 2, 'epoch': 1, 'seq': self.seq,
+                           'op': 'final_cancel' if cancel else 'final_prepare'}
+                if not cancel:
+                    budget = int(remaining * 1000)
+                    if not 1 <= budget <= 30000:
+                        _fail(ControlCause.DEADLINE)
+                    request['budgetMillis'] = budget
+                self.normal.send(request, deadline)
+                reply = self.normal.receive(deadline)
+                expected = {'version': 2, 'epoch': 1, 'seq': self.seq,
+                            'kind': 'quiesce', 'status': 'cancelled' if cancel else 'drained',
+                            'pending': 0, 'open': 0}
+                if (type(reply) is not dict or reply.keys() != expected.keys()
+                        or any(type(reply[key]) is not type(value) or reply[key] != value
+                               for key, value in expected.items())):
+                    _fail(ControlCause.FRAME)
+                if time.monotonic() >= deadline:
+                    _fail(ControlCause.DEADLINE)
+                if not cancel:
+                    self.final_prepared = True
+                return True
+            except (OSError, ControlFailure, ValueError, OverflowError):
+                self._latch()
 
     def snapshot(self, deadline):
         return self._request('snapshot', deadline)
@@ -1022,6 +1068,29 @@ class OwnedCIWorker:
                 print(json.dumps(operation, separators=(',', ':')), file=sys.stderr, flush=True)
             except Exception:
                 pass
+
+    def prepare_final_shutdown(self, deadline):
+        if self.process is None or self.process.poll() is not None:
+            _fail()
+        return self.controller.final_shutdown(deadline)
+
+    def cancel_final_shutdown(self, deadline):
+        if self.process is None or self.process.poll() is not None:
+            _fail()
+        return self.controller.final_shutdown(deadline, cancel=True)
+
+    def abort_final_shutdown(self):
+        # Cancel the normal stream locally. Once Go returns from synchronous
+        # drain (root cancellation or its deadline), EOF handling clears park.
+        # FD ownership remains with this owner until Wait; detach avoids closing
+        # a live descriptor and subsequently closing a recycled descriptor twice.
+        self.controller.invalid = True
+        self.controller.normal.failed = True
+        endpoint = socket.socket(fileno=self.controller.normal.write_fd)
+        try:
+            endpoint.shutdown(socket.SHUT_RDWR)
+        finally:
+            endpoint.detach()
 
     def stop_rescuer(self):
         if self.rescuer is None:

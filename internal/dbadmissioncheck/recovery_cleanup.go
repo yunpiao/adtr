@@ -202,7 +202,7 @@ var recoveryBodies = map[string]struct{ file, body string }{
 			g.mu.Unlock()
 			return nil, errAdmissionClosed
 		}
-		if g.closing {
+		if g.closing || g.finalParked {
 			if g.changed == nil {
 				g.changed = make(chan struct{})
 			}
@@ -310,7 +310,9 @@ func exactRecoveryFunction(path, file, name string, fn *ast.FuncDecl) bool {
 }
 
 const recoveryCleanupBody = `{
+ g.finalTransportMu.Lock()
  stopOnce.Do(func(){stopping.Store(true);normal.Close();rescue.Close()})
+ g.finalTransportMu.Unlock()
  wg.Wait()
  recoveryOnce.Do(func(){g.finishRecoveryCleanup()})
  g.mu.Lock()
@@ -435,7 +437,7 @@ func recoveryDeclarations(fset *token.FileSet, path string, files []*ast.File, i
 					}
 				case *ast.SelectorExpr:
 					selection := info.Selections[x]
-					if selection != nil && selection.Kind() == types.FieldVal && recoveryField(selection.Recv(), selection.Obj().Name()) && !exact && !observer && !(name == "lifecycleTicket.failedObserved" && exactConnectFailureFunction(path, filename, name, fn)) && !uncleanCapture(path, filename, name, ancestors) {
+					if selection != nil && selection.Kind() == types.FieldVal && recoveryField(selection.Recv(), selection.Obj().Name()) && !exact && !observer && !exactFinalQuiesceFunction(path, filename, name, fn) && !(name == "lifecycleTicket.failedObserved" && exactConnectFailureFunction(path, filename, name, fn)) && !uncleanCapture(path, filename, name, ancestors) {
 						emit(x, "recovery qualification or observation escapes its fixed producer/consumer")
 					}
 				case *ast.StarExpr:

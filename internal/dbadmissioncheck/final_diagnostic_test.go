@@ -21,7 +21,7 @@ func TestFinalDiagnosticCapabilityIsExact(t *testing.T) {
 	}
 	writer := `package dbadmission
  import("encoding/json";"os";"sync")
- type lifecycleGate struct{mu sync.Mutex;captureEndFD int;finishRecoveryCleanup func();writeUncleanCloseDiagnostic func();writeUncleanOperationDiagnostic func();writeConnectFailureDiagnostic func();writeRecoveryCleanupDiagnostic func()}
+ type lifecycleGate struct{mu sync.Mutex;finalTransportMu sync.Mutex;captureEndFD int;finishRecoveryCleanup func();writeUncleanCloseDiagnostic func();writeUncleanOperationDiagnostic func();writeConnectFailureDiagnostic func();writeRecoveryCleanupDiagnostic func()}
  func(g *lifecycleGate)finalInvalidationDiagnostic()struct{}{return struct{}{}}
  func(g *lifecycleGate)writeFinalInvalidationDiagnostic(){
  data,err:=json.Marshal(g.finalInvalidationDiagnostic())

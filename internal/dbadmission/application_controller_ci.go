@@ -47,14 +47,15 @@ type applicationFrame struct {
 	Records  []applicationRecord `json:"records"`
 }
 type applicationRequest struct {
-	Version  int    `json:"version"`
-	Epoch    uint64 `json:"epoch"`
-	Seq      uint64 `json:"seq"`
-	Op       string `json:"op"`
-	Target   uint64 `json:"target,omitempty"`
-	Kind     string `json:"kind,omitempty"`
-	TaskID   string `json:"taskID,omitempty"`
-	WorkerID string `json:"workerID,omitempty"`
+	Version      int    `json:"version"`
+	Epoch        uint64 `json:"epoch"`
+	Seq          uint64 `json:"seq"`
+	Op           string `json:"op"`
+	Target       uint64 `json:"target,omitempty"`
+	Kind         string `json:"kind,omitempty"`
+	TaskID       string `json:"taskID,omitempty"`
+	WorkerID     string `json:"workerID,omitempty"`
+	BudgetMillis int64  `json:"budgetMillis,omitempty"`
 }
 
 func (g *lifecycleGate) applicationSnapshot(seq uint64, kind string) (applicationFrame, error) {
@@ -125,7 +126,9 @@ func StartCIController(normal, rescue, witness, captureEnd *os.File, nonce [16]b
 	var stopOnce, reportOnce, recoveryOnce sync.Once
 	var wg sync.WaitGroup
 	cleanup := func() {
+		g.finalTransportMu.Lock()
 		stopOnce.Do(func() { stopping.Store(true); normal.Close(); rescue.Close() })
+		g.finalTransportMu.Unlock()
 		wg.Wait()
 		recoveryOnce.Do(func() { g.finishRecoveryCleanup() })
 		// Retain the reader through controller join and serialize raw-FD teardown
@@ -211,6 +214,8 @@ func readApplicationRequest(reader *bufio.Reader, limit int, last uint64) (appli
 	}
 	expected := map[string]bool{"version": true, "epoch": true, "seq": true, "op": true}
 	switch r.Op {
+	case "final_prepare":
+		expected["budgetMillis"] = true
 	case "pin":
 		expected["target"] = true
 	case "prepare_selection":
@@ -233,6 +238,7 @@ func recordApplicationFailure(file *os.File, g *lifecycleGate, stopping *atomic.
 	// EOF/partial/timeout cannot be relabelled by a later cleanup Close.
 	if !(stopping.Load() && errors.Is(original, os.ErrClosed)) {
 		g.invalidateTransport()
+		g.abortFinalQuiesce()
 		if onFailure != nil {
 			onFailure()
 		}
@@ -268,7 +274,48 @@ func serveApplicationNormal(file *os.File, g *lifecycleGate, stopping *atomic.Bo
 		if r.Op != "prepare_selection" && r.Op != "configure_target" && (r.Kind != "" || r.TaskID != "" || r.WorkerID != "") {
 			return
 		}
+		if r.Op != "final_prepare" && r.BudgetMillis != 0 {
+			return
+		}
 		switch r.Op {
+		case "final_prepare":
+			if r.Target != 0 || g.prepareFinalQuiesce(r.BudgetMillis) != nil {
+				return
+			}
+			writeMu.Lock()
+			err := writeFinalQuiesceFrame(file, g, r.Seq, "drained")
+			writeMu.Unlock()
+			if err != nil {
+				terminal = err
+				return
+			}
+			continue
+		case "final_cancel":
+			if r.Target != 0 || !g.finalTransportMu.TryLock() {
+				return
+			}
+			err := func() error {
+				defer g.finalTransportMu.Unlock()
+				if stopping.Load() {
+					return errSealProtocol
+				}
+				if err := g.cancelFinalQuiesce(); err != nil {
+					return err
+				}
+				writeMu.Lock()
+				err := writeFinalQuiesceFrame(file, g, r.Seq, "cancelled")
+				writeMu.Unlock()
+				if err != nil {
+					g.abortFinalQuiesce()
+					return err
+				}
+				return g.completeFinalQuiesce()
+			}()
+			if err != nil {
+				terminal = err
+				return
+			}
+			continue
 		case "prepare_selection":
 			if r.Target != 0 || r.TaskID != "" || r.WorkerID != "" || g.prepareActivitySelection(r.Kind) != nil {
 				return
@@ -322,7 +369,7 @@ func serveApplicationRescue(file *os.File, g *lifecycleGate, stopping *atomic.Bo
 			return
 		}
 		last = r.Seq
-		if r.Target != 0 || r.Kind != "" || r.TaskID != "" || r.WorkerID != "" {
+		if r.Target != 0 || r.Kind != "" || r.TaskID != "" || r.WorkerID != "" || r.BudgetMillis != 0 {
 			return
 		}
 		switch r.Op {
@@ -331,6 +378,7 @@ func serveApplicationRescue(file *os.File, g *lifecycleGate, stopping *atomic.Bo
 				return
 			}
 		case "abort":
+			g.abortFinalQuiesce()
 			g.mu.Lock()
 			g.invalidateBecauseLocked(invalidAbort)
 			if g.seal != nil {
@@ -354,4 +402,42 @@ func serveApplicationRescue(file *os.File, g *lifecycleGate, stopping *atomic.Bo
 			return
 		}
 	}
+}
+
+func writeFinalQuiesceFrame(file *os.File, g *lifecycleGate, seq uint64, status string) error {
+	g.mu.Lock()
+	deadline := g.finalQuiesce.deadline
+	valid := !g.invalid && g.finalParked && g.finalDrainedLocked() && g.finalQuiesce.state == status
+	g.mu.Unlock()
+	if !valid || !time.Now().Before(deadline) {
+		return errSealProtocol
+	}
+	frame := struct {
+		Version int    `json:"version"`
+		Epoch   uint64 `json:"epoch"`
+		Seq     uint64 `json:"seq"`
+		Kind    string `json:"kind"`
+		Status  string `json:"status"`
+		Pending int    `json:"pending"`
+		Open    int    `json:"open"`
+	}{2, 1, seq, "quiesce", status, 0, 0}
+	data, err := json.Marshal(frame)
+	if err != nil || len(data)+1 > 1024 {
+		return errSealProtocol
+	}
+	data = append(data, '\n')
+	if bound := time.Now().Add(500 * time.Millisecond); bound.Before(deadline) {
+		deadline = bound
+	}
+	if err := file.SetWriteDeadline(deadline); err != nil {
+		return err
+	}
+	n, err := file.Write(data)
+	if err != nil {
+		return err
+	}
+	if n != len(data) {
+		return errSealProtocol
+	}
+	return nil
 }

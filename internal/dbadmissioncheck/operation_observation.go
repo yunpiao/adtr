@@ -231,7 +231,7 @@ func operationObservationDeclarations(fset *token.FileSet, path string, files []
 			if path == managed && expected && !exactObserverFunction(path, filename, name, fn) && !(name == "observeLifecycleConfig" && filename == "operation_observation_default.go" && captureBodyMatches(fn, `{return config}`)) {
 				emit(decl, "operation observer must retain its exact context/configuration and closed-diagnostic behavior")
 			}
-			if path == module+"/cmd/adtr" && name == "observeCIWorkerContext" && !((filename == "db_observation_ci.go" && captureBodyMatches(fn, `{dbadmission.ObserveCIWorkerContext(ctx)}`)) || (filename == "db_observation_default.go" && captureBodyMatches(fn, `{}`))) {
+			if path == module+"/cmd/adtr" && name == "observeCIWorkerContext" && !((filename == "db_observation_ci.go" && captureBodyMatches(fn, `{dbadmission.ObserveCIWorkerContext(ctx);dbadmission.ConfigureCIShutdown(stop)}`)) || (filename == "db_observation_default.go" && captureBodyMatches(fn, `{}`))) {
 				emit(decl, "worker context bridge must only forward the existing context when tagged")
 			}
 			var ancestors []ast.Node
@@ -269,7 +269,7 @@ func operationObservationDeclarations(fset *token.FileSet, path string, files []
 								installed = true
 							}
 						}
-						if !allowed || !installed {
+						if !allowed || !installed || !workerShutdownBinding(fn, directCallFor(x, ancestors), info) {
 							emit(x, "worker context observation must remain in the installed worker startup branch")
 						}
 					}

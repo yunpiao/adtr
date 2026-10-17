@@ -9,6 +9,7 @@ import base64
 import hmac
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
+import math
 import os
 from pathlib import Path
 import queue
@@ -349,7 +350,11 @@ def normalized(sql):
 
 class Psql:
     """One persistent bounded connection, with no DSN in argv or output."""
-    def __init__(self, container, readonly):
+    def __init__(self, container, readonly, deadline=None):
+        self.deadline = deadline
+        if deadline is not None:
+            require(type(deadline) in (int, float) and math.isfinite(deadline) and time.monotonic() < deadline,
+                    'final quiescence deadline or state invalid')
         require(re.fullmatch(r'adtr-auth-e2e-[0-9a-f]{12}', container), 'isolated database required')
         options = '-c statement_timeout=1000 -c idle_in_transaction_session_timeout=8000'
         if readonly:
@@ -375,6 +380,9 @@ class Psql:
             self.lines.put(None)
 
     def query(self, sql, timeout=1.5):
+        if self.deadline is not None:
+            timeout = min(timeout, self.deadline - time.monotonic())
+            require(timeout > 0, 'final quiescence deadline or state invalid')
         require(self.process.poll() is None, 'checkpoint database session exited')
         self.process.stdin.write(sql + ';\n')
         self.process.stdin.flush()
@@ -386,6 +394,25 @@ class Psql:
             raise RuntimeError('checkpoint database observation unavailable') from error
 
     def close(self):
+        if self.deadline is not None:
+            expired = time.monotonic() >= self.deadline
+            close_failed = False
+            if self.process.poll() is None:
+                try:
+                    self.process.stdin.close()
+                except OSError:
+                    close_failed = True
+                try:
+                    self.process.wait(timeout=max(0, self.deadline - time.monotonic()))
+                except subprocess.TimeoutExpired:
+                    # Failure-only owned observer reap, never additional grace.
+                    self.process.kill()
+                    self.process.wait(timeout=2)
+                    expired = True
+            self.reader.join(timeout=max(0, min(2, self.deadline - time.monotonic())))
+            require(not close_failed and not expired and time.monotonic() < self.deadline,
+                    'final quiescence deadline or state invalid')
+            return
         if self.process.poll() is None:
             self.process.stdin.close()  # EOF rolls back the barrier, never commits data.
             try:
@@ -1225,6 +1252,30 @@ class RunningExportCancelGuard:
     def check(self):
         require(not self.failed and self.stopped_at is None and self.used, 'running checkpoint guard incomplete or failed')
         self.owned.check()
+
+    def verify_final_quiescence(self, deadline):
+        require(type(deadline) in (int, float) and math.isfinite(deadline) and
+                time.monotonic() < deadline and self.used and not self.failed,
+                'final quiescence deadline or state invalid')
+        require(re.fullmatch('adtr-user-export-[0-9a-f]{32}', self.application_name) is not None,
+                'invalid application identity')
+        observer = None
+        try:
+            observer = Psql(self.container, True, deadline=deadline)
+            remaining = deadline - time.monotonic()
+            require(remaining > 0, 'final quiescence deadline or state invalid')
+            proof = observer.query("SELECT jsonb_build_object('database',current_database(),'backendCount',"
+                "(SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() AND application_name='"
+                + self.application_name + "'))", timeout=min(1.5, remaining))
+            require(type(proof) is dict and set(proof) == {'database', 'backendCount'} and
+                    type(proof['database']) is str and proof['database'] == 'adtr_e2e' and
+                    type(proof['backendCount']) is int and proof['backendCount'] == 0,
+                    'final quiescence owned backend observation failed')
+        finally:
+            if observer is not None:
+                observer.close()
+        require(time.monotonic() < deadline, 'final quiescence deadline or state invalid')
+        return True
 
     def verify_recovery_cleanup_after_wait(self, worker_exit_code, summary=None):
         counts = ('qualified', 'completed', 'pending', 'open', 'connectPending', 'failed')

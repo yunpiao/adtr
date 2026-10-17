@@ -39,6 +39,9 @@ type lifecycleGate struct {
 	firstConnectFailure                                        *connectFailureDiagnostic
 	firstUncleanClose                                          *uncleanCloseDiagnostic
 	firstUncleanOperation                                      *uncleanOperationDiagnostic
+	finalTransportMu                                           sync.Mutex
+	finalQuiesce                                               finalQuiesce
+	finalParked                                                bool
 	workerContext                                              context.Context
 	recoveryQualified, recoveryCompleted                       uint64
 	recoveryFinalized                                          bool
@@ -99,7 +102,7 @@ func (g *lifecycleGate) acquire(ctx context.Context) (*lifecycleTicket, error) {
 			g.mu.Unlock()
 			return nil, errAdmissionClosed
 		}
-		if g.closing {
+		if g.closing || g.finalParked {
 			if g.changed == nil {
 				g.changed = make(chan struct{})
 			}

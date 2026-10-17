@@ -520,3 +520,60 @@ chain while still setting sticky failure. This exercises actual connector
 behavior, not an established backend or an in-flight authentication failure;
 it does not identify the historical user job's failure. The existing whole
 `dbadmission` integration group selects this test without a name filter.
+
+### Final shutdown admission barrier
+
+Run 39070647653's user job observed cancellation on the first native-closing
+COMMIT after release. COMMIT cancellation does not establish whether the server
+committed, so it remains outside the statement-only recovery qualification.
+The group job independently observed a pre-capture Connect deadline with the
+root context still active. This final-shutdown change does not resolve that
+queued-pause/readiness failure.
+
+Only an installed CI worker registers its actual `signal.NotifyContext` stop
+function. After the browser and original recovery steps succeed, the parent
+starts one absolute 30-second worker shutdown budget. `final_prepare` closes
+new-ticket admission and waits, without cancelling admitted work, for every
+pending/open/closing/physically-pending-cleanup ticket and query trace to drain.
+Existing sticky failure, cancelled root, missing authorization, repeats or
+expiry refuse the handshake. The parent then independently checks the entire
+verified application-name/database backend set is empty, not just known PIDs.
+The gate stays closed between the registry ACK and that PostgreSQL check.
+
+`final_cancel` revalidates the parked boundary and calls the same root stop
+function outside the registry lock. Its synchronous return is required:
+root.Done closes before child cancellation propagation is complete. Only after
+that return may the controller write the bounded ACK and reopen admission for
+independent shutdown cleanup. Each caller still checks its original context;
+no operation deadline is refreshed. Quiescence acknowledgements, final account
+reconciliation and journal Close retain their original independent contexts and
+can connect after reopening. A journal attempt that genuinely times out while
+parked still fails final delivery. No uncertain COMMIT result is accepted.
+
+A dedicated mutex holds controller cleanup's normal/rescue Close behind the
+cancel/ACK operation; cleanup performs Close while holding that mutex and only
+then joins controller goroutines. The handler never holds the registry mutex
+across root cancellation or socket writes. Its single ACK write is bounded by
+the smaller of 500 ms and the remaining original shutdown budget. ACK loss,
+partial writes or deadline expiry fail the entire attempt. An earlier worker exit, even with code zero, cannot substitute for this final
+handshake. After a successful
+ACK the parent waits with the remaining budget and does not send SIGTERM again,
+because NotifyContext.stop has already removed its signal subscription.
+
+If any final handshake step fails, the parent shuts down its owned normal socket
+before TERM. The worker's existing EOF failure path invalidates the attempt and
+unparks admission so independent cleanup cannot deadlock behind the gate.
+If the normal reader is still inside prepare, EOF is processed after root
+cancellation, independent rescue abort, or the original deadline ends that wait;
+SHUT_RDWR alone is not an immediate interrupt of the registry wait. Unexpected
+parent death also has the independent rescuer abort path. Failure cleanup and forced
+termination remain failures. Worker Wait, final sticky, full owned PostgreSQL
+zero-set, task/business state and final journal proof are all still required.
+
+Tests separately cover the stop-return barrier, existing pending/COMMIT drain,
+cleanup-first versus ACK-first transport ordering, blocked ACK expiry and
+normal EOF after prepare. The real PostgreSQL test uses a synthetic released
+registry authorization and verifies actual blocked-query completion, COMMIT,
+and managed Close before root cancellation; it is not the complete exporter
+capture proof. The three application suites continue to supply that proof.
+Default builds retain their existing signal, context and shutdown behavior.

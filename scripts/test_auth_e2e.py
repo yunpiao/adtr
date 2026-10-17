@@ -388,6 +388,24 @@ def main():
                     owned_ci_worker.controller.resume_and_release(abort=True)
                 except (OSError, RuntimeError):
                     shutdown_error = RuntimeError("owned CI rescue cleanup failed")
+            worker_cancel_acknowledged = False
+            worker_shutdown_deadline = time.monotonic() + 30 if owned_ci_worker is not None else None
+            if (owned_ci_worker is not None and running_cancel_guard is not None
+                    and shutdown_error is None and worker.poll() is None):
+                try:
+                    owned_ci_worker.prepare_final_shutdown(worker_shutdown_deadline)
+                    running_cancel_guard.verify_final_quiescence(worker_shutdown_deadline)
+                    owned_ci_worker.cancel_final_shutdown(worker_shutdown_deadline)
+                    worker_cancel_acknowledged = True
+                except Exception:
+                    shutdown_error = RuntimeError("owned CI final quiescence failed")
+                    try:
+                        owned_ci_worker.abort_final_shutdown()
+                    except Exception:
+                        pass  # Preserve failure and continue bounded TERM/KILL recovery.
+            if (running_cancel_guard is not None and shutdown_error is None
+                    and not worker_cancel_acknowledged):
+                shutdown_error = RuntimeError("owned CI final cancellation acknowledgement missing")
             for label, process in [("worker", worker), ("API", server)]:
                 if process is None:
                     continue
@@ -395,9 +413,12 @@ def main():
                     # A failed browser may leave our own child stopped. Resume before shutdown.
                     process.send_signal(signal.SIGCONT)
                 process_record = diagnostics.report["processes"]["api" if label == "API" else "worker"]
-                process.terminate()
+                if label != "worker" or not worker_cancel_acknowledged:
+                    process.terminate()
                 try:
-                    code = process.wait(timeout=30)
+                    wait_budget = (max(0, worker_shutdown_deadline - time.monotonic())
+                                   if label == "worker" and worker_shutdown_deadline is not None else 30)
+                    code = process.wait(timeout=wait_budget)
                     process_record["after_cleanup"] = code
                     if code != 0:
                         shutdown_error = RuntimeError(f"{label} did not exit successfully")

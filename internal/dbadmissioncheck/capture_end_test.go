@@ -33,7 +33,7 @@ func captureFixture(t *testing.T) (string, fixtureImporter) {
  type activityRegistration struct{generation uint64}
  type lifecycleTicket struct{gate *lifecycleGate;generation uint64;state byte;registration *activityRegistration}
  type sealAttempt struct{captureEnded,released bool;epoch uint64;target *lifecycleTicket;registration *activityRegistration}
- type lifecycleGate struct{mu sync.Mutex;writeFinalInvalidationDiagnostic func();writeRecoveryCleanupDiagnostic func();finishRecoveryCleanup func();seal *sealAttempt;invalid,closing bool;captureEndFD int;nonce [16]byte;pending,open int;invalidateBecauseLocked func(invalidationReason);notifyLocked func()}
+ type lifecycleGate struct{mu sync.Mutex;finalTransportMu sync.Mutex;writeFinalInvalidationDiagnostic func();writeRecoveryCleanupDiagnostic func();finishRecoveryCleanup func();seal *sealAttempt;invalid,closing bool;captureEndFD int;nonce [16]byte;pending,open int;invalidateBecauseLocked func(invalidationReason);notifyLocked func()}
  `
 	return source, imp
 }

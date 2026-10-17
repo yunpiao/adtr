@@ -67,7 +67,7 @@ func run() (runErr error) {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	if admissionFailure != nil {
-		observeCIWorkerContext(ctx)
+		observeCIWorkerContext(ctx, stop)
 		// A startup transport failure must be handled synchronously before any DB constructor.
 		select {
 		case <-admissionFailure:

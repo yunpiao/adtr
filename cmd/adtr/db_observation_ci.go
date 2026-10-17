@@ -7,4 +7,7 @@ import (
 	"github.com/yunpiao/adtr/internal/dbadmission"
 )
 
-func observeCIWorkerContext(ctx context.Context) { dbadmission.ObserveCIWorkerContext(ctx) }
+func observeCIWorkerContext(ctx context.Context, stop context.CancelFunc) {
+	dbadmission.ObserveCIWorkerContext(ctx)
+	dbadmission.ConfigureCIShutdown(stop)
+}

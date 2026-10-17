@@ -36,10 +36,20 @@ def fixture_worker():
             normal.send(frame(0, 'ready'), time.monotonic() + 3)
             while True:
                 request = normal.receive(time.monotonic() + 60)
+                if request['op'] in ('final_prepare', 'final_cancel'):
+                    state['final_prepared'] = True
+                    normal.send({'version': 2, 'epoch': 1, 'seq': request['seq'],
+                                 'kind': 'quiesce', 'status': 'drained' if request['op'] == 'final_prepare' else 'cancelled',
+                                 'pending': 0, 'open': 0}, time.monotonic() + 3)
+                    continue
                 if request['op'] == 'pin':
                     state.update(status='sealed', target=request['target'])
                 normal.send(frame(request['seq']), time.monotonic() + 3)
         except (OSError, r.ControlFailure):
+            if state.get('final_prepared'):
+                # Synthetic EOF acknowledgement only, not Go cleanup evidence.
+                page[24:28] = (1).to_bytes(4, 'little')
+                os._exit(0)
             return
 
     threading.Thread(target=normal_loop, daemon=True).start()
@@ -108,6 +118,9 @@ class RuntimeTests(unittest.TestCase):
             self.assertTrue(c.commit_capture(1, 1, capture_deadline))
             c.resume_and_release()
             self.assertNotIn(owner.identity.verify(), ('T', 't'))
+            shutdown_deadline = time.monotonic() + 30
+            self.assertTrue(owner.prepare_final_shutdown(shutdown_deadline))
+            self.assertTrue(owner.cancel_final_shutdown(shutdown_deadline))
             with self.assertRaises(r.ControlFailure):
                 owner.close_after_wait()
         finally:
@@ -115,6 +128,31 @@ class RuntimeTests(unittest.TestCase):
         self.assertIsNotNone(owner.process.returncode)
         self.assertIsNone(owner.witness)
         self.assertIsNotNone(owner.rescuer.returncode)
+
+    def test_final_prepare_then_local_abort_reaches_worker_eof(self):
+        owner = spawn()
+        try:
+            deadline = time.monotonic() + 1.5
+            owner.controller.arm(deadline)
+            owner.controller.pin(1, deadline)
+            owner.process.send_signal(signal.SIGSTOP)
+            while time.monotonic() < deadline and not owner.identity.threads_stopped():
+                time.sleep(.002)
+            self.assertTrue(owner.identity.threads_stopped())
+            owner.controller.after_stop(deadline)
+            owner.controller.commit_capture(1, 1, deadline)
+            owner.controller.resume_and_release()
+            owner.prepare_final_shutdown(time.monotonic() + 30)
+            owner.abort_final_shutdown()
+            # The fixture exits only when its actual normal socket observes EOF.
+            self.assertEqual(owner.process.wait(timeout=3), 0)
+            with self.assertRaises(r.ControlFailure): owner.close_after_wait()
+        finally:
+            if owner.process.poll() is None:
+                with self.assertRaises(r.ControlFailure): owner.shutdown()
+            elif owner.witness is not None:
+                with self.assertRaises(r.ControlFailure): owner.close_after_wait()
+        self.assertIsNone(owner.witness)
 
     def test_commit_running_expired_or_duplicate_is_permanent_failure(self):
         for scenario in ('running', 'expired', 'duplicate'):

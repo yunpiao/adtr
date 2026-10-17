@@ -4,4 +4,4 @@ package main
 
 import "context"
 
-func observeCIWorkerContext(context.Context) {}
+func observeCIWorkerContext(context.Context, context.CancelFunc) {}

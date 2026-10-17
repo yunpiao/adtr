@@ -32,6 +32,67 @@ def task():
 
 
 class ContractTests(unittest.TestCase):
+    def test_final_psql_carries_deadline_through_startup_query_and_close(self):
+        with patch.object(g.subprocess, 'Popen'), patch.object(g.threading, 'Thread'), patch.object(g.Psql, 'query', return_value=44) as query, patch.object(g.time, 'monotonic', return_value=10):
+            db = g.Psql('adtr-auth-e2e-' + 'b' * 12, True, deadline=11)
+            self.assertEqual(db.deadline, 11)
+            query.assert_called_once_with('SELECT to_json(pg_backend_pid())')
+        db = g.Psql.__new__(g.Psql); db.deadline = 11
+        db.process = Mock(); db.process.poll.return_value = None
+        db.lines = Mock(); db.lines.get.return_value = '0'
+        db.reader = Mock()
+        with patch.object(g.time, 'monotonic', return_value=10):
+            self.assertEqual(db.query('SELECT 0'), 0)
+            self.assertEqual(db.lines.get.call_args.kwargs['timeout'], 1)
+            db.close()
+            self.assertEqual(db.process.wait.call_args.kwargs['timeout'], 1)
+            self.assertEqual(db.reader.join.call_args.kwargs['timeout'], 1)
+        db.process.reset_mock()
+        db.process.stdin.close.side_effect = BrokenPipeError('synthetic private close failure')
+        with patch.object(g.time, 'monotonic', return_value=10):
+            with self.assertRaises(RuntimeError): db.close()
+        db.process.wait.assert_called_once_with(timeout=1)
+        db.process.stdin.close.side_effect = None
+        db.process.reset_mock()
+        db.process.wait.side_effect = [g.subprocess.TimeoutExpired('owned-observer', 0), 0]
+        with patch.object(g.time, 'monotonic', return_value=11):
+            with self.assertRaises(RuntimeError): db.close()
+        db.process.kill.assert_called_once()
+        self.assertEqual(db.process.wait.call_args_list[0].kwargs['timeout'], 0)
+        self.assertEqual(db.process.wait.call_args_list[1].kwargs['timeout'], 2)
+
+    def test_final_quiescence_requires_full_owned_zero_and_original_deadline(self):
+        guard = self.guard(); guard.used = True; guard.failed = False
+        guard.application_name = 'adtr-user-export-' + 'a' * 32
+        guard.container = 'adtr-auth-e2e-' + 'a' * 12
+        observer = Mock()
+        observer.query.return_value = {'database': 'adtr_e2e', 'backendCount': 0}
+        with patch.object(g, 'Psql', return_value=observer), patch.object(g.time, 'monotonic', return_value=10):
+            self.assertTrue(guard.verify_final_quiescence(11))
+        self.assertEqual(observer.query.call_args.kwargs['timeout'], 1)
+        sql = observer.query.call_args.args[0]
+        self.assertIn("application_name='" + guard.application_name + "'", sql)
+        self.assertIn('datname=current_database()', sql)
+        self.assertNotIn('pid=', sql)
+        observer.close.assert_called_once()
+        for proof in ({'database':'adtr_e2e','backendCount':1}, {'database':'other','backendCount':0},
+                      {'database':'adtr_e2e','backendCount':False}, {'database':'adtr_e2e','backendCount':0,'extra':1}, None):
+            observer.reset_mock(); observer.query.return_value = proof
+            with self.subTest(proof=proof), patch.object(g, 'Psql', return_value=observer), patch.object(g.time, 'monotonic', return_value=10):
+                with self.assertRaises(RuntimeError): guard.verify_final_quiescence(11)
+            observer.close.assert_called_once()
+        observer.query.side_effect = RuntimeError('synthetic private observation failure')
+        with patch.object(g, 'Psql', return_value=observer), patch.object(g.time, 'monotonic', return_value=10):
+            with self.assertRaises(RuntimeError): guard.verify_final_quiescence(11)
+        for deadline in (10, float('nan'), float('inf'), True):
+            with self.subTest(deadline=deadline), patch.object(g, 'Psql') as factory, patch.object(g.time, 'monotonic', return_value=10):
+                with self.assertRaises(RuntimeError): guard.verify_final_quiescence(deadline)
+                factory.assert_not_called()
+        observer.query.side_effect = None
+        observer.query.return_value = {'database':'adtr_e2e','backendCount':0}
+        with patch.object(g, 'Psql', return_value=observer), patch.object(g.time, 'monotonic', side_effect=[10,10,12]):
+            with self.assertRaises(RuntimeError): guard.verify_final_quiescence(11)
+
     def test_recovery_cleanup_requires_final_counts_and_all_owned_backends_zero(self):
         summary = dict(event='owned_ci_recovery_cleanup', captureAuthorized=True,
             released=True, settled=True, qualified=2, completed=2, pending=0,
@@ -976,6 +1037,7 @@ class ContractTests(unittest.TestCase):
         self.assertIn('statement_timeout=1000', options)
         self.assertIn('ON_ERROR_STOP=1', launch.call_args.args[0])
         db = g.Psql.__new__(g.Psql)
+        db.deadline = None
         db.process = Mock(); db.process.poll.return_value = None
         db.lines = Mock(); db.lines.get.return_value = None
         with self.assertRaises(RuntimeError) as caught:

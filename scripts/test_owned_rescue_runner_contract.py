@@ -199,9 +199,55 @@ RUNNER_DELTAS = [('from user_asset_export_v3_terminal_ci import SUITES as EXPORT
   '                    owned_ci_worker.controller.resume_and_release(abort=True)\n'
   '                except (OSError, RuntimeError):\n'
   '                    shutdown_error = RuntimeError("owned CI rescue cleanup failed")\n'
+  '            worker_cancel_acknowledged = False\n'
+  '            worker_shutdown_deadline = time.monotonic() + 30 if owned_ci_worker is not None '
+  'else None\n'
+  '            if (owned_ci_worker is not None and running_cancel_guard is not None\n'
+  '                    and shutdown_error is None and worker.poll() is None):\n'
+  '                try:\n'
+  '                    owned_ci_worker.prepare_final_shutdown(worker_shutdown_deadline)\n'
+  '                    running_cancel_guard.verify_final_quiescence(worker_shutdown_deadline)\n'
+  '                    owned_ci_worker.cancel_final_shutdown(worker_shutdown_deadline)\n'
+  '                    worker_cancel_acknowledged = True\n'
+  '                except Exception:\n'
+  '                    shutdown_error = RuntimeError("owned CI final quiescence failed")\n'
+  '                    try:\n'
+  '                        owned_ci_worker.abort_final_shutdown()\n'
+  '                    except Exception:\n'
+  '                        pass  # Preserve failure and continue bounded TERM/KILL recovery.\n'
+  '            if (running_cancel_guard is not None and shutdown_error is None\n'
+  '                    and not worker_cancel_acknowledged):\n'
+  '                shutdown_error = RuntimeError("owned CI final cancellation acknowledgement '
+  'missing")\n'
   '            for label, process in [("worker", worker), ("API", server)]:\n'
   '                if process is None:\n'
   '                    continue\n'),
+ ('                    # A failed browser may leave our own child stopped. Resume before '
+  'shutdown.\n'
+  '                    process.send_signal(signal.SIGCONT)\n'
+  '                process_record = diagnostics.report["processes"]["api" if label == "API" else '
+  '"worker"]\n'
+  '                process.terminate()\n'
+  '                try:\n'
+  '                    code = process.wait(timeout=30)\n'
+  '                    process_record["after_cleanup"] = code\n'
+  '                    if code != 0:\n'
+  '                        shutdown_error = RuntimeError(f"{label} did not exit successfully")\n',
+  '                    # A failed browser may leave our own child stopped. Resume before '
+  'shutdown.\n'
+  '                    process.send_signal(signal.SIGCONT)\n'
+  '                process_record = diagnostics.report["processes"]["api" if label == "API" else '
+  '"worker"]\n'
+  '                if label != "worker" or not worker_cancel_acknowledged:\n'
+  '                    process.terminate()\n'
+  '                try:\n'
+  '                    wait_budget = (max(0, worker_shutdown_deadline - time.monotonic())\n'
+  '                                   if label == "worker" and worker_shutdown_deadline is not '
+  'None else 30)\n'
+  '                    code = process.wait(timeout=wait_budget)\n'
+  '                    process_record["after_cleanup"] = code\n'
+  '                    if code != 0:\n'
+  '                        shutdown_error = RuntimeError(f"{label} did not exit successfully")\n'),
  ('                    process.kill()\n'
   '                    process_record["after_cleanup"] = process.wait(timeout=10)\n'
   '                    shutdown_error = RuntimeError(f"{label} did not stop gracefully")\n'
@@ -266,6 +312,162 @@ def controller():
 
 
 class Contracts(unittest.TestCase):
+    def test_final_quiesce_exact_ack_one_shared_deadline(self):
+        c = controller(); c.committed = c.released = True
+        def ack(seq, status):
+            return dict(version=2, epoch=1, seq=seq, kind='quiesce', status=status, pending=0, open=0)
+        c.normal.receive.side_effect = [ack(1, 'drained'), ack(2, 'cancelled')]
+        with patch.object(r.time, 'monotonic', return_value=10):
+            self.assertTrue(c.final_shutdown(40))
+            self.assertTrue(c.final_shutdown(40, cancel=True))
+            with self.assertRaises(r.ControlFailure):
+                c.final_shutdown(40, cancel=True)
+        self.assertTrue(c.invalid)
+        self.assertEqual(c.normal.send.call_args_list[0].args,
+                         ({'version': 2, 'epoch': 1, 'seq': 1, 'op': 'final_prepare', 'budgetMillis': 30000}, 40))
+        self.assertEqual(c.normal.send.call_args_list[1].args,
+                         ({'version': 2, 'epoch': 1, 'seq': 2, 'op': 'final_cancel'}, 40))
+        for change in ({'version': True}, {'pending': False}, {'open': 1},
+                       {'extra': ''}, {'status': 'cancelled'}, {'seq': 0}):
+            c = controller(); c.committed = c.released = True
+            c.normal.receive.return_value = dict(ack(1, 'drained'), **change)
+            with patch.object(r.time, 'monotonic', return_value=10):
+                with self.assertRaises(r.ControlFailure): c.final_shutdown(40)
+            self.assertTrue(c.invalid)
+            self.assertFalse(c.final_prepared)
+
+    def test_final_quiesce_abort_shuts_stream_without_closing_owned_fd(self):
+        owner = r.OwnedCIWorker.__new__(r.OwnedCIWorker)
+        owner.controller = controller(); owner.controller.normal.write_fd = 73
+        for error in (None, OSError('private')):
+            endpoint = Mock(); endpoint.shutdown.side_effect = error
+            with patch.object(r.socket, 'socket', return_value=endpoint) as constructor:
+                if error is None: owner.abort_final_shutdown()
+                else:
+                    with self.assertRaises(OSError): owner.abort_final_shutdown()
+            constructor.assert_called_once_with(fileno=73)
+            endpoint.shutdown.assert_called_once_with(r.socket.SHUT_RDWR)
+            endpoint.detach.assert_called_once_with()
+            endpoint.close.assert_not_called()
+            self.assertTrue(owner.controller.invalid)
+            self.assertTrue(owner.controller.normal.failed)
+
+    def test_final_quiesce_deadline_and_transport_fail_closed(self):
+        for deadline in (10, 40.001, float('nan'), True):
+            c = controller(); c.committed = c.released = True
+            with patch.object(r.time, 'monotonic', return_value=10):
+                with self.assertRaises(r.ControlFailure): c.final_shutdown(deadline)
+            c.normal.send.assert_not_called()
+        c = controller(); c.committed = c.released = True
+        c.normal.receive.return_value = dict(version=2, epoch=1, seq=1, kind='quiesce', status='drained', pending=0, open=0)
+        with patch.object(r.time, 'monotonic', side_effect=[10, 40]):
+            with self.assertRaises(r.ControlFailure): c.final_shutdown(40)
+        self.assertTrue(c.invalid)
+        c = controller(); c.committed = c.released = True
+        with patch.object(r.time, 'monotonic', return_value=10):
+            with self.assertRaises(r.ControlFailure): c.final_shutdown(40, cancel=True)
+        c.normal.send.assert_not_called()
+        for error in (OSError(), r.ControlFailure()):
+            c = controller(); c.committed = c.released = True
+            c.normal.receive.side_effect = error
+            with patch.object(r.time, 'monotonic', return_value=10):
+                with self.assertRaises(r.ControlFailure): c.final_shutdown(40)
+            self.assertTrue(c.invalid)
+
+    def test_running_final_success_requires_cancel_ack_even_after_early_exit_zero(self):
+        source = (Path(__file__).parent / 'test_auth_e2e.py').read_text()
+        tree = ast.parse(source)
+        prepare = next(n for n in ast.walk(tree) if isinstance(n, ast.If)
+                       and 'worker.poll() is None' in ast.unparse(n.test)
+                       and 'shutdown_error is None' in ast.unparse(n.test))
+        require = next(n for n in ast.walk(tree) if isinstance(n, ast.If)
+                       and 'not worker_cancel_acknowledged' in ast.unparse(n.test)
+                       and 'running_cancel_guard is not None' in ast.unparse(n.test))
+        compiled = compile(ast.fix_missing_locations(ast.Module(body=[prepare, require], type_ignores=[])), '<required-final-ack>', 'exec')
+        for exit_code in (0, 1):
+            worker = Mock(); worker.poll.return_value = exit_code
+            owner = Mock()
+            env = dict(worker=worker, owned_ci_worker=owner, running_cancel_guard=Mock(),
+                       shutdown_error=None, worker_cancel_acknowledged=False, worker_shutdown_deadline=40)
+            exec(compiled, env)
+            self.assertEqual(str(env['shutdown_error']), 'owned CI final cancellation acknowledgement missing')
+            owner.prepare_final_shutdown.assert_not_called()
+            owner.cancel_final_shutdown.assert_not_called()
+        code = compile(ast.fix_missing_locations(ast.Module(body=[require], type_ignores=[])), '<ack-guard>', 'exec')
+        for running, acknowledged, prior in ((True, True, None), (False, False, None), (True, False, RuntimeError('prior'))):
+            env = dict(running_cancel_guard=Mock() if running else None,
+                       worker_cancel_acknowledged=acknowledged, shutdown_error=prior)
+            exec(code, env)
+            self.assertIs(env['shutdown_error'], prior)
+
+    def test_final_quiesce_runner_order_and_remaining_wait(self):
+        source = (Path(__file__).parent / 'test_auth_e2e.py').read_text()
+        calls = ['owned_ci_worker.controller.resume_and_release(abort=True)',
+                 'worker_shutdown_deadline = time.monotonic() + 30',
+                 'owned_ci_worker.prepare_final_shutdown(worker_shutdown_deadline)',
+                 'running_cancel_guard.verify_final_quiescence(worker_shutdown_deadline)',
+                 'owned_ci_worker.cancel_final_shutdown(worker_shutdown_deadline)',
+                 'process.terminate()', 'code = process.wait(timeout=wait_budget)',
+                 'owned_ci_worker.close_after_wait()']
+        positions = [source.index(call) for call in calls]
+        self.assertEqual(positions, sorted(positions))
+        self.assertIn('max(0, worker_shutdown_deadline - time.monotonic())', source)
+        tree = ast.parse(source)
+        gate = next(n for n in ast.walk(tree) if isinstance(n, ast.If)
+                    and 'owned_ci_worker is not None' in ast.unparse(n.test)
+                    and 'worker.poll() is None' in ast.unparse(n.test)
+                    and 'shutdown_error is None' in ast.unparse(n.test))
+        self.assertIn('except Exception:', ast.get_source_segment(source, gate))
+        self.assertIn('owned CI final quiescence failed', ast.get_source_segment(source, gate))
+        block = ast.Module(body=[gate], type_ignores=[])
+        compiled = compile(ast.fix_missing_locations(block), '<final-quiesce-gate>', 'exec')
+        for failed in ('prepare', 'pg', 'cancel', None):
+            owner = Mock(); guard = Mock(); worker = Mock(); worker.poll.return_value = None
+            events = []
+            def step(name):
+                def run(deadline):
+                    self.assertEqual(deadline, 40)
+                    events.append(name)
+                    if failed == name: raise RuntimeError('private error must not escape')
+                return run
+            owner.prepare_final_shutdown.side_effect = step('prepare')
+            guard.verify_final_quiescence.side_effect = step('pg')
+            owner.cancel_final_shutdown.side_effect = step('cancel')
+            env = dict(owned_ci_worker=owner, running_cancel_guard=guard, worker=worker,
+                       shutdown_error=None, worker_shutdown_deadline=40)
+            exec(compiled, env)
+            expected = ['prepare', 'pg', 'cancel']
+            self.assertEqual(events, expected if failed is None else expected[:expected.index(failed)+1])
+            if failed is None:
+                self.assertIsNone(env['shutdown_error'])
+                owner.abort_final_shutdown.assert_not_called()
+            else:
+                self.assertEqual(str(env['shutdown_error']), 'owned CI final quiescence failed')
+                owner.abort_final_shutdown.assert_called_once_with()
+            events.clear(); env['shutdown_error'] = RuntimeError('prior')
+            exec(compiled, env)
+            self.assertEqual(events, [])
+        loop = next(n for n in ast.walk(tree) if isinstance(n, ast.For)
+                    and isinstance(n.target, ast.Tuple)
+                    and [x.id for x in n.target.elts] == ['label', 'process'])
+        code = compile(ast.fix_missing_locations(ast.Module(body=[loop], type_ignores=[])), '<shutdown-loop>', 'exec')
+        from types import SimpleNamespace
+        for acknowledged in (True, False):
+            worker = Mock(); api = Mock()
+            worker.wait.return_value = api.wait.return_value = 0
+            diagnostics = SimpleNamespace(report={'processes': {'worker': {}, 'api': {}}})
+            env = dict(worker=worker, server=api, diagnostics=diagnostics,
+                       args=SimpleNamespace(suite='user-asset-export-v3-running-cancel'),
+                       worker_cancel_acknowledged=acknowledged, worker_shutdown_deadline=40,
+                       time=SimpleNamespace(monotonic=lambda: 15), subprocess=r.subprocess,
+                       shutdown_error=None)
+            exec(code, env)
+            if acknowledged: worker.terminate.assert_not_called()
+            else: worker.terminate.assert_called_once_with()
+            worker.wait.assert_called_once_with(timeout=25)
+            api.terminate.assert_called_once_with()
+            api.wait.assert_called_once_with(timeout=30)
+
     def channel(self):
         with patch.object(r.os, 'set_blocking'):
             return r.PipeChannel(51, 51)
@@ -1017,7 +1219,7 @@ class Contracts(unittest.TestCase):
         wait_loop = next(node for node in ast.walk(tree) if isinstance(node, ast.For)
                          and ast.unparse(node.target) == '(label, process)')
         self.assertLess(wait_loop.end_lineno, proof.lineno)
-        self.assertIn('process.wait(timeout=30)', ast.get_source_segment(source, wait_loop))
+        self.assertIn('process.wait(timeout=wait_budget)', ast.get_source_segment(source, wait_loop))
         self.assertIn('if code != 0:', ast.get_source_segment(source, wait_loop))
         cleanup = next(node for node in ast.walk(tree) if isinstance(node, ast.Call)
                        and isinstance(node.func, ast.Name) and node.func.id == 'remove_owned_container')
