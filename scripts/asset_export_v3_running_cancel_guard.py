@@ -898,7 +898,7 @@ class RunningExportCancelGuard:
         self.prepared = True
         return {'prepared': True}
 
-    def prepare_activity_fixture(self, observer, task_id, worker_id):
+    def prepare_activity_fixture(self, task_id, worker_id):
         key = self.controller.prepare_target(task_id, worker_id, time.monotonic() + .5)
         expected = 'ci-activity-' + base64.b32encode(hashlib.sha256(
             b'adtr-ci-activity-v1\x00' + self.nonce + b'\x00' + task_id.encode('utf-8')).digest()).decode('ascii').lower().rstrip('=')
@@ -907,9 +907,13 @@ class RunningExportCancelGuard:
         self.activity_key, self.activity_owner = key, worker_id
         # A committed synthetic FAILURE sentinel never fabricates healthy state.
         # An existing/colliding row is never overwritten or later deleted.
-        count = observer.query("WITH inserted AS (INSERT INTO adtr.system_worker_activity(tenant_id,worker_id,cycle,status,error_code,last_success_at) VALUES('default','" + key + "','queue','failure','cycle_failed',NULL) RETURNING 1) SELECT to_json(count(*)) FROM inserted")
-        require(type(count) is int and count == 1, 'activity fixture insertion failed')
-        self.activity_fixture_created = True
+        writer = Psql(self.container, False)
+        try:
+            count = writer.query("WITH inserted AS (INSERT INTO adtr.system_worker_activity(tenant_id,worker_id,cycle,status,error_code,last_success_at) VALUES('default','" + key + "','queue','failure','cycle_failed',NULL) RETURNING 1) SELECT to_json(count(*)) FROM inserted")
+            require(type(count) is int and count == 1, 'activity fixture insertion failed')
+            self.activity_fixture_created = True
+        finally:
+            writer.close()
 
     def cleanup_activity_fixture_after_wait(self, worker_exit_code):
         if not self.activity_fixture_created:
@@ -918,18 +922,18 @@ class RunningExportCancelGuard:
                 'activity fixture cleanup failed')
         key, owner = identifier(self.activity_key), identifier(self.activity_owner)
         # identifier validates in place and returns the string.
-        observer = Psql(self.container, True)
+        writer = Psql(self.container, False)
         try:
-            count = observer.query("WITH removed AS (DELETE FROM adtr.system_worker_activity WHERE tenant_id='default' AND worker_id='" + key + "' AND cycle='queue' AND last_success_at IS NULL AND ((status='failure' AND error_code='cycle_failed') OR (status='progress' AND error_code='')) RETURNING 1) SELECT to_json(count(*)) FROM removed")
+            count = writer.query("WITH removed AS (DELETE FROM adtr.system_worker_activity WHERE tenant_id='default' AND worker_id='" + key + "' AND cycle='queue' AND last_success_at IS NULL AND ((status='failure' AND error_code='cycle_failed') OR (status='progress' AND error_code='')) RETURNING 1) SELECT to_json(count(*)) FROM removed")
             require(type(count) is int and count == 1, 'activity fixture cleanup failed')
-            verified = observer.query("SELECT jsonb_build_object('remaining',(SELECT count(*) FROM adtr.system_worker_activity WHERE tenant_id='default' AND worker_id='" + key + "'),'ordinary',(SELECT count(*) FROM adtr.system_worker_activity WHERE tenant_id='default' AND worker_id='" + owner + "' AND cycle='queue'))")
+            verified = writer.query("SELECT jsonb_build_object('remaining',(SELECT count(*) FROM adtr.system_worker_activity WHERE tenant_id='default' AND worker_id='" + key + "'),'ordinary',(SELECT count(*) FROM adtr.system_worker_activity WHERE tenant_id='default' AND worker_id='" + owner + "' AND cycle='queue'))")
             require(type(verified) is dict and set(verified) == {'remaining', 'ordinary'} and
                     all(type(verified[key]) is int for key in verified) and
                     verified == {'remaining': 0, 'ordinary': 1},
                     'activity fixture cleanup failed')
             self.activity_fixture_created = False
         finally:
-            observer.close()
+            writer.close()
 
     def checkpoint(self, task_id, worker_id):
         identifier(task_id); identifier(worker_id)
@@ -953,7 +957,7 @@ class RunningExportCancelGuard:
             require(initial['task'] and initial['task']['kind'] == export_kind(self.asset_kind)[0] and initial['task']['state'] == 'queued' and initial['task']['attempt'] == 0
                     and initial['task']['snapshotCount'] == 0 and
                     all(not s['transaction'] for s in initial['sessions']), 'initial queued transaction-free boundary missed')
-            self.prepare_activity_fixture(observer, task_id, worker_id)
+            self.prepare_activity_fixture(task_id, worker_id)
             stage = 'barrier_open'
             lock = Psql(self.container, False)
             stage = 'barrier_lock'

@@ -291,3 +291,19 @@ return the opaque alias in its workerId field while the fixture row exists; this
 explicit CI read-side effect is removed by cleanup, not hidden by a reader change. Real PG tests
 contrast shared-row indirect blocking with isolated-row ordinary completion and
 unique-target drain; real three-kind CI remains the application-level acceptance.
+
+### Python fixture connection regression
+
+Run 39046143973 reached `initial_boundary/database_session_ended` in all three
+real application suites. Source inspection found that the alias INSERT and
+post-Wait DELETE used a Psql connection configured with
+`default_transaction_read_only=on`; `ON_ERROR_STOP=1` terminates that session on
+a rejected write. The artifact contains no SQLSTATE, so the exact server error
+was not independently recorded. The deterministic connection-mode defect is
+fixed by dedicated short-lived fixture writer connections, each closed in
+`finally`. The persistent qualification observer remains read-only, with the
+same timeouts and strict validators. Collision rejection and cleanup ownership
+checks are unchanged. A real Python Psql regression in the existing disposable
+CI PostgreSQL container covers these actual options and fixture methods before
+browser validation; offline contracts also require the connection modes at
+each call site. The new regression's runtime outcome remains subject to CI.

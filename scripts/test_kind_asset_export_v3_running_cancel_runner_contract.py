@@ -4,6 +4,7 @@ import hashlib
 from pathlib import Path
 import re
 import unittest
+from test_ci_critical_priority_contract import restore_critical_priority
 from test_directory_e2e_credentials_contract import restore_credentials_runner
 from test_owned_rescue_runner_contract import restore_owned_runner
 
@@ -219,6 +220,8 @@ CHANGES = {'scripts/test_auth_e2e.py': ('f88f83e8dfdb25928b5cb204f2b01162873ae23
                                 1)])}
 
 def restore_before_owned(text, name):
+    if name == '.github/workflows/ci.yml':
+        text = restore_critical_priority(text)
     if name == 'scripts/test_auth_e2e.py':
         text = restore_credentials_runner(text)
     for old, new, count in reversed(CHANGES[name][1]):

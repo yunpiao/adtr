@@ -109,7 +109,10 @@ class ContractTests(unittest.TestCase):
             b'adtr-ci-activity-v1\x00' + guard.nonce + b'\x00task-one').digest()).decode().lower().rstrip('=')
         guard.controller.prepare_target.return_value = expected
         observer = Mock(); observer.query.return_value = 1
-        g.RunningExportCancelGuard.prepare_activity_fixture(guard, observer, 'task-one', 'worker')
+        with patch.object(g, 'Psql', return_value=observer) as connect:
+            g.RunningExportCancelGuard.prepare_activity_fixture(guard, 'task-one', 'worker')
+        connect.assert_called_once_with(guard.container, False)
+        observer.close.assert_called_once()
         self.assertTrue(guard.activity_fixture_created)
         insert = observer.query.call_args.args[0]
         self.assertIn("'failure','cycle_failed',NULL", insert)
@@ -117,7 +120,9 @@ class ContractTests(unittest.TestCase):
         self.assertEqual(guard.activity_key, expected)
         cleanup = Mock(); cleanup.query.side_effect = [1, {'remaining': 0, 'ordinary': 1}]
         guard.owned.process.poll.return_value = 1
-        with patch.object(g, 'Psql', return_value=cleanup): guard.cleanup_activity_fixture_after_wait(1)
+        with patch.object(g, 'Psql', return_value=cleanup) as connect: guard.cleanup_activity_fixture_after_wait(1)
+        connect.assert_called_once_with(guard.container, False)
+        cleanup.close.assert_called_once()
         self.assertFalse(guard.activity_fixture_created)
         self.assertIn("tenant_id='default'", cleanup.query.call_args_list[0].args[0])
         self.assertIn("AND cycle='queue'", cleanup.query.call_args_list[0].args[0])
@@ -126,16 +131,18 @@ class ContractTests(unittest.TestCase):
             observer = Mock()
             if isinstance(result, Exception): observer.query.side_effect = result
             else: observer.query.return_value = result
-            with self.assertRaises(RuntimeError):
-                g.RunningExportCancelGuard.prepare_activity_fixture(guard, observer, 'task-one', 'worker')
+            with patch.object(g, 'Psql', return_value=observer) as connect, self.assertRaises(RuntimeError):
+                g.RunningExportCancelGuard.prepare_activity_fixture(guard, 'task-one', 'worker')
+            connect.assert_called_once_with(guard.container, False)
+            observer.close.assert_called_once()
             with patch.object(g, 'Psql') as connection:
                 guard.cleanup_activity_fixture_after_wait(1)
             connection.assert_not_called()
         guard.controller.prepare_target.return_value = 'ci-wrong-nonce'
         observer = Mock()
-        with self.assertRaises(RuntimeError):
-            g.RunningExportCancelGuard.prepare_activity_fixture(guard, observer, 'task-one', 'worker')
-        observer.query.assert_not_called()
+        with patch.object(g, 'Psql') as connect, self.assertRaises(RuntimeError):
+            g.RunningExportCancelGuard.prepare_activity_fixture(guard, 'task-one', 'worker')
+        connect.assert_not_called()
 
     def test_wrong_bound_activity_key_fails_before_pin(self):
         guard = self.guard(); guard.controller.snapshot.return_value['records'][0]['candidate']['activityKey'] = 'other-key'
@@ -490,7 +497,7 @@ class ContractTests(unittest.TestCase):
         expected = {
             'validate_sessions': '4efb9b60ec57914d43c55c695e0916b07d71fbcd3f3cdac8c3cd06b630bbd092',
             'validate_checkpoint': '83ff1b7a711627ec7ee4e28761dde75f5e18ae3e81abb39927b8057022a06e74',
-            'checkpoint': 'b8a9236573af194818fcdbf1b32767d7d81bbd04c0d6d090e3719e4fa6905eeb',
+            'checkpoint': '039710ad8b035333d739a9f84aef7bf44c5e2984919ee83d3a71c3164a151a8a',
         }
         actual = {node.name: hashlib.sha256(ast.get_source_segment(source, node).encode()).hexdigest()
                   for node in ast.walk(ast.parse(source)) if isinstance(node, ast.FunctionDef)
@@ -832,6 +839,34 @@ class ContractTests(unittest.TestCase):
         self.assertIn('PGOPTIONS=-c statement_timeout=1000 -c idle_in_transaction_session_timeout=8000 -c default_transaction_read_only=on', argv)
         self.assertNotIn('ADTR_DATABASE_URL', ' '.join(argv))
         self.assertEqual(db.pid, 44)
+
+    def test_fixture_writers_leave_observers_read_only_and_fail_closed_on_session_end(self):
+        import ast
+        source = Path(g.__file__).read_text()
+        methods = {node.name: node for node in ast.walk(ast.parse(source))
+                   if isinstance(node, ast.FunctionDef)}
+        for name, expected in (('prepare', [True]), ('checkpoint', [True, False]),
+                               ('prepare_activity_fixture', [False]),
+                               ('cleanup_activity_fixture_after_wait', [False])):
+            calls = [node for node in ast.walk(methods[name]) if isinstance(node, ast.Call)
+                     and isinstance(node.func, ast.Name) and node.func.id == 'Psql']
+            self.assertEqual([node.args[1].value for node in calls], expected)
+        with patch.object(g.subprocess, 'Popen') as launch, patch.object(g.Psql, 'query', return_value=44), patch.object(g.threading, 'Thread'):
+            g.Psql('adtr-auth-e2e-' + 'b' * 12, False)
+        options = next(value for value in launch.call_args.args[0] if value.startswith('PGOPTIONS='))
+        self.assertNotIn('default_transaction_read_only', options)
+        self.assertIn('statement_timeout=1000', options)
+        self.assertIn('ON_ERROR_STOP=1', launch.call_args.args[0])
+        db = g.Psql.__new__(g.Psql)
+        db.process = Mock(); db.process.poll.return_value = None
+        db.lines = Mock(); db.lines.get.return_value = None
+        with self.assertRaises(RuntimeError) as caught:
+            db.query('private synthetic SQL')
+        self.assertEqual(g.failure_event('initial_boundary', caught.exception), {
+            'event': 'running_cancel_guard_failure', 'stage': 'initial_boundary',
+            'reason': 'database_session_ended'})
+        db.process.stdin.write.assert_called_once()
+        self.assertNotIn('private', str(caught.exception))
 
     def test_checkpoint_sql_read_only_and_exact_owned_scope(self):
         guard = self.guard(); sql = guard.observe_sql('task-one')

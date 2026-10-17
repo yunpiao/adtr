@@ -27,6 +27,16 @@ class IntegrationRunnerContract(unittest.TestCase):
         makefile = Path('Makefile').read_text()
         self.assertIn('ADTR_RUN_OWNED_RESCUE_TESTS=1 python3 scripts/test_owned_rescue_runner_runtime.py', makefile)
 
+    def test_actual_psql_regression_reuses_ready_owned_container_before_go(self):
+        source = Path('scripts/test_integration.py').read_text()
+        self.assertIn('fixture_psql = args.suite in ("all", "non-auth")', source)
+        self.assertIn('("adtr-auth-e2e-" if fixture_psql else "adtr-test-") + uuid.uuid4().hex[:12]', source)
+        self.assertIn('env=dict(env, ADTR_RUN_ACTIVITY_PSQL_TESTS="1"), check=True)', source)
+        self.assertLess(source.index('"POSTGRES_DB=adtr_test"'), source.index('"pg_isready"'))
+        self.assertLess(source.index('"pg_isready"'), source.index('"scripts/test_activity_fixture_psql_runtime.py"'))
+        self.assertLess(source.index('"scripts/test_activity_fixture_psql_runtime.py"'), source.index('return run_tests(args, env)'))
+        self.assertIn('["python3", "scripts/test_activity_fixture_psql_runtime.py", "--container", name]', source)
+
     def test_partitions_are_disjoint_exhaustive_and_deterministic(self):
         shards = runner.partition_auth_tests(self.discovery)
         self.assertEqual(len(shards), runner.AUTH_SHARDS)
