@@ -73,6 +73,25 @@ func TestIntegrationApplicationNormalEOFLeavesRescueLive(t *testing.T) {
 	if f := read(); f.Kind != "ready" || f.Status != "open" || len(f.Records) != 0 {
 		t.Fatal("ready incomplete")
 	}
+	if writeApplicationFrame(parent, applicationRequest{Version: 2, Epoch: 1, Seq: 1, Op: "diagnostic"}, 1024) != nil {
+		t.Fatal("diagnostic send")
+	}
+	diagnosticLine, diagnosticErr := reader.ReadBytes('\n')
+	var diagnosticFields map[string]json.RawMessage
+	var diagnostic applicationDiagnostic
+	if diagnosticErr != nil || json.Unmarshal(diagnosticLine, &diagnosticFields) != nil ||
+		json.Unmarshal(diagnosticLine, &diagnostic) != nil || len(diagnosticFields) != 10 {
+		t.Fatal("diagnostic reply schema")
+	}
+	for _, name := range []string{"version", "epoch", "seq", "kind", "reason", "phase", "pending", "open", "total", "retained"} {
+		if _, ok := diagnosticFields[name]; !ok {
+			t.Fatal("diagnostic field missing")
+		}
+	}
+	if diagnostic.Version != 2 || diagnostic.Epoch != 1 || diagnostic.Seq != 1 || diagnostic.Kind != "diagnostic" ||
+		diagnostic.Reason != "none" || diagnostic.Phase != "open" || diagnostic.Total != 0 || diagnostic.Retained != 0 || diagnostic.Pending != 0 || diagnostic.Open != 0 {
+		t.Fatal("fresh diagnostic values")
+	}
 	ticket, err := g.acquire(context.Background())
 	if err != nil {
 		t.Fatal("admission")
@@ -82,7 +101,7 @@ func TestIntegrationApplicationNormalEOFLeavesRescueLive(t *testing.T) {
 		t.Fatal("registration")
 	}
 	generation := g.candidates()[0].generation
-	if writeApplicationFrame(parent, applicationRequest{Version: 2, Epoch: 1, Seq: 1, Op: "pin", Target: generation}, 1024) != nil {
+	if writeApplicationFrame(parent, applicationRequest{Version: 2, Epoch: 1, Seq: 2, Op: "pin", Target: generation}, 1024) != nil {
 		t.Fatal("pin send")
 	}
 	if f := read(); f.Status != "sealed" || f.Target != generation {

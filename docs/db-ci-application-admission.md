@@ -131,3 +131,28 @@ a fresh full runtime scan and equal backend sets are required before the origina
 strict validators qualify the sole target. A backend still visible during cleanup
 therefore waits, while a malformed row still fails. After STOP, all strict checks
 are immediate and no further capture attempt is allowed.
+
+### Pre-capture failure diagnosis
+
+PR173's first application run reached worker readiness in all three running-cancel
+suites, then fixture directory tasks remained queued. The worker was still alive
+before cleanup; its cleanup exit code was 1. These facts do not identify the first
+invalidating branch. The lifetime allocation limit of 4096 is a source-supported
+hypothesis because four 250 ms polling slots and background work continually open
+connections during the multi-minute fixture. Failed connection startup or unclean
+connection closure can also invalidate the same pre-pin gate.
+
+The private normal channel therefore supports a separate `diagnostic` operation.
+It returns only the first closed reason, its phase and current pending/open/total/
+retained counts, without registry records or identities. The sticky store remains
+before the reason/phase mutation; subsequent failures cannot overwrite the first
+reason. `unclean_close` names the existing `closed(false)` branch and does not
+claim to distinguish native closure from incomplete asynchronous cleanup.
+
+On an existing fixture failure, the runner may request this bounded diagnostic
+only while the worker is alive, unarmed, unreleased, identity-verified and all its
+threads are running. Otherwise it records `unavailable` and proceeds to cleanup.
+It never waits for this request on a stopped worker, uses the sole reader mutex
+and sequence, and prints only the closed fields. The diagnostic is not admission
+or capture evidence. Neither the 4096 limit, sticky failure policy nor fixture's
+30-second expectation is changed; the next exact-tree CI must establish the cause.

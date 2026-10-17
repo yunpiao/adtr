@@ -167,6 +167,22 @@ RUNNER_DELTAS = [('from user_asset_export_v3_terminal_ci import SUITES as EXPORT
   '                    env.update(ADTR_E2E_RUNNING_CANCEL_GUARD_URL=running_cancel_guard.url,\n'
   '                               '
   'ADTR_E2E_RUNNING_CANCEL_GUARD_TOKEN=running_cancel_guard.token)\n'),
+ ('        diagnostics.phase("browser-pass")\n'
+  '        chain = "real browser -> API -> worker/PostgreSQL" if worker is not None else "real '
+  'browser -> API -> PostgreSQL"\n'
+  '    finally:\n'
+  '        try:\n'
+  '            diagnostics.snapshot(server, worker)\n'
+  '        except Exception:\n',
+  '        diagnostics.phase("browser-pass")\n'
+  '        chain = "real browser -> API -> worker/PostgreSQL" if worker is not None else "real '
+  'browser -> API -> PostgreSQL"\n'
+  '    finally:\n'
+  '        if sys.exc_info()[0] is not None and owned_ci_worker is not None:\n'
+  '            owned_ci_worker.report_failure_diagnostic()\n'
+  '        try:\n'
+  '            diagnostics.snapshot(server, worker)\n'
+  '        except Exception:\n'),
  ('                    account_barrier.close()\n'
   '                except Exception as error:\n'
   '                    shutdown_error = error\n'
@@ -409,6 +425,67 @@ class Contracts(unittest.TestCase):
             else:
                 guard.verify_journal_after_wait.assert_not_called()
                 self.assertIs(scope['shutdown_error'], prior_error)
+
+    def test_diagnostic_projection_rejects_private_or_malformed_fields(self):
+        frame = {'version': 2, 'epoch': 1, 'seq': 1, 'kind': 'diagnostic',
+                 'reason': 'capacity', 'phase': 'open', 'pending': 0,
+                 'open': 2, 'total': 4096, 'retained': 4096}
+        result = r.diagnostic_projection(frame, 1)
+        self.assertNotIn('seq', result)
+        self.assertEqual(result['reason'], 'capacity')
+        for mutation in ({'records': ['private']}, {'reason': 'private SQL'},
+                         {'phase': 'private'}, {'pending': True}, {'total': -1},
+                         {'retained': 2 ** 64}, {'epoch': True}, {'seq': 2}):
+            with self.assertRaises(r.ControlFailure):
+                r.diagnostic_projection(frame | mutation, 1)
+
+    def test_failed_fixture_diagnostic_unarmed_running_only(self):
+        import io
+        import threading
+        owner = r.OwnedCIWorker()
+        owner.controller = controller()
+        owner.controller.armed = False
+        owner.controller.mutex = threading.RLock()
+        owner.process = Mock(); owner.process.poll.return_value = None
+        owner.identity = Mock(); owner.identity.threads_running.return_value = True
+        owner.controller.normal.receive.return_value = {
+            'version': 2, 'epoch': 1, 'seq': 1, 'kind': 'diagnostic',
+            'reason': 'unclean_close', 'phase': 'open', 'pending': 0,
+            'open': 1, 'total': 17, 'retained': 17}
+        with patch.object(r.sys, 'stderr', io.StringIO()) as output:
+            result = owner.report_failure_diagnostic()
+            self.assertEqual(json.loads(output.getvalue()), result)
+        self.assertEqual(result['reason'], 'unclean_close')
+        self.assertEqual(owner.controller.normal.send.call_args.args[0]['op'], 'diagnostic')
+        self.assertFalse(owner.controller.armed)
+        self.assertFalse(owner.controller.invalid)
+        for armed, running, exited in ((True, True, None), (False, False, None), (False, True, 1)):
+            owner.controller.armed = armed
+            owner.identity.threads_running.return_value = running
+            owner.process.poll.return_value = exited
+            owner.controller.normal.reset_mock()
+            with patch.object(r.sys, 'stderr', io.StringIO()):
+                self.assertEqual(owner.report_failure_diagnostic()['reason'], 'unavailable')
+            owner.controller.normal.send.assert_not_called()
+
+    def test_failed_diagnostic_never_prints_exception_or_stops_cleanup(self):
+        import io
+        import threading
+        owner = r.OwnedCIWorker(); owner.controller = controller()
+        owner.controller.armed = False
+        owner.controller.mutex = threading.RLock()
+        owner.process = Mock(); owner.process.poll.return_value = None
+        owner.identity = Mock(); owner.identity.threads_running.return_value = True
+        owner.controller.normal.receive.side_effect = RuntimeError('private SQL secret')
+        with patch.object(r.sys, 'stderr', io.StringIO()) as output:
+            result = owner.report_failure_diagnostic()
+            self.assertNotIn('private', output.getvalue())
+        self.assertEqual(result, {'event': 'ci_worker_admission_failure',
+                                 'reason': 'unavailable', 'phase': 'unavailable'})
+        source = Path(__file__).with_name('test_auth_e2e.py').read_text()
+        self.assertIn('if sys.exc_info()[0] is not None and owned_ci_worker is not None:', source)
+        self.assertLess(source.index('owned_ci_worker.report_failure_diagnostic()'),
+                        source.index('diagnostics.snapshot(server, worker)'))
 
     def test_exact_runner_delta_and_mutations(self):
         import hashlib

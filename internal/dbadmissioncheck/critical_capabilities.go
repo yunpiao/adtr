@@ -3,6 +3,7 @@ package dbadmissioncheck
 import (
 	"bytes"
 	"go/ast"
+	"go/constant"
 	"go/format"
 	"go/token"
 	"go/types"
@@ -188,6 +189,9 @@ func criticalDeclarations(fset *token.FileSet, path string, files []*ast.File, i
 					name = receiverName(fn.Recv.List[0].Type) + "." + name
 				}
 			}
+			if path == managed && name == "lifecycleGate.invalidateBecauseLocked" && !(filename == "application_diagnostic_ci.go" && exactDiagnosticInvalidation(fn)) {
+				emit(decl, "diagnostic invalidator must preserve sticky-first and first-reason-only ordering")
+			}
 			if path == managed && name == "invalidateWitness" && !(filename == "lifecycle_ci.go" && exactWitnessDispatcher(fn, info)) {
 				emit(decl, "witness dispatcher must only synchronously invalidate its nonnil argument")
 			}
@@ -258,11 +262,25 @@ func criticalDeclarations(fset *token.FileSet, path string, files []*ast.File, i
 						emit(x, "shared witness construction outside reviewed mapper")
 					}
 				case *ast.Ident:
+					if obj, ok := info.Defs[x].(*types.Const); ok && isNamed(obj.Type(), managed, "invalidationReason") && !reviewedInvalidationConstant(obj) {
+						emit(x, "invalidation reason constant is outside the reviewed closed set")
+					}
 					obj := info.Uses[x]
 					if obj == nil || obj.Pkg() == nil {
 						return true
 					}
 					pkg := obj.Pkg().Path()
+					if function, ok := obj.(*types.Func); ok && pkg == managed {
+						signature := callableSignature(function.Type())
+						if signature != nil && signature.Recv() != nil && isNamed(signature.Recv().Type(), managed, "lifecycleGate") {
+							if obj.Name() == "markInvalidLocked" && !(path == managed && filename == "application_diagnostic_ci.go" && name == "lifecycleGate.invalidateBecauseLocked" && exactDiagnosticInvalidation(fn) && directCallFor(x, ancestors) != nil) {
+								emit(x, "sticky mark must only be called by the reviewed diagnostic invalidator")
+							}
+							if obj.Name() == "invalidateBecauseLocked" && !constantInvalidationCall(x, ancestors, info) {
+								emit(x, "invalidation requires a direct call with a reviewed reason constant")
+							}
+						}
+					}
 					if pkg == module+"/cmd/adtr" && obj.Name() == "configureCIAdmission" && !(path == pkg && filename == "main.go" && name == "run" && directCallFor(x, ancestors) != nil) {
 						emit(x, "CI admission configuration outside exact process bootstrap")
 					}
@@ -358,4 +376,49 @@ func validatedWitnessAlignment(fn *ast.FuncDecl, before token.Pos) bool {
 		}
 	}
 	return false
+}
+
+var reviewedInvalidationReasons = map[string]string{
+	"invalidCapacity": "capacity", "invalidConnectFailed": "connect_failed",
+	"invalidConnectState": "invalid_connect_state", "invalidDuplicateBackend": "duplicate_backend",
+	"invalidCloseState": "invalid_close_state", "invalidUncleanClose": "unclean_close",
+	"invalidTargetClosed": "target_closed", "invalidTargetClosing": "target_closing",
+	"invalidTargetRevoked": "target_revoked", "invalidWaitCancelled": "wait_cancelled",
+	"invalidTransport": "transport", "invalidRecordCapacity": "record_capacity",
+	"invalidAbort": "abort", "invalidExplicit": "explicit_invalidation",
+}
+
+func reviewedInvalidationConstant(obj *types.Const) bool {
+	expected, ok := reviewedInvalidationReasons[obj.Name()]
+	return ok && obj.Pkg() != nil && obj.Pkg().Path() == managed && isNamed(obj.Type(), managed, "invalidationReason") && obj.Val().Kind() == constant.String && constant.StringVal(obj.Val()) == expected
+}
+func constantInvalidationCall(id *ast.Ident, ancestors []ast.Node, info *types.Info) bool {
+	// Existing registration cleanup is a reviewed closure. The call itself must
+	// still be direct; no method value, conversion or dynamic reason is accepted.
+	for _, ancestor := range ancestors {
+		switch ancestor.(type) {
+		case *ast.GoStmt, *ast.DeferStmt:
+			return false
+		}
+	}
+	if len(ancestors) < 3 {
+		return false
+	}
+	selector, ok := ancestors[len(ancestors)-2].(*ast.SelectorExpr)
+	if !ok || selector.Sel != id {
+		return false
+	}
+	call, ok := ancestors[len(ancestors)-3].(*ast.CallExpr)
+	if !ok || call.Fun != selector || len(call.Args) != 1 || call.Ellipsis.IsValid() {
+		return false
+	}
+	argument, ok := call.Args[0].(*ast.Ident)
+	if !ok {
+		return false
+	}
+	obj, ok := info.Uses[argument].(*types.Const)
+	return ok && reviewedInvalidationConstant(obj)
+}
+func exactDiagnosticInvalidation(fn *ast.FuncDecl) bool {
+	return fn != nil && fn.Body != nil && len(fn.Body.List) == 3 && compactSource(fn.Body.List[0]) == "phase:=g.diagnosticPhaseLocked()" && compactSource(fn.Body.List[1]) == "g.markInvalidLocked()" && compactSource(fn.Body.List[2]) == `ifg.firstInvalidReason==""{g.firstInvalidReason=reasong.firstInvalidPhase=phase}`
 }

@@ -357,6 +357,8 @@ def main():
         diagnostics.phase("browser-pass")
         chain = "real browser -> API -> worker/PostgreSQL" if worker is not None else "real browser -> API -> PostgreSQL"
     finally:
+        if sys.exc_info()[0] is not None and owned_ci_worker is not None:
+            owned_ci_worker.report_failure_diagnostic()
         try:
             diagnostics.snapshot(server, worker)
         except Exception:

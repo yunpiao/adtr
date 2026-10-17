@@ -61,7 +61,7 @@ func (g *lifecycleGate) register(conn *Conn, identity ActivityIdentity) (func(),
 			return
 		}
 		if g.seal != nil && !g.seal.released && g.seal.registration == registration {
-			g.markInvalidLocked()
+			g.invalidateBecauseLocked(invalidTargetRevoked)
 		}
 		ticket.registration = nil
 		g.notifyLocked()
@@ -136,7 +136,7 @@ func (g *lifecycleGate) release(epoch uint64) error {
 func (g *lifecycleGate) invalidate() {
 	g.mu.Lock()
 	defer g.unlockAndPublishInvalid()
-	g.markInvalidLocked()
+	g.invalidateBecauseLocked(invalidExplicit)
 	g.notifyLocked()
 }
 
@@ -145,7 +145,7 @@ func (g *lifecycleGate) invalidateWaitLocked() func() {
 	if g.seal == nil || g.seal.released {
 		return nil
 	}
-	g.markInvalidLocked()
+	g.invalidateBecauseLocked(invalidWaitCancelled)
 	g.notifyLocked()
 	return g.invalidPublisherLocked()
 }
@@ -178,7 +178,7 @@ func (g *lifecycleGate) unlockAndPublishInvalid() {
 // A broken transport cannot publish on itself. Its EOF is terminal to the parent.
 func (g *lifecycleGate) invalidateTransport() {
 	g.mu.Lock()
-	g.markInvalidLocked()
+	g.invalidateBecauseLocked(invalidTransport)
 	g.notifyLocked()
 	g.mu.Unlock()
 }

@@ -1,6 +1,9 @@
 package dbadmissioncheck
 
 import (
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"go/types"
 	"os"
 	"strings"
@@ -127,6 +130,66 @@ func TestOwnedDescriptorNonblockIsExact(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, ds := fixtureCheck(t, module+"/cmd/adtr", tc.file, `package main;import "syscall";func configureCIAdmission(fd,i int){`+tc.body+`}`, imp)
+			if (len(ds) > 0) != tc.bad {
+				t.Fatalf("bad=%v diagnostics=%v", tc.bad, ds)
+			}
+		})
+	}
+}
+
+func TestDiagnosticReasonsRemainClosedAndStickyFirst(t *testing.T) {
+	lifecycle := `package dbadmission
+ type invalidationWitness interface{invalidate()}
+ type lifecycleGate struct{invalid bool;witness invalidationWitness;firstInvalidReason invalidationReason;firstInvalidPhase string}
+ func invalidateWitness(w invalidationWitness){if w!=nil{w.invalidate()}}
+ func(g *lifecycleGate)markInvalidLocked(){invalidateWitness(g.witness);g.invalid=true}
+ `
+	diagnostic := `package dbadmission
+ type invalidationReason string
+ const invalidCapacity invalidationReason="capacity"
+ func(g *lifecycleGate)diagnosticPhaseLocked()string{return "open"}
+ func(g *lifecycleGate)invalidateBecauseLocked(reason invalidationReason){
+ phase:=g.diagnosticPhaseLocked()
+ g.markInvalidLocked()
+ if g.firstInvalidReason==""{
+ g.firstInvalidReason=reason
+ g.firstInvalidPhase=phase
+ }
+ }
+ func(g *lifecycleGate)caller(){g.invalidateBecauseLocked(invalidCapacity)}
+ `
+	for _, tc := range []struct {
+		name, source string
+		bad          bool
+	}{
+		{"constant direct call", diagnostic, false},
+		{"existing cleanup closure", strings.Replace(diagnostic, "g.invalidateBecauseLocked(invalidCapacity)", "func(){g.invalidateBecauseLocked(invalidCapacity)}()", 1), false},
+		{"dynamic reason", strings.Replace(diagnostic, "g.invalidateBecauseLocked(invalidCapacity)", "r:=invalidCapacity;g.invalidateBecauseLocked(r)", 1), true},
+		{"literal reason", strings.Replace(diagnostic, "g.invalidateBecauseLocked(invalidCapacity)", `g.invalidateBecauseLocked("capacity")`, 1), true},
+		{"method alias", strings.Replace(diagnostic, "g.invalidateBecauseLocked(invalidCapacity)", "f:=g.invalidateBecauseLocked;f(invalidCapacity)", 1), true},
+		{"async invalidation", strings.Replace(diagnostic, "g.invalidateBecauseLocked(invalidCapacity)", "go g.invalidateBecauseLocked(invalidCapacity)", 1), true},
+		{"deferred invalidation", strings.Replace(diagnostic, "g.invalidateBecauseLocked(invalidCapacity)", "defer g.invalidateBecauseLocked(invalidCapacity)", 1), true},
+		{"constant value drift", strings.Replace(diagnostic, `="capacity"`, `="private detail"`, 1), true},
+		{"unreviewed constant", strings.ReplaceAll(diagnostic, "invalidCapacity", "invalidOther"), true},
+		{"direct mark bypass", diagnostic + `func(g *lifecycleGate)bypass(){g.markInvalidLocked()}`, true},
+		{"reason before mark", strings.Replace(diagnostic, "g.markInvalidLocked()", "g.firstInvalidReason=reason;g.markInvalidLocked()", 1), true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fs := token.NewFileSet()
+			var files []*ast.File
+			for filename, source := range map[string]string{"lifecycle_ci.go": lifecycle, "application_diagnostic_ci.go": tc.source} {
+				f, err := parser.ParseFile(fs, filename, source, 0)
+				if err != nil {
+					t.Fatal(err)
+				}
+				files = append(files, f)
+			}
+			info := &types.Info{Instances: map[*ast.Ident]types.Instance{}, Types: map[ast.Expr]types.TypeAndValue{}, Uses: map[*ast.Ident]types.Object{}, Defs: map[*ast.Ident]types.Object{}, Selections: map[*ast.SelectorExpr]*types.Selection{}}
+			config := types.Config{Importer: fixtureImporter{}}
+			if _, err := config.Check(managed, fs, files, info); err != nil {
+				t.Fatal(err)
+			}
+			ds := Check(fs, managed, files, info)
 			if (len(ds) > 0) != tc.bad {
 				t.Fatalf("bad=%v diagnostics=%v", tc.bad, ds)
 			}

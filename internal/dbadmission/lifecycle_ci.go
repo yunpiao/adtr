@@ -18,16 +18,18 @@ var coordinator struct {
 }
 
 type lifecycleGate struct {
-	mu               sync.Mutex
-	closing, invalid bool
-	pending, open    int
-	next             uint64
-	tickets          map[uint64]*lifecycleTicket
-	changed          chan struct{}
-	seal             *sealAttempt
-	witness          invalidationWitness
-	revision         uint64
-	total            uint64
+	mu                 sync.Mutex
+	closing, invalid   bool
+	pending, open      int
+	next               uint64
+	tickets            map[uint64]*lifecycleTicket
+	changed            chan struct{}
+	seal               *sealAttempt
+	witness            invalidationWitness
+	revision           uint64
+	total              uint64
+	firstInvalidReason invalidationReason
+	firstInvalidPhase  string
 }
 
 type lifecycleTicket struct {
@@ -87,7 +89,7 @@ func (g *lifecycleGate) acquire(ctx context.Context) (*lifecycleTicket, error) {
 			continue
 		}
 		if g.witness != nil && g.total >= 4096 {
-			g.markInvalidLocked()
+			g.invalidateBecauseLocked(invalidCapacity)
 			g.notifyLocked()
 			g.unlockAndPublishInvalid()
 			return nil, errAdmissionClosed
@@ -133,13 +135,13 @@ func (t *lifecycleTicket) attach(conn *Conn, backend uint32) {
 	g.mu.Lock()
 	defer g.unlockAndPublishInvalid()
 	if t.state != 'p' || conn == nil || backend == 0 {
-		g.markInvalidLocked()
+		g.invalidateBecauseLocked(invalidConnectState)
 		g.notifyLocked()
 		return
 	}
 	for _, other := range g.tickets {
 		if other != t && other.state == 'o' && (other.conn == conn || other.backend == backend) {
-			g.markInvalidLocked()
+			g.invalidateBecauseLocked(invalidDuplicateBackend)
 			g.notifyLocked()
 			return
 		}
@@ -156,7 +158,7 @@ func (t *lifecycleTicket) failed() {
 	g := t.gate
 	g.mu.Lock()
 	defer g.unlockAndPublishInvalid()
-	g.markInvalidLocked()
+	g.invalidateBecauseLocked(invalidConnectFailed)
 	if t.state == 'p' {
 		g.pending--
 	}
@@ -169,12 +171,14 @@ func (t *lifecycleTicket) closed(clean bool) {
 	g.mu.Lock()
 	defer g.unlockAndPublishInvalid()
 	if t.state != 'o' && t.state != 'x' {
-		g.markInvalidLocked()
+		g.invalidateBecauseLocked(invalidCloseState)
 		g.notifyLocked()
 		return
 	}
-	if !clean || (g.seal != nil && !g.seal.released && g.seal.target == t) {
-		g.markInvalidLocked()
+	if !clean {
+		g.invalidateBecauseLocked(invalidUncleanClose)
+	} else if g.seal != nil && !g.seal.released && g.seal.target == t {
+		g.invalidateBecauseLocked(invalidTargetClosed)
 	}
 	g.open--
 	t.state = 'c'
@@ -187,12 +191,12 @@ func (t *lifecycleTicket) closingConnection() {
 	g.mu.Lock()
 	defer g.unlockAndPublishInvalid()
 	if t.state != 'o' {
-		g.markInvalidLocked()
+		g.invalidateBecauseLocked(invalidCloseState)
 		g.notifyLocked()
 		return
 	}
 	if g.seal != nil && !g.seal.released && g.seal.target == t {
-		g.markInvalidLocked()
+		g.invalidateBecauseLocked(invalidTargetClosing)
 		g.notifyLocked()
 	}
 	t.state = 'x'

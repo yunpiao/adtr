@@ -77,7 +77,7 @@ func (g *lifecycleGate) applicationSnapshot(seq uint64, kind string) (applicatio
 		f.Records = append(f.Records, r)
 	}
 	if len(f.Records) > 128 {
-		g.markInvalidLocked()
+		g.invalidateBecauseLocked(invalidRecordCapacity)
 		g.notifyLocked()
 		return f, errSealProtocol
 	}
@@ -233,6 +233,18 @@ func serveApplicationNormal(file *os.File, g *lifecycleGate, stopping *atomic.Bo
 		}
 		last = r.Seq
 		switch r.Op {
+		case "diagnostic":
+			if r.Target != 0 {
+				return
+			}
+			writeMu.Lock()
+			err := writeApplicationFrame(file, g.applicationDiagnostic(r.Seq), 1024)
+			writeMu.Unlock()
+			if err != nil {
+				terminal = err
+				return
+			}
+			continue
 		case "snapshot", "status":
 			if r.Target != 0 {
 				return
@@ -276,7 +288,7 @@ func serveApplicationRescue(file *os.File, g *lifecycleGate, stopping *atomic.Bo
 			}
 		case "abort":
 			g.mu.Lock()
-			g.markInvalidLocked()
+			g.invalidateBecauseLocked(invalidAbort)
 			if g.seal != nil {
 				g.seal.released = true
 			}

@@ -192,16 +192,19 @@ class OwnedIdentity:
         self.verify()
         signal.pidfd_send_signal(self.pidfd, sig)
 
+    def threads_running(self):
+        self.verify()
+        try:
+            states = [(p / 'stat').read_text().rsplit(')', 1)[1].split()[0]
+                      for p in (Path('/proc') / str(self.pid) / 'task').iterdir()]
+        except (OSError, IndexError):
+            _fail()
+        return bool(states) and all(state not in ('T', 't', 'Z', 'X', 'x') for state in states)
+
     def resume(self, deadline):
         self.send(signal.SIGCONT)
         while time.monotonic() < deadline:
-            self.verify()
-            try:
-                states = [(p / 'stat').read_text().rsplit(')', 1)[1].split()[0]
-                          for p in (Path('/proc') / str(self.pid) / 'task').iterdir()]
-            except (OSError, IndexError):
-                _fail()
-            if states and all(state not in ('T', 't', 'Z', 'X', 'x') for state in states):
+            if self.threads_running():
                 return
             time.sleep(.002)
         _fail()
@@ -264,6 +267,31 @@ def _rescue_exchange(channel, seq, abort, deadline):
             or type(frame.get('seq')) is not int or frame['seq'] != seq
             or frame.get('kind') != 'reply' or frame.get('status') != 'released'):
         _fail()
+
+
+DIAGNOSTIC_REASONS = frozenset({'none', 'capacity', 'connect_failed', 'invalid_connect_state',
+    'duplicate_backend', 'invalid_close_state', 'unclean_close', 'target_closed',
+    'target_closing', 'target_revoked', 'wait_cancelled', 'transport', 'record_capacity',
+    'abort', 'explicit_invalidation'})
+DIAGNOSTIC_PHASES = frozenset({'open', 'draining', 'sealed', 'released'})
+
+
+def diagnostic_projection(frame, seq):
+    fields = {'version', 'epoch', 'seq', 'kind', 'reason', 'phase',
+              'pending', 'open', 'total', 'retained'}
+    if (not isinstance(frame, dict) or set(frame) != fields
+            or type(frame['version']) is not int or frame['version'] != 2
+            or type(frame['epoch']) is not int or frame['epoch'] != 1
+            or type(frame['seq']) is not int or frame['seq'] != seq
+            or frame['kind'] != 'diagnostic'
+            or not isinstance(frame['reason'], str) or frame['reason'] not in DIAGNOSTIC_REASONS
+            or not isinstance(frame['phase'], str) or frame['phase'] not in DIAGNOSTIC_PHASES
+            or not all(_int(frame[key]) and frame[key] <= 2 ** 64 - 1
+                       for key in ('pending', 'open', 'total', 'retained'))):
+        _fail()
+    # Construct an allowlisted projection; never print a private wire frame.
+    return {'event': 'ci_worker_admission_failure', **{key: frame[key] for key in
+            ('reason', 'phase', 'pending', 'open', 'total', 'retained')}}
 
 
 class WorkerController:
@@ -440,6 +468,36 @@ class OwnedCIWorker:
         except BaseException:
             self.shutdown()
             raise
+
+    def report_failure_diagnostic(self):
+        """Post-failure observation only; never capture eligibility or sticky read."""
+        report = {'event': 'ci_worker_admission_failure',
+                  'reason': 'unavailable', 'phase': 'unavailable'}
+        locked = False
+        try:
+            c = self.controller
+            if (c is None or c.armed or c.released or self.process.poll() is not None
+                    or not self.identity.threads_running()):
+                _fail()
+            locked = c.mutex.acquire(timeout=.02)
+            if not locked or c.armed or c.released or not self.identity.threads_running():
+                _fail()
+            deadline = time.monotonic() + .2
+            c.seq += 1
+            c.normal.send({'version': 2, 'epoch': 1, 'seq': c.seq, 'op': 'diagnostic'}, deadline)
+            report = diagnostic_projection(c.normal.receive(deadline), c.seq)
+        except Exception:
+            # Missing/invalid evidence is explicitly unavailable; never serialize
+            # exceptions, registry records, identifiers, descriptor values or env.
+            pass
+        finally:
+            if locked:
+                c.mutex.release()
+        try:
+            print(json.dumps(report, separators=(',', ':')), file=sys.stderr, flush=True)
+        except Exception:
+            pass  # Optional evidence must not interrupt owned cleanup.
+        return report
 
     def stop_rescuer(self):
         if self.rescuer is None:
