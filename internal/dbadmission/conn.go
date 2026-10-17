@@ -22,7 +22,8 @@ type Conn struct {
 }
 
 type lifecyclePermit interface {
-	connected()
+	connected(*Conn)
+	closingConnection()
 	failed()
 	closed(clean bool)
 }
@@ -48,10 +49,11 @@ func connectWith(ctx context.Context, config *pgx.ConnConfig, connect func(conte
 		}
 		return nil, err
 	}
+	conn := &Conn{raw: raw, permit: permit}
 	if permit != nil {
-		permit.connected()
+		permit.connected(conn)
 	}
-	return &Conn{raw: raw, permit: permit}, nil
+	return conn, nil
 }
 
 func (c *Conn) Begin(ctx context.Context) (pgx.Tx, error) {
@@ -77,6 +79,7 @@ func (c *Conn) Close(ctx context.Context) error {
 		return c.raw.Close(ctx)
 	}
 	c.closed = true
+	c.permit.closingConnection()
 	// A native transaction may close its connection on an error. Such an
 	// unobserved close invalidates this attempt rather than proving quiescence.
 	alreadyClosed := c.raw.IsClosed()

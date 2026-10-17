@@ -62,7 +62,7 @@ func TestPendingAndOpenLifetimePreventDrain(t *testing.T) {
 	if g.locallyDrained() {
 		t.Fatal("pending startup counted as drained")
 	}
-	ticket.connected()
+	attachTestTicket(ticket)
 	if g.locallyDrained() {
 		t.Fatal("open lifetime counted as drained")
 	}
@@ -83,7 +83,7 @@ func TestFailedStartupAndUncleanClosePoisonAttempt(t *testing.T) {
 		if startup {
 			ticket.failed()
 		} else {
-			ticket.connected()
+			attachTestTicket(ticket)
 			ticket.closed(false)
 		}
 		g.closeAdmission()
@@ -126,7 +126,7 @@ func TestAcquireAndClosureAreSerialized(t *testing.T) {
 			defer wg.Done()
 			ticket, err := g.acquire(context.Background())
 			if err == nil {
-				ticket.connected()
+				attachTestTicket(ticket)
 				ticket.closed(true)
 			}
 		}()
