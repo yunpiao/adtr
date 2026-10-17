@@ -34,6 +34,7 @@ func (d Diagnostic) String() string { return fmt.Sprintf("%s: %s", d.Position, d
 // type check of the same package. Unknown protected operations are rejected.
 func Check(fset *token.FileSet, path string, files []*ast.File, info *types.Info) []Diagnostic {
 	var out []Diagnostic
+	scanners := scanOnlyParameters(files, info)
 	emit := func(n ast.Node, reason string) { out = append(out, Diagnostic{fset.Position(n.Pos()), reason}) }
 	for _, file := range files {
 		for _, spec := range file.Imports {
@@ -89,7 +90,7 @@ func Check(fset *token.FileSet, path string, files []*ast.File, info *types.Info
 							emit(id, "unreviewed network transport constructor or method")
 						}
 
-						if p == "unsafe" || p == "plugin" || p == "os/exec" || (p == "syscall" && !safeSystemObject(path, obj.Name())) || (p == "reflect" && obj.Name() != "DeepEqual") || p == "database/sql" || strings.HasPrefix(p, pgx+"/pgxpool") || strings.HasPrefix(p, pgx+"/stdlib") {
+						if p == "unsafe" || p == "plugin" || p == "os/exec" || (p == "syscall" && !safeSystemObject(path, obj.Name()) && !safeSystemField(path, filepath.Base(fset.Position(file.Pos()).Filename), name, id, ancestors, info)) || (p == "reflect" && obj.Name() != "DeepEqual") || p == "database/sql" || strings.HasPrefix(p, pgx+"/pgxpool") || strings.HasPrefix(p, pgx+"/stdlib") {
 							emit(id, "unproved reflective, unsafe, or alternate database route: "+p+"."+obj.Name())
 						}
 						if f, ok := obj.(*types.Func); ok && (p == pgx || p == pgx+"/pgconn") && rawResult(f.Type()) {
@@ -162,7 +163,7 @@ func Check(fset *token.FileSet, path string, files []*ast.File, info *types.Info
 								if sig.Variadic() && j == sig.Params().Len()-1 && !x.Ellipsis.IsValid() {
 									dest = dest.(*types.Slice).Elem()
 								}
-								if dynamicEscape(actual.typ, dest) {
+								if dynamicEscape(actual.typ, dest) && !scanOnlyCall(x, i, actual.typ, dest, scanners, info) {
 									emit(arg, "protected database value passed through dynamic interface")
 								}
 							}
@@ -307,7 +308,7 @@ func interfaceType(t types.Type) bool {
 	return ok
 }
 func sensitiveDynamic(t types.Type) bool {
-	return protectedValue(t) || isNamed(t, pgx, "Tx") || isNamed(t, pgx, "Rows")
+	return protectedValue(t) || isNamed(t, pgx, "Tx") || isNamed(t, pgx, "Rows") || isNamed(t, pgx, "Row")
 }
 
 func dynamicEscape(from, to types.Type) bool {
@@ -442,4 +443,137 @@ func callableSignature(t types.Type) *types.Signature {
 	}
 	sig, _ := t.Underlying().(*types.Signature)
 	return sig
+}
+
+// Narrowing Rows to Row is safe only for a statically resolved local scanner
+// whose parameter is used solely by synchronous, direct Scan calls. Checking
+// every typed parameter reference rejects aliases, assertions, storage, return,
+// forwarding and closure capture; method-set compatibility alone is insufficient.
+func scanOnlyParameters(files []*ast.File, info *types.Info) map[types.Object]map[int]bool {
+	out := map[types.Object]map[int]bool{}
+	for _, file := range files {
+		for _, decl := range file.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok || fn.Body == nil {
+				continue
+			}
+			obj := info.Defs[fn.Name]
+			if obj == nil {
+				continue
+			}
+			sig := callableSignature(obj.Type())
+			if sig == nil || sig.Recv() != nil {
+				continue
+			}
+			for i := 0; i < sig.Params().Len(); i++ {
+				param := sig.Params().At(i)
+				if !isNamed(param.Type(), pgx, "Row") {
+					continue
+				}
+				valid, uses := true, 0
+				var stack []ast.Node
+				ast.Inspect(fn.Body, func(n ast.Node) bool {
+					if n == nil {
+						stack = stack[:len(stack)-1]
+						return false
+					}
+					stack = append(stack, n)
+					id, ok := n.(*ast.Ident)
+					if !ok || info.Uses[id] != param {
+						return true
+					}
+					uses++
+					if len(stack) < 3 {
+						valid = false
+						return true
+					}
+					sel, selector := stack[len(stack)-2].(*ast.SelectorExpr)
+					call, calling := stack[len(stack)-3].(*ast.CallExpr)
+					if !selector || !calling || sel.X != id || call.Fun != sel || sel.Sel.Name != "Scan" || call.Ellipsis.IsValid() {
+						valid = false
+						return true
+					}
+					selection := info.Selections[sel]
+					if selection == nil || selection.Kind() != types.MethodVal || !isNamed(selection.Recv(), pgx, "Row") {
+						valid = false
+					}
+					for _, ancestor := range stack {
+						switch ancestor.(type) {
+						case *ast.FuncLit, *ast.GoStmt, *ast.DeferStmt:
+							valid = false
+						}
+					}
+					return true
+				})
+				if valid && uses > 0 {
+					if out[obj] == nil {
+						out[obj] = map[int]bool{}
+					}
+					out[obj][i] = true
+				}
+			}
+		}
+	}
+	return out
+}
+func scanOnlyCall(call *ast.CallExpr, index int, from, to types.Type, scanners map[types.Object]map[int]bool, info *types.Info) bool {
+	if !isNamed(from, pgx, "Rows") || !isNamed(to, pgx, "Row") {
+		return false
+	}
+	id, ok := call.Fun.(*ast.Ident)
+	if !ok {
+		return false
+	}
+	return scanners[info.Uses[id]][index]
+}
+
+// These are read-only filesystem observations, not syscall entrypoints. Keep
+// receiver type, field and reviewed source location together; same-named fields
+// or mutations in other code must not inherit this exception.
+func safeSystemField(path, file, function string, id *ast.Ident, ancestors []ast.Node, info *types.Info) bool {
+	if path != module+"/internal/systemhealth" || len(ancestors) < 2 {
+		return false
+	}
+	sel, ok := ancestors[len(ancestors)-2].(*ast.SelectorExpr)
+	if !ok || sel.Sel != id {
+		return false
+	}
+	selection := info.Selections[sel]
+	if selection == nil || selection.Kind() != types.FieldVal {
+		return false
+	}
+	allowed := false
+	if file == "cgroup_linux.go" && function == "cgroupIdentity" {
+		allowed = (isNamed(selection.Recv(), "syscall", "Stat_t") && (id.Name == "Dev" || id.Name == "Ino" || id.Name == "Ctim")) || (isNamed(selection.Recv(), "syscall", "Timespec") && (id.Name == "Sec" || id.Name == "Nsec"))
+	}
+	if file == "platform_linux.go" && function == "statFS" && isNamed(selection.Recv(), "syscall", "Statfs_t") {
+		allowed = id.Name == "Bsize" || id.Name == "Blocks" || id.Name == "Bfree" || id.Name == "Bavail" || id.Name == "Type"
+	}
+	if !allowed {
+		return false
+	}
+	contains := func(n ast.Node) bool { return n != nil && n.Pos() <= sel.Pos() && n.End() >= sel.End() }
+	for _, ancestor := range ancestors {
+		switch n := ancestor.(type) {
+		case *ast.AssignStmt:
+			for _, lhs := range n.Lhs {
+				if contains(lhs) {
+					return false
+				}
+			}
+		case *ast.IncDecStmt:
+			if contains(n.X) {
+				return false
+			}
+		case *ast.UnaryExpr:
+			if n.Op == token.AND && contains(n.X) {
+				return false
+			}
+		case *ast.RangeStmt:
+			if contains(n.Key) || contains(n.Value) {
+				return false
+			}
+		}
+	}
+	return true
 }

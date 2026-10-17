@@ -55,6 +55,8 @@ func fixtures(t *testing.T) fixtureImporter {
  func(c *Conn)IsClosed()bool{return false}
  func(c *Conn)PgConn()*pgconn.PgConn{return nil}
  type Tx interface {Conn()*Conn; Commit()error}
+ type Row interface {Scan(...any)error}
+ type Rows interface {Row;Conn()*Conn}
  `, imp)
 	imp[pgx] = p
 	p, _ = fixtureCheck(t, managed, "managed.go", `package dbadmission
@@ -244,5 +246,94 @@ func TestUnreviewedTransportAndImports(t *testing.T) {
 	_, ds := fixtureCheck(t, module+"/internal/example", "example.go", `package example;import "net";var dial=net.Dial`, imp)
 	if len(ds) == 0 {
 		t.Fatal("transport alias escaped")
+	}
+}
+
+func TestRowsToVerifiedLocalScanner(t *testing.T) {
+	imp := fixtures(t)
+	cases := []struct {
+		name, body, call string
+		bad              bool
+	}{
+		{"direct synchronous Scan", `func scan(row p.Row)error{var value int;return row.Scan(&value)}`, `scan(rows)`, false},
+		{"multiple columns", `func scan(row p.Row)error{var value int;var name string;return row.Scan(&value,&name)}`, `scan(rows)`, false},
+		{"static scanner second parameter", `func scan(n int,row p.Row)error{var value int;return row.Scan(&value,&n)}`, `scan(1,rows)`, false},
+		{"scanner function value", `func scan(row p.Row)error{return row.Scan()}`, `func(){alias:=scan;_=alias(rows)}()`, true},
+		{"assert Rows", `func scan(row p.Row)error{_=row.(p.Rows);return row.Scan()}`, `scan(rows)`, true},
+		{"return row", `func scan(row p.Row)p.Row{return row}`, `scan(rows)`, true},
+		{"store row", `var saved p.Row;func scan(row p.Row)error{saved=row;return row.Scan()}`, `scan(rows)`, true},
+		{"alias row", `func scan(row p.Row)error{alias:=row;return alias.Scan()}`, `scan(rows)`, true},
+		{"method value", `func scan(row p.Row)error{method:=row.Scan;return method()}`, `scan(rows)`, true},
+		{"closure capture", `func scan(row p.Row)error{return func()error{return row.Scan()}()}`, `scan(rows)`, true},
+		{"goroutine", `func scan(row p.Row)error{go row.Scan();return nil}`, `scan(rows)`, true},
+		{"defer", `func scan(row p.Row)error{defer row.Scan();return nil}`, `scan(rows)`, true},
+		{"forward variadic", `func sink(...any){};func scan(row p.Row)error{sink(row);return row.Scan()}`, `scan(rows)`, true},
+		{"Scan variadic forwarding", `func scan(row p.Row)error{args:=[]any{};return row.Scan(args...)}`, `scan(rows)`, true},
+		{"Scan receives row", `func scan(row p.Row)error{return row.Scan(row)}`, `scan(rows)`, true},
+		{"Row to any", `func scan(row p.Row)error{var value any=row;_=value;return row.Scan()}`, `scan(rows)`, true},
+		{"unused row", `func scan(row p.Row)error{return nil}`, `scan(rows)`, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			source := `package example;import p "github.com/jackc/pgx/v5";` + tc.body + `;func f(rows p.Rows){` + tc.call + `}`
+			_, ds := fixtureCheck(t, module+"/internal/example", "example.go", source, imp)
+			if (len(ds) > 0) != tc.bad {
+				t.Fatalf("bad=%v diagnostics=%v", tc.bad, ds)
+			}
+		})
+	}
+}
+
+func TestRowRemainsProtectedOutsideScanner(t *testing.T) {
+	imp := fixtures(t)
+	for _, body := range []string{
+		`func f(row p.Row){var x any=row;_=x}`,
+		`func f(row p.Row)any{return row}`,
+		`func f(row p.Row){_=any(row)}`,
+		`func f(row p.Row){_=row.(p.Rows)}`,
+	} {
+		_, ds := fixtureCheck(t, module+"/internal/example", "example.go", `package example;import p "github.com/jackc/pgx/v5";`+body, imp)
+		if len(ds) == 0 {
+			t.Fatal("Row escaped dynamic protection")
+		}
+	}
+}
+
+func TestFilesystemObservationFieldsAreExactReadOnly(t *testing.T) {
+	imp := fixtures(t)
+	p, _ := fixtureCheck(t, "syscall", "syscall.go", `package syscall
+ type Timespec struct {Sec,Nsec int64}
+ type Stat_t struct {Dev,Ino uint64;Ctim Timespec}
+ type Statfs_t struct {Bsize int64;Blocks,Bfree,Bavail uint64;Type int64}
+ type Other struct {Bsize int64}
+ func Socket(){}
+ `, imp)
+	imp["syscall"] = p
+	cases := []struct {
+		name, file, function, body string
+		bad                        bool
+	}{
+		{"stat observations", "cgroup_linux.go", "cgroupIdentity", `var stat syscall.Stat_t;_=stat.Dev;_=stat.Ino;_=stat.Ctim.Sec;_=stat.Ctim.Nsec`, false},
+		{"statfs observations", "platform_linux.go", "statFS", `var stat syscall.Statfs_t;_=stat.Bsize;_=stat.Blocks;_=stat.Bfree;_=stat.Bavail;_=stat.Type`, false},
+		{"wrong function", "platform_linux.go", "other", `var stat syscall.Statfs_t;_=stat.Bsize`, true},
+		{"wrong file", "other.go", "statFS", `var stat syscall.Statfs_t;_=stat.Bsize`, true},
+		{"same named other field", "platform_linux.go", "statFS", `var stat syscall.Other;_=stat.Bsize`, true},
+		{"field mutation", "platform_linux.go", "statFS", `var stat syscall.Statfs_t;stat.Bsize=1`, true},
+		{"field increment", "platform_linux.go", "statFS", `var stat syscall.Statfs_t;stat.Bsize++`, true},
+		{"field address", "platform_linux.go", "statFS", `var stat syscall.Statfs_t;_=&stat.Bsize`, true},
+		{"nested field mutation", "cgroup_linux.go", "cgroupIdentity", `var stat syscall.Stat_t;stat.Ctim.Sec=1`, true},
+		{"nested field address", "cgroup_linux.go", "cgroupIdentity", `var stat syscall.Stat_t;_=&stat.Ctim.Sec`, true},
+		{"range field mutation", "platform_linux.go", "statFS", `var stat syscall.Statfs_t;for _,stat.Bsize=range []int64{1}{}`, true},
+		{"field literal", "platform_linux.go", "statFS", `_=syscall.Statfs_t{Bsize:1}`, true},
+		{"unreviewed syscall", "platform_linux.go", "statFS", `syscall.Socket()`, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			source := `package systemhealth;import "syscall";func ` + tc.function + `(){` + tc.body + `}`
+			_, ds := fixtureCheck(t, module+"/internal/systemhealth", tc.file, source, imp)
+			if (len(ds) > 0) != tc.bad {
+				t.Fatalf("bad=%v diagnostics=%v", tc.bad, ds)
+			}
+		})
 	}
 }
