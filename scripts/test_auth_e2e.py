@@ -30,6 +30,7 @@ from ci_postgres_image import postgres_image_args
 from test_integration import IMAGE
 from ldap_e2e_fixture import LDAPFixture
 from account_barrier_e2e_fixture import AccountBarrierFixture
+from directory_e2e_credentials import configure_directory_credentials
 from e2e_owned_container import OWNER_LABEL, remove_owned_container
 from e2e_runtime_diagnostics import http_handler_panicked, RuntimeDiagnostics
 from e2e_container_startup_diagnostics import report_container_startup_failure
@@ -161,6 +162,7 @@ def main():
                    ADTR_BOOTSTRAP_PASSWORD=secrets.token_urlsafe(24), ADTR_E2E_BASE_URL=base)
         env["ADTR_E2E_USERNAME"] = env["ADTR_BOOTSTRAP_USERNAME"]
         env["ADTR_E2E_PASSWORD"] = env["ADTR_BOOTSTRAP_PASSWORD"]
+        configure_directory_credentials(env, args.suite)
         if not Path("web/dist/index.html").is_file():
             raise RuntimeError("build the real frontend before running acceptance")
         for mode in ["migrate", "bootstrap"]:

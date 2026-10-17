@@ -4,6 +4,7 @@ import hashlib
 from pathlib import Path
 import re
 import unittest
+from test_directory_e2e_credentials_contract import restore_credentials_runner
 
 CHANGES = {'scripts/test_auth_e2e.py': ('f88f83e8dfdb25928b5cb204f2b01162873ae23fcdd277f862b574dc4d0fa83b',
                               [('from computer_asset_export_v3_ci import',
@@ -217,6 +218,8 @@ CHANGES = {'scripts/test_auth_e2e.py': ('f88f83e8dfdb25928b5cb204f2b01162873ae23
                                 1)])}
 
 def restore(text, name):
+    if name == 'scripts/test_auth_e2e.py':
+        text = restore_credentials_runner(text)
     for old, new, count in reversed(CHANGES[name][1]):
         if text.count(new) != count:
             raise ValueError('kind running cancel addition absent or altered: ' + name)

@@ -11,6 +11,21 @@ import { navigateTo } from "./navigation";
 import { openMembers } from "./group-members-v4-helpers";
 import { groupMembersV4ResponseJSON } from "./group-members-v4-response-observer";
 export const paginationMembershipSources = [
+  "internal/auth/task_http.go",
+  "internal/auth/task_public.go",
+  "web/e2e/specialized-task-controls.ts",
+  "web/src/TaskMaintenance.tsx",
+  "web/src/TaskPresentation.tsx",
+  "web/src/TaskWorkspace.tsx",
+  "web/src/access-api.ts",
+  "web/src/access-common.tsx",
+  "web/src/api.ts",
+  "web/src/maintenance-api.ts",
+  "web/src/maintenance-intent.ts",
+  "web/src/soc-tasks.css",
+  "web/src/task-api.ts",
+  "web/src/task-common.tsx",
+  "web/src/task-view-state.ts",
   "internal/testldapfixture/main.go",
   "internal/testldapfixture/server.go",
   "internal/testldapfixture/directory.go",

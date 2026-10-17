@@ -1,3 +1,4 @@
+import { randomBytes, randomInt } from "node:crypto";
 import { revealNavigation } from "./test-navigation";
 import {
   act,
@@ -5,6 +6,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
@@ -19,13 +21,33 @@ import {
 } from "./access-api";
 import { ApiError, type Profile } from "./api";
 import {
+  isAssetExportTask,
+  isDirectoryTask,
+  requiresDedicatedTaskControls,
+  requiresDedicatedTaskRecovery,
   taskAPI,
+  taskError,
   taskOperations,
   taskStates,
   terminal,
   type Task,
   type TaskState,
 } from "./task-api";
+import {
+  clearExportRecovery as clearUserExportRecovery,
+  exportRecoveryStorage as userExportRecoveryStorage,
+  writeExportRecovery as writeUserExportRecovery,
+} from "./user-asset-export-v3-recovery";
+import {
+  clearExportRecovery as clearGroupExportRecovery,
+  exportRecoveryStorage as groupExportRecoveryStorage,
+  writeExportRecovery as writeGroupExportRecovery,
+} from "./group-asset-export-v3-recovery";
+import {
+  clearExportRecovery as clearComputerExportRecovery,
+  exportRecoveryStorage as computerExportRecoveryStorage,
+  writeExportRecovery as writeComputerExportRecovery,
+} from "./computer-asset-export-v3-recovery";
 
 let profile: Profile;
 const kind = {
@@ -84,7 +106,15 @@ const response = (body: unknown, status = 200) =>
 let override: (url: string, init: RequestInit) => Promise<Response> | undefined;
 let fetcher: ReturnType<typeof vi.fn>;
 let counter = 0;
+// Ephemeral inputs for fetch-mocked DOM tests, never real account credentials.
+let mockPassword: string;
+let mockCode: string;
+let replayCode: string;
 beforeEach(() => {
+  mockPassword = randomBytes(24).toString("base64url");
+  const code = randomInt(1_000_000);
+  mockCode = code.toString().padStart(6, "0");
+  replayCode = ((code + 1) % 1_000_000).toString().padStart(6, "0");
   vi.spyOn(window, "scrollTo").mockImplementation(() => {});
   discardTaskIntent({ ID: 1, username: "admin" });
   sessionStorage.clear();
@@ -135,8 +165,8 @@ const fill = (label: string, value: string) =>
   fireEvent.change(screen.getByLabelText(label, { exact: true }), {
     target: { value },
   });
-const proof = (code = "123456") => {
-  fill("操作者当前密码", "Synthetic Actor Password 123");
+const proof = (code = mockCode) => {
+  fill("操作者当前密码", mockPassword);
   fill("未使用的认证器验证码", code);
 };
 const calls = (path: string) =>
@@ -175,7 +205,7 @@ describe("task transport", () => {
         payload: {},
         idempotencyKey: "stable-key",
       },
-      { actorPassword: "Synthetic Password 123", totpCode: "123456" },
+      { actorPassword: mockPassword, totpCode: mockCode },
       profile.csrfToken,
       signal,
     );
@@ -222,7 +252,7 @@ describe("task transport", () => {
       taskAPI.recover(
         task().taskUUID,
         "key",
-        { actorPassword: "Password 1234", totpCode: "123456" },
+        { actorPassword: mockPassword, totpCode: mockCode },
         "csrf",
         new AbortController().signal,
       ),
@@ -418,7 +448,7 @@ describe("task workspace", () => {
     await screen.findByRole("alert");
     await screen.findByText(/已重新读取最近/);
     expect(screen.getByLabelText("操作者当前密码")).toHaveValue("");
-    proof("654321");
+    proof(replayCode);
     click("使用原幂等键确认提交");
     await screen.findByText(/服务器确认幂等重放/);
     const bodies = calls("/submit").map(([, init]) =>
@@ -426,7 +456,9 @@ describe("task workspace", () => {
     );
     expect(bodies).toHaveLength(2);
     expect(bodies[0].idempotencyKey).toBe(bodies[1].idempotencyKey);
-    expect(bodies[1].totpCode).toBe("654321");
+    expect(bodies[0].totpCode).toBe(mockCode);
+    expect(bodies[1].totpCode).toBe(replayCode);
+    expect(replayCode).not.toBe(mockCode);
     expect(localStorage.length + sessionStorage.length).toBe(0);
   });
   it("preserves an uncertain key after leaving and reopening the entire workspace", async () => {
@@ -800,6 +832,570 @@ describe("dedicated dictionary task guards", () => {
       expect(screen.queryByText(/DIRECTORY_PRIVATE/)).toBeNull();
       expect(calls("/recover")).toHaveLength(0);
       expect(calls("/cancel")).toHaveLength(0);
+    },
+  );
+});
+
+// Synthetic DOM/transport regressions only. Real browser/API/Worker evidence
+// belongs to the dedicated integration suites and is not implied by these tests.
+describe("specialized dictionary and asset export task controls", () => {
+  const specialKinds = [
+    { taskName: "domain.directory_read.v3", href: "#directory-v3" },
+    { taskName: "domain.directory_read.v4", href: "#group-members-v4" },
+    { taskName: "user_assets.v3.export", href: "#user-assets-v3" },
+    { taskName: "group_assets.v3.export", href: "#group-assets-v3" },
+    { taskName: "computer_assets.v3.export", href: "#computer-assets-v3" },
+  ] as const;
+  const firstID = task().taskUUID;
+  const secondID = "00000000-0000-4000-8000-000000000002";
+  const recoveryKey = "00000000-0000-4000-8000-000000000039";
+  const otherActor = { ID: 2, username: "other_admin" };
+  const ownerStorage = (actor = { ID: profile.ID, username: profile.username }) =>
+    `adtr.pending-task:${actor.ID}:${encodeURIComponent(actor.username)}`;
+  const savedRecover = (taskUUID = firstID, actor = profile) =>
+    JSON.stringify({
+      owner: actor.ID,
+      username: actor.username,
+      action: "recover",
+      taskUUID,
+      key: recoveryKey,
+    });
+  const specialTask = (
+    taskName: string,
+    state: TaskState = "failed",
+    id = firstID,
+  ): Task => ({
+    ...task(state, id),
+    taskName,
+    domainId: "synthetic-domain-id",
+    progress: 37,
+    attempt: 1,
+    resultVersion: 1,
+    error: "SYNTHETIC_SPECIALIZED_ERROR",
+    result: {
+      private: "SPECIALIZED_PRIVATE_RESULT",
+      nested: { objectDN: "SPECIALIZED_PRIVATE_DIRECTORY_DN" },
+    },
+    cursor: { private: "SPECIALIZED_PRIVATE_CURSOR" },
+  });
+  const taskDetail = (current: Task) => ({
+    task: current,
+    events: [
+      {
+        id: 17,
+        action: "progress",
+        state: current.state,
+        attempt: 1,
+        resultVersion: 1,
+        createdAt: current.updatedAt,
+      },
+    ],
+  });
+  function deferredResponse() {
+    let resolve!: (value: Response) => void;
+    const promise = new Promise<Response>((done) => {
+      resolve = done;
+    });
+    return { promise, resolve };
+  }
+  function expectNoGenericAction() {
+    for (const name of [
+      "请求取消任务",
+      "创建恢复任务",
+      "确认请求取消",
+      "确认恢复任务",
+    ])
+      expect(screen.queryByRole("button", { name })).toBeNull();
+    expect(screen.queryByLabelText("恢复幂等键")).toBeNull();
+    expect(screen.queryByLabelText("操作者当前密码")).toBeNull();
+    expect(screen.queryByLabelText("未使用的认证器验证码")).toBeNull();
+    expect(screen.queryByLabelText("任务实际结果")).toBeNull();
+    expect(screen.queryByText("查看已提交的执行游标")).toBeNull();
+    // Include closed details and other hidden DOM, not just visible text.
+    expect(document.body.textContent).not.toContain("SPECIALIZED_PRIVATE_");
+    expect(calls("/cancel")).toHaveLength(0);
+    expect(calls("/recover")).toHaveLength(0);
+  }
+  function expectDedicatedLink(href: string) {
+    const detail = screen.getByRole("region", { name: "任务执行详情" });
+    const links = within(detail).getAllByRole("link");
+    expect(links).toHaveLength(1);
+    expect(links[0]).toHaveAttribute("href", href);
+    expect(links[0]).toBeVisible();
+    // The link selects a workspace; it must not encode an unsupported task-ID
+    // lookup or import a generic pending recovery key into that workspace.
+    expect(links[0].getAttribute("href")).not.toContain(firstID);
+    expect(links[0].getAttribute("href")).not.toContain(recoveryKey);
+    const guidance = links[0].closest("p");
+    if (href === "#group-members-v4") {
+      expect(guidance).toHaveTextContent(/仅(?:以只读方式)?查看已保存结果/);
+      expect(guidance).toHaveTextContent("当前没有采集或取消控件");
+      expect(guidance).toHaveTextContent(/采集、回执和取消仍需对应专用\s*API/);
+    } else if (href.endsWith("-assets-v3")) {
+      expect(guidance).toHaveTextContent(/不会按此任务 ID\s*自动恢复/);
+      expect(guidance).toHaveTextContent("请保留原导出操作记录");
+      expect(guidance).toHaveTextContent("重新核验当前权限");
+    } else {
+      expect(guidance).toHaveTextContent("观察、回执及专用任务操作");
+      expect(guidance).toHaveTextContent("重新核验当前权限");
+    }
+    return links[0];
+  }
+  afterEach(() => {
+    discardTaskIntent(otherActor);
+    clearUserExportRecovery();
+    clearGroupExportRecovery();
+    clearComputerExportRecovery();
+  });
+
+  it.each(specialKinds)(
+    "classifies the exact dedicated kind $taskName consistently",
+    ({ taskName }) => {
+      expect(isDirectoryTask(taskName)).toBe(taskName.startsWith("domain."));
+      expect(isAssetExportTask(taskName)).toBe(!taskName.startsWith("domain."));
+      expect(requiresDedicatedTaskControls(taskName)).toBe(true);
+      expect(requiresDedicatedTaskRecovery(taskName)).toBe(true);
+    },
+  );
+
+  it.each([
+    { name: undefined },
+    { name: null },
+    { name: 3 },
+    { name: {} },
+    { name: "" },
+    { name: "domain.directory_read.v30" },
+    { name: "domain.directory_read.v4.extra" },
+    { name: "prefix.user_assets.v3.export" },
+    { name: "user_assets.v3.export.extra" },
+    { name: "group_assets.v3.export-preview" },
+    { name: "computer_assets.v3.exported" },
+    { name: "system.logs_bundle.extra" },
+    { name: "toString" },
+    { name: "__proto__" },
+  ])("does not broaden dedicated behavior to $name", ({ name }) => {
+    expect(isDirectoryTask(name)).toBe(false);
+    expect(isAssetExportTask(name)).toBe(false);
+    expect(requiresDedicatedTaskControls(name)).toBe(false);
+    expect(requiresDedicatedTaskRecovery(name)).toBe(false);
+  });
+
+  it.each([
+    ["infrastructure.health", false, false],
+    ["audit.export", false, true],
+    ["domain.connection_test", false, true],
+    ["domain.account_connection_test", false, true],
+    ["domain.directory_read", true, true],
+    ["domain.directory_read.v2", true, true],
+    ["system.logs_bundle", true, true],
+  ] as const)(
+    "preserves the existing control/recovery distinction for %s",
+    (name, dedicatedControls, dedicatedRecovery) => {
+      expect(requiresDedicatedTaskControls(name)).toBe(dedicatedControls);
+      expect(requiresDedicatedTaskRecovery(name)).toBe(dedicatedRecovery);
+    },
+  );
+
+  it.each([
+    ["directory_route_required", "目录任务"],
+    ["user_asset_export_route_required", "用户资产"],
+    ["group_asset_export_route_required", "组资产"],
+    ["computer_asset_export_route_required", "计算机资产"],
+  ] as const)(
+    "explains the dedicated API error %s without suggesting a generic retry",
+    async (code, destination) => {
+      override = (url) =>
+        url.startsWith("/api/tasks/detail")
+          ? response({ error: code }, 400)
+          : undefined;
+      await start();
+      click(`详情 ${firstID}`);
+      await screen.findByRole("alert");
+      const message = taskError(new ApiError(code, 400));
+      expect(screen.getByRole("alert")).toHaveTextContent(message);
+      expect(message).toContain(destination);
+      expect(message).toContain("专用");
+      expect(message).not.toContain(code);
+      if (code === "directory_route_required") {
+        expect(message).toContain("字典 3");
+        expect(message).toContain("字典 4");
+        expect(message).toContain("仅查看已保存结果");
+        expect(message).toContain("采集和取消仍需专用 API");
+      } else {
+        expect(message).toContain("不会按此任务 ID 自动恢复");
+        expect(message).toContain("请保留原导出操作记录");
+      }
+      expectNoGenericAction();
+    },
+  );
+
+  it.each(
+    specialKinds.flatMap((kind) =>
+      taskStates.map((state) => ({ ...kind, state })),
+    ),
+  )(
+    "keeps $taskName / $state read-only with a dedicated route and fresh status",
+    async ({ taskName, href, state }) => {
+      let current = specialTask(taskName, state);
+      override = (url) =>
+        url.startsWith("/api/tasks/detail")
+          ? response(taskDetail(current))
+          : url.split("?")[0] === "/api/tasks"
+            ? response(list([current]))
+            : undefined;
+      await detail();
+      expectDedicatedLink(href);
+      expectNoGenericAction();
+      expect(screen.getByTestId("task-detail-identity")).toHaveTextContent(
+        firstID,
+      );
+      expect(document.querySelector(`[data-state="${state}"]`)).toBeVisible();
+      expect(screen.getByLabelText("任务持久化进度")).toHaveValue(37);
+      expect(screen.getByText("服务器错误代码：")).toHaveTextContent(
+        "SYNTHETIC_SPECIALIZED_ERROR",
+      );
+      const events = screen.getByRole("list", { name: "持久化任务事件" });
+      expect(within(events).getByText("事件 #17")).toBeVisible();
+      expect(within(events).getByText("进度已持久化")).toBeVisible();
+      expect(within(events).getByText("尝试 1 · 结果版本 1")).toBeVisible();
+      if (["failed", "partial_failed", "dead_letter"].includes(state)) {
+        expect(screen.getByText(/下方专用入口/)).toBeVisible();
+        expect(screen.queryByText(/当前健康检查界面不支持/)).toBeNull();
+      }
+      current = { ...current, progress: 63 };
+      click("刷新任务详情");
+      await waitFor(() =>
+        expect(screen.getByLabelText("任务持久化进度")).toHaveValue(63),
+      );
+      expect(calls("/detail").length).toBeGreaterThanOrEqual(2);
+      expectDedicatedLink(href);
+      expectNoGenericAction();
+    },
+  );
+
+  it.each(
+    specialKinds.flatMap((kind) =>
+      (["legacy", "scoped"] as const).map((storage) => ({
+        ...kind,
+        storage,
+      })),
+    ),
+  )(
+    "clears only a confirmed $storage generic recovery for $taskName",
+    async ({ taskName, href, storage }) => {
+      const raw = savedRecover();
+      sessionStorage.setItem(
+        storage === "legacy" ? "adtr.pending-task" : ownerStorage(),
+        raw,
+      );
+      const foreign = savedRecover(firstID, { ...profile, ...otherActor });
+      sessionStorage.setItem(ownerStorage(otherActor), foreign);
+      const locator = {
+        version: 1 as const,
+        actorID: profile.ID,
+        domainId: "synthetic-domain-id",
+        idempotencyKey: recoveryKey,
+      };
+      writeUserExportRecovery({ ...locator, kind: "user_assets.v3.export" });
+      writeGroupExportRecovery({ ...locator, kind: "group_assets.v3.export" });
+      writeComputerExportRecovery({
+        ...locator,
+        kind: "computer_assets.v3.export",
+      });
+      const exportRecords = [
+        userExportRecoveryStorage,
+        groupExportRecoveryStorage,
+        computerExportRecoveryStorage,
+      ].map((key) => ({ key, value: sessionStorage.getItem(key) }));
+      const pendingDetail = deferredResponse();
+      override = (url) =>
+        url.startsWith("/api/tasks/detail") ? pendingDetail.promise : undefined;
+      await start();
+      click("继续核对未确认的提交");
+      await waitFor(() => expect(calls("/detail")).toHaveLength(1));
+      expect(sessionStorage.getItem(ownerStorage())).not.toBeNull();
+      expectNoGenericAction();
+      await act(async () =>
+        pendingDetail.resolve(
+          await response(taskDetail(specialTask(taskName))),
+        ),
+      );
+      await screen.findByRole("list", { name: "持久化任务事件" });
+      expectDedicatedLink(href);
+      await waitFor(() =>
+        expect(sessionStorage.getItem(ownerStorage())).toBeNull(),
+      );
+      expect(sessionStorage.getItem("adtr.pending-task")).toBeNull();
+      expect(sessionStorage.getItem(ownerStorage(otherActor))).toBe(foreign);
+      for (const { key, value } of exportRecords)
+        expect(sessionStorage.getItem(key)).toBe(value);
+      expectNoGenericAction();
+      click("返回任务列表");
+      await screen.findByRole("table", { name: "任务列表" });
+      expect(screen.getByRole("button", { name: "提交健康检查" })).toBeEnabled();
+      expect(
+        screen.queryByRole("button", { name: "继续核对未确认的提交" }),
+      ).toBeNull();
+    },
+  );
+
+  it.each([
+    "other task",
+    "submit",
+    "other actor",
+    "other username",
+    "foreign legacy",
+    "foreign legacy username",
+  ] as const)(
+    "preserves an unrelated %s intent when reading a specialized task",
+    async (source) => {
+      const foreign = source !== "other task" && source !== "submit";
+      const actor = {
+        ...profile,
+        ...otherActor,
+        ...(source.includes("username") ? { ID: profile.ID } : {}),
+      };
+      const raw =
+        source === "submit"
+          ? JSON.stringify({
+              owner: profile.ID,
+              username: profile.username,
+              action: "submit",
+              key: recoveryKey,
+            })
+          : savedRecover(
+              source === "other task" ? secondID : firstID,
+              foreign ? actor : profile,
+            );
+      const storage =
+        source.startsWith("foreign legacy")
+          ? "adtr.pending-task"
+          : ownerStorage(foreign ? actor : profile);
+      sessionStorage.setItem(storage, raw);
+      override = (url) =>
+        url.startsWith("/api/tasks/detail")
+          ? response(taskDetail(specialTask("user_assets.v3.export")))
+          : undefined;
+      await detail();
+      expectDedicatedLink("#user-assets-v3");
+      expectNoGenericAction();
+      expect(sessionStorage.getItem(storage)).toBe(raw);
+      click("返回任务列表");
+      await screen.findByRole("table", { name: "任务列表" });
+      if (source === "other task" || source === "submit") {
+        expect(screen.getByRole("button", { name: "提交健康检查" })).toBeDisabled();
+        expect(
+          screen.getByRole("button", { name: "继续核对未确认的提交" }),
+        ).toBeVisible();
+      } else {
+        expect(screen.getByRole("button", { name: "提交健康检查" })).toBeEnabled();
+      }
+      expect(sessionStorage.getItem(storage)).toBe(raw);
+    },
+  );
+
+  it.each([403, 404])(
+    "preserves a recovery intent when its kind cannot be confirmed (%s)",
+    async (status) => {
+      const raw = savedRecover();
+      sessionStorage.setItem(ownerStorage(), raw);
+      override = (url) =>
+        url.startsWith("/api/tasks/detail")
+          ? response(
+              { error: status === 403 ? "forbidden" : "not_found" },
+              status,
+            )
+          : undefined;
+      await start();
+      click("继续核对未确认的提交");
+      await screen.findByRole("alert");
+      expect(sessionStorage.getItem(ownerStorage())).toBe(raw);
+      expectNoGenericAction();
+    },
+  );
+
+  it("preserves a saved recovery when the detail response identifies another task", async () => {
+    const raw = savedRecover();
+    sessionStorage.setItem(ownerStorage(), raw);
+    override = (url) =>
+      url.startsWith("/api/tasks/detail")
+        ? response(
+            taskDetail(
+              specialTask("user_assets.v3.export", "failed", secondID),
+            ),
+          )
+        : undefined;
+    await start();
+    click("继续核对未确认的提交");
+    await screen.findByRole("alert");
+    expect(sessionStorage.getItem(ownerStorage())).toBe(raw);
+    expect(screen.queryByTestId("task-detail-identity")).toBeNull();
+    expectNoGenericAction();
+  });
+
+  it.each(specialKinds)(
+    "removes $taskName detail after current permissions are revoked",
+    async ({ taskName, href }) => {
+      let revoked = false;
+      override = (url) =>
+        url.startsWith("/api/tasks/detail")
+          ? revoked
+            ? response({ error: "forbidden" }, 403)
+            : response(taskDetail(specialTask(taskName)))
+          : undefined;
+      await detail();
+      expectDedicatedLink(href);
+      revoked = true;
+      click("刷新任务详情");
+      await screen.findByRole("alert");
+      expect(screen.queryByTestId("task-detail-identity")).toBeNull();
+      expect(screen.queryByRole("link")).toBeNull();
+      expect(screen.queryByLabelText("任务持久化进度")).toBeNull();
+      expect(screen.queryByText("SYNTHETIC_SPECIALIZED_ERROR")).toBeNull();
+      expectNoGenericAction();
+    },
+  );
+
+  it.each([
+    ["running", "请求取消任务", "确认请求取消"],
+    ["failed", "创建恢复任务", "确认恢复任务"],
+  ] as const)(
+    "removes the old generic %s action form after a refreshed specialized kind",
+    async (state, openAction, confirmAction) => {
+      let current = task(state);
+      override = (url) =>
+        url.startsWith("/api/tasks/detail")
+          ? response(taskDetail(current))
+          : undefined;
+      await detail();
+      click(openAction);
+      proof();
+      expect(screen.getByRole("button", { name: confirmAction })).toBeEnabled();
+      current = specialTask("computer_assets.v3.export", state);
+      click("刷新任务详情");
+      await screen.findByRole("link");
+      expectDedicatedLink("#computer-assets-v3");
+      expectNoGenericAction();
+    },
+  );
+
+  it("ignores an older generic response after selecting a specialized task", async () => {
+    const stale = deferredResponse();
+    const current = specialTask("group_assets.v3.export", "failed", secondID);
+    override = (url) =>
+      url.startsWith("/api/tasks/detail")
+        ? url.includes(firstID)
+          ? stale.promise
+          : response(taskDetail(current))
+        : url.split("?")[0] === "/api/tasks"
+          ? response(list([task(), current]))
+          : undefined;
+    await start();
+    click(`详情 ${firstID}`);
+    await waitFor(() => expect(calls("/detail")).toHaveLength(1));
+    const staleSignal = calls("/detail")[0][1].signal;
+    click("返回任务列表");
+    await screen.findByRole("table", { name: "任务列表" });
+    click(`详情 ${secondID}`);
+    await screen.findByRole("list", { name: "持久化任务事件" });
+    expect(staleSignal?.aborted).toBe(true);
+    await act(async () =>
+      stale.resolve(
+        await response(
+          taskDetail({
+            ...task("failed"),
+            result: { private: "SPECIALIZED_PRIVATE_STALE_RESPONSE" },
+          }),
+        ),
+      ),
+    );
+    expect(screen.getByTestId("task-detail-identity")).toHaveTextContent(
+      secondID,
+    );
+    expectDedicatedLink("#group-assets-v3");
+    expectNoGenericAction();
+  });
+
+  it("fences a specialized response and cleanup when the signed-in actor changes", async () => {
+    const raw = savedRecover();
+    const originalStorage = ownerStorage();
+    sessionStorage.setItem(originalStorage, raw);
+    const stale = deferredResponse();
+    override = (url) =>
+      url.startsWith("/api/tasks/detail") ? stale.promise : undefined;
+    const mounted = render(
+      <TaskWorkspace profile={profile} sessionChanged={vi.fn()} />,
+    );
+    await screen.findByRole("table", { name: "任务列表" });
+    click("继续核对未确认的提交");
+    await waitFor(() => expect(calls("/detail")).toHaveLength(1));
+    const staleSignal = calls("/detail")[0][1].signal;
+    const nextActor = {
+      ...profile,
+      ...otherActor,
+      csrfToken: "next-actor-session",
+    };
+    mounted.rerender(
+      <TaskWorkspace profile={nextActor} sessionChanged={vi.fn()} />,
+    );
+    await screen.findByRole("table", { name: "任务列表" });
+    expect(staleSignal?.aborted).toBe(true);
+    await act(async () =>
+      stale.resolve(
+        await response(taskDetail(specialTask("domain.directory_read.v4"))),
+      ),
+    );
+    expect(screen.queryByTestId("task-detail-identity")).toBeNull();
+    expect(screen.queryByRole("link")).toBeNull();
+    expect(sessionStorage.getItem(originalStorage)).toBe(raw);
+    expect(sessionStorage.getItem(ownerStorage(otherActor))).toBeNull();
+    expect(screen.getByRole("button", { name: "提交健康检查" })).toBeEnabled();
+    expectNoGenericAction();
+  });
+
+  it.each(["popstate", "hashchange"] as const)(
+    "revalidates a specialized detail after %s without restoring generic controls",
+    async (eventName) => {
+      window.history.replaceState({}, "", "#tasks");
+      let current = specialTask("domain.directory_read.v4", "failed");
+      override = (url) =>
+        url.startsWith("/api/tasks/detail")
+          ? response(taskDetail(current))
+          : url.split("?")[0] === "/api/tasks"
+            ? response(list([current]))
+            : undefined;
+      render(<App />);
+      await screen.findByRole("table", { name: "任务列表" });
+      click(`详情 ${firstID}`);
+      await screen.findByRole("list", { name: "持久化任务事件" });
+      const saved = JSON.parse(JSON.stringify(window.history.state));
+      const hash = window.location.hash;
+      click("返回任务列表");
+      await screen.findByRole("table", { name: "任务列表" });
+      current = { ...current, progress: 91 };
+      const before = fetcher.mock.calls.length;
+      act(() => {
+        window.history.replaceState(saved, "", hash);
+        window.dispatchEvent(
+          eventName === "popstate"
+            ? new PopStateEvent("popstate", { state: saved })
+            : new HashChangeEvent("hashchange"),
+        );
+      });
+      await waitFor(() =>
+        expect(screen.getByLabelText("任务持久化进度")).toHaveValue(91),
+      );
+      const refreshed = fetcher.mock.calls.slice(before).map(([url]) => url);
+      expect(refreshed).toEqual(
+        expect.arrayContaining([
+          "/api/auth/me",
+          "/api/access/menu",
+          "/api/access/check",
+          expect.stringContaining(`/api/tasks/detail?taskUUID=${firstID}`),
+        ]),
+      );
+      expectDedicatedLink("#group-members-v4");
+      expectNoGenericAction();
     },
   );
 });

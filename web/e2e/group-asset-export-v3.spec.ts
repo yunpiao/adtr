@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { expectSpecializedTaskReadOnly } from "./specialized-task-controls";
 import { readFile, writeFile } from "node:fs/promises";
 import { setupGroupFixture, proof, readJSON } from "./group-assets-v3-fixture";
 import { observeDirectoryV2Responses } from "./directory-v2-response-observer";
@@ -98,6 +99,17 @@ test("group asset export real source, owner MFA, Worker persistence and XLSX dow
     cases.push({ name, request: created.request, create: created, receipt, detail, download: { filename, headers: Object.fromEntries(downloadHeaderNames.map((key) => [key, downloadResponse.headers()[key]])) }, database: await storedExport(created.taskID), pageSize: list.page.pageSize, firstPageCount: list.list.length, screenshot: { filename: screenshot, sha256: hash(await readFile(info.outputPath(screenshot))) } });
     await info.attach(filename, { path: info.outputPath(filename), contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
     await info.attach(screenshot, { path: info.outputPath(screenshot), contentType: "image/png" });
+    if (name === "empty")
+      await expectSpecializedTaskReadOnly(
+        context,
+        {
+          actorId,
+          taskUUID: created.taskID,
+          taskName: "group_assets.v3.export",
+          state: "succeeded",
+        },
+        fixture.safe,
+      );
   }
   const after = await sensitiveBudget(actorId, fixture.actorId);
   expect(after).toEqual({ ...before, owner: 10, exportTasks: 3 });

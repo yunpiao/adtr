@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { expectSpecializedTaskReadOnly } from "./specialized-task-controls";
 import { allColumns, chooseColumns, createExport, panelFor, receiptAndDetail, recoveryDownload, safeColumns, screenshot, terminalExport, terminalSetup, unavailableDownload, writeTerminalEvidence } from "./group-asset-export-v3-terminal-helpers";
 
 // Actual dedicated XML-invalid group-SAM TLS LDAP -> observation -> Worker -> PG.
@@ -34,6 +35,17 @@ test("failed XLSX retains receipt and explicitly recovers with ordered safe subs
     ui: { downloadButtons: await panel.getByRole("button", { name: "下载组 XLSX", exact: true }).count(), downloadEvents: downloads, error: "export_invalid_text" },
     screenshot: await screenshot(page, info, "failed-terminal.png") };
   expect(downloads).toBe(0);
+  await expectSpecializedTaskReadOnly(
+    context,
+    {
+      actorId: setup.actorId,
+      taskUUID: operation.create.taskID,
+      taskName: "group_assets.v3.export",
+      state: "failed",
+      error: "export_invalid_text",
+    },
+    setup.fixture.safe,
+  );
   // Explicitly replace only the terminal operation; never recollect or mutate
   // the failed immutable request. Selected column order must survive to XLSX.
   await panel.getByRole("button", { name: "按当前列表创建另一导出", exact: true }).click();

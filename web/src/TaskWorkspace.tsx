@@ -19,6 +19,8 @@ import {
 import {
   stateLabels,
   supportedKind,
+  requiresDedicatedTaskControls,
+  requiresDedicatedTaskRecovery,
   taskAPI,
   taskOperations,
   taskStates,
@@ -45,12 +47,10 @@ import {
 import {
   TaskTimeline,
   TaskStateExplanation,
+  TaskDedicatedGuidance,
   taskKindLabel,
 } from "./TaskPresentation";
 import "./soc-tasks.css";
-
-const isDirectoryTask = (name: unknown) =>
-  name === "domain.directory_read" || name === "domain.directory_read.v2";
 
 interface Intent {
   action: "submit" | "recover";
@@ -936,15 +936,9 @@ function TaskDetails({
   );
   const task = read.data?.task;
   useEffect(() => {
-    // The dedicated audit route owns export creation and its protected ledger.
-    // Reconcile an old saved generic recovery intent after the server identifies
-    // its kind, instead of leaving the tab trapped in an impossible retry.
-    if (
-      task?.taskName === "audit.export" ||
-      task?.taskName === "system.logs_bundle" ||
-      isDomainConnectionTask(task?.taskName) ||
-      isDirectoryTask(task?.taskName)
-    ) {
+    // Only a successful current-actor detail read may reconcile the matching
+    // generic recovery intent. Dedicated export recovery storage is separate.
+    if (task && requiresDedicatedTaskRecovery(task.taskName)) {
       if (old?.action === "recover" && old.taskUUID === id) clearIntent(old);
       setAction((current) => (current === "recover" ? null : current));
     }
@@ -1010,11 +1004,12 @@ function TaskDetails({
               {task.nextAttemptAt ?? "服务器未提供"}
             </p>
           )}
-          {task.state === "partial_failed" && (
-            <p className="warning">
-              结果包含部分失败；不能整体自动重放。当前健康检查界面不支持选择失败对象重新提交。
-            </p>
-          )}
+          {task.state === "partial_failed" &&
+            !requiresDedicatedTaskControls(task.taskName) && (
+              <p className="warning">
+                结果包含部分失败；不能整体自动重放。当前健康检查界面不支持选择失败对象重新提交。
+              </p>
+            )}
           <label className="task-progress">
             持久化进度：{task.progress}%
             <progress
@@ -1023,18 +1018,8 @@ function TaskDetails({
               value={task.progress}
             />
           </label>
-          {task.taskName === "system.logs_bundle" ? (
-            <p>
-              运行日志诊断包的结果和文件请在「运行日志与诊断包」页面查看；提交、取消和下载均需该页面重新核验权限。
-            </p>
-          ) : isDirectoryTask(task.taskName) ? (
-            <p>
-              目录任务请在「
-              {task.taskName === "domain.directory_read.v2"
-                ? "补充目录资产"
-                : "目录资产"}
-              」页面查看；读取观察、查询回执、取消和原编号重试均需在对应页面核验权限。
-            </p>
+          {requiresDedicatedTaskControls(task.taskName) ? (
+            <TaskDedicatedGuidance taskName={task.taskName} />
           ) : isDomainConnectionTask(task.taskName) ? (
             <p>
               域连接诊断请在「域连接」页面查看；重新检测须在那里明确提交保存版本，不能创建通用恢复任务。
@@ -1058,8 +1043,7 @@ function TaskDetails({
               !task.archived &&
               !terminal(task.state) &&
               task.state !== "cancel_requested" &&
-              task.taskName !== "system.logs_bundle" &&
-              !isDirectoryTask(task.taskName) &&
+              !requiresDedicatedTaskControls(task.taskName) &&
               context.can("POST /api/tasks/cancel") && (
                 <button
                   className="secondary danger"
@@ -1070,12 +1054,7 @@ function TaskDetails({
               )}
             {!action &&
               !task.archived &&
-              !(
-                task.taskName === "audit.export" ||
-                task.taskName === "system.logs_bundle" ||
-                isDomainConnectionTask(task.taskName) ||
-                isDirectoryTask(task.taskName)
-              ) &&
+              !requiresDedicatedTaskRecovery(task.taskName) &&
               ["failed", "dead_letter"].includes(task.state) &&
               context.can("POST /api/tasks/recover") && (
                 <button disabled={blocked} onClick={() => setAction("recover")}>
@@ -1103,15 +1082,11 @@ function TaskDetails({
             </p>
           )}
           {action &&
-            task.taskName !== "system.logs_bundle" &&
-            !isDirectoryTask(task.taskName) &&
+            !requiresDedicatedTaskControls(task.taskName) &&
             !task.archived &&
             !(
               action === "recover" &&
-              (task.taskName === "audit.export" ||
-                task.taskName === "system.logs_bundle" ||
-                isDomainConnectionTask(task.taskName) ||
-                isDirectoryTask(task.taskName))
+              requiresDedicatedTaskRecovery(task.taskName)
             ) && (
               <TaskAction
                 key={`${id}-${action}`}
@@ -1178,7 +1153,7 @@ function TaskAction({
   reconcile: () => void;
 }) {
   const [intent] = useState(() =>
-      action === "recover"
+      action === "recover" && !requiresDedicatedTaskRecovery(task.taskName)
         ? intentFor(context.profile, action, task.taskUUID)
         : null,
     ),
@@ -1186,17 +1161,12 @@ function TaskAction({
   const mutation = useTaskMutation(context.sessionChanged);
   const allowed =
     !task.archived &&
-    task.taskName !== "system.logs_bundle" &&
-    !isDirectoryTask(task.taskName) &&
+    !requiresDedicatedTaskControls(task.taskName) &&
     context.can(`POST /api/tasks/${action}`) &&
     (action === "cancel"
       ? !terminal(task.state)
-      : !(
-          task.taskName === "audit.export" ||
-          task.taskName === "system.logs_bundle" ||
-          isDomainConnectionTask(task.taskName) ||
-          isDirectoryTask(task.taskName)
-        ) && ["failed", "dead_letter"].includes(task.state));
+      : !requiresDedicatedTaskRecovery(task.taskName) &&
+        ["failed", "dead_letter"].includes(task.state));
   return (
     <form
       className="task-action"

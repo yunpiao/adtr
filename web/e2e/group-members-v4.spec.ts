@@ -5,6 +5,7 @@ import {
   membershipProvenance,
 } from "./group-members-v4-helpers";
 import { navigateTo } from "./navigation";
+import { expectSpecializedTaskReadOnly } from "./specialized-task-controls";
 import {
   test,
   expect,
@@ -49,6 +50,11 @@ function requireFixture() {
     "ADTR_E2E_LDAP_IP",
     "ADTR_E2E_LDAP_USERNAME",
     "ADTR_E2E_LDAP_PASSWORD",
+    "ADTR_E2E_MEMBERSHIP_PASSWORD",
+    "ADTR_E2E_MEMBERSHIP_READER_INITIAL_PASSWORD",
+    "ADTR_E2E_MEMBERSHIP_READER_PASSWORD",
+    "ADTR_E2E_MEMBERSHIP_PRODUCER_INITIAL_PASSWORD",
+    "ADTR_E2E_MEMBERSHIP_PRODUCER_PASSWORD",
   ] as const;
   if (
     names.some((name) => !process.env[name]) ||
@@ -407,13 +413,15 @@ test("group members dictionary4 real Worker TLS LDAP PostgreSQL API UI facts", a
   test.setTimeout(630_000);
   let username = process.env.ADTR_E2E_USERNAME!;
   const initialPassword = process.env.ADTR_E2E_PASSWORD!;
-  let password = "Changed Directory Password 123";
+  let password = process.env.ADTR_E2E_MEMBERSHIP_PASSWORD!;
   const readerUsername = "membership-reader";
-  const readerInitial = "Initial Membership Reader Password 123";
-  const readerPassword = "Changed Membership Reader Password 123";
+  const readerInitial =
+    process.env.ADTR_E2E_MEMBERSHIP_READER_INITIAL_PASSWORD!;
+  const readerPassword = process.env.ADTR_E2E_MEMBERSHIP_READER_PASSWORD!;
   const producerUsername = "directory-producer";
-  const producerInitial = "Initial Directory Producer Password 123";
-  const producerPassword = "Changed Directory Producer Password 123";
+  const producerInitial =
+    process.env.ADTR_E2E_MEMBERSHIP_PRODUCER_INITIAL_PASSWORD!;
+  const producerPassword = process.env.ADTR_E2E_MEMBERSHIP_PRODUCER_PASSWORD!;
   const accountUser = process.env.ADTR_E2E_LDAP_USERNAME!;
   const accountPassword = process.env.ADTR_E2E_LDAP_PASSWORD!;
   const ldapIP = process.env.ADTR_E2E_LDAP_IP!;
@@ -846,6 +854,16 @@ test("group members dictionary4 real Worker TLS LDAP PostgreSQL API UI facts", a
     actorId,
   );
   expect(receipt.task.taskUUID).toBe(taskUUID);
+  await expectSpecializedTaskReadOnly(
+    context,
+    {
+      actorId,
+      taskUUID,
+      taskName: "domain.directory_read.v4",
+      state: "succeeded",
+    },
+    safe,
+  );
   const observed = await readJSON(
     context,
     `/api/directory/v4/observation?domainId=${domainId}&observationId=${taskUUID}&pageSize=25`,
