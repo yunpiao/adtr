@@ -577,3 +577,49 @@ registry authorization and verifies actual blocked-query completion, COMMIT,
 and managed Close before root cancellation; it is not the complete exporter
 capture proof. The three application suites continue to supply that proof.
 Default builds retain their existing signal, context and shutdown behavior.
+
+## Queued physical connection parking
+
+This CI-only addition closes a queued STOP admission gap. Previously, a
+transaction-free PostgreSQL sample did not exclude a managed pending Connect or
+an idle connection. The observed group connect_failed/open deadline is compatible
+with that gap, but does not prove the exact connection crossed STOP.
+
+The active worker's prepare_selection now parks new managed admission and waits
+for pending/open/closing/quarantined tickets and trace-in-flight counts to be zero.
+The parent checks a complete owned application-name/database PostgreSQL zero
+session observation while the park remains held. Task isolation, controller
+preparation, observer startup/read/close and PG zero share one preparation deadline
+of two seconds, inside the unchanged three-second HTTP timeout. The running-only
+queued helper requires zero connections as well as zero transactions and makes no
+CONT/re-STOP retry. The checkpoint's initial session collection must be empty.
+Other suites retain their original transaction-free retry behavior.
+
+The target is still created while queued STOP is held. configure_target is sent
+without waiting; after CONT, the controller binds the original task/owner/alias,
+writes its exact zero-registry ACK while still parked, then opens admission. The
+capture deadline remains the original 1.5 seconds. Waiting callers use their
+original contexts and error returns. A caller whose context expired before it
+obtained a ticket performs no Connect and receives the same context error; this
+alone does not create a new global sticky failure. Candidate authorization waits
+and already-admitted Connect/dirty failures retain their original hard failures.
+Thus this is physical connection parking, not a guarantee that every producer's
+operation budget or retry delay survives STOP. Business, journal and capture
+readiness can still fail for those reasons.
+
+Preparation is one-shot. Any non-checkpoint resume after preparation starts,
+including a missed queued boundary or lost preparation ACK, permanently fails the
+attempt and invokes the independent rescue abort. Normal EOF, rescue abort, root
+cancellation and the preparation deadline wake the parked lifecycle path with
+failure. A successful old preparation cannot be reused after reopening admission.
+Error recovery may take its existing bounded rescue/reap path; it cannot convert
+an expired preparation into success. No identity, SQL, or raw error is added to
+public output.
+
+The initial checkpoint CONT has a single explicit owned-guard entry, requiring
+its installed delegate, live owned identity and stopped leader. Every ordinary
+resume/watchdog/close continues through the normal delegate; after preparation
+and before ARM it permanently aborts even if checkpoint processing has already
+started. The one authorized initial CONT is a direct synchronous checkpoint call,
+not a shared temporary flag that a concurrent watchdog could consume. A static
+contract scans all non-test Python scripts for that sole direct call.

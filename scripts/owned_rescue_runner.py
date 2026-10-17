@@ -667,7 +667,9 @@ class WorkerController:
             step = ControlStep.SCHEMA
             frame = _frame(response, self.seq)
             step = ControlStep.REPLY
-            if frame['kind'] != 'reply' or frame['status'] != 'open':
+            if (frame['kind'] != 'reply' or frame['status'] != 'open'
+                    or frame['pending'] != 0 or frame['open'] != 0
+                    or frame['records'] or frame['target'] != 0):
                 _fail(ControlCause.STATE)
             return frame
         except ControlFailure as error:
@@ -688,13 +690,25 @@ class WorkerController:
             self.selection_prepared = True  # No replay even if send/ACK fails.
             self.seq += 1
             try:
+                if type(deadline) not in (int, float):
+                    _fail(ControlCause.DEADLINE)
+                remaining = deadline - time.monotonic()
+                if not 0 < remaining <= 2:
+                    _fail(ControlCause.DEADLINE)
+                budget = int(remaining * 1000)
+                if not 1 <= budget <= 2000:
+                    _fail(ControlCause.DEADLINE)
                 self.normal.send({'version': 2, 'epoch': 1, 'seq': self.seq,
-                                  'op': 'prepare_selection', 'kind': kind}, deadline)
+                                  'op': 'prepare_selection', 'kind': kind,
+                                  'budgetMillis': budget}, deadline)
             except ControlFailure as error:
                 self._latch(operation, ControlStep.SEND, self._cause(error))
             except OSError:
                 self._latch(operation, ControlStep.SEND, ControlCause.TRANSPORT)
-            return self._configuration_ack(deadline, operation)
+            frame = self._configuration_ack(deadline, operation)
+            if time.monotonic() >= deadline:
+                self._latch(operation, ControlStep.REPLY, ControlCause.DEADLINE)
+            return frame
 
     def prepare_target(self, task_id, worker_id, deadline):
         """Queue one frame while stopped; NEVER wait for the stopped worker."""

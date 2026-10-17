@@ -195,7 +195,8 @@ async function queueActivity(scope?: { workerID: string; alias: string }) {
 }
 let ownedStopped = false;
 export async function pauseOwnedExportWorker() {
-  // Any missed in-flight transaction resumes before another bounded attempt.
+  // Running capture already holds a drained admission park; it cannot retry a missed boundary.
+  const runningQueued = Boolean(process.env.ADTR_E2E_RUNNING_CANCEL_GUARD_URL);
   const deadline = Date.now() + 10_000;
   const samples = { attempts: 0, zeroConnections: 0, activeTransactions: 0, lastConnections: 0, lastActiveTransactions: 0 };
   try {
@@ -208,12 +209,13 @@ export async function pauseOwnedExportWorker() {
       samples.attempts++; samples.zeroConnections += Number(pg.connections === 0);
       samples.activeTransactions += Number(pg.activeTransactions > 0);
       samples.lastConnections = pg.connections; samples.lastActiveTransactions = pg.activeTransactions;
-      if (w.databaseIdentityVerified && pg.activeTransactions === 0) {
+      if (w.databaseIdentityVerified && pg.activeTransactions === 0 && (!runningQueued || pg.connections === 0)) {
         // Capture only AFTER stop confirmation, so a pre-stop late commit cannot
         // be mistaken for the post-resume real queue cycle.
         const queue = await queueActivity();
         return { pid: w.pid, parentPID: w.parentPID, starttime: w.starttime, binarySHA256: hash(await readFile(w.binary)), nonceSHA256: hash(w.nonce), applicationNameSHA256: hash(w.applicationName), allThreadsStopped: true, databaseIdentityVerified: w.databaseIdentityVerified, threadCount: w.states.length, connections: pg.connections, activeTransactions: 0, workerID: queue.workerID, queueSuccessBefore: queue.success };
       }
+      if (runningQueued) throw new Error("Owned running Worker queued connections were not empty");
       await signalWorker("SIGCONT"); ownedStopped = false;
       await new Promise((done) => setTimeout(done, 100));
     }

@@ -840,6 +840,7 @@ class RunningExportCancelGuard:
         self.journal_baseline = None
         self.checkpoint_task_id = None
         self.prepared = False
+        self.preparation_started = False
         self.activity_key = None
         self.activity_fixture_created = False
         self.activity_owner = None
@@ -916,18 +917,38 @@ class RunningExportCancelGuard:
  FROM pg_stat_activity a WHERE datname=current_database() AND application_name='{self.application_name}'),'[]'::jsonb))"""
 
     def prepare(self):
-        require(not self.prepared and not self.used and self.controller is not None,
+        require(not self.preparation_started and not self.prepared and not self.used and self.controller is not None,
                 'activity selection preparation failed')
         require(all(state not in ('T', 't') for state in self.threads()), 'activity selection preparation failed')
-        observer = Psql(self.container, True)
+        self.preparation_started = True
+        deadline = time.monotonic() + 2.0
+        observer = None
         try:
+            observer = Psql(self.container, True, deadline=deadline)
             count = observer.query("SELECT to_json(count(*)) FROM adtr.tasks WHERE state IN ('queued','running','retry_wait','cancel_requested')")
             require(type(count) is int and count == 0, 'activity selection preparation failed')
+            self.controller.prepare_selection(export_kind(self.asset_kind)[0], deadline)
+            require(re.fullmatch('adtr-user-export-[0-9a-f]{32}', self.application_name) is not None,
+                    'invalid application identity')
+            proof = observer.query("SELECT jsonb_build_object('database',current_database(),'backendCount',"
+                "(SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() AND application_name='"
+                + self.application_name + "'))")
+            require(type(proof) is dict and set(proof) == {'database', 'backendCount'} and
+                    type(proof['database']) is str and proof['database'] == 'adtr_e2e' and
+                    type(proof['backendCount']) is int and proof['backendCount'] == 0,
+                    'activity selection preparation failed')
+            closing_observer, observer = observer, None
+            closing_observer.close()
+            require(time.monotonic() < deadline, 'activity selection preparation failed')
+            self.prepared = True
+            return {'prepared': True}
+        except Exception:
+            self.failed = True
+            self.resume()
+            raise
         finally:
-            observer.close()
-        self.controller.prepare_selection(export_kind(self.asset_kind)[0], time.monotonic() + 2.0)
-        self.prepared = True
-        return {'prepared': True}
+            if observer is not None:
+                observer.close()
 
     def prepare_activity_fixture(self, task_id, worker_id):
         key = self.controller.prepare_target(task_id, worker_id, time.monotonic() + .5)
@@ -987,7 +1008,7 @@ class RunningExportCancelGuard:
             self.checkpoint_task_id = task_id
             require(initial['task'] and initial['task']['kind'] == export_kind(self.asset_kind)[0] and initial['task']['state'] == 'queued' and initial['task']['attempt'] == 0
                     and initial['task']['snapshotCount'] == 0 and
-                    all(not s['transaction'] for s in initial['sessions']), 'initial queued transaction-free boundary missed')
+                    initial['sessions'] == [], 'initial queued transaction-free boundary missed')
             self.prepare_activity_fixture(task_id, worker_id)
             stage = 'barrier_open'
             lock = Psql(self.container, False)
@@ -996,7 +1017,7 @@ class RunningExportCancelGuard:
             require(locked['count'] == 1, 'exact pre-existing activity row required')
             observer_started = time.monotonic()
             stage = 'resume'
-            self.owned.resume()
+            self.owned.resume_queued_checkpoint()
             resumed = time.monotonic()
             deadline = resumed + 1.5  # fail closed before the production 2s callback expires
             self.controller.arm(deadline)
@@ -1177,6 +1198,10 @@ class RunningExportCancelGuard:
                 raise RuntimeError('checkpoint session cleanup failed') from None
 
     def _resume_capture_owned(self):
+        if self.controller is not None and self.preparation_started and not self.controller.armed:
+            self.failed = True
+            self.controller.resume_and_release(abort=True)
+            return True
         # After ARM only the independent rescuer may issue CONT. This also
         # covers OwnedExportWorkerGuard's cumulative watchdog and close path.
         if self.controller is not None and self.controller.armed:
@@ -1190,7 +1215,10 @@ class RunningExportCancelGuard:
             duration = 0 if self.stopped_at is None else now - self.stopped_at
             started = self.stopped_at
             self.owned.resume()
-            if self.controller is not None and self.used:
+            if self.controller is not None and self.preparation_started and not self.used:
+                self.failed = True
+                self.controller.resume_and_release(abort=True)
+            elif self.controller is not None and self.used:
                 self.controller.resume_and_release(abort=self.failed)
             self.stopped_at = None
             if duration >= self.MAX_RUNNING_STOP_SECONDS:

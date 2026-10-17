@@ -474,8 +474,9 @@ class Contracts(unittest.TestCase):
 
     def test_selection_configure_split_ack_keeps_original_deadline(self):
         c = controller(); c.armed = False
-        c.normal.receive.side_effect = [frame(), dict(frame(), seq=2)]
-        c.prepare_selection('user_assets.v3.export', 20)
+        c.normal.receive.side_effect = [dict(frame(), open=0), dict(frame(), seq=2, open=0)]
+        with patch.object(r.time, 'monotonic', return_value=18):
+            c.prepare_selection('user_assets.v3.export', 20)
         c.normal.receive.assert_called_once_with(20)
         alias = c.prepare_target('task-1', 'worker-1', 21)
         self.assertEqual(len(alias), 64)
@@ -495,6 +496,47 @@ class Contracts(unittest.TestCase):
         with self.assertRaises(r.ControlFailure):
             c.finish_target(22)
         self.assertEqual(c.normal.receive.call_count, 2)
+
+    def test_queued_prepare_budget_drain_and_deadline_are_mandatory(self):
+        for deadline in (10, 10.0001, 12.001, True, float('nan')):
+            c = controller(); c.armed = False
+            with patch.object(r.time, 'monotonic', return_value=10):
+                with self.assertRaises(r.ControlFailure): c.prepare_selection('user_assets.v3.export', deadline)
+            c.normal.send.assert_not_called()
+            self.assertTrue(c.invalid)
+            self.assertTrue(c.selection_prepared)
+        for reply in (dict(frame(), open=1), dict(frame(), open=0, pending=1),
+                      dict(frame(), open=0, target=1),
+                      dict(frame(), open=0, records=[{'generation': 1, 'state': 'pending', 'backend': 0, 'candidate': None}])):
+            c = controller(); c.armed = False; c.normal.receive.return_value = reply
+            with patch.object(r.time, 'monotonic', return_value=10):
+                with self.assertRaises(r.ControlFailure): c.prepare_selection('user_assets.v3.export', 12)
+            self.assertTrue(c.invalid)
+        c = controller(); c.armed = False
+        c.normal.receive.return_value = dict(frame(), open=0)
+        with patch.object(r.time, 'monotonic', side_effect=[10.5, 11]):
+            c.prepare_selection('user_assets.v3.export', 12)
+        self.assertEqual(c.normal.send.call_args.args, ({'version': 2, 'epoch': 1,
+            'seq': 1, 'op': 'prepare_selection', 'kind': 'user_assets.v3.export', 'budgetMillis': 1500}, 12))
+        c = controller(); c.armed = False
+        c.normal.receive.return_value = dict(frame(), open=0)
+        with patch.object(r.time, 'monotonic', side_effect=[10, 12]):
+            with self.assertRaises(r.ControlFailure): c.prepare_selection('user_assets.v3.export', 12)
+        self.assertTrue(c.invalid)
+
+    def test_prepared_abort_reuses_one_rescue_exchange_and_forbids_retry(self):
+        c = controller(); c.armed = False
+        c.normal.receive.side_effect = r.ControlFailure()
+        with patch.object(r.time, 'monotonic', return_value=10):
+            with self.assertRaises(r.ControlFailure): c.prepare_selection('user_assets.v3.export', 12)
+        c.supervisor.receive.return_value = {'version': 2, 'epoch': 1, 'status': 'released'}
+        c.resume_and_release(abort=True)
+        c.resume_and_release(abort=True)
+        c.supervisor.send.assert_called_once()
+        self.assertEqual(c.supervisor.send.call_args.args[0]['op'], 'abort')
+        self.assertTrue(c.invalid)
+        with self.assertRaises(r.ControlFailure): c.prepare_selection('user_assets.v3.export', 12)
+        c.normal.send.assert_called_once()
 
     def test_activity_alias_matches_go_fixed_vector(self):
         c = controller(); c.armed = False; c.selection_prepared = True
@@ -524,7 +566,9 @@ class Contracts(unittest.TestCase):
         with self.assertRaises(r.ControlFailure): c.snapshot(2)
         c.normal.send.assert_not_called()
         for response in (dict(frame(), seq=99), dict(frame(), private='secret'),
-                         dict(frame(), status='draining')):
+                         dict(frame(), status='draining'), dict(frame(), open=0, target=1),
+                         dict(frame(), open=1), dict(frame(), open=0, pending=1),
+                         dict(frame(), open=0, records=[{'generation': 1, 'state': 'pending', 'backend': 0, 'candidate': None}])):
             c = controller(); c.target_sent = True; c.seq = 1
             c.normal.receive.return_value = response
             with self.assertRaises(r.ControlFailure) as caught: c.finish_target(2)

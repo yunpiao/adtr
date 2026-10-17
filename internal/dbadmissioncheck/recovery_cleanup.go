@@ -202,7 +202,7 @@ var recoveryBodies = map[string]struct{ file, body string }{
 			g.mu.Unlock()
 			return nil, errAdmissionClosed
 		}
-		if g.closing || g.finalParked {
+		if g.closing || g.finalParked || g.queuedParked {
 			if g.changed == nil {
 				g.changed = make(chan struct{})
 			}

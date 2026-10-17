@@ -172,6 +172,11 @@ func TestFinalProtocolCompleteBodiesMatchProduction(t *testing.T) {
 }
 func TestFinalProtocolOrderingCannotBeWeakened(t *testing.T) {
 	for _, tc := range []struct{ name, function, old, new string }{
+		{"queued prepare bypass", "serveApplicationNormal", "g.prepareQueuedSelection(r.Kind, r.BudgetMillis)", "g.prepareActivitySelection(r.Kind)"},
+		{"queued ACK omitted", "serveApplicationNormal", `send(r.Seq, "reply")`, `send(r.Seq, "invalid")`},
+		{"queued reopen omitted", "serveApplicationNormal", "g.completeQueuedSelection()", "g.completeFinalQuiesce()"},
+		{"queued failure unlock omitted", "recordApplicationFailure", "g.abortQueuedSelection()", "g.abortFinalQuiesce()"},
+		{"queued rescue unlock omitted", "serveApplicationRescue", "g.abortQueuedSelection()", "g.abortFinalQuiesce()"},
 		{"ACK omitted", "serveApplicationNormal", `writeFinalQuiesceFrame(file, g, r.Seq, "cancelled")`, `writeFinalQuiesceFrame(file, g, r.Seq, "drained")`},
 		{"reopen omitted", "serveApplicationNormal", "return g.completeFinalQuiesce()", "return nil"},
 		{"unserialized cancel", "serveApplicationNormal", "!g.finalTransportMu.TryLock()", "false"},
@@ -185,7 +190,7 @@ func TestFinalProtocolOrderingCannotBeWeakened(t *testing.T) {
 			if body == expected.body {
 				t.Fatal("mutation unchanged")
 			}
-			file, err := parser.ParseFile(token.NewFileSet(), expected.file, "package dbadmission;func changed()"+body, 0)
+			file, err := parser.ParseFile(token.NewFileSet(), expected.file, "package dbadmission;func changed()"+body, parser.ParseComments)
 			if err != nil {
 				t.Fatal(err)
 			}

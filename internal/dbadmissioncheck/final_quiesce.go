@@ -217,6 +217,7 @@ var finalQuiesceBodies = map[string]struct{ file, body string }{
 		expected["target"] = true
 	case "prepare_selection":
 		expected["kind"] = true
+		expected["budgetMillis"] = true
 	case "configure_target":
 		expected["taskID"], expected["workerID"] = true, true
 	}
@@ -236,6 +237,7 @@ var finalQuiesceBodies = map[string]struct{ file, body string }{
 	if !(stopping.Load() && errors.Is(original, os.ErrClosed)) {
 		g.invalidateTransport()
 		g.abortFinalQuiesce()
+		g.abortQueuedSelection()
 		if onFailure != nil {
 			onFailure()
 		}
@@ -271,7 +273,7 @@ var finalQuiesceBodies = map[string]struct{ file, body string }{
 		if r.Op != "prepare_selection" && r.Op != "configure_target" && (r.Kind != "" || r.TaskID != "" || r.WorkerID != "") {
 			return
 		}
-		if r.Op != "final_prepare" && r.BudgetMillis != 0 {
+		if r.Op != "final_prepare" && r.Op != "prepare_selection" && r.BudgetMillis != 0 {
 			return
 		}
 		switch r.Op {
@@ -314,7 +316,7 @@ var finalQuiesceBodies = map[string]struct{ file, body string }{
 			}
 			continue
 		case "prepare_selection":
-			if r.Target != 0 || r.TaskID != "" || r.WorkerID != "" || g.prepareActivitySelection(r.Kind) != nil {
+			if r.Target != 0 || r.TaskID != "" || r.WorkerID != "" || g.prepareQueuedSelection(r.Kind, r.BudgetMillis) != nil {
 				return
 			}
 		case "configure_target":
@@ -352,6 +354,12 @@ var finalQuiesceBodies = map[string]struct{ file, body string }{
 			terminal = err
 			return
 		}
+		if r.Op == "configure_target" {
+			if err := g.completeQueuedSelection(); err != nil {
+				terminal = err
+				return
+			}
+		}
 	}
 }`},
 	"serveApplicationRescue": {"application_controller_ci.go", `{
@@ -376,6 +384,7 @@ var finalQuiesceBodies = map[string]struct{ file, body string }{
 			}
 		case "abort":
 			g.abortFinalQuiesce()
+			g.abortQueuedSelection()
 			g.mu.Lock()
 			g.invalidateBecauseLocked(invalidAbort)
 			if g.seal != nil {
@@ -530,7 +539,7 @@ func finalQuiesceDeclarations(fset *token.FileSet, path string, files []*ast.Fil
 					case "abortFinalQuiesce":
 						allowed = exact && (name == "serveApplicationNormal" || name == "serveApplicationRescue" || name == "recordApplicationFailure") && captureConsumerCall(x, ancestors, true)
 					case "finalDrainedLocked":
-						allowed = exact && (name == "lifecycleGate.prepareFinalQuiesce" || name == "lifecycleGate.cancelFinalQuiesce" || name == "lifecycleGate.completeFinalQuiesce" || name == "writeFinalQuiesceFrame") && directCallFor(x, ancestors) != nil
+						allowed = (exact && (name == "lifecycleGate.prepareFinalQuiesce" || name == "lifecycleGate.cancelFinalQuiesce" || name == "lifecycleGate.completeFinalQuiesce" || name == "writeFinalQuiesceFrame") || exactQueuedParkFunction(path, filename, name, fn) && (name == "lifecycleGate.prepareQueuedSelection" || name == "lifecycleGate.completeQueuedSelection" || name == "lifecycleGate.configureActivitySelection")) && directCallFor(x, ancestors) != nil
 					case "writeFinalQuiesceFrame":
 						allowed = exact && name == "serveApplicationNormal" && finalFrameCall(x, ancestors)
 					default:

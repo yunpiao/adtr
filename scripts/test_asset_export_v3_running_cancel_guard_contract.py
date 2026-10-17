@@ -190,7 +190,7 @@ class ContractTests(unittest.TestCase):
 
     def test_prepare_is_live_only_isolated_and_once(self):
         guard = self.guard(); guard.prepared = False; guard.threads = Mock(return_value=['R'])
-        observer = Mock(); observer.query.return_value = 0
+        observer = Mock(); observer.query.side_effect = [0, {'database': 'adtr_e2e', 'backendCount': 0}]
         with patch.object(g, 'Psql', return_value=observer):
             self.assertEqual(guard.prepare(), {'prepared': True})
             with self.assertRaises(RuntimeError): guard.prepare()
@@ -200,6 +200,112 @@ class ContractTests(unittest.TestCase):
             observer = Mock(); observer.query.return_value = count
             with patch.object(g, 'Psql', return_value=observer), self.assertRaises(RuntimeError): guard.prepare()
             guard.controller.prepare_selection.assert_not_called()
+
+    def test_queued_prepare_shared_deadline_and_physical_zero(self):
+        for proof in ({'database': 'adtr_e2e', 'backendCount': 1},
+                      {'database': 'other', 'backendCount': 0},
+                      {'database': 'adtr_e2e', 'backendCount': False},
+                      {'database': 'adtr_e2e', 'backendCount': 0, 'extra': 0}):
+            guard = self.guard(); guard.prepared = False; guard.threads = Mock(return_value=['R'])
+            observer = Mock(); observer.query.side_effect = [0, proof]
+            with patch.object(g, 'Psql', return_value=observer), self.assertRaises(RuntimeError):
+                guard.prepare()
+            self.assertTrue(guard.failed)
+            guard.controller.resume_and_release.assert_called_once_with(abort=True)
+            self.assertFalse(guard.prepared)
+        guard = self.guard(); guard.prepared = False; guard.threads = Mock(return_value=['R'])
+        observer = Mock(); observer.query.side_effect = [0, {'database': 'adtr_e2e', 'backendCount': 0}]
+        with patch.object(g, 'Psql', return_value=observer) as psql, patch.object(g.time, 'monotonic', return_value=10):
+            guard.prepare()
+        self.assertEqual(psql.call_args.kwargs, {'deadline': 12.0})
+        self.assertEqual(guard.controller.prepare_selection.call_args.args[1], 12.0)
+        guard.resume()
+        self.assertTrue(guard.failed)
+        guard.controller.resume_and_release.assert_called_once_with(abort=True)
+        with self.assertRaises(RuntimeError): guard.checkpoint('task-one', 'worker')
+
+    def test_queued_watchdog_delegate_aborts_without_parent_cont(self):
+        guard = self.guard(); guard.preparation_started = True; guard.used = False
+        self.assertTrue(guard._resume_capture_owned())
+        self.assertTrue(guard.failed)
+        guard.controller.resume_and_release.assert_called_once_with(abort=True)
+        guard.owned.process.send_signal.assert_not_called()
+        guard = self.guard(); guard.preparation_started = True; guard.used = True
+        self.assertTrue(guard._resume_capture_owned())
+        self.assertTrue(guard.failed)
+        guard.controller.resume_and_release.assert_called_once_with(abort=True)
+
+    def test_queued_checkpoint_resume_is_unique_owned_entry(self):
+        from user_asset_export_v3_worker_guard import OwnedExportWorkerGuard
+        import ast, inspect
+        owned = object.__new__(OwnedExportWorkerGuard)
+        owned.process = Mock(); owned.process.poll.return_value = None
+        owned.resume_delegate = Mock(return_value=True)
+        owned.assert_identity = Mock(return_value='T')
+        owned.resume_queued_checkpoint()
+        owned.process.send_signal.assert_called_once_with(g.signal.SIGCONT)
+        owned.resume_delegate.assert_not_called()
+        for delegate, exited, state in ((None, None, 'T'), (Mock(), 0, 'T'), (Mock(), None, 'R'), (Mock(), None, 't')):
+            owned.process.reset_mock(); owned.process.poll.return_value = exited
+            owned.resume_delegate = delegate; owned.assert_identity.return_value = state
+            with self.assertRaises(RuntimeError): owned.resume_queued_checkpoint()
+            owned.process.send_signal.assert_not_called()
+        owned.process.poll.return_value = None; owned.resume_delegate = Mock()
+        owned.assert_identity.side_effect = RuntimeError('identity changed')
+        with self.assertRaises(RuntimeError): owned.resume_queued_checkpoint()
+        owned.process.send_signal.assert_not_called()
+        source = Path(g.__file__).read_text()
+        calls = [n for n in ast.walk(ast.parse(source)) if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and n.func.attr == 'resume_queued_checkpoint']
+        self.assertEqual(len(calls), 1)
+        references = []
+        for path in Path(g.__file__).parent.rglob('*.py'):
+            if path.name.startswith('test_'):
+                continue
+            tree = ast.parse(path.read_text())
+            parents = {child: parent for parent in ast.walk(tree) for child in ast.iter_child_nodes(parent)}
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Attribute) or node.attr != 'resume_queued_checkpoint':
+                    continue
+                caller = parents.get(node)
+                self.assertIsInstance(caller, ast.Call)
+                self.assertIs(caller.func, node)
+                self.assertEqual(ast.unparse(node), 'self.owned.resume_queued_checkpoint')
+                owner = caller
+                while owner in parents and not isinstance(owner, ast.FunctionDef):
+                    owner = parents[owner]
+                references.append((path.name, owner.name))
+        self.assertEqual(references, [('asset_export_v3_running_cancel_guard.py', 'checkpoint')])
+        self.assertIn('self.owned.resume_queued_checkpoint()', inspect.getsource(g.RunningExportCancelGuard.checkpoint))
+        self.assertIn("all(s == 'T' for s in self.threads())", inspect.getsource(g.RunningExportCancelGuard.checkpoint))
+
+    def test_queued_prepare_close_failure_always_aborts(self):
+        guard = self.guard(); guard.prepared = False; guard.threads = Mock(return_value=['R'])
+        observer = Mock(); observer.query.side_effect = [0, {'database': 'adtr_e2e', 'backendCount': 0}]
+        observer.close.side_effect = RuntimeError('closed failure')
+        with patch.object(g, 'Psql', return_value=observer), self.assertRaises(RuntimeError): guard.prepare()
+        observer.close.assert_called_once()
+        self.assertTrue(guard.failed)
+        guard.controller.resume_and_release.assert_called_once_with(abort=True)
+
+    def test_running_queued_helpers_require_empty_connections_and_no_retry(self):
+        for kind in ('user', 'group', 'computer'):
+            source = (Path(g.__file__).parent.parent / 'web/e2e' / f'{kind}-asset-export-v3-terminal-helpers.ts').read_text()
+            self.assertIn('(!runningQueued || pg.connections === 0)', source)
+            rejection = source.index('if (runningQueued) throw new Error("Owned running Worker queued connections were not empty")')
+            self.assertLess(rejection, source.index('await signalWorker("SIGCONT"); ownedStopped = false;', rejection))
+        import inspect
+        self.assertIn("initial['sessions'] == []", inspect.getsource(g.RunningExportCancelGuard.checkpoint))
+
+    def test_queued_prepare_lost_ack_aborts_without_ready(self):
+        guard = self.guard(); guard.prepared = False; guard.threads = Mock(return_value=['R'])
+        observer = Mock(); observer.query.return_value = 0
+        guard.controller.prepare_selection.side_effect = RuntimeError('closed failure')
+        with patch.object(g, 'Psql', return_value=observer), self.assertRaises(RuntimeError):
+            guard.prepare()
+        self.assertTrue(guard.failed)
+        self.assertFalse(guard.prepared)
+        guard.controller.resume_and_release.assert_called_once_with(abort=True)
+        self.assertEqual(observer.query.call_count, 1)
 
     def test_activity_fixture_key_binding_collision_and_exact_wait_cleanup(self):
         import base64, hashlib
@@ -615,7 +721,7 @@ class ContractTests(unittest.TestCase):
         expected = {
             'validate_sessions': '4efb9b60ec57914d43c55c695e0916b07d71fbcd3f3cdac8c3cd06b630bbd092',
             'validate_checkpoint': '83ff1b7a711627ec7ee4e28761dde75f5e18ae3e81abb39927b8057022a06e74',
-            'checkpoint': '69d5c72ae76ed12149e429a60d32a6098d7567591f944144b1261352ff0945ed',
+            'checkpoint': '4ec2efbe87439fde416066a5aa3cf757166ab7468a9946fbab2c533d58408cb7',
         }
         actual = {node.name: hashlib.sha256(ast.get_source_segment(source, node).encode()).hexdigest()
                   for node in ast.walk(ast.parse(source)) if isinstance(node, ast.FunctionDef)
@@ -846,6 +952,9 @@ class ContractTests(unittest.TestCase):
         guard.controller.commit_capture.return_value = True
         guard.controller.armed = False
         guard.owned = factory.return_value
+        # Shared sequence spy preserves old event-order assertions; the real
+        # dedicated entry is separately exercised below.
+        guard.owned.resume_queued_checkpoint = guard.owned.resume
         guard.owned.assert_identity = Mock(return_value="T")
         return guard
 

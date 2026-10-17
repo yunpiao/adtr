@@ -220,6 +220,7 @@ func readApplicationRequest(reader *bufio.Reader, limit int, last uint64) (appli
 		expected["target"] = true
 	case "prepare_selection":
 		expected["kind"] = true
+		expected["budgetMillis"] = true
 	case "configure_target":
 		expected["taskID"], expected["workerID"] = true, true
 	}
@@ -239,6 +240,7 @@ func recordApplicationFailure(file *os.File, g *lifecycleGate, stopping *atomic.
 	if !(stopping.Load() && errors.Is(original, os.ErrClosed)) {
 		g.invalidateTransport()
 		g.abortFinalQuiesce()
+		g.abortQueuedSelection()
 		if onFailure != nil {
 			onFailure()
 		}
@@ -274,7 +276,7 @@ func serveApplicationNormal(file *os.File, g *lifecycleGate, stopping *atomic.Bo
 		if r.Op != "prepare_selection" && r.Op != "configure_target" && (r.Kind != "" || r.TaskID != "" || r.WorkerID != "") {
 			return
 		}
-		if r.Op != "final_prepare" && r.BudgetMillis != 0 {
+		if r.Op != "final_prepare" && r.Op != "prepare_selection" && r.BudgetMillis != 0 {
 			return
 		}
 		switch r.Op {
@@ -317,7 +319,7 @@ func serveApplicationNormal(file *os.File, g *lifecycleGate, stopping *atomic.Bo
 			}
 			continue
 		case "prepare_selection":
-			if r.Target != 0 || r.TaskID != "" || r.WorkerID != "" || g.prepareActivitySelection(r.Kind) != nil {
+			if r.Target != 0 || r.TaskID != "" || r.WorkerID != "" || g.prepareQueuedSelection(r.Kind, r.BudgetMillis) != nil {
 				return
 			}
 		case "configure_target":
@@ -355,6 +357,12 @@ func serveApplicationNormal(file *os.File, g *lifecycleGate, stopping *atomic.Bo
 			terminal = err
 			return
 		}
+		if r.Op == "configure_target" {
+			if err := g.completeQueuedSelection(); err != nil {
+				terminal = err
+				return
+			}
+		}
 	}
 }
 func serveApplicationRescue(file *os.File, g *lifecycleGate, stopping *atomic.Bool, onFailure func()) {
@@ -379,6 +387,7 @@ func serveApplicationRescue(file *os.File, g *lifecycleGate, stopping *atomic.Bo
 			}
 		case "abort":
 			g.abortFinalQuiesce()
+			g.abortQueuedSelection()
 			g.mu.Lock()
 			g.invalidateBecauseLocked(invalidAbort)
 			if g.seal != nil {

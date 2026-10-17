@@ -454,8 +454,25 @@ func allowedSelectionCaller(path, file, function, operation string, id *ast.Iden
 		return false
 	}
 	switch operation {
-	case "prepareActivitySelection", "configureActivitySelection":
-		return file == "application_controller_ci.go" && function == "serveApplicationNormal"
+	case "prepareActivitySelection":
+		if file != queuedParkSource || function != "lifecycleGate.prepareQueuedSelection" {
+			return false
+		}
+		for _, node := range ancestors {
+			if fn, ok := node.(*ast.FuncDecl); ok {
+				return exactQueuedParkFunction(path, file, function, fn)
+			}
+		}
+		return false
+	case "configureActivitySelection":
+		if file == "application_controller_ci.go" && function == "serveApplicationNormal" {
+			for _, node := range ancestors {
+				if fn, ok := node.(*ast.FuncDecl); ok {
+					return exactFinalQuiesceFunction(path, file, function, fn)
+				}
+			}
+		}
+		return false
 	case "awaitActivitySelection":
 		return file == "activity_selection_ci.go" && function == "AwaitActivitySelection"
 	case "registerActivityRow":

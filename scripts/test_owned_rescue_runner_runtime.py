@@ -36,6 +36,12 @@ def fixture_worker():
             normal.send(frame(0, 'ready'), time.monotonic() + 3)
             while True:
                 request = normal.receive(time.monotonic() + 60)
+                if request['op'] == 'prepare_selection':
+                    if (set(request) != {'version', 'epoch', 'seq', 'op', 'kind', 'budgetMillis'}
+                            or type(request['budgetMillis']) is not int
+                            or not 1 <= request['budgetMillis'] <= 2000):
+                        raise r.ControlFailure('fixture prepare schema')
+                    state['queued_parked'] = True
                 if request['op'] in ('final_prepare', 'final_cancel'):
                     state['final_prepared'] = True
                     normal.send({'version': 2, 'epoch': 1, 'seq': request['seq'],
@@ -45,6 +51,8 @@ def fixture_worker():
                 if request['op'] == 'pin':
                     state.update(status='sealed', target=request['target'])
                 normal.send(frame(request['seq']), time.monotonic() + 3)
+                if request['op'] == 'configure_target':
+                    state['queued_parked'] = False
         except (OSError, r.ControlFailure):
             if state.get('final_prepared'):
                 # Synthetic EOF acknowledgement only, not Go cleanup evidence.
@@ -64,6 +72,7 @@ def fixture_worker():
             if r.CAPTURE_END.unpack(token) != (b'ADTREND1', bytes.fromhex('1' * 32), 1, 1, 1):
                 raise RuntimeError('fixture capture binding')
         state['status'] = 'released'
+        state['queued_parked'] = False
         rescue.send({'version': 2, 'epoch': 1, 'seq': previous,
                      'kind': 'reply', 'status': 'released'}, time.monotonic() + 3)
 
@@ -97,6 +106,29 @@ def parent_fixture():
 
 
 class RuntimeTests(unittest.TestCase):
+    def test_queued_prepare_stopped_configure_and_abort_are_bounded(self):
+        owner = spawn()
+        try:
+            c = owner.controller
+            self.assertEqual(c.prepare_selection('user_assets.v3.export', time.monotonic() + 2)['open'], 0)
+            owner.process.send_signal(signal.SIGSTOP)
+            stop_deadline = time.monotonic() + 1
+            while time.monotonic() < stop_deadline and not owner.identity.threads_stopped():
+                time.sleep(.002)
+            self.assertTrue(owner.identity.threads_stopped())
+            c.prepare_target('task-one', 'worker-one', time.monotonic() + 1)
+            owner.identity.resume(time.monotonic() + 1)
+            capture_deadline = time.monotonic() + 1.5
+            c.arm(capture_deadline)
+            self.assertEqual(c.finish_target(capture_deadline)['status'], 'open')
+            c.resume_and_release(abort=True)
+            c.resume_and_release(abort=True)
+            self.assertTrue(c.invalid)
+        finally:
+            with self.assertRaises(r.ControlFailure): owner.shutdown()
+        self.assertIsNone(owner.witness)
+        self.assertIsNotNone(owner.process.returncode)
+
     def test_ready_pin_stop_resume_and_wait_before_unmap(self):
         owner = spawn()
         try:

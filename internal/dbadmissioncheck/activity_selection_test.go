@@ -44,8 +44,6 @@ func TestPrivateSelectionCapabilities(t *testing.T) {
  func activityRowKey(){}
  `
 	for _, boundary := range []struct{ operation, file, caller string }{
-		{"prepareActivitySelection", "application_controller_ci.go", "func serveApplicationNormal(g *lifecycleGate)"},
-		{"configureActivitySelection", "application_controller_ci.go", "func serveApplicationNormal(g *lifecycleGate)"},
 		{"awaitActivitySelection", "activity_selection_ci.go", "func AwaitActivitySelection(g *lifecycleGate)"},
 		{"registerActivityRow", "activity_identity_ci.go", "func RegisterActivityIdentity(g *lifecycleGate)"},
 		{"activityRowKey", "activity_selection_ci.go", "func(g *lifecycleGate)configureActivitySelection()"},

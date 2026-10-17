@@ -65,12 +65,18 @@ func (g *lifecycleGate) configureActivitySelection(taskID, workerID string) erro
 	if !g.application || g.selection != 1 || g.invalid || g.closing || g.seal != nil || !selectionID(taskID) || !selectionWorkerID(workerID) {
 		return errSealProtocol
 	}
+	if g.queuedState != "" && (g.queuedState != "drained" || !g.queuedParked || !g.finalDrainedLocked()) {
+		return errSealProtocol
+	}
 	key := activityRowKey(g.nonce, taskID)
 	if key == workerID {
 		return errSealProtocol
 	}
 	g.selectionTask, g.selectionOwner, g.selectionKey = taskID, workerID, key
 	g.selection = 2
+	if g.queuedParked {
+		g.queuedState = "configured"
+	}
 	g.notifyLocked()
 	return nil
 }

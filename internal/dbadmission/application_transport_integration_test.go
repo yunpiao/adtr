@@ -61,6 +61,7 @@ func TestIntegrationApplicationNormalEOFLeavesRescueLive(t *testing.T) {
 	coordinator.Lock()
 	g := coordinator.gate
 	coordinator.Unlock()
+	ObserveCIWorkerContext(context.Background())
 	w := g.witness.(*ciWitness)
 	parent.SetDeadline(time.Now().Add(3 * time.Second))
 	reader := bufio.NewReader(parent)
@@ -99,10 +100,10 @@ func TestIntegrationApplicationNormalEOFLeavesRescueLive(t *testing.T) {
 		t.Fatal("fresh diagnostic values")
 	}
 
-	if writeApplicationFrame(parent, applicationRequest{Version: 2, Epoch: 1, Seq: 2, Op: "prepare_selection", Kind: testSealIdentity().Kind}, 1024) != nil {
+	if writeApplicationFrame(parent, applicationRequest{Version: 2, Epoch: 1, Seq: 2, Op: "prepare_selection", Kind: testSealIdentity().Kind, BudgetMillis: 1000}, 1024) != nil {
 		t.Fatal("prepare send")
 	}
-	if f := read(); f.Seq != 2 || f.Kind != "reply" || f.Status != "open" {
+	if f := read(); f.Seq != 2 || f.Kind != "reply" || f.Status != "open" || f.Pending != 0 || f.Open != 0 || f.Target != 0 || len(f.Records) != 0 {
 		t.Fatal("prepare ack")
 	}
 	waiting := make(chan error, 1)
@@ -117,7 +118,7 @@ func TestIntegrationApplicationNormalEOFLeavesRescueLive(t *testing.T) {
 	if writeApplicationFrame(parent, applicationRequest{Version: 2, Epoch: 1, Seq: 3, Op: "configure_target", TaskID: testSealIdentity().TaskID, WorkerID: "private-worker"}, 1024) != nil {
 		t.Fatal("configure send")
 	}
-	if f := read(); f.Seq != 3 || f.Kind != "reply" || f.Status != "open" {
+	if f := read(); f.Seq != 3 || f.Kind != "reply" || f.Status != "open" || f.Pending != 0 || f.Open != 0 || f.Target != 0 || len(f.Records) != 0 {
 		t.Fatal("configure ack")
 	}
 	select {
