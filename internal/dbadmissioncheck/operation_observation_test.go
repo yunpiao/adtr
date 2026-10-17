@@ -50,7 +50,8 @@ func TestObserverNativeAndConfigCapabilitiesAreExact(t *testing.T) {
 		{"reviewed observer", original, false},
 		{"overlap ignored", strings.Replace(original, "t.operationInFlight != 0", "t.operationInFlight == 0", 1), true},
 		{"sequence mismatch ignored", strings.Replace(original, "trace.sequence != t.activeOperation", "trace.sequence == t.activeOperation", 1), true},
-		{"rollback wrong sentinel", strings.Replace(original, "pgconn.ErrConnClosed", "context.Canceled", 1), true},
+		{"rollback wrong sentinel", strings.Replace(original, "pgconn.ErrConnClosed", "context.Canceled", 1) + `
+var _ = pgconn.ErrConnClosed`, true},
 		{"rollback permitted while open", strings.Replace(original, `operation == "rollback" && nativeClosed`, `operation == "rollback" && !nativeClosed`, 1), true},
 		{"forged trace identity", original + `func other(){_=operationTraceKey{}}`, true},
 		{"trace sequence mutation", original + `func other(trace *operationTrace){trace.sequence=2}`, true},

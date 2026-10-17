@@ -36,6 +36,10 @@ func TestFinalDiagnosticCapabilityIsExact(t *testing.T) {
 		bad                        bool
 	}{
 		{"once closed projection", "application_controller_ci.go", writer, caller, false},
+		{"newline statement separators", "application_controller_ci.go", writer, strings.Replace(caller, "g.writeFinalInvalidationDiagnostic();g.writeRecoveryCleanupDiagnostic()", "g.writeFinalInvalidationDiagnostic()\ng.writeRecoveryCleanupDiagnostic()", 1), false},
+		{"reversed final writers", "application_controller_ci.go", writer, strings.Replace(caller, "g.writeFinalInvalidationDiagnostic();g.writeRecoveryCleanupDiagnostic()", "g.writeRecoveryCleanupDiagnostic();g.writeFinalInvalidationDiagnostic()", 1), true},
+		{"missing recovery writer", "application_controller_ci.go", writer, strings.Replace(caller, ";g.writeRecoveryCleanupDiagnostic()", "", 1), true},
+		{"extra final writer", "application_controller_ci.go", writer, strings.Replace(caller, "g.writeFinalInvalidationDiagnostic();", "g.writeFinalInvalidationDiagnostic();g.writeFinalInvalidationDiagnostic();", 1), true},
 		{"wrong caller file", "other.go", writer, caller, true},
 		{"wrong function", "application_controller_ci.go", writer, strings.Replace(caller, "StartCIController", "other", 1), true},
 		{"async writer", "application_controller_ci.go", writer, strings.Replace(caller, "g.writeFinalInvalidationDiagnostic()", "go g.writeFinalInvalidationDiagnostic()", 1), true},

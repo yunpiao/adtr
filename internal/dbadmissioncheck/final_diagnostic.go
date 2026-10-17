@@ -48,11 +48,17 @@ func allowedFinalDiagnosticCaller(path, file, function, operation string, id *as
 		case *ast.GoStmt, *ast.DeferStmt:
 			return false
 		case *ast.CallExpr:
-			if compactSource(node) != "reportOnce.Do(func(){g.writeFinalInvalidationDiagnostic();g.writeRecoveryCleanupDiagnostic()})" {
+			// Compare the parsed callback body, not a string containing source
+			// semicolons: format.Node normalizes statement separators to newlines.
+			if len(node.Args) != 1 || node.Ellipsis.IsValid() {
+				continue
+			}
+			callback, ok := node.Args[0].(*ast.FuncLit)
+			if !ok || !captureBodyMatches(&ast.FuncDecl{Body: callback.Body}, `{g.writeFinalInvalidationDiagnostic();g.writeRecoveryCleanupDiagnostic()}`) {
 				continue
 			}
 			method, ok := node.Fun.(*ast.SelectorExpr)
-			if !ok {
+			if !ok || sourceText(method) != "reportOnce.Do" {
 				continue
 			}
 			selection := info.Selections[method]
