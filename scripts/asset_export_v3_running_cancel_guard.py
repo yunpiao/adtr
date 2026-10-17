@@ -663,10 +663,12 @@ def validate_checkpoint(row, task_id, worker_id, asset_kind='user'):
 JOURNAL_PROOF_SQL = """SELECT jsonb_build_object(
  'terminal',EXISTS(SELECT FROM adtr.tasks WHERE task_id='{task_id}' AND state='cancelled')
  AND NOT EXISTS(SELECT FROM adtr.tasks WHERE state IN ('queued','running','retry_wait','cancel_requested')),
- 'delivery', (SELECT count(*)=1 AND COALESCE(bool_and(r.acceptance_stopped AND r.accepted=r.acknowledged
+ 'reportConsistent', (SELECT count(*)=1 AND COALESCE(bool_and(r.accepted>=r.acknowledged
  AND r.rejected=0 AND r.queue_full=0 AND r.write_failures=0 AND r.unacknowledged=0 AND r.abandoned=0
  AND NOT EXISTS(SELECT FROM adtr.operational_log_events other WHERE other.module='worker' AND other.process_id<>r.process_id)),false)
  FROM adtr.operational_log_reports r WHERE r.module='worker'),
+ 'eventCount',(SELECT count(*) FROM adtr.operational_log_events WHERE module='worker'),
+ 'processID',(SELECT min(process_id) FROM adtr.operational_log_events WHERE module='worker'),
  'count',count(*),'processCount',count(DISTINCT process_id),
  'closed',COALESCE(bool_and(module='worker' AND code='queue_progress' AND outcome='progress'
  AND reason='' AND severity='info' AND schema_version=1 AND
@@ -1224,23 +1226,63 @@ class RunningExportCancelGuard:
         require(not self.failed and self.stopped_at is None and self.used, 'running checkpoint guard incomplete or failed')
         self.owned.check()
 
-    def verify_journal_after_wait(self, worker_exit_code):
-        require(type(worker_exit_code) is int and worker_exit_code == 0 and self.used and not self.failed,
-                'journal verification requires successful worker Wait')
-        identifier(self.checkpoint_task_id)
-        # Main emits its typed journal event before invoking the candidate-only
-        # health callback. Check the actual persisted row after cancellation.
-        observer = Psql(self.container, True)
-        try:
-            proof = observer.query(JOURNAL_PROOF_SQL.format(task_id=self.checkpoint_task_id))
-            require(type(self.journal_baseline) is int and type(proof) is dict and
-                    set(proof) == {'count', 'processCount', 'closed', 'delivery', 'terminal'} and
-                    type(proof['count']) is int and proof['count'] == self.journal_baseline + 1 and
-                    type(proof['processCount']) is int and proof['processCount'] == 1 and
-                    proof['closed'] is True and proof['delivery'] is True and proof['terminal'] is True,
-                    'candidate journal fields or delivery unverified')
-        finally:
-            observer.close()
+    def verify_journal_after_wait(self, worker_exit_code, final_record=None):
+        # Persisted reports precede Append's acknowledgement. Final delivery is
+        # instead witnessed after recorder Close and bound to this DB process.
+        counts = ('accepted', 'acknowledged', 'rejected', 'queueFull',
+                  'writeFailures', 'unacknowledged', 'abandoned')
+        keys = {'event', 'processIDSHA256', 'closeOK', 'acceptanceStopped', *counts}
+        valid_final = (type(final_record) is dict and set(final_record) == keys and
+            final_record['event'] == 'owned_ci_final_journal' and
+            type(final_record['processIDSHA256']) is str and
+            re.fullmatch('[0-9a-f]{64}', final_record['processIDSHA256']) is not None and
+            all(type(final_record[k]) is int and 0 <= final_record[k] <= 2**63-1 for k in counts) and
+            all(type(final_record[k]) is bool for k in ('closeOK', 'acceptanceStopped')))
+        checks = {'workerWait': type(worker_exit_code) is int and worker_exit_code == 0 and self.used and not self.failed,
+                  'finalRecord': valid_final}
+        proof = None
+        if checks['workerWait']:
+            identifier(self.checkpoint_task_id)
+            observer = None
+            try:
+                observer = Psql(self.container, True)
+                proof = observer.query(JOURNAL_PROOF_SQL.format(task_id=self.checkpoint_task_id))
+            except Exception:
+                checks['observation'] = False
+            finally:
+                if observer is not None:
+                    try:
+                        observer.close()
+                    except Exception:
+                        checks['observation'] = False
+        proof_keys = {'count', 'processCount', 'closed', 'reportConsistent', 'terminal', 'eventCount', 'processID'}
+        valid_proof = (type(proof) is dict and set(proof) == proof_keys and
+            all(type(proof[k]) is int and 0 <= proof[k] <= 2**63-1 for k in ('count', 'processCount', 'eventCount')) and
+            all(type(proof[k]) is bool for k in ('closed', 'reportConsistent', 'terminal')) and
+            type(proof['processID']) is str and re.fullmatch('[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}', proof['processID']) is not None)
+        checks['observation'] = checks.get('observation', True) and valid_proof
+        checks.update(closeOK=valid_final and final_record['closeOK'],
+            acceptanceStopped=valid_final and final_record['acceptanceStopped'],
+            acceptedAcknowledged=valid_final and final_record['accepted'] == final_record['acknowledged'],
+            errorsZero=valid_final and all(final_record[k] == 0 for k in counts[2:]),
+            processMatch=valid_final and valid_proof and hmac.compare_digest(final_record['processIDSHA256'], digest(proof['processID'])),
+            eventCountMatches=valid_final and valid_proof and proof['eventCount'] == final_record['accepted'],
+            queueProgressDelta=valid_proof and type(self.journal_baseline) is int and proof['count'] == self.journal_baseline + 1,
+            singleProcess=valid_proof and proof['processCount'] == 1,
+            closedFields=valid_proof and proof['closed'],
+            reportConsistent=valid_proof and proof['reportConsistent'],
+            terminal=valid_proof and proof['terminal'])
+        if not all(checks.values()):
+            event = {'event': 'running_cancel_journal_failure', 'stage': 'after_worker_wait',
+                'reason': next(key for key, ok in checks.items() if not ok), 'checks': checks,
+                'finalCounters': {key: final_record[key] if valid_final else None for key in counts},
+                'queueProgressCount': proof['count'] if valid_proof else None,
+                'baselineCount': self.journal_baseline if type(self.journal_baseline) is int and 0 <= self.journal_baseline <= 2**63-1 else None,
+                'eventCount': proof['eventCount'] if valid_proof else None,
+                'accepted': final_record['accepted'] if valid_final else None,
+                'acknowledged': final_record['acknowledged'] if valid_final else None}
+            print(json.dumps(event, sort_keys=True), flush=True)
+            raise RuntimeError('candidate journal fields or delivery unverified')
         print(json.dumps({'event': 'running_cancel_journal_verified',
                           'newQueueProgressEvents': 1, 'businessFieldsClosed': True,
                           'metadataFieldsClosed': True, 'finalDeliveryVerified': True}, sort_keys=True), flush=True)

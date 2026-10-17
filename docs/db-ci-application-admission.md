@@ -422,3 +422,38 @@ owner activity advances, exact sentinel cleanup and journal acknowledgement all
 remain required. Deterministic Go contracts cover each side of the boundary,
 malformed/stale/duplicate buffered frames and hard failures; isolated rescuer
 runtime contracts and the three real application suites must execute in CI.
+
+### Final journal delivery witness
+
+Run 39054470799 reached all three browser successes with a clear final sticky
+witness and clean worker exit, but the final journal check failed. Source review
+identified a proof-model error: `Recorder` passes `Stats()` to `Store.Append`
+before incrementing its acknowledged counter. Persisted reports are intentionally
+incomplete observations, and `Close` does not replace them with a final report.
+Their acknowledged count must not be treated as the final delivery count.
+
+Only an installed CI worker now emits a private final observation after the
+existing producer joins, stopped event, and `Recorder.Close` return. The default
+build neither takes this extra Stats snapshot nor emits it. The observation binds
+the process with SHA-256 and contains only the Close result and closed counters.
+The existing private stderr file carries this record; it is never copied to CI
+output or artifacts. Synchronous stderr writes retain the existing OS/disk
+blocking boundary. A missing, duplicate, malformed, oversized, or failed-Close
+record cannot establish delivery.
+
+After worker Wait, the runner parses the exact record into memory. The guard
+binds its hash to the database process, requires accepted = acknowledged = all
+worker events, stopped acceptance, and zero rejection, queue-full, write-failure,
+unacknowledged, or abandoned counters. The persisted report remains a separate
+consistency check. The original exact queue-progress increment, closed event
+fields, task cancellation, and absence of other executable tasks still apply.
+Failure output contains only fixed predicate names, booleans, and bounded counts;
+process identifiers and hashes remain private.
+
+`TestActivityCandidateFinalJournalActualRecorderAndPostgres` uses the actual
+Recorder and Store in a fresh database. Three accepted events produce a final
+acknowledged count of three while the last stored report contains two. Its name
+is selected by the existing tagged cmd integration group. Offline tests cover
+missing/incorrect identity witnesses, delivery counters, event counts, closed
+fields, and read/close failures. New Go/PG behavior requires the new exact-tree
+CI run; the prior group configure EOF remains independently unexplained.

@@ -374,6 +374,47 @@ def first_invalidation_projection(logs):
                 pass
 
 
+FINAL_JOURNAL_EVENT = 'owned_ci_final_journal'
+FINAL_JOURNAL_COUNTS = frozenset({'accepted', 'acknowledged', 'rejected', 'queueFull',
+                                  'writeFailures', 'unacknowledged', 'abandoned'})
+
+
+def final_journal_projection(logs):
+    """Private final Stats only; no event/hash/raw log is ever printed."""
+    position = None
+    try:
+        logs.flush()
+        position = logs.tell()
+        logs.seek(0)
+        text = logs.read(MAX_FINAL_LOG_BYTES + 1)
+        if type(text) is not str or len(text.encode('utf-8')) > MAX_FINAL_LOG_BYTES:
+            return None
+        candidates = [line for line in text.splitlines(keepends=True) if FINAL_JOURNAL_EVENT in line]
+        if (len(candidates) != 1 or not candidates[0].endswith('\n')
+                or len(candidates[0].encode('utf-8')) > 1024):
+            return None
+        frame = json.loads(candidates[0], object_pairs_hook=_unique_object,
+                           parse_constant=lambda _: _fail())
+        fields = FINAL_JOURNAL_COUNTS | {'event', 'processIDSHA256', 'closeOK', 'acceptanceStopped'}
+        if (type(frame) is not dict or set(frame) != fields
+                or frame['event'] != FINAL_JOURNAL_EVENT
+                or type(frame['processIDSHA256']) is not str
+                or re.fullmatch(r'[0-9a-f]{64}', frame['processIDSHA256']) is None
+                or type(frame['closeOK']) is not bool or type(frame['acceptanceStopped']) is not bool
+                or not all(type(frame[key]) is int and 0 <= frame[key] <= 2 ** 63 - 1
+                           for key in FINAL_JOURNAL_COUNTS)):
+            return None
+        return {key: frame[key] for key in fields}
+    except Exception:
+        return None
+    finally:
+        if position is not None:
+            try:
+                logs.seek(position)
+            except Exception:
+                pass
+
+
 def diagnostic_projection(frame, seq):
     fields = {'version', 'epoch', 'seq', 'kind', 'reason', 'phase',
               'pending', 'open', 'total', 'retained'}
@@ -752,6 +793,11 @@ class OwnedCIWorker:
         except Exception:
             pass  # Optional evidence must not interrupt owned cleanup.
         return report
+
+    def final_journal_after_wait(self, logs):
+        if self.process is None or type(self.process.returncode) is not int:
+            return None
+        return final_journal_projection(logs)
 
     def report_first_invalidation_after_wait(self, logs):
         """Optional final evidence only; never changes qualification or cleanup."""

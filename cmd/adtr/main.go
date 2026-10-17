@@ -159,6 +159,9 @@ func run() (runErr error) {
 			}
 			drain, stopDrain := context.WithTimeout(context.Background(), 5*time.Second)
 			closeErr := journal.Close(drain)
+			if admissionFailure != nil && *mode == "worker" {
+				emitCIJournalFinal(journal, closeErr)
+			}
 			stopDrain()
 			journalCancel()
 			if closeErr != nil {

@@ -421,7 +421,7 @@ def main():
                 try:
                     # The worker's successful Wait includes journal.Close/drain.
                     # Query its final report while the isolated database is alive.
-                    running_cancel_guard.verify_journal_after_wait(worker.returncode)
+                    running_cancel_guard.verify_journal_after_wait(worker.returncode, owned_ci_worker.final_journal_after_wait(logs))
                 except Exception:
                     shutdown_error = RuntimeError("owned CI final journal proof failed")
             if ldap_fixture is not None:

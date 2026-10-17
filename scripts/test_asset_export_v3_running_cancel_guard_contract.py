@@ -801,21 +801,80 @@ class ContractTests(unittest.TestCase):
         guard.owned.process.send_signal.assert_not_called()
         guard.owned.resume.assert_called_once()
 
+    def journal_specimen(self):
+        process = '12345678-1234-4123-8123-123456789012'
+        final = {'event': 'owned_ci_final_journal', 'processIDSHA256': g.digest(process),
+            'closeOK': True, 'acceptanceStopped': True, 'accepted': 20, 'acknowledged': 20,
+            'rejected': 0, 'queueFull': 0, 'writeFailures': 0, 'unacknowledged': 0, 'abandoned': 0}
+        proof = {'count': 5, 'processCount': 1, 'closed': True, 'reportConsistent': True,
+                 'terminal': True, 'processID': process, 'eventCount': 20}
+        return final, proof
+
     def test_actual_journal_check_requires_closed_delivery_without_identity_output(self):
         guard = self.guard(); guard.used = True; guard.journal_baseline = 4; guard.checkpoint_task_id = "task-one"
-        observer = Mock(); observer.query.return_value = {'count': 5, 'processCount': 1, 'closed': True, 'delivery': True, 'terminal': True}
+        final, proof = self.journal_specimen()
+        observer = Mock(); observer.query.return_value = proof
         with patch.object(g, 'Psql', return_value=observer), patch('builtins.print') as output:
-            guard.verify_journal_after_wait(0)
+            guard.verify_journal_after_wait(0, final)
         observer.query.assert_called_once_with(g.JOURNAL_PROOF_SQL.format(task_id="task-one"))
         event = json.loads(output.call_args.args[0])
         self.assertEqual(event, {'event': 'running_cancel_journal_verified',
             'newQueueProgressEvents': 1, 'businessFieldsClosed': True, 'metadataFieldsClosed': True, 'finalDeliveryVerified': True})
         for update in ({'count': 4}, {'count': 6}, {'processCount': 2}, {'closed': False},
-                       {'count': True}, {'candidate': 'private'}, {'delivery': False}, {'terminal': False}):
-            observer = Mock(); observer.query.return_value = {'count': 5, 'processCount': 1, 'closed': True, 'delivery': True, 'terminal': True} | update
-            with patch.object(g, 'Psql', return_value=observer), self.assertRaises(RuntimeError):
-                guard.verify_journal_after_wait(0)
+                       {'count': True}, {'candidate': 'private'}, {'reportConsistent': False}, {'terminal': False},
+                       {'eventCount': 19}, {'eventCount': 21}, {'processID': '22345678-1234-4123-8123-123456789012'}):
+            observer = Mock(); observer.query.return_value = proof | update
+            with patch.object(g, 'Psql', return_value=observer), patch('builtins.print') as output, self.assertRaises(RuntimeError):
+                guard.verify_journal_after_wait(0, final)
             observer.close.assert_called_once()
+            event = json.loads(output.call_args.args[0])
+            self.assertEqual(event['event'], 'running_cancel_journal_failure')
+            self.assertNotIn(proof['processID'], json.dumps(event))
+            self.assertNotIn(final['processIDSHA256'], json.dumps(event))
+
+    def test_journal_final_witness_missing_bad_or_incomplete_always_fails(self):
+        final, proof = self.journal_specimen()
+        changes = [None, {}, final | {'closeOK': False}, final | {'acceptanceStopped': False},
+            final | {'acknowledged': 19}, final | {'accepted': 21}, final | {'processIDSHA256': 'f'*64},
+            final | {'processIDSHA256': 'private'}, final | {'extra': 'private'}]
+        changes += [final | {key: 1} for key in ('rejected', 'queueFull', 'writeFailures', 'unacknowledged', 'abandoned')]
+        changes += [final | {'accepted': value} for value in (True, -1, 2**63, '20')]
+        for record in changes:
+            guard = self.guard(); guard.used = True; guard.journal_baseline = 4; guard.checkpoint_task_id = 'task-one'
+            observer = Mock(); observer.query.return_value = proof
+            with patch.object(g, 'Psql', return_value=observer), patch('builtins.print') as output, self.assertRaises(RuntimeError):
+                guard.verify_journal_after_wait(0, record)
+            event = json.loads(output.call_args.args[0])
+            self.assertFalse(all(event['checks'].values()))
+            self.assertNotIn('private', json.dumps(event))
+            self.assertNotIn('processIDSHA256', json.dumps(event))
+
+    def test_journal_observer_read_and_close_failures_remain_closed(self):
+        final, proof = self.journal_specimen()
+        for failing in ('open', 'read', 'close'):
+            guard = self.guard(); guard.used = True; guard.journal_baseline = 4; guard.checkpoint_task_id = 'task-one'
+            observer = Mock(); observer.query.return_value = proof
+            if failing == 'read': observer.query.side_effect = RuntimeError('private SQL')
+            if failing == 'close': observer.close.side_effect = RuntimeError('private process')
+            with patch.object(g, 'Psql', side_effect=RuntimeError('private config') if failing == 'open' else None,
+                              return_value=observer), patch('builtins.print') as output, self.assertRaises(RuntimeError):
+                guard.verify_journal_after_wait(0, final)
+            event = json.loads(output.call_args.args[0])
+            self.assertFalse(event['checks']['observation'])
+            self.assertNotIn('private', json.dumps(event))
+
+    def test_final_journal_real_pg_case_is_selected_and_default_does_not_take_stats(self):
+        root = Path(g.__file__).resolve().parents[1]
+        source = (root / 'cmd/adtr/db_journal_integration_test.go').read_text()
+        self.assertIn('func TestActivityCandidateFinalJournalActualRecorderAndPostgres', source)
+        self.assertIn('acknowledged != 2', source)
+        self.assertIn('proof.Acknowledged != 3', source)
+        runner = (root / 'scripts/run_integration.py').read_text()
+        self.assertIn('"^TestActivityCandidate"', runner)
+        self.assertIn('"./cmd/adtr"', runner)
+        default = (root / 'cmd/adtr/db_journal_default.go').read_text()
+        self.assertNotIn('.Stats(', default)
+        self.assertNotIn('Stderr', default)
 
     def test_resume_records_real_monotonic_duration(self):
         guard = self.guard(); guard.stopped_at = 100.

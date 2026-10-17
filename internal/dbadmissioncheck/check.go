@@ -35,6 +35,7 @@ func (d Diagnostic) String() string { return fmt.Sprintf("%s: %s", d.Position, d
 func Check(fset *token.FileSet, path string, files []*ast.File, info *types.Info) []Diagnostic {
 	out := criticalDeclarations(fset, path, files, info)
 	out = append(out, captureEndDeclarations(fset, path, files, info)...)
+	out = append(out, journalFinalDeclarations(fset, path, files, info)...)
 	scanners := scanOnlyParameters(files, info)
 	emit := func(n ast.Node, reason string) { out = append(out, Diagnostic{fset.Position(n.Pos()), reason}) }
 	for _, file := range files {

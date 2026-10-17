@@ -228,7 +228,8 @@ RUNNER_DELTAS = [('from user_asset_export_v3_terminal_ci import SUITES as EXPORT
   '                try:\n'
   "                    # The worker's successful Wait includes journal.Close/drain.\n"
   '                    # Query its final report while the isolated database is alive.\n'
-  '                    running_cancel_guard.verify_journal_after_wait(worker.returncode)\n'
+  '                    running_cancel_guard.verify_journal_after_wait(worker.returncode, '
+  'owned_ci_worker.final_journal_after_wait(logs))\n'
   '                except Exception:\n'
   '                    shutdown_error = RuntimeError("owned CI final journal proof failed")\n'
   '            if ldap_fixture is not None:\n'
@@ -537,6 +538,48 @@ class Contracts(unittest.TestCase):
         self.assertIsNone(owner.witness)
         self.assertIsNone(owner.page_fd)
 
+    def test_final_journal_private_projection_is_strict_and_post_wait(self):
+        import io
+        stats = dict(event=r.FINAL_JOURNAL_EVENT, processIDSHA256='ab' * 32,
+                     closeOK=True, acceptanceStopped=True,
+                     **{key: 0 for key in r.FINAL_JOURNAL_COUNTS})
+        line = json.dumps(stats) + '\n'
+        owner = r.OwnedCIWorker(); owner.process = Mock(returncode=None)
+        logs = io.StringIO('private other log\n' + line); logs.seek(5)
+        with patch('builtins.print') as output:
+            self.assertIsNone(owner.final_journal_after_wait(logs))
+            self.assertEqual(logs.tell(), 5)
+            owner.process.returncode = 0
+            self.assertEqual(owner.final_journal_after_wait(logs), stats)
+            self.assertEqual(logs.tell(), 5)
+            output.assert_not_called()
+        for key in r.FINAL_JOURNAL_COUNTS:
+            for bad in (True, -1, 2 ** 63, 1.0, '0', {}, None):
+                self.assertIsNone(r.final_journal_projection(io.StringIO(
+                    json.dumps(stats | {key: bad}) + '\n')))
+            self.assertEqual(r.final_journal_projection(io.StringIO(
+                json.dumps(stats | {key: 2 ** 63 - 1}) + '\n'))[key], 2 ** 63 - 1)
+        malformed = [line + line, line.rstrip(), '', 'prefix ' + line, ' ' * 1024 + line,
+                     json.dumps(stats | {'extra': ''}) + '\n',
+                     json.dumps(stats | {'processIDSHA256': 'AB' * 32}) + '\n',
+                     json.dumps(stats | {'processIDSHA256': 'ab' * 32 + '\n'}) + '\n',
+                     json.dumps(stats | {'closeOK': 1}) + '\n',
+                     json.dumps(stats | {'acceptanceStopped': 0}) + '\n',
+                     line.replace('"closeOK": true', '"closeOK": true, "closeOK": false'),
+                     '\udcff' + line]
+        for key in stats:
+            malformed.append(json.dumps({k: v for k, v in stats.items() if k != key}) + '\n')
+        for text in malformed:
+            logs = io.StringIO(text); logs.seek(1 if text else 0); before = logs.tell()
+            self.assertIsNone(r.final_journal_projection(logs))
+            self.assertEqual(logs.tell(), before)
+        with patch.object(r, 'MAX_FINAL_LOG_BYTES', len(line) - 1):
+            self.assertIsNone(r.final_journal_projection(io.StringIO(line)))
+        broken = Mock(); broken.tell.return_value = 9
+        broken.read.side_effect = UnicodeError('private malformed bytes')
+        self.assertIsNone(r.final_journal_projection(broken))
+        self.assertEqual(broken.seek.call_args.args, (9,))
+
     def test_first_invalidation_projection_is_exact_bounded_and_private(self):
         import io
         event = dict(event=r.FINAL_INVALIDATION_EVENT, reason='unclean_close', phase='sealed')
@@ -672,7 +715,7 @@ class Contracts(unittest.TestCase):
                          and ast.unparse(node.target) == '(label, process)')
         final_witness = source.index('owned_ci_worker.close_after_wait()')
         cleanup = source.index('running_cancel_guard.cleanup_activity_fixture_after_wait(worker.returncode)')
-        proof = source.index('running_cancel_guard.verify_journal_after_wait(worker.returncode)')
+        proof = source.index('running_cancel_guard.verify_journal_after_wait(worker.returncode, owned_ci_worker.final_journal_after_wait(logs))')
         self.assertLess(wait_loop.end_lineno, gate.lineno)
         self.assertLess(final_witness, cleanup); self.assertLess(cleanup, proof)
         code = compile(ast.fix_missing_locations(ast.Module(body=[gate], type_ignores=[])),
@@ -702,7 +745,7 @@ class Contracts(unittest.TestCase):
         self.assertEqual(len(calls), 1)
         proof = calls[0]
         self.assertEqual(ast.unparse(proof),
-                         'running_cancel_guard.verify_journal_after_wait(worker.returncode)')
+                         'running_cancel_guard.verify_journal_after_wait(worker.returncode, owned_ci_worker.final_journal_after_wait(logs))')
         wait_loop = next(node for node in ast.walk(tree) if isinstance(node, ast.For)
                          and ast.unparse(node.target) == '(label, process)')
         self.assertLess(wait_loop.end_lineno, proof.lineno)
@@ -721,11 +764,13 @@ class Contracts(unittest.TestCase):
                                             (RuntimeError('earlier cleanup'), None)):
             guard = Mock()
             guard.verify_journal_after_wait.side_effect = journal_error
+            owner = Mock(); owner.final_journal_after_wait.return_value = {'private': 'stats'}
             scope = {'running_cancel_guard': guard, 'worker': Mock(returncode=0),
+                     'owned_ci_worker': owner, 'logs': object(),
                      'shutdown_error': prior_error}
             exec(code, scope)
             if prior_error is None:
-                guard.verify_journal_after_wait.assert_called_once_with(0)
+                guard.verify_journal_after_wait.assert_called_once_with(0, {'private': 'stats'})
                 if journal_error is not None:
                     self.assertEqual(str(scope['shutdown_error']), 'owned CI final journal proof failed')
             else:
