@@ -44,12 +44,18 @@ func TestIntegrationApplicationNormalEOFLeavesRescueLive(t *testing.T) {
 	}()
 	page, nonce := testWitnessFile(t, nil)
 	failed := make(chan struct{}, 2)
-	cleanup, err := StartCIController(normal, rescue, page, nonce, func() { failed <- struct{}{} })
+	endReader, endWriter, pipeErr := os.Pipe()
+	if pipeErr != nil {
+		t.Fatal("capture end pipe")
+	}
+	defer endReader.Close()
+	defer endWriter.Close()
+	cleanup, err := StartCIController(normal, rescue, page, endReader, nonce, func() { failed <- struct{}{} })
 	if err != nil {
 		t.Fatal("application install")
 	}
 	defer cleanup()
-	if _, err := StartCIController(normal, rescue, page, nonce, nil); err == nil {
+	if _, err := StartCIController(normal, rescue, page, endReader, nonce, nil); err == nil {
 		t.Fatal("second installation accepted")
 	}
 	coordinator.Lock()

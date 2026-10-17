@@ -293,6 +293,7 @@ def main():
                 if args.suite in {RUNNING_CANCEL_SUITE} | KIND_RUNNING_CANCEL_SUITES:
                     asset_kind = {GROUP_RUNNING_CANCEL_SUITE: "group", COMPUTER_RUNNING_CANCEL_SUITE: "computer"}.get(args.suite, "user")
                     running_cancel_guard = RunningExportCancelGuard(worker, export_worker_nonce, Path("bin/adtr").resolve(), name, export_worker_app, env["ADTR_DATABASE_URL"], asset_kind=asset_kind, controller=owned_ci_worker.controller)
+                    export_worker_guard.resume_delegate = running_cancel_guard._resume_capture_owned
                     running_cancel_guard.start()
                     env.update(ADTR_E2E_RUNNING_CANCEL_GUARD_URL=running_cancel_guard.url,
                                ADTR_E2E_RUNNING_CANCEL_GUARD_TOKEN=running_cancel_guard.token)

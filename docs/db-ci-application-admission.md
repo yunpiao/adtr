@@ -370,3 +370,55 @@ The final event has fixed bounded content, but its synchronous stderr write is
 not a bounded transport protocol: an OS or disk stall can delay shutdown. In
 these owned CI runs stderr is the existing private temporary log file. The
 post-Wait extractor never echoes that file and missing output remains unknown.
+
+### Explicit capture-end authorization (CI-only)
+
+Run 39051685632, head 85af3126, reported `target_revoked` / `sealed` in
+all three running-cancel jobs. Each browser completed its assertions and each
+worker exited zero, but the final sticky witness correctly rejected the run.
+This confirms the target-registration obligation remained active when the
+resumed health callback revoked its registration before the release RPC. The
+older group configure-EOF event is separate and remains unexplained.
+
+The new boundary ends those capture obligations while all worker threads are
+still stopped, after the unchanged strict PostgreSQL/checkpoint/registry checks
+and clear sticky witness. It adds no time to the original 1.5-second deadline.
+The parent requests a single commit from the independent rescuer. That same
+single-threaded rescuer owns every capture-related CONT, verifies the exact
+worker and all-T state, and sends a fixed 48-byte authorization in one
+nonblocking write to an exclusive pipe before acknowledging the commit. The
+frame binds launch nonce, epoch, ticket generation and registration generation.
+A lost acknowledgement, late request, partial write or rescue failure fails the
+attempt; it cannot be retried as a new capture. Parent fallback must first Wait
+for the rescuer and permanently fail before issuing its recovery CONT.
+
+The worker reads at most 49 bytes without blocking while holding its registry
+mutex. Only EAGAIN means authorization is not yet present. EOF, short/extra
+frames or a binding mismatch remain permanent failures. A valid frame is
+consumed once and cached for that exact seal, so subsequent normal pipe EOF does
+not revoke it. No shared-memory publication or general atomic mmap-store claim
+is used. The original sticky page remains single-worker-writer and never resets.
+
+The authorization ends only registration retention, clean target-connection
+retention, and continued waiting of already-gated connection attempts. Original
+context errors are still returned. It neither opens admission nor reports a
+successful release; those require the existing authenticated release/ACK.
+Transport failures, malformed state, failed connects, native/unclean Close and
+all other hard failures remain sticky before and after authorization. A dirty
+close or EOF observed before STOP but committed after CONT cannot be erased.
+This also means expired contexts can still reveal a separate unclean-close
+failure; no timeout or selected-health context was changed to conceal it.
+
+Every ARM-after CONT path, including both Python watchdogs and browser finally
+restoration, uses the same rescuer. The three running suites route browser
+SIGCONT through the existing authenticated loopback guard; a failed RPC never
+falls back to a browser signal. Ordinary suites keep their existing signal path.
+The original barrier ROLLBACK remains after complete capture qualification and
+now after capture-end acknowledgement, avoiding an extended database-lock hold.
+
+Evidence requires `captureEndAuthorized: true` in addition to the previous
+strict fields. Final worker Wait, sticky validity, task cancellation, two real
+owner activity advances, exact sentinel cleanup and journal acknowledgement all
+remain required. Deterministic Go contracts cover each side of the boundary,
+malformed/stale/duplicate buffered frames and hard failures; isolated rescuer
+runtime contracts and the three real application suites must execute in CI.

@@ -1,3 +1,4 @@
+import { runningGuard } from "./owned-running-control";
 import { expect, type Page, type BrowserContext, type TestInfo } from "@playwright/test";
 import { readFile, writeFile, readdir, readlink } from "node:fs/promises";
 import { execFile } from "node:child_process";
@@ -170,6 +171,10 @@ async function checkedWorker() {
   } catch { throw new Error("Owned Worker identity could not be verified"); }
 }
 async function signalWorker(signal: "SIGSTOP" | "SIGCONT") {
+  if (signal === "SIGCONT" && (process.env.ADTR_E2E_RUNNING_CANCEL_GUARD_URL !== undefined || process.env.ADTR_E2E_RUNNING_CANCEL_GUARD_TOKEN !== undefined)) {
+    await runningGuard("resume");
+    return;
+  }
   const worker = await checkedWorker();
   // Recheck process birth/parent immediately before signalling, after thread reads.
   const stat = await readFile(`/proc/${worker.pid}/stat`, "utf8");

@@ -126,7 +126,7 @@ func witnessSyscall(path, file, function string, id *ast.Ident, ancestors []ast.
 			return false
 		}
 		for _, ancestor := range ancestors {
-			if condition, ok := ancestor.(*ast.IfStmt); ok && sourceText(condition.Cond) == "i < 2 && syscall.SetNonblock(fd, true) != nil" {
+			if condition, ok := ancestor.(*ast.IfStmt); ok && sourceText(condition.Cond) == "i != 2 && syscall.SetNonblock(fd, true) != nil" {
 				return true
 			}
 		}

@@ -113,6 +113,7 @@ FAILURE_REASONS = MappingProxyType({
     'invalid journal baseline': 'journal_baseline_invalid',
     'checkpoint task is not isolated': 'checkpoint_not_isolated',
     'stopped controller witness invalid': 'stopped_witness_invalid',
+    'capture end authorization failed': 'capture_end_failed',
     'stopped candidate identity changed': 'stopped_candidate_changed',
     'pinned candidate changed': 'pinned_candidate_changed',
     'checkpoint task boundary pending': 'task_boundary_pending',
@@ -121,7 +122,7 @@ FAILURE_REASONS = MappingProxyType({
 FAILURE_STAGES = frozenset({'preflight', 'observer_open', 'initial_observation',
     'initial_boundary', 'barrier_open', 'barrier_lock', 'resume', 'capture', 'capture_readiness',
     'stop_identity', 'stop_signal', 'all_threads', 'stopped_observation',
-    'checkpoint_validation', 'session_validation', 'capture_window',
+    'checkpoint_validation', 'session_validation', 'capture_window', 'capture_end',
     'registry_snapshot', 'registry_match', 'candidate_binding', 'candidate_strict',
     'registry_pin', 'sealed_observation', 'sealed_registry',
     'barrier_release', 'cleanup', 'http_request'})
@@ -814,7 +815,8 @@ class RunningExportCancelGuard:
         self.activity_fixture_created = False
         self.activity_owner = None
         self.nonce = bytes.fromhex(nonce)
-        self.owned = OwnedExportWorkerGuard(process, nonce, binary, proc_root)
+        self.owned = OwnedExportWorkerGuard(process, nonce, binary, proc_root,
+            resume_delegate=self._resume_capture_owned)
         require(application_name == 'adtr-user-export-' + nonce and re.fullmatch('[0-9a-f]{32}', nonce), 'invalid application identity')
         self.application_name, self.container = application_name, database_container
         self.database_url = database_url
@@ -1109,11 +1111,18 @@ class RunningExportCancelGuard:
                     'stopped candidate identity changed')
             stage = 'capture_window'
             require(time.monotonic() < deadline, 'activity checkpoint exceeded safe callback window')
+            stage = 'capture_end'
+            require(self.controller.after_stop(deadline) is True, 'stopped controller witness invalid')
+            require(all(s == 'T' for s in self.threads()), 'not all owned threads stopped')
+            require(self.controller.commit_capture(sealed_frame['records'][0]['generation'],
+                    candidate[0], deadline) is True, 'capture end authorization failed')
+            require(time.monotonic() < deadline, 'activity checkpoint exceeded safe callback window')
+            require(all(s == 'T' for s in self.threads()), 'not all owned threads stopped')
             stage = 'barrier_release'
             released = lock.query("ROLLBACK; SELECT to_json(true)", timeout=.5)
             require(released is True, 'activity barrier release unverified')
             return task | {'workerIDSHA256': digest(worker_id), 'applicationNameSHA256': digest(self.application_name),
-                'admissionSealed': True, 'stickyWitnessValid': True, 'allThreadsStopped': True, 'threadCount': len(states), 'ownedSessionCount': len(sessions),
+                'admissionSealed': True, 'stickyWitnessValid': True, 'captureEndAuthorized': True, 'allThreadsStopped': True, 'threadCount': len(states), 'ownedSessionCount': len(sessions),
                 'allowedActivityTransactions': txs, 'unsafeTransactions': 0, 'blockedOwnedBackends': blocked,
                 'activityLockReleased': True, 'observerStartedBeforeResume': True, 'checkpointCaught': True,
                 'observerStartedMonotonic': observer_started, 'resumedForCheckpointMonotonic': resumed,
@@ -1137,6 +1146,14 @@ class RunningExportCancelGuard:
                 self.failed = True
                 self.resume()
                 raise RuntimeError('checkpoint session cleanup failed') from None
+
+    def _resume_capture_owned(self):
+        # After ARM only the independent rescuer may issue CONT. This also
+        # covers OwnedExportWorkerGuard's cumulative watchdog and close path.
+        if self.controller is not None and self.controller.armed:
+            self.controller.resume_and_release(abort=self.failed)
+            return True
+        return False
 
     def resume(self):
         with self._mutex:

@@ -516,7 +516,7 @@ class ContractTests(unittest.TestCase):
         expected = {
             'validate_sessions': '4efb9b60ec57914d43c55c695e0916b07d71fbcd3f3cdac8c3cd06b630bbd092',
             'validate_checkpoint': '83ff1b7a711627ec7ee4e28761dde75f5e18ae3e81abb39927b8057022a06e74',
-            'checkpoint': '039710ad8b035333d739a9f84aef7bf44c5e2984919ee83d3a71c3164a151a8a',
+            'checkpoint': '69d5c72ae76ed12149e429a60d32a6098d7567591f944144b1261352ff0945ed',
         }
         actual = {node.name: hashlib.sha256(ast.get_source_segment(source, node).encode()).hexdigest()
                   for node in ast.walk(ast.parse(source)) if isinstance(node, ast.FunctionDef)
@@ -744,6 +744,8 @@ class ContractTests(unittest.TestCase):
         guard.controller.snapshot.return_value = frame
         guard.controller.pin.return_value = frame
         guard.controller.after_stop.return_value = True
+        guard.controller.commit_capture.return_value = True
+        guard.controller.armed = False
         guard.owned = factory.return_value
         guard.owned.assert_identity = Mock(return_value="T")
         return guard
@@ -913,6 +915,64 @@ class ContractTests(unittest.TestCase):
         self.assertEqual(events[-1], 'resume')
         observer.close.assert_called_once(); barrier.close.assert_called_once()
         self.assertTrue(guard.failed)
+
+    def test_capture_end_commit_precedes_barrier_release_and_failure_is_terminal(self):
+        for commit in (True, False):
+            guard = self.guard(); guard.threads = Mock(return_value=['T'])
+            queued = task() | {'state': 'queued', 'attempt': 0, 'snapshotCount': 0}
+            observer, barrier = Mock(), Mock(pid=99)
+            observer.query.side_effect = [{'otherNonterminal': 0, 'journalCount': 0, 'task': queued, 'sessions': []},
+                *[{'task': task(), 'sessions': [session()]} for _ in range(3)]]
+            events = []
+            barrier.query.side_effect = lambda sql, **kw: (events.append('rollback') or True) if sql.startswith('ROLLBACK') else {'count': 1}
+            guard.controller.commit_capture.side_effect = lambda *args: events.append('commit') or commit
+            with patch.object(g, 'Psql', side_effect=[observer, barrier]):
+                if commit:
+                    self.assertTrue(guard.checkpoint('task-one', 'worker')['checkpointCaught'])
+                    self.assertEqual(events, ['commit', 'rollback'])
+                else:
+                    with self.assertRaises(RuntimeError): guard.checkpoint('task-one', 'worker')
+                    self.assertEqual(events, ['commit'])
+                    self.assertTrue(guard.failed)
+            guard.controller.commit_capture.assert_called_once()
+            args = guard.controller.commit_capture.call_args.args
+            self.assertEqual(args[:2], (1, 2))
+            self.assertEqual(args[2], guard.controller.pin.call_args.args[1])
+
+    def test_browser_cont_routes_through_guard_without_signal_fallback(self):
+        root = Path(g.__file__).resolve().parents[1]
+        control = (root / 'web/e2e/owned-running-control.ts').read_text()
+        self.assertNotIn('terminal-helpers', control)
+        self.assertIn('redirect: "error"', control)
+        for kind in ('user', 'group', 'computer'):
+            source = (root / f'web/e2e/{kind}-asset-export-v3-terminal-helpers.ts').read_text()
+            signal_body = source.split('async function signalWorker(', 1)[1].split('async function queueActivity', 1)[0]
+            routing = signal_body.split('const worker = await checkedWorker()', 1)[0]
+            self.assertIn('signal === "SIGCONT"', routing)
+            self.assertIn('await runningGuard("resume");', routing)
+            self.assertIn('return;', routing)
+            self.assertNotIn('catch', routing)
+            self.assertLess(signal_body.index('await runningGuard'), signal_body.index('process.kill'))
+            spec = (root / f'web/e2e/{kind}-asset-export-v3-running-cancel.spec.ts').read_text()
+            self.assertIn('finally { await restoreOwnedExportWorker(); }', spec)
+
+    def test_all_armed_owned_resumes_delegate_and_never_signal_directly(self):
+        from user_asset_export_v3_worker_guard import OwnedExportWorkerGuard
+        guard = self.guard()
+        guard.controller.armed = True
+        owned = object.__new__(OwnedExportWorkerGuard)
+        owned.process = Mock(); owned.process.poll.return_value = None
+        owned.assert_identity = Mock()
+        owned.resume_delegate = guard._resume_capture_owned
+        owned.resume()
+        guard.controller.resume_and_release.assert_called_once_with(abort=False)
+        owned.process.send_signal.assert_not_called()
+        guard.controller.resume_and_release.side_effect = RuntimeError('closed')
+        with self.assertRaises(RuntimeError): owned.resume()
+        owned.process.send_signal.assert_not_called()
+        guard.controller.armed = False
+        owned.resume()
+        owned.process.send_signal.assert_called_once_with(signal.SIGCONT)
 
     def test_complete_checkpoint_locks_existing_row_and_releases(self):
         guard = self.guard(); guard.threads = Mock(return_value=['T'] * 4)

@@ -40,7 +40,7 @@ test("real computer snapshot running export accepts cancellation then clears all
     const checkpoint = await runningGuard("checkpoint", { taskID, workerID: pause.workerID });
     expect(checkpoint).toMatchObject({ taskID, kind: "computer_assets.v3.export", state: "running", attempt: 1, progress: 10,
       snapshotCount: 1, manifestCount: 0, chunkCount: 0, allThreadsStopped: true, unsafeTransactions: 0,
-      activityLockReleased: true, observerStartedBeforeResume: true, checkpointCaught: true });
+      captureEndAuthorized: true, activityLockReleased: true, observerStartedBeforeResume: true, checkpointCaught: true });
     expect(checkpoint.leaseRemainingSeconds).toBeGreaterThan(20);
     expect(checkpoint.fencingToken).toBeGreaterThan(0);
     expect(checkpoint.blockedOwnedBackends).toBeGreaterThan(0);

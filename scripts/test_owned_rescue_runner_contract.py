@@ -163,6 +163,8 @@ RUNNER_DELTAS = [('from user_asset_export_v3_terminal_ci import SUITES as EXPORT
   '                    running_cancel_guard = RunningExportCancelGuard(worker, '
   'export_worker_nonce, Path("bin/adtr").resolve(), name, export_worker_app, '
   'env["ADTR_DATABASE_URL"], asset_kind=asset_kind, controller=owned_ci_worker.controller)\n'
+  '                    export_worker_guard.resume_delegate = '
+  'running_cancel_guard._resume_capture_owned\n'
   '                    running_cancel_guard.start()\n'
   '                    env.update(ADTR_E2E_RUNNING_CANCEL_GUARD_URL=running_cancel_guard.url,\n'
   '                               '
@@ -332,6 +334,88 @@ class Contracts(unittest.TestCase):
             with self.assertRaises(r.ControlFailure): r._frame(value, 1)
         del candidate['activityKey']
         with self.assertRaises(r.ControlFailure): r._frame(value, 1)
+
+    def test_capture_end_frame_matches_go_fixed_vector(self):
+        value = r.CAPTURE_END.pack(b'ADTREND1', bytes([7]) * 16, 1, 2, 3)
+        self.assertEqual(len(value), 48)
+        self.assertEqual(value.hex(), '41445452454e4431' + '07' * 16
+                         + '0000000000000001' + '0000000000000002' + '0000000000000003')
+
+    def test_capture_commit_ack_is_bound_once_and_original_deadline(self):
+        c = controller(); c.capture_deadline = 10
+        ack = dict(version=2, epoch=1, status='committed', ticketGeneration=7, registrationGeneration=9)
+        c.supervisor.receive.return_value = ack
+        with patch.object(r.time, 'monotonic', return_value=1):
+            self.assertIs(c.commit_capture(7, 9, 10), True)
+            self.assertTrue(c.committed)
+            with self.assertRaises(r.ControlFailure): c.commit_capture(7, 9, 10)
+        c.supervisor.send.assert_called_once()
+        self.assertEqual(c.supervisor.send.call_args.args[1], 10)
+        self.assertEqual(c.supervisor.receive.call_args.args, (10,))
+        for response in (ack | {'ticketGeneration': True}, ack | {'registrationGeneration': 8},
+                         ack | {'private': 'secret'}):
+            c = controller(); c.capture_deadline = 10
+            c.supervisor.receive.return_value = response
+            with patch.object(r.time, 'monotonic', return_value=1):
+                with self.assertRaises(r.ControlFailure): c.commit_capture(7, 9, 10)
+            self.assertTrue(c.invalid); self.assertFalse(c.committed)
+        c = controller(); c.capture_deadline = 10
+        c.supervisor.receive.return_value = ack
+        with patch.object(r.time, 'monotonic', side_effect=[1, 10]):
+            with self.assertRaises(r.ControlFailure): c.commit_capture(7, 9, 10)
+        self.assertFalse(c.committed)
+        c = controller(); c.armed = False
+        c.supervisor.send.side_effect = r.ControlFailure()
+        with self.assertRaises(r.ControlFailure): c.arm(10)
+        self.assertTrue(c.armed)  # Uncertain ARM must retain the exclusive CONT route.
+
+    def test_rescuer_capture_write_is_atomic_and_all_failures_recover(self):
+        arm = dict(version=2, epoch=1, op='arm', deadline=1.5)
+        commit = dict(version=2, epoch=1, op='commit_capture', ticketGeneration=7, registrationGeneration=9)
+        for scenario in ('ok', 'not_stopped', 'identity', 'short', 'lost_ack', 'duplicate', 'pre_eof', 'expired'):
+            supervisor, rescue, identity = Mock(), Mock(), Mock()
+            events = []
+            frames = [arm] + ([] if scenario == 'pre_eof' else [commit])
+            if scenario == 'duplicate': frames.append(commit)
+            supervisor.receive.side_effect = frames + [r.ControlFailure()]
+            identity.threads_stopped.return_value = scenario != 'not_stopped'
+            identity.resume.side_effect = lambda deadline: events.append('resume')
+            if scenario == 'identity': identity.verify.side_effect = [None, r.ControlFailure()]
+            def send(frame, deadline):
+                if frame.get('status') == 'committed' and scenario == 'lost_ack':
+                    raise r.ControlFailure()
+            supervisor.send.side_effect = send
+            def write(fd, payload):
+                events.append('write')
+                self.assertEqual(fd, 81)
+                self.assertEqual(r.CAPTURE_END.unpack(payload), (b'ADTREND1', bytes(16), 1, 7, 9))
+                self.assertEqual(len(payload), 48)
+                return 47 if scenario == 'short' else 48
+            clock = [0, 0, 0, 0, 0, 2] if scenario == 'expired' else None
+            def now():
+                return clock.pop(0) if clock else (2 if scenario == 'expired' else 0)
+            with patch.object(r, 'PipeChannel', side_effect=[supervisor, rescue]), \
+                    patch.object(r, 'OwnedIdentity', return_value=identity), \
+                    patch.object(r, '_rescue_exchange'), patch.object(r.os, 'write', side_effect=write) as writing, \
+                    patch.object(r.os, 'close'), patch.object(r.time, 'monotonic', side_effect=now), \
+                    patch.object(r.select, 'select', return_value=([1], [], [])):
+                self.assertEqual(r._rescue_main(1, 2, 100, 9, '/owned', 81, bytes(16)), 1)
+            self.assertLessEqual(writing.call_count, 1)
+            if scenario in ('not_stopped', 'identity', 'pre_eof', 'expired'):
+                writing.assert_not_called()
+            if 'write' in events: self.assertLess(events.index('write'), events.index('resume'))
+            self.assertIn('resume', events)
+
+    def test_capture_fd_and_secondary_guard_resume_are_exclusive(self):
+        source = Path(r.__file__).read_text()
+        self.assertIn('os.pipe2(os.O_NONBLOCK | os.O_CLOEXEC)', source)
+        self.assertIn('os.close(capture_write); self.fds.remove(capture_write)', source)
+        tree = ast.parse(source)
+        commit = next(node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)
+                      and node.name == 'commit_capture')
+        self.assertNotIn('SIGCONT', ast.get_source_segment(source, commit))
+        runner = Path(__file__).with_name('test_auth_e2e.py').read_text()
+        self.assertEqual(runner.count('export_worker_guard.resume_delegate = running_cancel_guard._resume_capture_owned'), 1)
 
     def test_close_same_socket_fd_once(self):
         c = self.channel()
@@ -821,19 +905,19 @@ class Contracts(unittest.TestCase):
                'PGSERVICEFILE': '/private', 'PGPASSFILE': '/private', 'PGSSLMODE': 'require',
                'ADTR_DATABASE_URL': 'explicit-isolated-test-dsn',
                'ADTR_CI_DB_NORMAL_FD': '999', 'PATH': '/fixed'}
-        child = r.owned_worker_environment(env, (30, 31, 32))
+        child = r.owned_worker_environment(env, (30, 31, 32, 33))
         self.assertFalse(any(key.startswith('PG') for key in child))
         self.assertEqual(child['ADTR_DATABASE_URL'], env['ADTR_DATABASE_URL'])
-        self.assertEqual([child[key] for key in r.ENV_FDS], ['30', '31', '32'])
+        self.assertEqual([child[key] for key in r.ENV_FDS], ['30', '31', '32', '33'])
         self.assertIn('PGHOST', env)  # Does not mutate the caller/global environment.
         self.assertEqual(child['PATH'], '/fixed')
 
     def test_rescuer_environment_and_descriptor_allowlist(self):
         source = Path(r.__file__).read_text()
-        self.assertIn('pass_fds=(normal_worker, rescue_worker, self.page_fd)', source)
+        self.assertIn('pass_fds=(normal_worker, rescue_worker, self.page_fd, capture_read)', source)
         self.assertLess(source.index('os.set_blocking(normal_worker, False)'), source.index('self.process = subprocess.Popen'))
         self.assertLess(source.index('os.set_blocking(rescue_worker, False)'), source.index('self.process = subprocess.Popen'))
-        self.assertIn('pass_fds=(supervisor_child, rescue_parent)', source)
+        self.assertIn('pass_fds=(supervisor_child, rescue_parent, capture_write)', source)
         self.assertIn('env={"PATH": os.defpath, "LC_ALL": "C.UTF-8"}', source)
 
     def test_rescue_ack_is_closed_and_sequence_bound(self):

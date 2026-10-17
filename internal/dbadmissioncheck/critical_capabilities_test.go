@@ -123,10 +123,10 @@ func TestOwnedDescriptorNonblockIsExact(t *testing.T) {
 		name, file, body string
 		bad              bool
 	}{
-		{"first two owned descriptors", "db_admission_ci.go", `if i<2 && syscall.SetNonblock(fd,true)!=nil{}`, false},
+		{"owned descriptors excluding witness", "db_admission_ci.go", `if i!=2 && syscall.SetNonblock(fd,true)!=nil{}`, false},
 		{"missing index bound", "db_admission_ci.go", `_=syscall.SetNonblock(fd,true)`, true},
-		{"blocking mode", "db_admission_ci.go", `if i<2 && syscall.SetNonblock(fd,false)!=nil{}`, true},
-		{"wrong file", "other.go", `if i<2 && syscall.SetNonblock(fd,true)!=nil{}`, true},
+		{"blocking mode", "db_admission_ci.go", `if i!=2 && syscall.SetNonblock(fd,false)!=nil{}`, true},
+		{"wrong file", "other.go", `if i!=2 && syscall.SetNonblock(fd,true)!=nil{}`, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, ds := fixtureCheck(t, module+"/cmd/adtr", tc.file, `package main;import "syscall";func configureCIAdmission(fd,i int){`+tc.body+`}`, imp)

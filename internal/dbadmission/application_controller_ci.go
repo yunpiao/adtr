@@ -104,17 +104,21 @@ func (g *lifecycleGate) applicationSnapshot(seq uint64, kind string) (applicatio
 // StartCIController is called only by the tagged worker bootstrap, before any
 // managed connection. It is one-shot: no uninstall/reinstall and no page reuse.
 // Cleanup closes transports, but the witness remains mapped until process exit.
-func StartCIController(normal, rescue, witness *os.File, nonce [16]byte, onFailure func()) (func(), error) {
+func StartCIController(normal, rescue, witness, captureEnd *os.File, nonce [16]byte, onFailure func()) (func(), error) {
 	coordinator.Lock()
 	defer coordinator.Unlock()
-	if coordinator.used || coordinator.gate != nil || normal == nil || rescue == nil || witness == nil {
+	if coordinator.used || coordinator.gate != nil || normal == nil || rescue == nil || witness == nil || captureEnd == nil {
 		return nil, errSealProtocol
+	}
+	endFD, err := prepareCaptureEnd(captureEnd)
+	if err != nil {
+		return nil, err
 	}
 	w, err := mapCIWitness(witness, nonce)
 	if err != nil {
 		return nil, err
 	}
-	g := &lifecycleGate{witness: w, application: true, nonce: nonce}
+	g := &lifecycleGate{witness: w, application: true, nonce: nonce, captureEndFD: endFD}
 	coordinator.used = true
 	coordinator.gate = g
 	var stopping atomic.Bool
@@ -123,6 +127,12 @@ func StartCIController(normal, rescue, witness *os.File, nonce [16]byte, onFailu
 	cleanup := func() {
 		stopOnce.Do(func() { stopping.Store(true); normal.Close(); rescue.Close() })
 		wg.Wait()
+		// Retain the reader through controller join and serialize raw-FD teardown
+		// with every consumer, so a late callback cannot read a reused descriptor.
+		g.mu.Lock()
+		g.captureEndFD = 0
+		captureEnd.Close()
+		g.mu.Unlock()
 		reportOnce.Do(func() { g.writeFinalInvalidationDiagnostic() })
 	}
 	// Each channel has one reader. Normal EOF cannot close the rescue channel.

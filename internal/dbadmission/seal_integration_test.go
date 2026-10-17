@@ -5,7 +5,9 @@ package dbadmission
 import (
 	"context"
 	"crypto/rand"
+	"encoding/binary"
 	"encoding/hex"
+	"os"
 	"sync"
 	"testing"
 	"time"
@@ -16,6 +18,16 @@ import (
 // This helper proves actual backend/lifetime and row-barrier correspondence.
 // It does not claim a synthetic identity proves an exporter snapshot checkpoint.
 func TestSealIntegrationExistingTargetAndSecondBegin(t *testing.T) {
+	for _, authorized := range []bool{false, true} {
+		name := "without_capture_end"
+		if authorized {
+			name = "with_capture_end"
+		}
+		t.Run(name, func(t *testing.T) { testSealIntegrationTargetLifecycle(t, authorized) })
+	}
+}
+
+func testSealIntegrationTargetLifecycle(t *testing.T, authorized bool) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	config := integrationConfig(t)
@@ -199,6 +211,30 @@ func TestSealIntegrationExistingTargetAndSecondBegin(t *testing.T) {
 	if total != 1 || matching != 1 || time.Now().After(deadline) {
 		t.Fatal("independent backend set did not match target")
 	}
+	if authorized {
+		endReader, endWriter, pipeErr := os.Pipe()
+		if pipeErr != nil {
+			t.Fatal("capture end pipe")
+		}
+		defer endReader.Close()
+		defer endWriter.Close()
+		fd, prepareErr := prepareCaptureEnd(endReader)
+		if prepareErr != nil {
+			t.Fatal("capture end descriptor")
+		}
+		g.mu.Lock()
+		g.captureEndFD = fd
+		frame := make([]byte, 48)
+		copy(frame[:8], "ADTREND1")
+		copy(frame[8:24], g.nonce[:])
+		binary.BigEndian.PutUint64(frame[24:32], g.seal.epoch)
+		binary.BigEndian.PutUint64(frame[32:40], g.seal.target.generation)
+		binary.BigEndian.PutUint64(frame[40:48], g.seal.registration.generation)
+		g.mu.Unlock()
+		if n, writeErr := endWriter.Write(frame); writeErr != nil || n != 48 {
+			t.Fatal("capture end publication")
+		}
+	}
 	if barrier.Rollback(ctx) != nil {
 		t.Fatal("barrier release failed")
 	}
@@ -211,7 +247,11 @@ func TestSealIntegrationExistingTargetAndSecondBegin(t *testing.T) {
 		t.Fatal("target rollback failed")
 	}
 	release()
-	if g.frame(1).Status != "invalid" {
+	if authorized {
+		if target.Close(ctx) != nil || g.invalid || !g.seal.captureEnded || !g.closing || g.seal.released {
+			t.Fatal("clean target completion invalidated committed capture")
+		}
+	} else if g.frame(1).Status != "invalid" {
 		t.Fatal("target revoke did not invalidate seal")
 	}
 	if g.release(1) != nil {

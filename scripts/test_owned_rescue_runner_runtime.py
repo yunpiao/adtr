@@ -49,6 +49,10 @@ def fixture_worker():
         if request['seq'] <= previous:
             raise RuntimeError('fixture rescue sequence')
         previous = request['seq']
+        if request['op'] == 'release':
+            token = os.read(int(os.environ['ADTR_CI_CAPTURE_END_FD']), 49)
+            if r.CAPTURE_END.unpack(token) != (b'ADTREND1', bytes.fromhex('1' * 32), 1, 1, 1):
+                raise RuntimeError('fixture capture binding')
         state['status'] = 'released'
         rescue.send({'version': 2, 'epoch': 1, 'seq': previous,
                      'kind': 'reply', 'status': 'released'}, time.monotonic() + 3)
@@ -66,10 +70,16 @@ def parent_fixture():
     print(json.dumps({'pid': owner.process.pid, 'starttime': start, 'exe': exe,
                       'rescuer': owner.rescuer.pid}), flush=True)
     command = sys.stdin.readline().strip()
-    if command == 'armed':
-        owner.controller.arm(time.monotonic() + 1.5)
+    capture_deadline = time.monotonic() + 1.5
+    if command in ('armed', 'committed'):
+        owner.controller.arm(capture_deadline)
         owner.controller.pin(1, time.monotonic() + 1)
     owner.process.send_signal(signal.SIGSTOP)
+    if command == 'committed':
+        while time.monotonic() < capture_deadline and not owner.identity.threads_stopped():
+            time.sleep(.002)
+        owner.controller.after_stop(capture_deadline)
+        owner.controller.commit_capture(1, 1, capture_deadline)
     print('stopped', flush=True)
     # A test owns this parent process and kills it. Rescue sibling must survive.
     sys.stdin.read()
@@ -81,7 +91,8 @@ class RuntimeTests(unittest.TestCase):
         owner = spawn()
         try:
             c = owner.controller
-            c.arm(time.monotonic() + 1.5)
+            capture_deadline = time.monotonic() + 1.5
+            c.arm(capture_deadline)
             self.assertEqual(c.pin(1, time.monotonic() + 1)['status'], 'sealed')
             owner.process.send_signal(signal.SIGSTOP)
             deadline = time.monotonic() + 1
@@ -94,6 +105,7 @@ class RuntimeTests(unittest.TestCase):
                 time.sleep(.002)
             self.assertTrue(states and all(state == 'T' for state in states))
             self.assertTrue(c.after_stop(deadline))
+            self.assertTrue(c.commit_capture(1, 1, capture_deadline))
             c.resume_and_release()
             self.assertNotIn(owner.identity.verify(), ('T', 't'))
             with self.assertRaises(r.ControlFailure):
@@ -103,6 +115,66 @@ class RuntimeTests(unittest.TestCase):
         self.assertIsNotNone(owner.process.returncode)
         self.assertIsNone(owner.witness)
         self.assertIsNotNone(owner.rescuer.returncode)
+
+    def test_commit_running_expired_or_duplicate_is_permanent_failure(self):
+        for scenario in ('running', 'expired', 'duplicate'):
+            with self.subTest(scenario=scenario):
+                owner = spawn()
+                try:
+                    c = owner.controller
+                    deadline = time.monotonic() + 1.5
+                    c.arm(deadline)
+                    c.pin(1, deadline)
+                    if scenario != 'running':
+                        owner.process.send_signal(signal.SIGSTOP)
+                        while time.monotonic() < deadline and not owner.identity.threads_stopped():
+                            time.sleep(.002)
+                        self.assertTrue(owner.identity.threads_stopped())
+                    if scenario == 'expired':
+                        time.sleep(max(0, deadline - time.monotonic()) + .01)
+                    if scenario == 'duplicate':
+                        self.assertTrue(c.after_stop(deadline))
+                        self.assertTrue(c.commit_capture(1, 1, deadline))
+                    with self.assertRaises(r.ControlFailure):
+                        c.commit_capture(1, 1, deadline)
+                    self.assertTrue(c.invalid)
+                finally:
+                    try:
+                        owner.shutdown()
+                    except r.ControlFailure:
+                        pass
+                self.assertIsNotNone(owner.process.returncode)
+                self.assertIsNone(owner.witness)
+
+    def test_complete_capture_write_with_lost_ack_never_succeeds(self):
+        from unittest.mock import patch
+        owner = spawn()
+        try:
+            c = owner.controller
+            deadline = time.monotonic() + 1.5
+            c.arm(deadline); c.pin(1, deadline)
+            owner.process.send_signal(signal.SIGSTOP)
+            while time.monotonic() < deadline and not owner.identity.threads_stopped():
+                time.sleep(.002)
+            self.assertTrue(c.after_stop(deadline))
+            receive = c.supervisor.receive
+            def lose_ack(bound):
+                ack = receive(bound)  # Real sibling has completed the atomic write.
+                self.assertEqual(ack['status'], 'committed')
+                raise r.ControlFailure()
+            with patch.object(c.supervisor, 'receive', side_effect=lose_ack):
+                with self.assertRaises(r.ControlFailure):
+                    c.commit_capture(1, 1, deadline)
+            self.assertTrue(c.invalid); self.assertFalse(c.committed)
+            c.resume_and_release()
+            self.assertTrue(c.invalid)
+        finally:
+            try:
+                owner.shutdown()
+            except r.ControlFailure:
+                pass
+        self.assertIsNotNone(owner.process.returncode)
+        self.assertIsNone(owner.witness)
 
     def test_rescuer_death_wait_before_fallback(self):
         owner = spawn()
@@ -125,7 +197,7 @@ class RuntimeTests(unittest.TestCase):
         self.assertIsNotNone(owner.process.returncode)
 
     def test_parentdeath_prearm_and_armed_exits_owned_tree(self):
-        for command in ('queued', 'armed'):
+        for command in ('queued', 'armed', 'committed'):
             with self.subTest(command=command):
                 parent = subprocess.Popen([sys.executable, str(Path(__file__).resolve()), '--fixture-parent'],
                     stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
@@ -219,6 +291,10 @@ class RuntimeTests(unittest.TestCase):
             self.assertNotIn(owner.identity.verify(), ('T', 't'))
         finally:
             owner.shutdown()
+        self.assertFalse(owner.controller.armed)
+        self.assertTrue(owner.controller.invalid)  # Pre-ARM abort is not capture evidence.
+        self.assertIsNotNone(owner.process.returncode)
+        self.assertIsNone(owner.witness)
 
 
 if __name__ == '__main__':

@@ -16,6 +16,7 @@ type sealAttempt struct {
 	target         *lifecycleTicket
 	registration   *activityRegistration
 	released       bool
+	captureEnded   bool
 	publishInvalid func()
 	publishOnce    sync.Once
 	publishDone    chan struct{}
@@ -83,7 +84,7 @@ func (g *lifecycleGate) registerActivityRow(conn *Conn, identity ActivityIdentit
 		if ticket.registration != registration {
 			return
 		}
-		if g.seal != nil && !g.seal.released && g.seal.registration == registration {
+		if g.seal != nil && !g.seal.released && g.seal.registration == registration && !g.captureObligationsEndedLocked() {
 			g.invalidateBecauseLocked(invalidTargetRevoked)
 		}
 		ticket.registration = nil
@@ -165,7 +166,7 @@ func (g *lifecycleGate) invalidate() {
 
 // Caller publishes outside the registry lock, before propagating ctx.Err.
 func (g *lifecycleGate) invalidateWaitLocked() func() {
-	if g.seal == nil || g.seal.released {
+	if g.seal == nil || g.seal.released || g.captureObligationsEndedLocked() {
 		return nil
 	}
 	g.invalidateBecauseLocked(invalidWaitCancelled)

@@ -31,7 +31,13 @@ func TestApplicationDeadlineProcessHelper(t *testing.T) {
 	ready, proceed := os.NewFile(6, "ready"), os.NewFile(7, "proceed")
 	var nonce [16]byte
 	nonce[0] = 9
-	cleanup, err := StartCIController(normal, rescue, page, nonce, nil)
+	endReader, endWriter, pipeErr := os.Pipe()
+	if pipeErr != nil {
+		t.Fatal("capture end pipe")
+	}
+	defer endReader.Close()
+	defer endWriter.Close()
+	cleanup, err := StartCIController(normal, rescue, page, endReader, nonce, nil)
 	if err != nil {
 		os.Exit(3)
 	}

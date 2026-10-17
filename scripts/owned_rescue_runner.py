@@ -28,6 +28,7 @@ class ControlFailure(RuntimeError):
 
 class ControlOperation(Enum):
     ARM = 'arm'
+    COMMIT_CAPTURE = 'commit_capture'
     PREPARE_SELECTION = 'prepare_selection'
     CONFIGURE_TARGET = 'configure_target'
     FINISH_TARGET = 'finish_target'
@@ -247,6 +248,15 @@ class OwnedIdentity:
             _fail()
         return bool(states) and all(state not in ('T', 't', 'Z', 'X', 'x') for state in states)
 
+    def threads_stopped(self):
+        self.verify()
+        try:
+            states = [(p / 'stat').read_text().rsplit(')', 1)[1].split()[0]
+                      for p in (Path('/proc') / str(self.pid) / 'task').iterdir()]
+        except (OSError, IndexError):
+            _fail()
+        return bool(states) and all(state == 'T' for state in states)
+
     def resume(self, deadline):
         self.send(signal.SIGCONT)
         while time.monotonic() < deadline:
@@ -261,7 +271,8 @@ class OwnedIdentity:
 
 PAGE_SIZE = 4096
 HEADER = struct.Struct('<8sIIQII16s')
-ENV_FDS = ('ADTR_CI_DB_NORMAL_FD', 'ADTR_CI_DB_RESCUE_FD', 'ADTR_CI_DB_WITNESS_FD')
+ENV_FDS = ('ADTR_CI_DB_NORMAL_FD', 'ADTR_CI_DB_RESCUE_FD', 'ADTR_CI_DB_WITNESS_FD', 'ADTR_CI_CAPTURE_END_FD')
+CAPTURE_END = struct.Struct('!8s16sQQQ')
 
 
 def _int(value, minimum=0):
@@ -388,6 +399,8 @@ class WorkerController:
         self.seq = 0
         self.invalid = False
         self.armed = self.released = False
+        self.capture_deadline = None
+        self.commit_attempted = self.committed = False
         self.selection_prepared = self.target_sent = self.target_finished = False
         self.mutex = threading.RLock()
 
@@ -491,6 +504,8 @@ class WorkerController:
         with self.mutex:
             if self.invalid or self.armed or self.released:
                 self._latch(operation)
+            self.armed = True  # An uncertain ARM send must never permit parent CONT.
+            self.capture_deadline = deadline
             step = ControlStep.SEND
             try:
                 self.supervisor.send({'version': 2, 'epoch': 1, 'op': 'arm',
@@ -501,6 +516,41 @@ class WorkerController:
                 if response != {'version': 2, 'epoch': 1, 'status': 'armed'}:
                     _fail(ControlCause.FRAME)
                 self.armed = True
+            except ControlFailure as error:
+                self._latch(operation, step, self._cause(error))
+            except OSError:
+                self._latch(operation, step, ControlCause.TRANSPORT)
+
+    def commit_capture(self, ticket_generation, registration_generation, deadline):
+        operation = ControlOperation.COMMIT_CAPTURE
+        with self.mutex:
+            if (self.invalid or not self.armed or self.released or self.commit_attempted
+                    or deadline != self.capture_deadline):
+                self._latch(operation)
+            self.commit_attempted = True
+            if not all(_int(value, 1) and value <= 2 ** 64 - 1
+                       for value in (ticket_generation, registration_generation)):
+                self._latch(operation, ControlStep.SCHEMA, ControlCause.FRAME)
+            step = ControlStep.SEND
+            try:
+                if time.monotonic() >= deadline:
+                    _fail(ControlCause.DEADLINE)
+                self.supervisor.send({'version': 2, 'epoch': 1, 'op': 'commit_capture',
+                    'ticketGeneration': ticket_generation,
+                    'registrationGeneration': registration_generation}, deadline)
+                step = ControlStep.RECEIVE
+                response = self.supervisor.receive(deadline)
+                step = ControlStep.REPLY
+                expected = {'version': 2, 'epoch': 1, 'status': 'committed',
+                            'ticketGeneration': ticket_generation,
+                            'registrationGeneration': registration_generation}
+                if (response != expected or any(type(response.get(key)) is not int
+                        for key in ('version', 'epoch', 'ticketGeneration', 'registrationGeneration'))):
+                    _fail(ControlCause.FRAME)
+                if time.monotonic() >= deadline:
+                    _fail(ControlCause.DEADLINE)
+                self.committed = True
+                return True
             except ControlFailure as error:
                 self._latch(operation, step, self._cause(error))
             except OSError:
@@ -574,6 +624,10 @@ class WorkerController:
         with self.mutex:
             if self.released:
                 return
+            if self.invalid or (self.armed and not self.committed):
+                abort = True
+            if abort:
+                self.invalid = True
             deadline = time.monotonic() + 3
             try:
                 self.supervisor.send({'version': 2, 'epoch': 1,
@@ -628,6 +682,8 @@ class OwnedCIWorker:
             os.ftruncate(self.page_fd, PAGE_SIZE)  # Once, before child sees it.
             os.pwrite(self.page_fd, HEADER.pack(b'ADTRGATE', 1, PAGE_SIZE, 1, 0, 0, nonce), 0)
             self.witness = mmap.mmap(self.page_fd, PAGE_SIZE, access=mmap.ACCESS_READ)
+            capture_read, capture_write = os.pipe2(os.O_NONBLOCK | os.O_CLOEXEC)
+            self.fds.update((capture_read, capture_write))
             normal_parent, normal_worker = _socket_pair()
             self.fds.update((normal_parent, normal_worker))
             rescue_parent, rescue_worker = _socket_pair()
@@ -638,12 +694,12 @@ class OwnedCIWorker:
             # when O_NONBLOCK is already present; SetWriteDeadline must work.
             os.set_blocking(normal_worker, False)
             os.set_blocking(rescue_worker, False)
-            child_env = owned_worker_environment(env, (normal_worker, rescue_worker, self.page_fd))
+            child_env = owned_worker_environment(env, (normal_worker, rescue_worker, self.page_fd, capture_read))
             self.process = subprocess.Popen(args, env=child_env, stdout=stdout, stderr=stderr,
-                    close_fds=True, pass_fds=(normal_worker, rescue_worker, self.page_fd))
-            # Only these three descriptors cross worker exec. In particular the
+                    close_fds=True, pass_fds=(normal_worker, rescue_worker, self.page_fd, capture_read))
+            # Only these four descriptors cross worker exec. In particular the
             # worker never holds supervisor-parent, preserving parent-death EOF.
-            for fd in (normal_worker, rescue_worker):
+            for fd in (normal_worker, rescue_worker, capture_read):
                 os.close(fd); self.fds.remove(fd)
             start, executable, _ = read_identity(self.process.pid)
             if executable != str(Path(binary).resolve()):
@@ -651,11 +707,12 @@ class OwnedCIWorker:
             self.identity = OwnedIdentity(self.process.pid, start, executable)
             self.rescuer = subprocess.Popen([sys.executable, str(Path(__file__).resolve()),
                     '--rescue', str(supervisor_child), str(rescue_parent), str(self.process.pid),
-                    str(start), executable], close_fds=True,
-                    pass_fds=(supervisor_child, rescue_parent), env={"PATH": os.defpath, "LC_ALL": "C.UTF-8"},
+                    str(start), executable, str(capture_write), nonce.hex()], close_fds=True,
+                    pass_fds=(supervisor_child, rescue_parent, capture_write), env={"PATH": os.defpath, "LC_ALL": "C.UTF-8"},
                     stdin=subprocess.DEVNULL,
                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             os.close(supervisor_child); self.fds.remove(supervisor_child)
+            os.close(capture_write); self.fds.remove(capture_write)
             normal = PipeChannel(normal_parent, normal_parent)
             supervisor = PipeChannel(supervisor_parent, supervisor_parent, read_limit=1024, write_limit=256)
             fallback = PipeChannel(rescue_parent, rescue_parent, read_limit=1024, write_limit=256)
@@ -798,16 +855,18 @@ class OwnedCIWorker:
         self.close_after_wait()
 
 
-def _rescue_main(supervisor_fd, rescue_fd, pid, starttime, executable):
+def _rescue_main(supervisor_fd, rescue_fd, pid, starttime, executable, capture_fd=None, nonce=None):
     supervisor = PipeChannel(supervisor_fd, supervisor_fd, read_limit=1024, write_limit=256)
     rescue = PipeChannel(rescue_fd, rescue_fd, read_limit=1024, write_limit=256)
     identity = OwnedIdentity(pid, starttime, executable)
-    armed = released = False
+    armed = released = committed = recovering = False
+    capture_deadline = None
     watchdog = None
     seq = 0
 
     def recover(abort):
-        nonlocal released, seq
+        nonlocal released, seq, recovering
+        recovering = True
         identity.resume(time.monotonic() + 1)
         if not released:
             seq += 1
@@ -844,10 +903,33 @@ def _rescue_main(supervisor_fd, rescue_fd, pid, starttime, executable):
                     _fail()
                 identity.verify()
                 armed = True
+                capture_deadline = frame['deadline']
                 watchdog = frame['deadline'] - 1.5 + 9
                 supervisor.send({'version': 2, 'epoch': 1, 'status': 'armed'}, frame['deadline'])
+            elif op == 'commit_capture':
+                if (set(frame) != {'version', 'epoch', 'op', 'ticketGeneration', 'registrationGeneration'}
+                        or not armed or released or recovering or committed or capture_fd is None
+                        or type(nonce) is not bytes or len(nonce) != 16
+                        or not all(_int(frame[key], 1) and frame[key] <= 2 ** 64 - 1
+                                   for key in ('ticketGeneration', 'registrationGeneration'))
+                        or time.monotonic() >= capture_deadline):
+                    _fail()
+                identity.verify()
+                if not identity.threads_stopped() or time.monotonic() >= capture_deadline:
+                    _fail()
+                # One exclusive writer, one <= PIPE_BUF nonblocking write, no retry.
+                committed = True
+                payload = CAPTURE_END.pack(b'ADTREND1', nonce, 1,
+                                          frame['ticketGeneration'], frame['registrationGeneration'])
+                if os.write(capture_fd, payload) != len(payload):
+                    _fail()
+                if time.monotonic() >= capture_deadline:
+                    _fail()
+                supervisor.send({'version': 2, 'epoch': 1, 'status': 'committed',
+                    'ticketGeneration': frame['ticketGeneration'],
+                    'registrationGeneration': frame['registrationGeneration']}, capture_deadline)
             elif op in ('release', 'abort') and set(frame) == {'version', 'epoch', 'op'}:
-                if op == 'release' and not armed:
+                if op == 'release' and (not armed or not committed):
                     _fail()
                 recover(op == 'abort')
                 watchdog = None
@@ -864,16 +946,19 @@ def _rescue_main(supervisor_fd, rescue_fd, pid, starttime, executable):
         terminate_orphan()
         return 1
     finally:
+        if capture_fd is not None:
+            os.close(capture_fd)
         identity.close()
         supervisor.close()
         rescue.close()
 
 
 if __name__ == '__main__':
-    if len(sys.argv) != 7 or sys.argv[1] != '--rescue':
+    if len(sys.argv) != 9 or sys.argv[1] != '--rescue':
         raise SystemExit(2)
     try:
         raise SystemExit(_rescue_main(int(sys.argv[2]), int(sys.argv[3]),
-                                     int(sys.argv[4]), int(sys.argv[5]), sys.argv[6]))
+                                     int(sys.argv[4]), int(sys.argv[5]), sys.argv[6],
+                                     int(sys.argv[7]), bytes.fromhex(sys.argv[8])))
     except (OSError, ControlFailure, ValueError):
         raise SystemExit(1)

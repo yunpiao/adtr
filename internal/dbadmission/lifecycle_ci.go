@@ -18,6 +18,7 @@ var coordinator struct {
 }
 
 type lifecycleGate struct {
+	captureEndFD                                               int
 	application                                                bool
 	nonce                                                      [16]byte
 	selection                                                  int
@@ -186,7 +187,7 @@ func (t *lifecycleTicket) closed(clean bool) {
 		(g.seal == nil || g.seal.target != t)
 	if !clean {
 		g.invalidateBecauseLocked(invalidUncleanClose)
-	} else if g.seal != nil && !g.seal.released && g.seal.target == t {
+	} else if g.seal != nil && !g.seal.released && g.seal.target == t && !g.captureObligationsEndedLocked() {
 		g.invalidateBecauseLocked(invalidTargetClosed)
 	}
 	g.open--
@@ -212,7 +213,7 @@ func (t *lifecycleTicket) closingConnection() {
 		g.notifyLocked()
 		return
 	}
-	if g.seal != nil && !g.seal.released && g.seal.target == t {
+	if g.seal != nil && !g.seal.released && g.seal.target == t && !g.captureObligationsEndedLocked() {
 		g.invalidateBecauseLocked(invalidTargetClosing)
 		g.notifyLocked()
 	}
