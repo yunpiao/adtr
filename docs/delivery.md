@@ -556,3 +556,41 @@ AD-F-034继续in_progress；AD-F-035增量及AD-F-041地址关系未由此交付
 Refs #50 / AD-F-158 / DTL-036。迁移18新增有界冻结目标、原接受回执、逐项首次时间收据及持久进度；每批复核live actor/tasks.readable/epoch，取消仅余项。固定结果all不扩展到实时全库；快照到期、新会话与Worker重启保持已接受操作。新HTTP和Worker已接线，UI后续切片；原纯模块与单条回执保持。详见 [批量运行时契约](message-bulk-runtime-contract.md)。
 
 本地完整make check通过1470前端/104 Python及Go race/vet/build，集成标签编译通过；实际PG调用缺DSN失败，不能算通过。已新增真实health跨页/并发/撤权/取消/原回执、非空17升级及PG连接终止/容器崩溃重启测试，独立设计与实际diff复核进行中，精确head CI待执行。#50及产品0/209保持开放，无生产部署。
+
+### PR167 后续：PG17 nullable observation 安全兼容
+
+- 精确基线为 main `89e3adbf823e507b9d4b9a543f88ab3b54a1855b`，完整树
+  `16c9c61dd25b894232aa1f63a0aa4d468466101e`；1088 个文件逐 blob/mode 核验后重建树一致。
+- main-push run `39002743684` 的 user/computer running-cancel 分别报告
+  `capture_readiness/invalid_session_observation` 与 `capture_readiness/unrecognized_lock`。
+  现有安全产物没有原字段或锁类型，实际触发值仍未查明，不能认定具体事务路径。
+- 已证实的模型缺口：CI 固定 PostgreSQL 17.6；其
+  [backend 初始化](https://github.com/postgres/postgres/blob/REL_17_6/src/backend/utils/activity/backend_status.c#L352-L401)
+  使用 STATE_UNDEFINED，
+  [统计输出](https://github.com/postgres/postgres/blob/REL_17_6/src/backend/utils/adt/pgstatfuncs.c#L341-L367)
+  将其转换为 SQL NULL。原预扫仅接受字符串，无法表示该合法观测。
+- 完整结构、锁类别及 blocker 图检查后，NULL state 仅返回 `state_unavailable` 未就绪；
+  保留原 1.5 秒 deadline，超时保留闭集最后原因。停后再次完整检查，NULL 立即失败并 CONT 清理。
+  不把 NULL 命名为已确认启动，不将其当成 idle 或安全冻结事务。
+- 新增闭集 `observationCheck`/`valueTypeCategory` 定位字段契约失败；
+  `lockTypeCategory` 仅使用 [PG17 文档枚举](https://www.postgresql.org/docs/17/view-pg-locks.html) 或 `other`。
+  所有原不支持的锁仍立即失败，即使属于 PG 的已知类别；不输出 SQL、名称、参数或 ID。
+- 原 `validate_sessions`、`validate_checkpoint` 保持不变；固定捕获窗口、单次 STOP、严格停后验证与清理均保留。
+  本地只执行禁止进程/网络/信号的离线 Python 契约；真实 PG 与三种导出需由新 head CI 验证。
+
+### PR168 后续：blocker 拒绝点闭集细分
+
+- 精确远程基线 `e1689acc6bf482c3ca4eeb465a913d5a8c91ad80`，树
+  `01d2f82fbe262b202c86a0e3833415140a517c27`。run `39005521837` 的 user
+  job `117317157083` 报 `capture_readiness/unowned_barrier_blocker`；group/computer 成功。
+  安全产物 `12091286378` 未提供具体拒绝点；API/worker 均退出 0，无 forced kill/panic。
+- 同一个旧 reason 有三条路径，离线合成分别复现：blocker 不在 owned 样本/barrier 集合、
+  owned 图存在环、完整预扫通过但严格 activity 到 barrier 的链不成立。
+  新 `blockerCheck` 分别为 `outside_owned_sample`、`cyclic_owned_graph`、`strict_barrier_chain`。
+  全部仍立即失败，不进入未就绪重采样，不输出 PID、SQL 或原值；字段仅绑定原精确拒绝 reason。
+- [PG17.6 状态快照](https://github.com/postgres/postgres/blob/REL_17_6/src/backend/utils/activity/backend_status.c#L650-L674)
+  与 [逐调用 blocker 快照](https://github.com/postgres/postgres/blob/REL_17_6/src/backend/utils/adt/lockfuncs.c#L443-L452)
+  分别采集；后者[单次保证瞬时自洽](https://github.com/postgres/postgres/blob/REL_17_6/src/backend/storage/lmgr/lock.c#L3571-L3580)。
+  跨来源/跨调用可能出现时间差，但本次没有证据确认 race，也没有证据确认外部会话。
+  worker appname 来自专属 nonce DSN，barrier PID 来自持续 psql 自报，尚未发现身份取错的代码证据。
+- 新契约覆盖三路拒绝、隐私闭集及严格 validator/checkpoint 函数字节保真；捕获时序与清理不变。

@@ -32,6 +32,57 @@ def task():
 
 
 class ContractTests(unittest.TestCase):
+    def test_blocker_diagnostics_distinguish_three_fatal_paths(self):
+        cases = {
+            'outside_owned_sample': [session() | {'blockers': [999]}],
+            'cyclic_owned_graph': [session() | {'blockers': [101]}, session(101) | {'blockers': [100]}],
+            'strict_barrier_chain': [session(), session(101) | {'query': g.SCHEMA_SQL,
+                'blockers': [102], 'locks': []}, session(102) | {'query': '', 'transaction': False,
+                'state': 'idle', 'waitType': None, 'blockers': [], 'locks': []}],
+        }
+        for check, rows in cases.items():
+            with self.subTest(check=check), self.assertRaisesRegex(RuntimeError,
+                    '^unowned or cyclic barrier blocker$') as caught:
+                g.freeze_readiness(rows, 99)
+            self.assertEqual(g.failure_event('capture_readiness', caught.exception), {
+                'event': 'running_cancel_guard_failure', 'stage': 'capture_readiness',
+                'reason': 'unowned_barrier_blocker', 'blockerCheck': check})
+        self.assertNotIn('unowned or cyclic barrier blocker', g.FREEZE_NOT_READY)
+        self.assertIsNone(g.validate_session_observation(cases['strict_barrier_chain'], 99))
+        with self.assertRaisesRegex(RuntimeError, 'unowned or cyclic'):
+            g.validate_sessions(cases['strict_barrier_chain'], 99)
+
+    def test_blocker_diagnostic_privacy_and_exact_reason_binding(self):
+        for detail in ({'blockerCheck': 'private SQL PID secret'},
+                {'blockerCheck': 'outside_owned_sample', 'pid': 999},
+                {'blockerCheck': []}, {'blockerCheck': None}, 'private'):
+            error = RuntimeError('unowned or cyclic barrier blocker'); error.blocker_diagnostic = detail
+            self.assertEqual(set(g.failure_event('capture_readiness', error)), {'event', 'stage', 'reason'})
+        for error in (RuntimeError('private'), ValueError('unowned or cyclic barrier blocker'),
+                      RuntimeError('unowned or cyclic barrier blocker', 'private')):
+            error.blocker_diagnostic = {'blockerCheck': 'strict_barrier_chain'}
+            self.assertNotIn('blockerCheck', g.failure_event('capture_readiness', error))
+        error = RuntimeError('unowned or cyclic barrier blocker')
+        with patch.object(g, 'validate_sessions', side_effect=error):
+            with self.assertRaises(RuntimeError) as caught:
+                g.freeze_readiness([session()], 99)
+        self.assertIs(caught.exception, error)
+        self.assertEqual(error.blocker_diagnostic, {'blockerCheck': 'strict_barrier_chain'})
+
+    def test_blocker_diagnostics_preserve_strict_guard_function_bytes(self):
+        import ast
+        import hashlib
+        source = Path(g.__file__).read_text()
+        expected = {
+            'validate_sessions': '4efb9b60ec57914d43c55c695e0916b07d71fbcd3f3cdac8c3cd06b630bbd092',
+            'validate_checkpoint': '83ff1b7a711627ec7ee4e28761dde75f5e18ae3e81abb39927b8057022a06e74',
+            'checkpoint': '90a1f7723cbdb0f5edf0182bf8e14989bb3c1fd3e5b8c61e0ba38f71bd0fa9a2',
+        }
+        actual = {node.name: hashlib.sha256(ast.get_source_segment(source, node).encode()).hexdigest()
+                  for node in ast.walk(ast.parse(source)) if isinstance(node, ast.FunctionDef)
+                  and node.name in expected}
+        self.assertEqual(actual, expected)
+
     def test_four_activity_slots_are_checked(self):
         safe, blocked, transactions = g.validate_sessions([session(n) for n in range(100, 104)], 99)
         self.assertEqual((len(safe), blocked, transactions), (4, 4, 4))
@@ -270,6 +321,114 @@ class ContractTests(unittest.TestCase):
         self.assertEqual(guard.owned.resume.call_count, 2)
         observer.close.assert_called_once(); barrier.close.assert_called_once()
         self.assertEqual(barrier.query.call_count, 1)
+
+    def test_null_state_waits_until_ready_for_every_kind(self):
+        for kind in g.EXPORT_KINDS:
+            guard = self.guard(asset_kind=kind); guard.threads = Mock(return_value=['T'])
+            running = task() | {'kind': g.export_kind(kind)[0]}
+            queued = running | {'state': 'queued', 'attempt': 0, 'snapshotCount': 0}
+            unavailable = session(101) | {'state': None, 'query': '', 'transaction': False,
+                                         'waitType': None, 'blockers': [], 'locks': []}
+            observer, barrier = Mock(), Mock(pid=99)
+            observer.query.side_effect = [{'task': queued, 'sessions': []},
+                {'task': running, 'sessions': [session(), unavailable]},
+                {'task': running, 'sessions': [session()]},
+                {'task': running, 'sessions': [session()]}]
+            barrier.query.side_effect = [{'count': 1}, True]
+            with patch.object(g, 'Psql', side_effect=[observer, barrier]), patch.object(g.time, 'sleep'):
+                self.assertTrue(guard.checkpoint('task-one', 'worker')['checkpointCaught'])
+            self.assertEqual(observer.query.call_count, 4)
+            guard.owned.process.send_signal.assert_called_once_with(signal.SIGSTOP)
+            observer.close.assert_called_once(); barrier.close.assert_called_once()
+
+    def test_null_state_deadline_keeps_unavailable_reason_without_stop(self):
+        guard = self.guard(); guard.threads = Mock(return_value=['T'])
+        queued = task() | {'state': 'queued', 'attempt': 0, 'snapshotCount': 0}
+        observer, barrier = Mock(), Mock(pid=99)
+        observer.query.side_effect = [{'task': queued, 'sessions': []},
+            {'task': task(), 'sessions': [session() | {'state': None}]}]
+        barrier.query.return_value = {'count': 1}
+        now = [0.0]
+        def sleep(_):
+            now[0] = 1.5
+        with patch.object(g, 'Psql', side_effect=[observer, barrier]), patch.object(g.time,
+                'monotonic', side_effect=lambda: now[0]), patch.object(g.time, 'sleep', side_effect=sleep):
+            with self.assertRaises(RuntimeError):
+                guard.checkpoint('task-one', 'worker')
+        guard.owned.process.send_signal.assert_not_called()
+        self.assertEqual(guard.failure_diagnostic, {'event': 'running_cancel_guard_failure',
+            'stage': 'capture', 'reason': 'capture_deadline_missed', 'lastNotReady': {
+                'event': 'running_cancel_guard_failure', 'stage': 'capture', 'reason': 'state_unavailable'}})
+        self.assertEqual(guard.owned.resume.call_count, 2)
+        observer.close.assert_called_once(); barrier.close.assert_called_once()
+
+    def test_null_state_after_stop_fails_and_resumes_for_every_kind(self):
+        for kind in g.EXPORT_KINDS:
+            guard = self.guard(asset_kind=kind); guard.threads = Mock(return_value=['T'])
+            running = task() | {'kind': g.export_kind(kind)[0]}
+            queued = running | {'state': 'queued', 'attempt': 0, 'snapshotCount': 0}
+            observer, barrier = Mock(), Mock(pid=99)
+            observer.query.side_effect = [{'task': queued, 'sessions': []},
+                {'task': running, 'sessions': [session()]},
+                {'task': running, 'sessions': [session() | {'state': None}]}]
+            barrier.query.return_value = {'count': 1}
+            with patch.object(g, 'Psql', side_effect=[observer, barrier]):
+                with self.assertRaises(RuntimeError):
+                    guard.checkpoint('task-one', 'worker')
+            guard.owned.process.send_signal.assert_called_once_with(signal.SIGSTOP)
+            self.assertEqual(observer.query.call_count, 3)
+            self.assertEqual(guard.owned.resume.call_count, 2)
+            self.assertEqual(guard.failure_diagnostic['reason'], 'state_unavailable')
+            self.assertEqual(guard.failure_diagnostic['stage'], 'session_validation')
+            self.assertIsNone(guard.stopped_at)
+            observer.close.assert_called_once(); barrier.close.assert_called_once()
+            self.assertEqual(barrier.query.call_count, 1)
+
+    def test_null_state_cannot_hide_later_invalid_rows_locks_or_blockers(self):
+        unavailable = session() | {'state': None}
+        for update in ({'query': None}, {'pid': True}, {'pid': 100}, {'locks': [{}]},
+                {'locks': [lock('object', 'RowExclusiveLock')]}, {'locks': [lock('secret', 'ShareLock')]},
+                {'blockers': [999]}, {'blockers': [102]}, {'state': 'secret'}, {'waitType': 'secret'}):
+            with self.subTest(update=update), self.assertRaises(RuntimeError):
+                g.freeze_readiness([unavailable, session(102) | update], 99)
+        a, b = session(102) | {'blockers': [103]}, session(103) | {'blockers': [102]}
+        with self.assertRaisesRegex(RuntimeError, 'unowned or cyclic'):
+            g.freeze_readiness([unavailable, a, b], 99)
+        self.assertEqual(str(g.freeze_readiness([unavailable], 99)), 'owned backend state unavailable')
+
+    def test_observation_diagnostics_are_closed_field_categories(self):
+        cases = [({'state': []}, 'state_type', 'list'), ({'state': 'private'}, 'state_value', 'str'),
+            ({'query': None}, 'query', 'null'), ({'transaction': 1}, 'transaction', 'int'),
+            ({'waitType': {}}, 'wait_type', 'dict'), ({'waitType': 'private'}, 'wait_value', 'str'),
+            ({'blockers': [False]}, 'blocker_pid', 'bool'), ({'locks': None}, 'locks', 'null'),
+            ({'locks': [lock('relation', 'ShareLock', relation=[])]}, 'lock_relation', 'list'),
+            ({'locks': [lock('relation', 'ShareLock', objsubid=True)]}, 'lock_objsubid', 'bool')]
+        for update, check, category in cases:
+            with self.subTest(check=check), self.assertRaises(RuntimeError) as caught:
+                g.freeze_readiness([session() | update], 99)
+            event = g.failure_event('capture_readiness', caught.exception)
+            self.assertEqual(event['observationCheck'], check)
+            self.assertEqual(event['valueTypeCategory'], category)
+            self.assertNotIn('private', json.dumps(event))
+        for detail in ({'observationCheck': 'private', 'valueTypeCategory': 'str'},
+                {'observationCheck': 'query', 'valueTypeCategory': 'private'},
+                {'observationCheck': 'query', 'valueTypeCategory': 'str', 'extra': 'private'}):
+            error = RuntimeError('invalid owned session observation'); error.observation_diagnostic = detail
+            self.assertEqual(set(g.failure_event('capture_readiness', error)), {'event', 'stage', 'reason'})
+
+    def test_pg_lock_categories_diagnose_but_never_accept_extra_types(self):
+        extra = g.LOCK_TYPE_CATEGORIES - {'relation', 'advisory', 'virtualxid', 'transactionid', 'tuple'}
+        for typ in extra | {'private-lock-value'}:
+            with self.subTest(typ=typ), self.assertRaisesRegex(RuntimeError, 'unrecognized owned lock') as caught:
+                g.freeze_readiness([session() | {'state': None}, session(102) | {
+                    'locks': [lock(typ, 'RowExclusiveLock')]}], 99)
+            event = g.failure_event('capture_readiness', caught.exception)
+            self.assertEqual(event['lockTypeCategory'], typ if typ in extra else 'other')
+            self.assertNotIn('private', json.dumps(event))
+        for detail in ({'lockTypeCategory': 'private'}, {'lockTypeCategory': 'object', 'extra': 'private'},
+                       {'lockTypeCategory': []}):
+            error = RuntimeError('unrecognized owned lock'); error.lock_diagnostic = detail
+            self.assertEqual(set(g.failure_event('capture_readiness', error)), {'event', 'stage', 'reason'})
 
     def test_deadline_is_checked_again_immediately_before_stop(self):
         guard = self.guard(); guard.threads = Mock(return_value=['T'])

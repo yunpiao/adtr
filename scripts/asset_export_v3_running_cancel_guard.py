@@ -76,6 +76,7 @@ FAILURE_REASONS = MappingProxyType({
     'unexpected barrier waiter': 'unexpected_barrier_waiter',
     'missed actual activity checkpoint': 'activity_waiter_missing',
     'invalid owned session observation': 'invalid_session_observation',
+    'owned backend state unavailable': 'state_unavailable',
     'nonidle unclassified owned session': 'nonidle_session',
 })
 FAILURE_STAGES = frozenset({'preflight', 'observer_open', 'initial_observation',
@@ -111,7 +112,44 @@ FREEZE_NOT_READY = frozenset({'unsafe owned transaction query',
     'unsafe owned relation lock', 'unsafe owned advisory lock',
     'unsafe virtual transaction lock', 'unsafe transaction lock', 'unsafe tuple lock',
     'nonidle unclassified owned session', 'unexpected barrier waiter',
-    'missed actual activity checkpoint'})
+    'missed actual activity checkpoint', 'owned backend state unavailable'})
+
+
+# PostgreSQL 17 lock names are diagnostic categories, NOT accepted lock types.
+LOCK_TYPE_CATEGORIES = frozenset({'relation', 'extend', 'frozenid', 'page',
+    'tuple', 'transactionid', 'virtualxid', 'spectoken', 'object', 'userlock',
+    'advisory', 'applytransaction', 'other'})
+BLOCKER_CHECKS = frozenset({'outside_owned_sample', 'cyclic_owned_graph', 'strict_barrier_chain'})
+OBSERVATION_FAILURE_VALUES = MappingProxyType({
+    'observationCheck': frozenset({'sessions', 'barrier_pid', 'session_fields',
+        'pid', 'transaction', 'state_type', 'state_value', 'query', 'wait_type',
+        'wait_value', 'blockers', 'blocker_pid', 'locks', 'lock_fields',
+        'lock_type', 'lock_mode', 'lock_granted', 'lock_relation', 'lock_classid',
+        'lock_objid', 'lock_objsubid'}),
+    'valueTypeCategory': frozenset({'null', 'bool', 'int', 'str', 'list', 'dict', 'other'}),
+})
+
+
+def observation_require(ok, check, value):
+    if not ok:
+        error = RuntimeError('invalid owned session observation')
+        category = {type(None): 'null', bool: 'bool', int: 'int', str: 'str',
+                    list: 'list', dict: 'dict'}.get(type(value), 'other')
+        error.observation_diagnostic = {'observationCheck': check, 'valueTypeCategory': category}
+        raise error
+
+
+def unrecognized_lock_failure(typ):
+    error = RuntimeError('unrecognized owned lock')
+    error.lock_diagnostic = {'lockTypeCategory': typ if type(typ) is str and
+                             typ in LOCK_TYPE_CATEGORIES else 'other'}
+    return error
+
+
+def blocker_failure(check):
+    error = RuntimeError('unowned or cyclic barrier blocker')
+    error.blocker_diagnostic = {'blockerCheck': check}
+    return error
 
 
 def transaction_lock_category(locks):
@@ -188,6 +226,19 @@ def failure_event(stage, error):
     if (type(detail) is dict and set(detail) == set(TRANSACTION_FAILURE_VALUES) | {'locksPresent'}
             and type(detail['locksPresent']) is bool and all(type(detail[key]) is str
                 and detail[key] in values for key, values in TRANSACTION_FAILURE_VALUES.items())):
+        event.update(detail)
+    detail = getattr(error, 'observation_diagnostic', None) if reason == 'invalid_session_observation' else None
+    if (type(detail) is dict and set(detail) == set(OBSERVATION_FAILURE_VALUES)
+            and all(type(detail[key]) is str and detail[key] in values
+                    for key, values in OBSERVATION_FAILURE_VALUES.items())):
+        event.update(detail)
+    detail = getattr(error, 'lock_diagnostic', None) if reason == 'unrecognized_lock' else None
+    if (type(detail) is dict and set(detail) == {'lockTypeCategory'} and
+            type(detail['lockTypeCategory']) is str and detail['lockTypeCategory'] in LOCK_TYPE_CATEGORIES):
+        event.update(detail)
+    detail = getattr(error, 'blocker_diagnostic', None) if reason == 'unowned_barrier_blocker' else None
+    if (type(detail) is dict and set(detail) == {'blockerCheck'} and
+            type(detail['blockerCheck']) is str and detail['blockerCheck'] in BLOCKER_CHECKS):
         event.update(detail)
     pending = getattr(error, 'last_not_ready_error', None) if reason == 'capture_deadline_missed' else None
     if (type(pending) is RuntimeError and len(pending.args) == 1 and
@@ -357,52 +408,63 @@ def validate_session_observation(sessions, lock_pid):
     The SQL observer already restricts every backend to the verified application.
     No row is filtered or rewritten to obtain a passing freeze validation.
     """
-    require(type(sessions) is list and type(lock_pid) is int and lock_pid > 0,
-            'invalid owned session observation')
+    observation_require(type(sessions) is list, 'sessions', sessions)
+    observation_require(type(lock_pid) is int and lock_pid > 0, 'barrier_pid', lock_pid)
     pids = set()
+    state_unavailable = False
     for row in sessions:
-        require(type(row) is dict and set(row) == {'pid', 'transaction', 'state',
-            'query', 'waitType', 'blockers', 'locks'}, 'invalid owned session observation')
-        require(type(row['pid']) is int and row['pid'] > 0 and row['pid'] != lock_pid and
-            type(row['transaction']) is bool and type(row['state']) is str and
-            type(row['query']) is str and (row['waitType'] is None or type(row['waitType']) is str)
-            and type(row['blockers']) is list and type(row['locks']) is list,
-            'invalid owned session observation')
-        require(row['state'] in ('active', 'idle', 'idle in transaction',
-            'idle in transaction (aborted)', 'fastpath function call', 'disabled') and
-            (row['waitType'] is None or row['waitType'] in ('Activity', 'BufferPin',
-             'Client', 'Extension', 'IO', 'IPC', 'Lock', 'LWLock', 'Timeout')),
-            'invalid owned session observation')
+        observation_require(type(row) is dict and set(row) == {'pid', 'transaction', 'state',
+            'query', 'waitType', 'blockers', 'locks'}, 'session_fields', row)
+        observation_require(type(row['pid']) is int and row['pid'] > 0 and row['pid'] != lock_pid, 'pid', row['pid'])
+        for key, typ in (('transaction', bool), ('query', str), ('blockers', list), ('locks', list)):
+            observation_require(type(row[key]) is typ, key, row[key])
+        observation_require(row['state'] is None or type(row['state']) is str, 'state_type', row['state'])
+        observation_require(row['waitType'] is None or type(row['waitType']) is str, 'wait_type', row['waitType'])
+        observation_require(row['state'] is None or row['state'] in ('active', 'idle', 'idle in transaction',
+            'idle in transaction (aborted)', 'fastpath function call', 'disabled'), 'state_value', row['state'])
+        observation_require(row['waitType'] is None or row['waitType'] in ('Activity', 'BufferPin',
+            'Client', 'Extension', 'IO', 'IPC', 'Lock', 'LWLock', 'Timeout'), 'wait_value', row['waitType'])
+        state_unavailable |= row['state'] is None
         require(row['pid'] not in pids, 'duplicate owned backend')
         pids.add(row['pid'])
-        require(all(type(pid) is int and pid > 0 for pid in row['blockers']),
-                'invalid owned session observation')
+        for pid in row['blockers']:
+            observation_require(type(pid) is int and pid > 0, 'blocker_pid', pid)
         for lock in row['locks']:
-            require(type(lock) is dict and set(lock) == {'type', 'mode', 'granted',
-                'relation', 'classid', 'objid', 'objsubid'}, 'invalid owned session observation')
-            require(type(lock['type']) is str and type(lock['mode']) is str and
-                type(lock['granted']) is bool and
-                all(lock[k] is None or type(lock[k]) is str for k in ('relation', 'classid', 'objid'))
-                and (lock['objsubid'] is None or type(lock['objsubid']) is int),
-                'invalid owned session observation')
-            require(lock['type'] in ('relation', 'advisory', 'virtualxid', 'transactionid', 'tuple'),
-                    'unrecognized owned lock')
-    require(all(set(row['blockers']) <= pids | {lock_pid} for row in sessions),
-            'unowned or cyclic barrier blocker')
+            observation_require(type(lock) is dict and set(lock) == {'type', 'mode', 'granted',
+                'relation', 'classid', 'objid', 'objsubid'}, 'lock_fields', lock)
+            for key, typ in (('type', str), ('mode', str), ('granted', bool)):
+                observation_require(type(lock[key]) is typ, 'lock_' + key, lock[key])
+            for key, typ in (('relation', str), ('classid', str), ('objid', str), ('objsubid', int)):
+                observation_require(lock[key] is None or type(lock[key]) is typ, 'lock_' + key, lock[key])
+            if lock['type'] not in ('relation', 'advisory', 'virtualxid', 'transactionid', 'tuple'):
+                raise unrecognized_lock_failure(lock['type'])
+    if not all(set(row['blockers']) <= pids | {lock_pid} for row in sessions):
+        raise blocker_failure('outside_owned_sample')
     # Acyclic owned chains must resolve to an unblocked owned backend or barrier.
     resolved = {lock_pid}
     for _ in sessions:
         for row in sessions:
             if set(row['blockers']) <= resolved:
                 resolved.add(row['pid'])
-    require(pids <= resolved, 'unowned or cyclic barrier blocker')
+    if not pids <= resolved:
+        raise blocker_failure('cyclic_owned_graph')
+    # PG17 STATE_UNDEFINED is SQL NULL. It is never a safe frozen state.
+    # Finish the full scan first so it cannot conceal a later fatal observation.
+    return RuntimeError('owned backend state unavailable') if state_unavailable else None
 
 
 def freeze_readiness(sessions, lock_pid):
-    validate_session_observation(sessions, lock_pid)
+    pending = validate_session_observation(sessions, lock_pid)
+    if pending is not None:
+        return pending
     try:
         validate_sessions(sessions, lock_pid)
     except RuntimeError as error:
+        # Full shape/ownership/acyclic preflight already passed. This identifies
+        # the strict validator's distinct chain refusal; it remains fatal.
+        if (type(error) is RuntimeError and len(error.args) == 1 and
+                type(error.args[0]) is str and error.args[0] == 'unowned or cyclic barrier blocker'):
+            error.blocker_diagnostic = {'blockerCheck': 'strict_barrier_chain'}
         if (type(error) is not RuntimeError or len(error.args) != 1 or
                 type(error.args[0]) is not str or error.args[0] not in FREEZE_NOT_READY):
             raise
@@ -539,7 +601,9 @@ class RunningExportCancelGuard:
             while time.monotonic() < deadline:
                 sample = observer.query(self.observe_sql(task_id), timeout=.5)
                 stage = 'capture_readiness'
-                validate_session_observation(sample['sessions'], lock.pid)
+                pending = validate_session_observation(sample['sessions'], lock.pid)
+                if pending is not None:
+                    last_not_ready = pending
                 stage = 'capture'
                 task = sample['task']
                 if task and task['state'] == 'running' and task['progress'] == 10 and task['snapshotCount'] == 1 and any(lock.pid in s['blockers'] and normalized(s['query']) == normalized(ACTIVITY_SQL) for s in sample['sessions']):
@@ -582,6 +646,9 @@ class RunningExportCancelGuard:
             stage = 'checkpoint_validation'
             task = validate_checkpoint(sample['task'], task_id, worker_id, self.asset_kind)
             stage = 'session_validation'
+            pending = validate_session_observation(sample['sessions'], lock.pid)
+            if pending is not None:
+                raise pending
             sessions, blocked, txs = validate_sessions(sample['sessions'], lock.pid)
             stage = 'capture_window'
             require(time.monotonic() < deadline, 'activity checkpoint exceeded safe callback window')
