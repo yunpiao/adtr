@@ -459,6 +459,7 @@ class ContractTests(unittest.TestCase):
         self.assertEqual(g.failure_event('session_validation', caught.exception), {
             'event': 'running_cancel_guard_failure', 'stage': 'session_validation',
             'reason': 'unsafe_transaction_query', 'queryCategory': 'other',
+            'lockSafetyCategory': 'unsafe_transactionid',
             'stateCategory': 'active', 'waitTypeCategory': 'Lock', 'locksPresent': True})
 
     def test_transaction_diagnostics_never_expand_query_acceptance(self):
@@ -483,6 +484,58 @@ class ContractTests(unittest.TestCase):
                 # Nontransactional idle remains accepted, including unknown SQL.
                 row.update(transaction=False, state='idle')
                 self.assertEqual(g.validate_sessions([session(), row], 99)[1:], (1, 1))
+
+    def test_transaction_lock_summary_is_diagnostic_only_and_order_independent(self):
+        cases = [([], 'none'), ([lock('virtualxid', 'ExclusiveLock')], 'allowlisted_shapes'),
+            ([lock('relation', 'RowShareLock', relation='adtr.schema_version')], 'allowlisted_shapes'),
+            ([lock('relation', 'AccessShareLock', relation='private.tenant')], 'unsafe_relation'),
+            ([lock('relation', 'ShareLock', relation='adtr.schema_version')], 'unsafe_relation'),
+            ([lock('relation', 'RowShareLock', False, 'adtr.schema_version')], 'unsafe_relation'),
+            ([lock('advisory', 'ShareLock', classid='0', objid='734192801', objsubid=1)], 'allowlisted_shapes'),
+            ([lock('advisory', 'ShareLock', classid='private')], 'unsafe_advisory'),
+            ([lock('virtualxid', 'ShareLock')], 'unsafe_virtualxid'),
+            ([lock('transactionid', 'ShareLock', False)], 'unsafe_transactionid'),
+            ([lock('transactionid', 'ExclusiveLock')], 'allowlisted_shapes'),
+            ([lock('tuple', 'ExclusiveLock')], 'unsafe_tuple'),
+            ([lock('private', 'private')], 'unknown_lock'),
+            ([None], 'unknown_lock'), (None, 'unknown_lock')]
+        for locks, expected in cases:
+            with self.subTest(category=expected, locks=locks):
+                self.assertEqual(g.transaction_lock_category(locks), expected)
+                if type(locks) is list:
+                    row = session(); row.update(query='SELECT private', locks=locks)
+                    with self.assertRaisesRegex(RuntimeError, '^unsafe owned transaction query$') as caught:
+                        g.validate_sessions([row], 99)
+                    event = g.failure_event('session_validation', caught.exception)
+                    self.assertEqual(event['lockSafetyCategory'], expected)
+                    self.assertNotIn('private', json.dumps(event))
+        mixed = [lock('relation', 'private', relation='private'), lock('private', 'private')]
+        self.assertEqual(g.transaction_lock_category(mixed), 'unknown_lock')
+        self.assertEqual(g.transaction_lock_category(list(reversed(mixed))), 'unknown_lock')
+
+    def test_transaction_lock_shapes_match_original_nonactivity_lock_rules(self):
+        modes = ('AccessShareLock', 'RowShareLock', 'RowExclusiveLock', 'ShareLock',
+                 'ExclusiveLock', 'AccessExclusiveLock', 'private')
+        cases = []
+        for typ in ('relation', 'advisory', 'virtualxid', 'transactionid', 'tuple', 'private'):
+            for mode in modes:
+                for granted in (False, True):
+                    for relation in sorted(g.RELATIONS) + ['private']:
+                        cases.append(lock(typ, mode, granted, relation,
+                            classid='0', objid='734192801', objsubid=1))
+        for key in ('classid', 'objid', 'objsubid'):
+            for value in ('private', None, 0, 2):
+                cases.append(lock('advisory', 'ShareLock', classid='0', objid='734192801',
+                                  objsubid=1) | {key: value})
+        for item in cases:
+            row = session(101); row.update(query=g.SCHEMA_SQL, blockers=[], locks=[item])
+            try:
+                g.validate_sessions([session(), row], 99)
+                accepted = True
+            except RuntimeError:
+                accepted = False
+            self.assertEqual(g.transaction_lock_category([item]) == 'allowlisted_shapes',
+                             accepted, item)
 
     def test_transaction_categories_are_closed_and_private(self):
         secret = 'postgres://private:credential@host/db SQL tenant worker token'
@@ -650,6 +703,7 @@ class ContractTests(unittest.TestCase):
                 self.assertEqual(guard.failure_diagnostic, {
                     'event': 'running_cancel_guard_failure', 'stage': 'session_validation',
                     'reason': 'unsafe_transaction_query', 'queryCategory': 'other',
+                    'lockSafetyCategory': 'unsafe_transactionid',
                     'stateCategory': 'active', 'waitTypeCategory': 'Lock', 'locksPresent': True})
                 for raw in ('private', 'task-one', 'worker', guard.token, guard.database_url, g.ACTIVITY_SQL):
                     self.assertNotIn(raw, lines[0])

@@ -1,5 +1,36 @@
 # 交付台账与工作约定
 
+### 2026-10-17 running-cancel 持锁类别补充诊断候选
+
+PR167 head `b7c6e1703179637874c70c096dcdf5e67721123f` 的
+[run38995521988](https://github.com/yunpiao/adtr/actions/runs/38995521988)
+user job `117287169944` 再现严格事务拒绝；安全 artifact `12087746411` 记录
+`other` / `idle in transaction` / `Client` / `locksPresent=true`。
+这表示观察时事务尚未结束、未执行查询、正在等待客户端且有锁；非active状态的query
+是最近语句。具体事务路径与锁类别尚未确认，不能由other推断为任何已知安全SQL。
+状态语义见[PostgreSQL文档](https://www.postgresql.org/docs/18/monitoring-stats.html)。
+
+静态检查及合成样本已证实捕获门槛缺口：现有capture只要求一个活动记录waiter及目标
+snapshot边界即SIGSTOP，然后才验证全会话。拥有相同application_name的worker进程
+还运行多槽claim、recovery、scheduler、maintenance及message循环；可能冻结另一个
+尚未结束的事务。这是与证据一致的机制假设，不是此次失败具体来源的证明。
+
+本候选只在拒绝事务事件增加 `lockSafetyCategory`：none、allowlisted_shapes、
+unsafe_relation、unsafe_advisory、unsafe_virtualxid、unsafe_transactionid、
+unsafe_tuple、unknown_lock。固定优先级汇总首类违规，不依赖锁枚举顺序。
+allowlisted_shapes仅说明锁形状符合原非activity规则，事务query仍被拒绝。
+字段不含锁名称、对象、ID、SQL或参数；删去只失去诊断信息，不改变准入。
+捕获、1.5秒窗口、租约、SQL白名单、冻结后复核、CONT及清理完全不改。
+
+离线Python契约59项通过（guard42项），包含516组锁形状与原非activity锁规则的
+一致性矩阵、未知值/字段注入隐私检查及清理后单次输出。所有原有函数逐字节比对，
+仅transaction_query_failure增加诊断字段，其余保持；diff检查通过。真实运行与
+精确head CI待完成，不能将本地静态结果当作浏览器或数据库验证。
+
+未来候选可以在冻结前要求全会话满足原严格冻结条件，运行窗口内不满足条件时继续
+观察，但需独立明确观察/身份异常与未就绪的边界，固定截止时间，并保留冻结后
+严格复核；观察到STOP间的竞态仍需验证。此次不采纳该行为改动，也不放行other。
+
 ### 2026-10-17 running-cancel 事务拒绝诊断候选
 
 基线真实 main `73ef65bf9860e695ce2f1a0b2b39c264f458c43d`，内容树

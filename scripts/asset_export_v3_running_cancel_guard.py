@@ -92,12 +92,51 @@ RELATION_FAILURE_VALUES = MappingProxyType({
 
 
 TRANSACTION_FAILURE_VALUES = MappingProxyType({
+    'lockSafetyCategory': frozenset({'none', 'allowlisted_shapes', 'unsafe_relation',
+        'unsafe_advisory', 'unsafe_virtualxid', 'unsafe_transactionid',
+        'unsafe_tuple', 'unknown_lock'}),
     'queryCategory': frozenset({'activity', 'schema', 'schemaGate', 'begin', 'commit', 'rollback', 'other'}),
     'stateCategory': frozenset({'active', 'idle', 'idle in transaction',
         'idle in transaction (aborted)', 'fastpath function call', 'disabled', 'other'}),
     'waitTypeCategory': frozenset({'Activity', 'BufferPin', 'Client', 'Extension',
         'IO', 'IPC', 'Lock', 'LWLock', 'Timeout', 'none', 'other'}),
 })
+
+
+def transaction_lock_category(locks):
+    # Diagnostic only, for the rejected/unclassified query path. Never authorize
+    # a transaction from this summary. Fixed priority makes mixed-lock samples
+    # independent of pg_locks row order, without retaining names or identifiers.
+    if type(locks) is not list:
+        return 'unknown_lock'
+    failures = set()
+    for lock in locks:
+        if type(lock) is not dict:
+            failures.add('unknown_lock')
+            continue
+        typ, mode = lock.get('type'), lock.get('mode')
+        granted = lock.get('granted') is True
+        if typ == 'relation':
+            relation = lock.get('relation')
+            if not (type(relation) is str and relation in RELATIONS and granted and
+                    mode in ('AccessShareLock', 'RowShareLock', 'RowExclusiveLock')):
+                failures.add('unsafe_relation')
+        elif typ == 'advisory':
+            if not (lock.get('classid') == '0' and lock.get('objid') == '734192801'
+                    and lock.get('objsubid') == 1 and mode == 'ShareLock' and granted):
+                failures.add('unsafe_advisory')
+        elif typ in ('virtualxid', 'transactionid'):
+            if not (mode == 'ExclusiveLock' and granted):
+                failures.add('unsafe_' + typ)
+        elif typ == 'tuple':
+            failures.add('unsafe_tuple')  # Unclassified queries never qualify.
+        else:
+            failures.add('unknown_lock')
+    for category in ('unknown_lock', 'unsafe_relation', 'unsafe_advisory',
+                     'unsafe_virtualxid', 'unsafe_transactionid', 'unsafe_tuple'):
+        if category in failures:
+            return category
+    return 'allowlisted_shapes' if locks else 'none'
 
 
 def transaction_query_failure(session):
@@ -112,6 +151,7 @@ def transaction_query_failure(session):
     error = RuntimeError('unsafe owned transaction query')
     error.transaction_diagnostic = {
         'queryCategory': category,
+        'lockSafetyCategory': transaction_lock_category(session['locks']),
         'stateCategory': state if type(state) is str and state in TRANSACTION_FAILURE_VALUES['stateCategory'] else 'other',
         'waitTypeCategory': ('none' if wait is None else wait
             if type(wait) is str and wait in TRANSACTION_FAILURE_VALUES['waitTypeCategory'] else 'other'),
