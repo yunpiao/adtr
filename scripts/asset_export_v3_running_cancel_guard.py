@@ -91,6 +91,35 @@ RELATION_FAILURE_VALUES = MappingProxyType({
 })
 
 
+TRANSACTION_FAILURE_VALUES = MappingProxyType({
+    'queryCategory': frozenset({'activity', 'schema', 'schemaGate', 'begin', 'commit', 'rollback', 'other'}),
+    'stateCategory': frozenset({'active', 'idle', 'idle in transaction',
+        'idle in transaction (aborted)', 'fastpath function call', 'disabled', 'other'}),
+    'waitTypeCategory': frozenset({'Activity', 'BufferPin', 'Client', 'Extension',
+        'IO', 'IPC', 'Lock', 'LWLock', 'Timeout', 'none', 'other'}),
+})
+
+
+def transaction_query_failure(session):
+    # Diagnostic classification ONLY: never use these categories to accept a
+    # session. Match entire known statements, not prefixes or SQL fragments.
+    query = normalized(session['query'])
+    category = {normalized(ACTIVITY_SQL): 'activity', normalized(SCHEMA_SQL): 'schema',
+                normalized(GATE_SQL): 'schemaGate'}.get(query)
+    if category is None:
+        category = {'begin': 'begin', 'commit': 'commit', 'rollback': 'rollback'}.get(query.lower(), 'other')
+    state, wait = session['state'], session['waitType']
+    error = RuntimeError('unsafe owned transaction query')
+    error.transaction_diagnostic = {
+        'queryCategory': category,
+        'stateCategory': state if type(state) is str and state in TRANSACTION_FAILURE_VALUES['stateCategory'] else 'other',
+        'waitTypeCategory': ('none' if wait is None else wait
+            if type(wait) is str and wait in TRANSACTION_FAILURE_VALUES['waitTypeCategory'] else 'other'),
+        'locksPresent': bool(session['locks']),
+    }
+    return error
+
+
 def failure_event(stage, error):
     # Exact allowlisting also handles unexpected exceptions without disclosing
     # their values. Diagnostic output must never prevent CONT or cleanup.
@@ -103,6 +132,11 @@ def failure_event(stage, error):
     if (type(detail) is dict and set(detail) == set(RELATION_FAILURE_VALUES) | {'granted'}
             and type(detail['granted']) is bool and all(type(detail[key]) is str
                 and detail[key] in values for key, values in RELATION_FAILURE_VALUES.items())):
+        event.update(detail)
+    detail = getattr(error, 'transaction_diagnostic', None) if reason == 'unsafe_transaction_query' else None
+    if (type(detail) is dict and set(detail) == set(TRANSACTION_FAILURE_VALUES) | {'locksPresent'}
+            and type(detail['locksPresent']) is bool and all(type(detail[key]) is str
+                and detail[key] in values for key, values in TRANSACTION_FAILURE_VALUES.items())):
         event.update(detail)
     return event
 
@@ -225,7 +259,8 @@ def validate_sessions(sessions, lock_pid):
                 normalized(GATE_SQL): 'schemaGate'}.get(normalized(session['query']), 'idle')
         active = session['transaction']
         if active:
-            require(kind != 'idle', 'unsafe owned transaction query')
+            if kind == 'idle':
+                raise transaction_query_failure(session)
             transactions += 1
         else:
             require(session['state'] == 'idle' and not locks, 'nonidle unclassified owned session')

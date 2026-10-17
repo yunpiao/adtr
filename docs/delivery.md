@@ -1,5 +1,33 @@
 # 交付台账与工作约定
 
+### 2026-10-17 running-cancel 事务拒绝诊断候选
+
+基线真实 main `73ef65bf9860e695ce2f1a0b2b39c264f458c43d`，内容树
+`bf65237e8d323a69f94f5bd1955704b0a907d460`；独立源码副本的 Git tree
+已逐内容重建核对一致。本地快照提交仅用于审查，不冒充真实 main 提交。
+
+[main-push run 38993821990](https://github.com/yunpiao/adtr/actions/runs/38993821990)
+的 user running-cancel job `117281858696` 在 02:27:31 UTC 拒绝了未匹配
+严格 SQL 白名单的事务，输出 `unsafe_transaction_query` / `session_validation`。
+安全诊断 artifact `12086807691` 已保留。现有证据未记录具体 SQL 类别和会话状态，
+根因尚未确定；历史同代码重跑通过不能证明本次失败安全，也不能支持扩大白名单。
+
+候选仅增加闭集失败诊断：`queryCategory` 为完整匹配的 activity/schema/schemaGate、
+begin/commit/rollback 或 other；`stateCategory`、`waitTypeCategory` 为固定类别，
+未知值归 other，空等待归 none；`locksPresent` 仅说明是否观察到锁。
+诊断不包含原 SQL、参数、连接串、环境、标识符、锁对象或异常原值。
+这些类别仅用于定位；BEGIN/COMMIT/ROLLBACK 事务仍被原严格规则拒绝。
+删除新增字段只会失去定位信息，不改变安全判定；副作用为失败事件增加四个字段。
+SQL 接受列表、冻结时序、清理及 CONT 后单次输出顺序保持。
+
+离线验证：原 guard 36 项基线通过；新增后 40 项 guard 契约通过，合并相关 runner/
+安全产物契约共 57 项通过，审计钩子禁止真实进程、网络、信号。
+首次组合运行因工作目录错误出现10项文件缺失错误；保留记录并在仓库根目录原代码
+重跑57项全通过。逆变换诊断新增片段后，guard 与原源码逐字节一致；`git diff --check` 通过。
+本地 Node/Go/PostgreSQL/browser 未运行；独立复审、精确远程 head CI 与合并后验证待完成。
+这是诊断增强候选，不宣称已解决实际事务拒绝根因，不改变产品验收范围。
+
+
 总路线图：https://github.com/yunpiao/adtr/issues/1 。全部 209 项均在范围内。
 工程文档、代码、PR、最新 head CI、合并、产品验收分别记录；任一阶段不能代表后续阶段完成。
 
