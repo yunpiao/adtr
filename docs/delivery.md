@@ -594,3 +594,26 @@ Refs #50 / AD-F-158 / DTL-036。迁移18新增有界冻结目标、原接受回�
   跨来源/跨调用可能出现时间差，但本次没有证据确认 race，也没有证据确认外部会话。
   worker appname 来自专属 nonce DSN，barrier PID 来自持续 psql 自报，尚未发现身份取错的代码证据。
 - 新契约覆盖三路拒绝、隐私闭集及严格 validator/checkpoint 函数字节保真；捕获时序与清理不变。
+
+### PR168 合并后：owned speculative INSERT 仅作为运行期未就绪
+
+- 基线 main `8d367ad5c32fc4e5e334701a24dae60e6f1a5bbe`，完整树
+  `fbc10ba6e0c664e09158cc2665f1fe12ccc293de`。post-main run `39010380998` 的 computer
+  job `117331556087` 报 `capture_readiness/unrecognized_lock`，闭集锁类别确为 `spectoken`；
+  group/user 成功。安全产物 `12093410338` 未记录具体 SQL，不能把触发路径认定为某条业务语句。
+- [PG17.6 lmgr.c](https://github.com/postgres/postgres/blob/REL_17_6/src/backend/storage/lmgr/lmgr.c#L723-L783)
+  定义 speculative insertion 决策锁：插入者取得 ExclusiveLock，等待者取得 ShareLock，决策后释放。
+  [ON CONFLICT 执行路径](https://github.com/postgres/postgres/blob/REL_17_6/src/backend/executor/nodeModifyTable.c#L973-L1071)
+  在 speculative 插入与唯一索引检查后释放，不必等待事务结束。
+  项目 computer 导出快照 `internal/domains/computer_asset_export_v3.go:111` 和 worker 活动记录
+  `internal/systemhealth/persistence_worker.go:36-42` 均有 ON CONFLICT 路径，这是候选来源而非本次根因证明。
+- 仅对精确 `spectoken` 的
+  [PG 投影形态](https://github.com/postgres/postgres/blob/REL_17_6/src/backend/utils/adt/lockfuncs.c#L300-L310)
+  识别未就绪：mode 为 ExclusiveLock/ShareLock，granted 为布尔，relation/classid/objsubid 为 NULL，
+  objid 为规范的非零 uint32 十进制 token。该 token 仅内存校验，不输出或保存。
+  不强求 transaction 状态与锁同步，不凭 SQL 名称推断安全；其他未知锁与非法形态仍立即失败。
+- 全部会话、锁形态与 owned blocker 图检查完成后才返回 `speculative_insert_in_progress`，
+  后续坏行、未知锁、外部 blocker、环不能被 spectoken 遮住。仍在原固定 deadline 内观察，持续未就绪零 STOP 并超时失败。
+  停后新出现 spectoken 立即失败并 CONT 清理，不循环解冻重试；严格冻结 validator、checkpoint 时序及 SQL 白名单原文不变。
+- 严格离线 82 项契约通过：两模式/两 granted 布尔、token 边界、非法形态、三种导出瞬态→ready、持续超时、停后 race、
+  后续坏样本不被遮蔽、候选 task 身份/租约失败优先以及原关键函数 SHA256 保真。真实行为等待新 head CI 验证。
