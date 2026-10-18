@@ -1,3 +1,4 @@
+import { runningGuard } from "./owned-running-control";
 import { expect, type Page, type BrowserContext, type TestInfo } from "@playwright/test";
 import { readFile, writeFile, readdir, readlink } from "node:fs/promises";
 import { execFile } from "node:child_process";
@@ -6,6 +7,7 @@ import { setupComputerFixture, readJSON, proof } from "./computer-assets-v3-fixt
 import { observeDirectoryV2Responses } from "./directory-v2-response-observer";
 import { assetAction, downloadHeaderNames, evidenceProvenance, exportPrefix, hash, openAssets, responseValue, sensitiveBudget, storedExport, switchToExportOwner } from "./computer-asset-export-v3-helpers";
 import { resolve } from "node:path";
+import { activityAlias, assertActivityScope } from "./owned-worker-activity-scope";
 const run = promisify(execFile);
 export const safeColumns = ["dn", "guid"];
 export const allColumns = ["guid", "sAMAccountName", "sid", "dn", "whenCreated"];
@@ -169,6 +171,10 @@ async function checkedWorker() {
   } catch { throw new Error("Owned Worker identity could not be verified"); }
 }
 async function signalWorker(signal: "SIGSTOP" | "SIGCONT") {
+  if (signal === "SIGCONT" && (process.env.ADTR_E2E_RUNNING_CANCEL_GUARD_URL !== undefined || process.env.ADTR_E2E_RUNNING_CANCEL_GUARD_TOKEN !== undefined)) {
+    await runningGuard("resume");
+    return;
+  }
   const worker = await checkedWorker();
   // Recheck process birth/parent immediately before signalling, after thread reads.
   const stat = await readFile(`/proc/${worker.pid}/stat`, "utf8");
@@ -176,8 +182,12 @@ async function signalWorker(signal: "SIGSTOP" | "SIGCONT") {
   if (tail[1] !== String(worker.parentPID) || tail[19] !== worker.starttime) throw new Error("Owned Worker changed before signal");
   process.kill(worker.pid, signal);
 }
-async function queueActivity() {
-  const value = await databaseJSON("SELECT jsonb_build_object('count',count(*),'workerID',min(worker_id),'success',min(extract(epoch FROM last_success_at))::text) FROM adtr.system_worker_activity WHERE tenant_id='default' AND cycle='queue'");
+async function queueActivity(scope?: { workerID: string; alias: string }) {
+  if (scope && (scope.workerID.length < 1 || scope.workerID.length > 128 || /[^A-Za-z0-9_.:-]/u.test(scope.workerID) || scope.alias.length !== 64 || !scope.alias.startsWith("ci-activity-") || /[^a-z2-7]/u.test(scope.alias.slice(12)) || scope.workerID === scope.alias)) throw new Error("Invalid owned activity scope");
+  const value = await databaseJSON(scope
+    ? `SELECT jsonb_build_object('scope',jsonb_build_object('original',count(*) FILTER (WHERE worker_id='${scope.workerID}'),'alias',count(*) FILTER (WHERE worker_id='${scope.alias}'),'other',count(*) FILTER (WHERE worker_id NOT IN ('${scope.workerID}','${scope.alias}'))),'count',count(*) FILTER (WHERE worker_id='${scope.workerID}'),'workerID',min(worker_id) FILTER (WHERE worker_id='${scope.workerID}'),'success',(min(extract(epoch FROM last_success_at)) FILTER (WHERE worker_id='${scope.workerID}'))::text) FROM adtr.system_worker_activity WHERE tenant_id='default' AND cycle='queue'`
+    : "SELECT jsonb_build_object('count',count(*),'workerID',min(worker_id),'success',min(extract(epoch FROM last_success_at))::text) FROM adtr.system_worker_activity WHERE tenant_id='default' AND cycle='queue'");
+  if (scope) assertActivityScope(value.scope);
   expect(value.count).toBe(1);
   expect(value.workerID).toMatch(/^[A-Za-z0-9_.:-]{1,128}$/u);
   expect(value.success).toMatch(/^[0-9]+\.[0-9]+$/u);
@@ -185,7 +195,8 @@ async function queueActivity() {
 }
 let ownedStopped = false;
 export async function pauseOwnedExportWorker() {
-  // Any missed in-flight transaction resumes before another bounded attempt.
+  // Running capture already holds a drained admission park; it cannot retry a missed boundary.
+  const runningQueued = Boolean(process.env.ADTR_E2E_RUNNING_CANCEL_GUARD_URL);
   const deadline = Date.now() + 10_000;
   const samples = { attempts: 0, zeroConnections: 0, activeTransactions: 0, lastConnections: 0, lastActiveTransactions: 0 };
   try {
@@ -198,12 +209,13 @@ export async function pauseOwnedExportWorker() {
       samples.attempts++; samples.zeroConnections += Number(pg.connections === 0);
       samples.activeTransactions += Number(pg.activeTransactions > 0);
       samples.lastConnections = pg.connections; samples.lastActiveTransactions = pg.activeTransactions;
-      if (w.databaseIdentityVerified && pg.activeTransactions === 0) {
+      if (w.databaseIdentityVerified && pg.activeTransactions === 0 && (!runningQueued || pg.connections === 0)) {
         // Capture only AFTER stop confirmation, so a pre-stop late commit cannot
         // be mistaken for the post-resume real queue cycle.
         const queue = await queueActivity();
         return { pid: w.pid, parentPID: w.parentPID, starttime: w.starttime, binarySHA256: hash(await readFile(w.binary)), nonceSHA256: hash(w.nonce), applicationNameSHA256: hash(w.applicationName), allThreadsStopped: true, databaseIdentityVerified: w.databaseIdentityVerified, threadCount: w.states.length, connections: pg.connections, activeTransactions: 0, workerID: queue.workerID, queueSuccessBefore: queue.success };
       }
+      if (runningQueued) throw new Error("Owned running Worker queued connections were not empty");
       await signalWorker("SIGCONT"); ownedStopped = false;
       await new Promise((done) => setTimeout(done, 100));
     }
@@ -215,26 +227,27 @@ export async function pauseOwnedExportWorker() {
 export async function restoreOwnedExportWorker() {
   if (ownedStopped) { await signalWorker("SIGCONT"); ownedStopped = false; }
 }
-export async function resumeOwnedExportWorker(context: BrowserContext, pause: Awaited<ReturnType<typeof pauseOwnedExportWorker>>) {
+export async function resumeOwnedExportWorker(context: BrowserContext, pause: Awaited<ReturnType<typeof pauseOwnedExportWorker>>, activityTaskID?: string) {
   await restoreOwnedExportWorker();
   await expect.poll(async () => (await checkedWorker()).states.every((s) => s !== "T" && s !== "t"), { timeout: 5000 }).toBe(true);
   const w = await checkedWorker();
+  const scope = activityTaskID === undefined ? undefined : { workerID: pause.workerID, alias: activityAlias(w.nonce, activityTaskID) };
   await expect.poll(async () => (await context.request.get(w.readyURL)).status(), { timeout: 10_000 }).toBe(200);
   await expect.poll(async () => {
-    const queue = await queueActivity();
+    const queue = await queueActivity(scope);
     expect(queue.workerID).toBe(pause.workerID);
     return Number(queue.success) > Number(pause.queueSuccessBefore);
   }, { timeout: 15_000 }).toBe(true);
-  const first = await queueActivity();
+  const first = await queueActivity(scope);
   expect(first.workerID).toBe(pause.workerID);
   // One completion could be a pre-STOP poll whose activity write was pending.
   // A second strictly newer recorded success proves a fresh post-resume cycle.
   await expect.poll(async () => {
-    const queue = await queueActivity();
+    const queue = await queueActivity(scope);
     expect(queue.workerID).toBe(pause.workerID);
     return Number(queue.success) > Number(first.success);
   }, { timeout: 20_000 }).toBe(true);
-  const queue = await queueActivity();
+  const queue = await queueActivity(scope);
   expect(queue.workerID).toBe(pause.workerID);
   return { sameIdentity: w.pid === pause.pid && w.starttime === pause.starttime && hash(w.nonce) === pause.nonceSHA256, allThreadsRunning: true, readyStatus: 200, workerID: queue.workerID, queueSuccessAfterFirst: first.success, queueSuccessAfter: queue.success };
 }

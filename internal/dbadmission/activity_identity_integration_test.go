@@ -26,7 +26,7 @@ func TestActivityIdentityScopedToExistingConnection(t *testing.T) {
 	}
 	defer other.Close(context.Background())
 	identity := ActivityIdentity{TaskID: "private-task", Kind: "user_assets.v3.export", Attempt: 1, LeaseOwner: "private-owner-0", FencingToken: 23, ResultVersion: 2, Phase: "first-fenced-progress-10"}
-	release, err := RegisterActivityIdentity(conn, identity)
+	release, _, err := RegisterActivityIdentity(conn, identity, "candidate-worker")
 	if err != nil {
 		t.Fatal("identity registration failed")
 	}
@@ -38,7 +38,7 @@ func TestActivityIdentityScopedToExistingConnection(t *testing.T) {
 	if registration == nil || registration.identity != identity || registration.backend == 0 || otherRegistration != nil {
 		t.Fatal("identity attached to incorrect handle")
 	}
-	if _, err := RegisterActivityIdentity(conn, identity); err == nil {
+	if _, _, err := RegisterActivityIdentity(conn, identity, "candidate-worker"); err == nil {
 		t.Fatal("handle rebound")
 	}
 	encoded, err := json.Marshal(identity)
@@ -61,7 +61,7 @@ func TestActivityIdentityScopedToExistingConnection(t *testing.T) {
 	if err := conn.Close(ctx); err != nil {
 		t.Fatal("identity connection close failed")
 	}
-	if _, err := RegisterActivityIdentity(conn, identity); err == nil {
+	if _, _, err := RegisterActivityIdentity(conn, identity, "candidate-worker"); err == nil {
 		t.Fatal("closed connection accepted identity")
 	}
 }

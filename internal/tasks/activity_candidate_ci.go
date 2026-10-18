@@ -85,18 +85,18 @@ func (p *activityCandidateProof) revoke() {
 
 // BindActivityCandidate may be called only by the dedicated health activity
 // transaction entrypoint, as enforced by the typed repository checker.
-func BindActivityCandidate(candidate ActivityCandidate, conn *dbadmission.Conn, workerID string) (func(), error) {
+func BindActivityCandidate(candidate ActivityCandidate, conn *dbadmission.Conn, workerID string) (func(), string, error) {
 	if candidate == nil {
-		return func() {}, nil
+		return func() {}, workerID, nil
 	}
 	proof, ok := candidate.(*activityCandidateProof)
 	if !ok || proof == nil {
-		return nil, errActivityCandidate
+		return nil, "", errActivityCandidate
 	}
 	proof.mu.Lock()
 	defer proof.mu.Unlock()
 	if proof.revoked || proof.consumed {
-		return nil, errActivityCandidate
+		return nil, "", errActivityCandidate
 	}
 	proof.consumed = true
 	owned := false
@@ -104,12 +104,37 @@ func BindActivityCandidate(candidate ActivityCandidate, conn *dbadmission.Conn, 
 		owned = owned || proof.identity.LeaseOwner == workerID+"-"+strconv.Itoa(slot)
 	}
 	if !owned {
-		return nil, errActivityCandidate
+		return nil, "", errActivityCandidate
 	}
-	release, err := dbadmission.RegisterActivityIdentity(conn, proof.identity)
+	release, key, err := dbadmission.RegisterActivityIdentity(conn, proof.identity, workerID)
 	if err != nil {
-		return nil, errActivityCandidate
+		return nil, "", errActivityCandidate
 	}
 	proof.release = release
-	return release, nil
+	return release, key, nil
+}
+
+// AwaitActivityCandidate cannot consume or expose the proof. It waits before
+// any health connection exists, and ordinary callbacks never call it.
+func AwaitActivityCandidate(ctx context.Context, candidate ActivityCandidate, workerID string) error {
+	if candidate == nil {
+		return nil
+	}
+	proof, ok := candidate.(*activityCandidateProof)
+	if !ok || proof == nil {
+		return errActivityCandidate
+	}
+	proof.mu.Lock()
+	defer proof.mu.Unlock()
+	if proof.revoked || proof.consumed {
+		return errActivityCandidate
+	}
+	owned := false
+	for slot := 0; slot < 4; slot++ {
+		owned = owned || proof.identity.LeaseOwner == workerID+"-"+strconv.Itoa(slot)
+	}
+	if !owned {
+		return errActivityCandidate
+	}
+	return dbadmission.AwaitActivitySelection(ctx, proof.identity)
 }

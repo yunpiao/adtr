@@ -89,7 +89,8 @@ class DirectoryCredentialsContract(unittest.TestCase):
         self.assertIn(').not.toContain("actorPassword")', code)
 
     def test_exact_prior_runner_bytes_and_reject_drift(self):
-        source = Path("scripts/test_auth_e2e.py").read_text()
+        from test_owned_rescue_runner_contract import restore_owned_runner
+        source = restore_owned_runner(Path("scripts/test_auth_e2e.py").read_text())
         restored = restore_credentials_runner(source)
         self.assertEqual(hashlib.sha256(restored.encode()).hexdigest(),
                          "21b22d642bd3518deaf3a3659e29113d90682de063dd504ab68340a8173b69e5")

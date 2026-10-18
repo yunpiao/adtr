@@ -13,7 +13,11 @@ IMAGE = "docker.io/library/postgres:17.6-alpine@sha256:ef257d85f76e48da1c6483245
 
 def main():
     args = parse_args()
-    name = "adtr-test-" + uuid.uuid4().hex[:12]
+    # Real owned-child protocol tests are explicit CI work, never import-time contracts.
+    if args.suite in ("all", "non-auth"):
+        subprocess.run(["make", "test-owned-rescue-ci"], check=True)
+    fixture_psql = args.suite in ("all", "non-auth")
+    name = ("adtr-auth-e2e-" if fixture_psql else "adtr-test-") + uuid.uuid4().hex[:12]
     password = secrets.token_hex(24)
     env = dict(os.environ, POSTGRES_PASSWORD=password)
     created = False
@@ -29,6 +33,9 @@ def main():
             time.sleep(0.5)
         else:
             raise RuntimeError("disposable database did not become ready")
+        if fixture_psql:
+            subprocess.run(["python3", "scripts/test_activity_fixture_psql_runtime.py", "--container", name],
+                           env=dict(env, ADTR_RUN_ACTIVITY_PSQL_TESTS="1"), check=True)
         address = subprocess.check_output(["docker", "port", name, "5432/tcp"], text=True).strip()
         env["ADTR_TEST_DATABASE_URL"] = f"postgres://postgres:{password}@{address}/adtr_test?sslmode=disable"
         return run_tests(args, env)

@@ -55,12 +55,37 @@ func run() (runErr error) {
 		}
 		return nil
 	}
+	admissionFailure, admissionCleanup, err := configureCIAdmission(*mode)
+	if err != nil {
+		return err
+	}
+	defer admissionCleanup()
 	cfg, err := app.LoadConfig(*mode, os.Getenv)
 	if err != nil {
 		return err
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	if admissionFailure != nil {
+		observeCIWorkerContext(ctx, stop)
+		// A startup transport failure must be handled synchronously before any DB constructor.
+		select {
+		case <-admissionFailure:
+			stop()
+			return fmt.Errorf("CI database controller unavailable")
+		default:
+		}
+		watchDone := make(chan struct{})
+		go func() {
+			defer close(watchDone)
+			select {
+			case <-admissionFailure:
+				stop()
+			case <-ctx.Done():
+			}
+		}()
+		defer func() { stop(); <-watchDone }()
+	}
 	if *mode == "migrate" {
 		migrationCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
@@ -135,6 +160,9 @@ func run() (runErr error) {
 			}
 			drain, stopDrain := context.WithTimeout(context.Background(), 5*time.Second)
 			closeErr := journal.Close(drain)
+			if admissionFailure != nil && *mode == "worker" {
+				emitCIJournalFinal(journal, closeErr)
+			}
 			stopDrain()
 			journalCancel()
 			if closeErr != nil {

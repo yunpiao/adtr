@@ -33,13 +33,22 @@ func (d Diagnostic) String() string { return fmt.Sprintf("%s: %s", d.Position, d
 // values, rather than just CallExprs. files and info must come from a successful
 // type check of the same package. Unknown protected operations are rejected.
 func Check(fset *token.FileSet, path string, files []*ast.File, info *types.Info) []Diagnostic {
-	var out []Diagnostic
+	out := criticalDeclarations(fset, path, files, info)
+	out = append(out, captureEndDeclarations(fset, path, files, info)...)
+	out = append(out, journalFinalDeclarations(fset, path, files, info)...)
+	out = append(out, uncleanCloseDeclarations(fset, path, files, info)...)
+	out = append(out, operationObservationDeclarations(fset, path, files, info)...)
+	out = append(out, recoveryDeclarations(fset, path, files, info)...)
+	out = append(out, connectFailureDeclarations(fset, path, files, info)...)
+	out = append(out, finalQuiesceDeclarations(fset, path, files, info)...)
+	out = append(out, queuedParkDeclarations(fset, path, files, info)...)
+	out = append(out, transportInvalidationDeclarations(fset, path, files, info)...)
 	scanners := scanOnlyParameters(files, info)
 	emit := func(n ast.Node, reason string) { out = append(out, Diagnostic{fset.Position(n.Pos()), reason}) }
 	for _, file := range files {
 		for _, spec := range file.Imports {
 			imported, _ := strconv.Unquote(spec.Path.Value)
-			if imported == "unsafe" || imported == "plugin" || imported == "os/exec" || imported == "database/sql" || strings.HasPrefix(imported, pgx+"/pgxpool") || strings.HasPrefix(imported, pgx+"/stdlib") {
+			if (imported == "unsafe" && !(path == managed && filepath.Base(fset.Position(file.Pos()).Filename) == witnessSource && spec.Name == nil)) || imported == "plugin" || imported == "os/exec" || imported == "database/sql" || strings.HasPrefix(imported, pgx+"/pgxpool") || strings.HasPrefix(imported, pgx+"/stdlib") {
 				emit(spec, "unproved alternate database or unsafe import")
 			}
 		}
@@ -82,7 +91,7 @@ func Check(fset *token.FileSet, path string, files []*ast.File, info *types.Info
 					obj := info.Uses[id]
 					if obj != nil && obj.Pkg() != nil {
 						p := obj.Pkg().Path()
-						if protectedActivityOperation(p, obj.Name()) && !allowedActivityCaller(path, filepath.Base(fset.Position(file.Pos()).Filename), name, p, obj.Name()) {
+						if protectedActivityOperation(p, obj.Name()) && (!allowedActivityCaller(path, filepath.Base(fset.Position(file.Pos()).Filename), name, p, obj.Name()) || ((obj.Name() == "AwaitActivityCandidate" || obj.Name() == "AwaitActivitySelection") && directCallFor(id, ancestors) == nil)) {
 							emit(id, "activity identity mint or registration outside exact caller")
 						}
 
@@ -90,7 +99,7 @@ func Check(fset *token.FileSet, path string, files []*ast.File, info *types.Info
 							emit(id, "unreviewed network transport constructor or method")
 						}
 
-						if p == "unsafe" || p == "plugin" || p == "os/exec" || (p == "syscall" && !safeSystemObject(path, obj.Name()) && !safeSystemField(path, filepath.Base(fset.Position(file.Pos()).Filename), name, id, ancestors, info)) || (p == "reflect" && obj.Name() != "DeepEqual") || p == "database/sql" || strings.HasPrefix(p, pgx+"/pgxpool") || strings.HasPrefix(p, pgx+"/stdlib") {
+						if (p == "unsafe" && !witnessUnsafe(path, filepath.Base(fset.Position(file.Pos()).Filename), name, id, ancestors, info)) || p == "plugin" || p == "os/exec" || (p == "syscall" && !safeSystemObject(path, obj.Name()) && !safeSystemField(path, filepath.Base(fset.Position(file.Pos()).Filename), name, id, ancestors, info) && !witnessSyscall(path, filepath.Base(fset.Position(file.Pos()).Filename), name, id, ancestors, info) && !captureEndSyscall(path, filepath.Base(fset.Position(file.Pos()).Filename), name, id, ancestors, info)) || (p == "reflect" && obj.Name() != "DeepEqual") || p == "database/sql" || strings.HasPrefix(p, pgx+"/pgxpool") || strings.HasPrefix(p, pgx+"/stdlib") {
 							emit(id, "unproved reflective, unsafe, or alternate database route: "+p+"."+obj.Name())
 						}
 						if f, ok := obj.(*types.Func); ok && (p == pgx || p == pgx+"/pgconn") && rawResult(f.Type()) {
@@ -107,7 +116,7 @@ func Check(fset *token.FileSet, path string, files []*ast.File, info *types.Info
 						if (p == pgx || p == pgx+"/pgconn") && strings.HasPrefix(obj.Name(), "ParseConfig") && !(factory && p == pgx && obj.Name() == "ParseConfig") {
 							emit(id, "configuration reparsing is outside the admitted configuration boundary")
 						}
-						if _, ok := obj.(*types.TypeName); ok && rawType(obj.Type()) && !trusted && !nilConn {
+						if _, ok := obj.(*types.TypeName); ok && rawType(obj.Type()) && !trusted && !nilConn && !(exactObserverFunction(path, filepath.Base(fset.Position(file.Pos()).Filename), name, fn) && (name == "operationObserver.TraceQueryStart" || name == "operationObserver.TraceQueryEnd")) {
 							emit(id, "raw database connection type escapes the managed boundary")
 						}
 					}
@@ -122,11 +131,17 @@ func Check(fset *token.FileSet, path string, files []*ast.File, info *types.Info
 							if path == managed && filepath.Base(fset.Position(file.Pos()).Filename) == "lifecycle_ci.go" && name == "lifecycleTicket.connected" && lifecycleBackendRead(fn, sel, ancestors, info) {
 								allowed = true
 							}
+							if exactObserverFunction(path, filepath.Base(fset.Position(file.Pos()).Filename), name, fn) && (name == "operationObserver.TraceQueryStart" || name == "operationObserver.TraceQueryEnd") && sourceText(sel) == "conn.IsClosed" && s.Kind() == types.MethodVal && isNamed(s.Recv(), pgx, "Conn") {
+								allowed = true
+							}
+							if recoveryNativeRead(path, filepath.Base(fset.Position(file.Pos()).Filename), name, fn, sel, info) {
+								allowed = true
+							}
 							if !allowed {
 								emit(sel, "raw connection method or transaction Conn escape")
 							}
 						}
-						if protectedConfig(s.Recv()) && !((s.Kind() != types.FieldVal && sel.Sel.Name == "Copy") || (factory && s.Kind() == types.FieldVal && configurationReadField(sel.Sel.Name))) {
+						if protectedConfig(s.Recv()) && !observedTracerField(path, filepath.Base(fset.Position(file.Pos()).Filename), name, fn, sel) && !((s.Kind() != types.FieldVal && sel.Sel.Name == "Copy") || (factory && s.Kind() == types.FieldVal && configurationReadField(sel.Sel.Name))) {
 							emit(sel, "configuration field access or unknown configuration operation")
 						}
 					}
@@ -174,7 +189,7 @@ func Check(fset *token.FileSet, path string, files []*ast.File, info *types.Info
 					case *ast.AssignStmt:
 						for _, lhs := range x.Lhs {
 							if sel, ok := lhs.(*ast.SelectorExpr); ok {
-								if selection := info.Selections[sel]; selection != nil && protectedConfig(selection.Recv()) {
+								if selection := info.Selections[sel]; selection != nil && protectedConfig(selection.Recv()) && !observedTracerField(path, filepath.Base(fset.Position(file.Pos()).Filename), name, fn, sel) {
 									emit(lhs, "configuration field replacement is forbidden")
 								}
 							}
@@ -407,14 +422,16 @@ func configurationReadField(name string) bool {
 }
 
 func protectedActivityOperation(path, name string) bool {
-	return (path == module+"/internal/tasks" && (name == "mintActivityCandidate" || name == "BindActivityCandidate")) || (path == managed && name == "RegisterActivityIdentity")
+	return (path == module+"/internal/tasks" && (name == "mintActivityCandidate" || name == "BindActivityCandidate" || name == "AwaitActivityCandidate")) || (path == managed && (name == "RegisterActivityIdentity" || name == "AwaitActivitySelection"))
 }
 func allowedActivityCaller(path, file, function, target, operation string) bool {
 	switch operation {
 	case "mintActivityCandidate":
 		return target == module+"/internal/tasks" && path == target && file == "activity_candidate_ci.go" && function == "Engine.withActivityCandidate"
-	case "BindActivityCandidate":
+	case "BindActivityCandidate", "AwaitActivityCandidate":
 		return target == module+"/internal/tasks" && path == module+"/internal/systemhealth" && file == "persistence_store.go" && function == "Store.withActivityTx"
+	case "AwaitActivitySelection":
+		return target == managed && path == module+"/internal/tasks" && file == "activity_candidate_ci.go" && function == "AwaitActivityCandidate"
 	case "RegisterActivityIdentity":
 		return target == managed && path == module+"/internal/tasks" && file == "activity_candidate_ci.go" && function == "BindActivityCandidate"
 	}

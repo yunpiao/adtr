@@ -56,6 +56,12 @@ func TestRepositoryTypedBoundary(t *testing.T) {
 
 func checkRepositoryBuild(t *testing.T, tags string) {
 	root := filepath.Join("..", "..")
+	checkSourceEnvironment(t, root)
+	rootAbs, err := filepath.Abs(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	actualSources := map[string]string{}
 	cmd := exec.Command("go", "list", "-tags="+tags, "-deps", "-export", "-json", "./cmd/adtr")
 	cmd.Dir = root
 	data, err := cmd.Output()
@@ -121,7 +127,18 @@ func checkRepositoryBuild(t *testing.T, tags string) {
 		}
 		var files []*ast.File
 		for _, name := range p.GoFiles {
-			f, e := parser.ParseFile(fset, filepath.Join(p.Dir, name), nil, parser.ParseComments)
+			sourcePath := filepath.Join(p.Dir, name)
+			relative, e := filepath.Rel(rootAbs, sourcePath)
+			if e != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+				t.Fatalf("source outside repository: %s", sourcePath)
+			}
+			source, e := os.ReadFile(sourcePath)
+			if e != nil {
+				t.Fatal(e)
+			}
+			sum := sha256.Sum256(source)
+			actualSources[filepath.ToSlash(relative)] = hex.EncodeToString(sum[:])
+			f, e := parser.ParseFile(fset, sourcePath, source, parser.ParseComments)
 			if e != nil {
 				t.Fatal(e)
 			}
@@ -143,6 +160,7 @@ func checkRepositoryBuild(t *testing.T, tags string) {
 		}
 
 	}
+	checkSourceCertificate(t, tags, actualSources)
 	names := make([]string, 0, len(seen))
 	for name := range seen {
 		names = append(names, name)

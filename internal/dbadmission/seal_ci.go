@@ -12,13 +12,15 @@ var errSealProtocol = errors.New("database seal unavailable")
 // sealAttempt is installed only by package tests in this verification slice.
 // LOCAL_SEALED is a local lifetime assertion, never PostgreSQL eligibility.
 type sealAttempt struct {
-	epoch          uint64
-	target         *lifecycleTicket
-	registration   *activityRegistration
-	released       bool
-	publishInvalid func()
-	publishOnce    sync.Once
-	publishDone    chan struct{}
+	epoch              uint64
+	target             *lifecycleTicket
+	registration       *activityRegistration
+	released           bool
+	captureEnded       bool
+	recoveryAuthorized bool
+	publishInvalid     func()
+	publishOnce        sync.Once
+	publishDone        chan struct{}
 }
 
 type sealSnapshot struct {
@@ -42,15 +44,39 @@ func (g *lifecycleGate) candidates() []sealSnapshot {
 	return result
 }
 
-func (g *lifecycleGate) register(conn *Conn, identity ActivityIdentity) (func(), error) {
+func (g *lifecycleGate) registerActivityRow(conn *Conn, identity ActivityIdentity, workerID string) (func(), string, error) {
 	g.mu.Lock()
 	ticket, ok := conn.permit.(*lifecycleTicket)
 	if !ok || ticket.gate != g || ticket.conn != conn || ticket.state != 'o' || ticket.backend == 0 || ticket.registration != nil || g.invalid || g.closing {
 		g.mu.Unlock()
-		return nil, errSealProtocol
+		return nil, "", errSealProtocol
+	}
+	if g.next == ^uint64(0) {
+		g.invalidateBecauseLocked(invalidCapacity)
+		g.notifyLocked()
+		g.unlockAndPublishInvalid()
+		return nil, "", errSealProtocol
+	}
+	key := workerID
+	if g.application && g.selection == 1 {
+		g.invalidateBecauseLocked(invalidExplicit)
+		g.notifyLocked()
+		g.unlockAndPublishInvalid()
+		return nil, "", errSealProtocol
+	}
+	if g.application && g.selection == 2 && identity.TaskID == g.selectionTask {
+		if identity.Kind != g.selectionKind || workerID != g.selectionOwner || g.selectionConsumed {
+			g.invalidateBecauseLocked(invalidExplicit)
+			g.notifyLocked()
+			g.unlockAndPublishInvalid()
+			return nil, "", errSealProtocol
+		}
+		key = g.selectionKey
+		g.selectionConsumed = true
 	}
 	g.next++
-	registration := &activityRegistration{identity: identity, backend: ticket.backend, generation: g.next}
+	registration := &activityRegistration{identity: identity, backend: ticket.backend, generation: g.next, activityKey: key}
+	ticket.recoveryEverRegistered = true
 	ticket.registration = registration
 	g.notifyLocked()
 	g.mu.Unlock()
@@ -60,12 +86,12 @@ func (g *lifecycleGate) register(conn *Conn, identity ActivityIdentity) (func(),
 		if ticket.registration != registration {
 			return
 		}
-		ticket.registration = nil
-		if g.seal != nil && !g.seal.released && g.seal.registration == registration {
-			g.invalid = true
+		if g.seal != nil && !g.seal.released && g.seal.registration == registration && !g.captureObligationsEndedLocked() {
+			g.invalidateBecauseLocked(invalidTargetRevoked)
 		}
+		ticket.registration = nil
 		g.notifyLocked()
-	}, nil
+	}, key, nil
 }
 
 func (g *lifecycleGate) pin(epoch, generation uint64, publish func()) error {
@@ -127,6 +153,11 @@ func (g *lifecycleGate) release(epoch uint64) error {
 	if g.seal == nil || epoch != g.seal.epoch {
 		return errSealProtocol
 	}
+	if g.seal.released {
+		return nil
+	}
+	// Consume only before release; rescue remains possible without permission.
+	g.seal.recoveryAuthorized = g.captureObligationsEndedLocked() && !g.invalid
 	g.seal.released = true
 	g.closing = false
 	g.notifyLocked()
@@ -136,16 +167,16 @@ func (g *lifecycleGate) release(epoch uint64) error {
 func (g *lifecycleGate) invalidate() {
 	g.mu.Lock()
 	defer g.unlockAndPublishInvalid()
-	g.invalid = true
+	g.invalidateBecauseLocked(invalidExplicit)
 	g.notifyLocked()
 }
 
 // Caller publishes outside the registry lock, before propagating ctx.Err.
 func (g *lifecycleGate) invalidateWaitLocked() func() {
-	if g.seal == nil || g.seal.released {
+	if g.seal == nil || g.seal.released || g.captureObligationsEndedLocked() {
 		return nil
 	}
-	g.invalid = true
+	g.invalidateBecauseLocked(invalidWaitCancelled)
 	g.notifyLocked()
 	return g.invalidPublisherLocked()
 }
@@ -178,7 +209,18 @@ func (g *lifecycleGate) unlockAndPublishInvalid() {
 // A broken transport cannot publish on itself. Its EOF is terminal to the parent.
 func (g *lifecycleGate) invalidateTransport() {
 	g.mu.Lock()
-	g.invalid = true
+	g.invalidateBecauseLocked(invalidTransport)
+	// A failed publication can enter here synchronously from publishInvalid.
+	// Release parked admissions without attempting publication on that same
+	// broken channel or waiting for our own in-progress publication to finish.
+	if g.finalParked {
+		g.finalQuiesce.state = "failed"
+		g.finalParked = false
+	}
+	if g.queuedParked {
+		g.queuedState = "failed"
+		g.queuedParked = false
+	}
 	g.notifyLocked()
 	g.mu.Unlock()
 }

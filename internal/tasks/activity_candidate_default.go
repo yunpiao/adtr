@@ -17,6 +17,8 @@ func (e *Engine) withActivityCandidate(ctx context.Context, lease Lease, expecte
 }
 
 // BindActivityCandidate is inactive in ordinary builds.
-func BindActivityCandidate(ActivityCandidate, *dbadmission.Conn, string) (func(), error) {
-	return func() {}, nil
+func BindActivityCandidate(_ ActivityCandidate, _ *dbadmission.Conn, workerID string) (func(), string, error) {
+	return func() {}, workerID, nil
 }
+
+func AwaitActivityCandidate(context.Context, ActivityCandidate, string) error { return nil }

@@ -26,12 +26,657 @@ def session(pid=100):
 
 def task():
     return {'taskID': 'task-one', 'kind': 'user_assets.v3.export', 'state': 'running',
-            'attempt': 1, 'progress': 10, 'snapshotCount': 1, 'manifestCount': 0,
+            'attempt': 1, 'progress': 10, 'resultVersion': 2, 'snapshotCount': 1, 'manifestCount': 0,
             'chunkCount': 0, 'fencingToken': 1, 'leaseOwner': 'worker-0',
             'databaseClock': 100., 'leaseUntilEpoch': 130., 'leaseRemainingSeconds': 30.}
 
 
 class ContractTests(unittest.TestCase):
+    def test_final_psql_carries_deadline_through_startup_query_and_close(self):
+        with patch.object(g.subprocess, 'Popen'), patch.object(g.threading, 'Thread'), patch.object(g.Psql, 'query', return_value=44) as query, patch.object(g.time, 'monotonic', return_value=10):
+            db = g.Psql('adtr-auth-e2e-' + 'b' * 12, True, deadline=11)
+            self.assertEqual(db.deadline, 11)
+            query.assert_called_once_with('SELECT to_json(pg_backend_pid())')
+        db = g.Psql.__new__(g.Psql); db.deadline = 11
+        db.process = Mock(); db.process.poll.return_value = None
+        db.lines = Mock(); db.lines.get.return_value = '0'
+        db.reader = Mock()
+        with patch.object(g.time, 'monotonic', return_value=10):
+            self.assertEqual(db.query('SELECT 0'), 0)
+            self.assertEqual(db.lines.get.call_args.kwargs['timeout'], 1)
+            db.close()
+            self.assertEqual(db.process.wait.call_args.kwargs['timeout'], 1)
+            self.assertEqual(db.reader.join.call_args.kwargs['timeout'], 1)
+        db.process.reset_mock()
+        db.process.stdin.close.side_effect = BrokenPipeError('synthetic private close failure')
+        with patch.object(g.time, 'monotonic', return_value=10):
+            with self.assertRaises(RuntimeError): db.close()
+        db.process.wait.assert_called_once_with(timeout=1)
+        db.process.stdin.close.side_effect = None
+        db.process.reset_mock()
+        db.process.wait.side_effect = [g.subprocess.TimeoutExpired('owned-observer', 0), 0]
+        with patch.object(g.time, 'monotonic', return_value=11):
+            with self.assertRaises(RuntimeError): db.close()
+        db.process.kill.assert_called_once()
+        self.assertEqual(db.process.wait.call_args_list[0].kwargs['timeout'], 0)
+        self.assertEqual(db.process.wait.call_args_list[1].kwargs['timeout'], 2)
+
+    def test_final_quiescence_requires_full_owned_zero_and_original_deadline(self):
+        guard = self.guard(); guard.used = True; guard.failed = False
+        guard.application_name = 'adtr-user-export-' + 'a' * 32
+        guard.container = 'adtr-auth-e2e-' + 'a' * 12
+        observer = Mock()
+        observer.query.return_value = {'database': 'adtr_e2e', 'backendCount': 0}
+        with patch.object(g, 'Psql', return_value=observer), patch.object(g.time, 'monotonic', return_value=10):
+            self.assertTrue(guard.verify_final_quiescence(11))
+        self.assertEqual(observer.query.call_args.kwargs['timeout'], 1)
+        sql = observer.query.call_args.args[0]
+        self.assertIn("application_name='" + guard.application_name + "'", sql)
+        self.assertIn('datname=current_database()', sql)
+        self.assertNotIn('pid=', sql)
+        observer.close.assert_called_once()
+        for proof in ({'database':'adtr_e2e','backendCount':1}, {'database':'other','backendCount':0},
+                      {'database':'adtr_e2e','backendCount':False}, {'database':'adtr_e2e','backendCount':0,'extra':1}, None):
+            observer.reset_mock(); observer.query.return_value = proof
+            with self.subTest(proof=proof), patch.object(g, 'Psql', return_value=observer), patch.object(g.time, 'monotonic', return_value=10):
+                with self.assertRaises(RuntimeError): guard.verify_final_quiescence(11)
+            observer.close.assert_called_once()
+        observer.query.side_effect = RuntimeError('synthetic private observation failure')
+        with patch.object(g, 'Psql', return_value=observer), patch.object(g.time, 'monotonic', return_value=10):
+            with self.assertRaises(RuntimeError): guard.verify_final_quiescence(11)
+        for deadline in (10, float('nan'), float('inf'), True):
+            with self.subTest(deadline=deadline), patch.object(g, 'Psql') as factory, patch.object(g.time, 'monotonic', return_value=10):
+                with self.assertRaises(RuntimeError): guard.verify_final_quiescence(deadline)
+                factory.assert_not_called()
+        observer.query.side_effect = None
+        observer.query.return_value = {'database':'adtr_e2e','backendCount':0}
+        with patch.object(g, 'Psql', return_value=observer), patch.object(g.time, 'monotonic', side_effect=[10,10,12]):
+            with self.assertRaises(RuntimeError): guard.verify_final_quiescence(11)
+
+    def test_recovery_cleanup_requires_final_counts_and_all_owned_backends_zero(self):
+        summary = dict(event='owned_ci_recovery_cleanup', captureAuthorized=True,
+            released=True, settled=True, qualified=2, completed=2, pending=0,
+            open=0, connectPending=0, failed=0)
+        guard = self.guard(); guard.used = True; guard.failed = False
+        guard.application_name = 'adtr-user-export-' + 'a' * 32
+        guard.container = 'adtr-auth-e2e-' + 'a' * 12
+        observer = Mock()
+        observer.query.return_value = {'database': 'adtr_e2e', 'backendCount': 0}
+        with patch.object(g, 'Psql', return_value=observer), patch('sys.stdout', new_callable=io.StringIO) as output:
+            guard.verify_recovery_cleanup_after_wait(0, summary)
+        self.assertTrue(json.loads(output.getvalue())['verified'])
+        sql = observer.query.call_args.args[0]
+        self.assertIn("application_name='" + guard.application_name + "'", sql)
+        self.assertIn('datname=current_database()', sql)
+        self.assertNotIn('pid=', sql)
+        observer.close.assert_called_once()
+        for bad in (None, summary | {'pending': 1}, summary | {'open': 1},
+                    summary | {'connectPending': 1}, summary | {'failed': 1},
+                    summary | {'qualified': 3}, summary | {'settled': False},
+                    summary | {'captureAuthorized': False}, summary | {'released': False},
+                    summary | {'qualified': True}, summary | {'private': 'secret'}):
+            with self.subTest(summary=bad), patch.object(g, 'Psql', return_value=observer), patch('sys.stdout', new_callable=io.StringIO):
+                with self.assertRaises(RuntimeError):
+                    guard.verify_recovery_cleanup_after_wait(0, bad)
+        for proof in ({'database': 'other', 'backendCount': 0}, {'database': 'adtr_e2e', 'backendCount': 1},
+                      {'database': 'adtr_e2e', 'backendCount': False}, None, {}):
+            observer.query.return_value = proof
+            with patch.object(g, 'Psql', return_value=observer), patch('sys.stdout', new_callable=io.StringIO):
+                with self.assertRaises(RuntimeError):
+                    guard.verify_recovery_cleanup_after_wait(0, summary)
+        observer.query.side_effect = RuntimeError('private SQL identity')
+        with patch.object(g, 'Psql', return_value=observer), patch('sys.stdout', new_callable=io.StringIO) as output:
+            with self.assertRaises(RuntimeError):
+                guard.verify_recovery_cleanup_after_wait(0, summary)
+        self.assertNotIn('private', output.getvalue())
+        self.assertNotIn(guard.application_name, output.getvalue())
+
+    def test_all_registry_and_checkpoint_require_messages_have_closed_reasons(self):
+        import ast
+        tree = ast.parse(Path(g.__file__).read_text())
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef) and node.name in ('candidate_identity', 'registered_candidate', 'registry_matches_pg', 'validate_sealed_registry', 'checkpoint'):
+                for call in ast.walk(node):
+                    if isinstance(call, ast.Call) and isinstance(call.func, ast.Name) and call.func.id == 'require':
+                        message = call.args[1]
+                        self.assertIsInstance(message, ast.Constant)
+                        self.assertIn(message.value, g.FAILURE_REASONS)
+
+    def test_controller_diagnostics_accept_only_exact_type_and_closed_fields(self):
+        error = g.ControlFailure('private SQL credential environment')
+        detail = {'operation': 'snapshot', 'step': 'receive', 'cause': 'deadline'}
+        error.control_diagnostic = detail
+        self.assertEqual(g.failure_event('registry_snapshot', error), {
+            'event': 'running_cancel_guard_failure', 'stage': 'registry_snapshot',
+            'reason': 'controller_failure', **detail})
+        class Derived(g.ControlFailure):
+            pass
+        for value in (Derived('private'), RuntimeError('private'), ValueError('private')):
+            value.control_diagnostic = detail
+            result = g.failure_event('registry_snapshot', value)
+            self.assertEqual(result['reason'], 'unclassified')
+            self.assertNotIn('operation', result)
+        for bad in (detail | {'private': 'private'}, detail | {'cause': 'x' * 100000},
+                    detail | {'step': False}, {'operation': 'snapshot'}, ['private']):
+            error.control_diagnostic = bad
+            result = g.failure_event('registry_snapshot', error)
+            self.assertEqual(result['reason'], 'unclassified')
+            self.assertNotIn('private', json.dumps(result))
+
+    def test_deadline_has_bounded_observation_count_and_last_wait(self):
+        for missing_candidate in (False, True):
+            guard = self.guard(); guard.threads = Mock(return_value=['T'])
+            queued = task() | {'state': 'queued', 'attempt': 0, 'snapshotCount': 0}
+            if missing_candidate:
+                guard.controller.snapshot.return_value['records'][0]['candidate'] = None
+            observer, barrier = Mock(), Mock(pid=99)
+            observer.query.side_effect = [{'otherNonterminal': 0, 'journalCount': 0, 'task': queued, 'sessions': []},
+                {'task': task() if missing_candidate else queued, 'sessions': [session()]}]
+            barrier.query.return_value = {'count': 1}
+            now = [0.]
+            with patch.object(g, 'Psql', side_effect=[observer, barrier]), patch.object(g.time, 'monotonic', side_effect=lambda: now[0]), patch.object(g.time, 'sleep', side_effect=lambda _: now.__setitem__(0, 1.5)):
+                with self.assertRaises(RuntimeError):
+                    guard.checkpoint('task-one', 'worker')
+            event = guard.failure_diagnostic
+            self.assertEqual(event['reason'], 'capture_deadline_missed')
+            self.assertEqual(event['observations'], 1)
+            self.assertEqual(event['lastNotReady']['reason'], 'candidate_absent' if missing_candidate else 'task_boundary_pending')
+            guard.controller.pin.assert_not_called()
+            guard.owned.process.send_signal.assert_not_called()
+        for count in (True, -1, 1000001, 'private', {'private': 1}):
+            error = RuntimeError('missed two-second activity checkpoint')
+            error.capture_observations = count
+            self.assertNotIn('observations', g.failure_event('capture', error))
+
+    def test_prepare_is_live_only_isolated_and_once(self):
+        guard = self.guard(); guard.prepared = False; guard.threads = Mock(return_value=['R'])
+        observer = Mock(); observer.query.side_effect = [0, {'database': 'adtr_e2e', 'backendCount': 0}]
+        with patch.object(g, 'Psql', return_value=observer):
+            self.assertEqual(guard.prepare(), {'prepared': True})
+            with self.assertRaises(RuntimeError): guard.prepare()
+        guard.controller.prepare_selection.assert_called_once()
+        for states, count in ((['T'], 0), (['R'], 1), (['R'], True)):
+            guard = self.guard(); guard.prepared = False; guard.threads = Mock(return_value=states)
+            observer = Mock(); observer.query.return_value = count
+            with patch.object(g, 'Psql', return_value=observer), self.assertRaises(RuntimeError): guard.prepare()
+            guard.controller.prepare_selection.assert_not_called()
+
+    def test_queued_prepare_shared_deadline_and_physical_zero(self):
+        for proof in ({'database': 'adtr_e2e', 'backendCount': 1},
+                      {'database': 'other', 'backendCount': 0},
+                      {'database': 'adtr_e2e', 'backendCount': False},
+                      {'database': 'adtr_e2e', 'backendCount': 0, 'extra': 0}):
+            guard = self.guard(); guard.prepared = False; guard.threads = Mock(return_value=['R'])
+            observer = Mock(); observer.query.side_effect = [0, proof]
+            with patch.object(g, 'Psql', return_value=observer), self.assertRaises(RuntimeError):
+                guard.prepare()
+            self.assertTrue(guard.failed)
+            guard.controller.resume_and_release.assert_called_once_with(abort=True)
+            self.assertFalse(guard.prepared)
+        guard = self.guard(); guard.prepared = False; guard.threads = Mock(return_value=['R'])
+        observer = Mock(); observer.query.side_effect = [0, {'database': 'adtr_e2e', 'backendCount': 0}]
+        with patch.object(g, 'Psql', return_value=observer) as psql, patch.object(g.time, 'monotonic', return_value=10):
+            guard.prepare()
+        self.assertEqual(psql.call_args.kwargs, {'deadline': 12.0})
+        self.assertEqual(guard.controller.prepare_selection.call_args.args[1], 12.0)
+        guard.resume()
+        self.assertTrue(guard.failed)
+        guard.controller.resume_and_release.assert_called_once_with(abort=True)
+        with self.assertRaises(RuntimeError): guard.checkpoint('task-one', 'worker')
+
+    def test_queued_watchdog_delegate_aborts_without_parent_cont(self):
+        guard = self.guard(); guard.preparation_started = True; guard.used = False
+        self.assertTrue(guard._resume_capture_owned())
+        self.assertTrue(guard.failed)
+        guard.controller.resume_and_release.assert_called_once_with(abort=True)
+        guard.owned.process.send_signal.assert_not_called()
+        guard = self.guard(); guard.preparation_started = True; guard.used = True
+        self.assertTrue(guard._resume_capture_owned())
+        self.assertTrue(guard.failed)
+        guard.controller.resume_and_release.assert_called_once_with(abort=True)
+
+    def test_queued_checkpoint_resume_is_unique_owned_entry(self):
+        from user_asset_export_v3_worker_guard import OwnedExportWorkerGuard
+        import ast, inspect
+        owned = object.__new__(OwnedExportWorkerGuard)
+        owned.process = Mock(); owned.process.poll.return_value = None
+        owned.resume_delegate = Mock(return_value=True)
+        owned.assert_identity = Mock(return_value='T')
+        owned.resume_queued_checkpoint()
+        owned.process.send_signal.assert_called_once_with(g.signal.SIGCONT)
+        owned.resume_delegate.assert_not_called()
+        for delegate, exited, state in ((None, None, 'T'), (Mock(), 0, 'T'), (Mock(), None, 'R'), (Mock(), None, 't')):
+            owned.process.reset_mock(); owned.process.poll.return_value = exited
+            owned.resume_delegate = delegate; owned.assert_identity.return_value = state
+            with self.assertRaises(RuntimeError): owned.resume_queued_checkpoint()
+            owned.process.send_signal.assert_not_called()
+        owned.process.poll.return_value = None; owned.resume_delegate = Mock()
+        owned.assert_identity.side_effect = RuntimeError('identity changed')
+        with self.assertRaises(RuntimeError): owned.resume_queued_checkpoint()
+        owned.process.send_signal.assert_not_called()
+        source = Path(g.__file__).read_text()
+        calls = [n for n in ast.walk(ast.parse(source)) if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and n.func.attr == 'resume_queued_checkpoint']
+        self.assertEqual(len(calls), 1)
+        references = []
+        for path in Path(g.__file__).parent.rglob('*.py'):
+            if path.name.startswith('test_'):
+                continue
+            tree = ast.parse(path.read_text())
+            parents = {child: parent for parent in ast.walk(tree) for child in ast.iter_child_nodes(parent)}
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Attribute) or node.attr != 'resume_queued_checkpoint':
+                    continue
+                caller = parents.get(node)
+                self.assertIsInstance(caller, ast.Call)
+                self.assertIs(caller.func, node)
+                self.assertEqual(ast.unparse(node), 'self.owned.resume_queued_checkpoint')
+                owner = caller
+                while owner in parents and not isinstance(owner, ast.FunctionDef):
+                    owner = parents[owner]
+                references.append((path.name, owner.name))
+        self.assertEqual(references, [('asset_export_v3_running_cancel_guard.py', 'checkpoint')])
+        self.assertIn('self.owned.resume_queued_checkpoint()', inspect.getsource(g.RunningExportCancelGuard.checkpoint))
+        self.assertIn("all(s == 'T' for s in self.threads())", inspect.getsource(g.RunningExportCancelGuard.checkpoint))
+
+    def test_queued_prepare_close_failure_always_aborts(self):
+        guard = self.guard(); guard.prepared = False; guard.threads = Mock(return_value=['R'])
+        observer = Mock(); observer.query.side_effect = [0, {'database': 'adtr_e2e', 'backendCount': 0}]
+        observer.close.side_effect = RuntimeError('closed failure')
+        with patch.object(g, 'Psql', return_value=observer), self.assertRaises(RuntimeError): guard.prepare()
+        observer.close.assert_called_once()
+        self.assertTrue(guard.failed)
+        guard.controller.resume_and_release.assert_called_once_with(abort=True)
+
+    def test_running_queued_helpers_require_empty_connections_and_no_retry(self):
+        for kind in ('user', 'group', 'computer'):
+            source = (Path(g.__file__).parent.parent / 'web/e2e' / f'{kind}-asset-export-v3-terminal-helpers.ts').read_text()
+            self.assertIn('(!runningQueued || pg.connections === 0)', source)
+            rejection = source.index('if (runningQueued) throw new Error("Owned running Worker queued connections were not empty")')
+            self.assertLess(rejection, source.index('await signalWorker("SIGCONT"); ownedStopped = false;', rejection))
+        import inspect
+        self.assertIn("initial['sessions'] == []", inspect.getsource(g.RunningExportCancelGuard.checkpoint))
+
+    def test_queued_prepare_lost_ack_aborts_without_ready(self):
+        guard = self.guard(); guard.prepared = False; guard.threads = Mock(return_value=['R'])
+        observer = Mock(); observer.query.return_value = 0
+        guard.controller.prepare_selection.side_effect = RuntimeError('closed failure')
+        with patch.object(g, 'Psql', return_value=observer), self.assertRaises(RuntimeError):
+            guard.prepare()
+        self.assertTrue(guard.failed)
+        self.assertFalse(guard.prepared)
+        guard.controller.resume_and_release.assert_called_once_with(abort=True)
+        self.assertEqual(observer.query.call_count, 1)
+
+    def test_activity_fixture_key_binding_collision_and_exact_wait_cleanup(self):
+        import base64, hashlib
+        guard = self.guard(); guard.activity_fixture_created = False
+        expected = 'ci-activity-' + base64.b32encode(hashlib.sha256(
+            b'adtr-ci-activity-v1\x00' + guard.nonce + b'\x00task-one').digest()).decode().lower().rstrip('=')
+        guard.controller.prepare_target.return_value = expected
+        observer = Mock(); observer.query.return_value = 1
+        with patch.object(g, 'Psql', return_value=observer) as connect:
+            g.RunningExportCancelGuard.prepare_activity_fixture(guard, 'task-one', 'worker')
+        connect.assert_called_once_with(guard.container, False)
+        observer.close.assert_called_once()
+        self.assertTrue(guard.activity_fixture_created)
+        insert = observer.query.call_args.args[0]
+        self.assertIn("'failure','cycle_failed',NULL", insert)
+        self.assertNotIn('ON CONFLICT', insert)
+        self.assertEqual(guard.activity_key, expected)
+        cleanup = Mock(); cleanup.query.side_effect = [1, {'remaining': 0, 'ordinary': 1}]
+        guard.owned.process.poll.return_value = 1
+        with patch.object(g, 'Psql', return_value=cleanup) as connect: guard.cleanup_activity_fixture_after_wait(1)
+        connect.assert_called_once_with(guard.container, False)
+        cleanup.close.assert_called_once()
+        self.assertFalse(guard.activity_fixture_created)
+        self.assertIn("tenant_id='default'", cleanup.query.call_args_list[0].args[0])
+        self.assertIn("AND cycle='queue'", cleanup.query.call_args_list[0].args[0])
+        for result in (0, True, RuntimeError('private collision')):
+            guard.activity_fixture_created = False
+            observer = Mock()
+            if isinstance(result, Exception): observer.query.side_effect = result
+            else: observer.query.return_value = result
+            with patch.object(g, 'Psql', return_value=observer) as connect, self.assertRaises(RuntimeError):
+                g.RunningExportCancelGuard.prepare_activity_fixture(guard, 'task-one', 'worker')
+            connect.assert_called_once_with(guard.container, False)
+            observer.close.assert_called_once()
+            with patch.object(g, 'Psql') as connection:
+                guard.cleanup_activity_fixture_after_wait(1)
+            connection.assert_not_called()
+        guard.controller.prepare_target.return_value = 'ci-wrong-nonce'
+        observer = Mock()
+        with patch.object(g, 'Psql') as connect, self.assertRaises(RuntimeError):
+            g.RunningExportCancelGuard.prepare_activity_fixture(guard, 'task-one', 'worker')
+        connect.assert_not_called()
+
+    def test_resume_scopes_exact_original_and_alias_without_relaxing_initial_pause(self):
+        root = Path(g.__file__).resolve().parents[1]
+        for kind in g.EXPORT_KINDS:
+            source = (root / f'web/e2e/{kind}-asset-export-v3-terminal-helpers.ts').read_text()
+            pause = source.split('export async function pauseOwnedExportWorker()', 1)[1].split('export async function restoreOwnedExportWorker()', 1)[0]
+            resume = source.split('export async function resumeOwnedExportWorker(', 1)[1]
+            self.assertIn('await queueActivity()', pause)
+            self.assertNotIn('queueActivity(scope)', pause)
+            self.assertIn('expect(value.count).toBe(1)', source)
+            self.assertIn('if (scope) assertActivityScope(value.scope)', source)
+            self.assertIn("worker_id NOT IN ('${scope.workerID}','${scope.alias}')", source)
+            self.assertIn("min(extract(epoch FROM last_success_at)) FILTER (WHERE worker_id='${scope.workerID}')", source)
+            self.assertIn('activityAlias(w.nonce, activityTaskID)', resume)
+            self.assertEqual(resume.count('await queueActivity(scope)'), 4)
+            self.assertIn('Number(queue.success) > Number(pause.queueSuccessBefore)', resume)
+            self.assertIn('Number(queue.success) > Number(first.success)', resume)
+            spec = (root / f'web/e2e/{kind}-asset-export-v3-running-cancel.spec.ts').read_text()
+            self.assertIn('resumeOwnedExportWorker(context, pause, taskID)', spec)
+
+    def test_wrong_bound_activity_key_fails_before_pin(self):
+        guard = self.guard(); guard.controller.snapshot.return_value['records'][0]['candidate']['activityKey'] = 'other-key'
+        with self.assertRaises(RuntimeError): self.run_candidate_samples(guard, [[session()]])
+        self.assertEqual(guard.failure_diagnostic['reason'], 'activity_alias_mismatch')
+        guard.controller.pin.assert_not_called()
+        guard.owned.process.send_signal.assert_not_called()
+
+    def test_three_specs_prepare_before_initial_pause(self):
+        root = Path(g.__file__).resolve().parents[1]
+        for kind in g.EXPORT_KINDS:
+            source = (root / 'web/e2e' / (kind + '-asset-export-v3-running-cancel.spec.ts')).read_text()
+            self.assertLess(source.index('runningGuard("prepare")'), source.index('await pauseOwnedExportWorker()'))
+            self.assertLess(source.index('await pauseOwnedExportWorker()'), source.index('await createExport('))
+
+    def run_candidate_samples(self, guard, rows, frames=None, expire=False):
+        guard.threads = Mock(return_value=['T'])
+        running = task() | {'kind': g.export_kind(guard.asset_kind)[0]}
+        queued = running | {'state': 'queued', 'attempt': 0, 'snapshotCount': 0}
+        observer, barrier = Mock(), Mock(pid=99)
+        observer.query.side_effect = [{'otherNonterminal': 0, 'journalCount': 0, 'task': queued, 'sessions': []},
+            *[{'task': running, 'sessions': value} for value in rows]]
+        barrier.query.side_effect = [{'count': 1}, True]
+        if frames is not None:
+            guard.controller.snapshot.side_effect = frames
+        now = [0.]
+        with patch.object(g, 'Psql', side_effect=[observer, barrier]), patch.object(g.time, 'monotonic', side_effect=lambda: now[0]), patch.object(g.time, 'sleep', side_effect=lambda _: now.__setitem__(0, 1.5 if expire else now[0])):
+            return guard.checkpoint('task-one', 'worker')
+
+    def test_early_binding_known_initialization_waits_then_direct_strict_every_kind(self):
+        for kind in g.EXPORT_KINDS:
+            for query in ('BEGIN', g.SCHEMA_SQL, g.GATE_SQL, '', g.ACTIVITY_SQL):
+                guard = self.guard(asset_kind=kind)
+                early = session() | {'query': query, 'blockers': [], 'waitType': 'Client'}
+                result = self.run_candidate_samples(guard, [[early], [session()], [session()], [session()]])
+                self.assertTrue(result['checkpointCaught'])
+                guard.controller.pin.assert_called_once()
+                guard.owned.process.send_signal.assert_called_once_with(signal.SIGSTOP)
+
+    def test_indirect_candidate_only_waits_deadline_without_pin_or_stop(self):
+        guard = self.guard()
+        frame = copy.deepcopy(guard.controller.snapshot.return_value)
+        frame.update(status='open', open=2)
+        frame['records'].append({'generation': 3, 'state': 'open', 'backend': 101, 'candidate': None})
+        with self.assertRaises(RuntimeError):
+            self.run_candidate_samples(guard, [[session() | {'blockers': [101]}, session(101)]], [frame], expire=True)
+        event = guard.failure_diagnostic
+        self.assertEqual(event['reason'], 'capture_deadline_missed')
+        self.assertEqual(event['lastNotReady']['blockerCategory'], 'indirect_owned_activity')
+        guard.controller.pin.assert_not_called()
+        guard.owned.process.send_signal.assert_not_called()
+
+    def test_selected_candidate_cannot_disappear_change_or_hide_in_incomplete_registry(self):
+        for field in ('missing', 'generation', 'ticket', 'backend', 'fencingToken', 'pending'):
+            guard = self.guard()
+            frame = copy.deepcopy(guard.controller.snapshot.return_value)
+            changed = copy.deepcopy(frame)
+            record = changed['records'][0]
+            if field == 'missing': record['candidate'] = None
+            elif field == 'ticket': record['generation'] += 10
+            elif field == 'backend': record['backend'] += 1
+            elif field == 'pending':
+                record['candidate'] = None
+                changed['pending'] = 1
+                changed['records'].append({'generation': 3, 'state': 'pending', 'backend': 0, 'candidate': None})
+            else: record['candidate'][field] += 10
+            early = session() | {'query': 'BEGIN', 'blockers': []}
+            with self.assertRaises(RuntimeError):
+                self.run_candidate_samples(guard, [[early], [early]], [frame, changed])
+            self.assertIn(guard.failure_diagnostic['reason'], ('selected_candidate_changed', 'candidate_backend_unavailable'))
+            guard.controller.pin.assert_not_called()
+            guard.owned.process.send_signal.assert_not_called()
+
+    def test_candidate_unknown_sql_fatal_and_diagnostic_private(self):
+        for query, category in (('private SQL secret', 'other'), ('COMMIT', 'commit'), ('ROLLBACK', 'rollback')):
+            guard = self.guard()
+            with self.assertRaises(RuntimeError):
+                self.run_candidate_samples(guard, [[session() | {'query': query, 'blockers': []}]])
+            event = guard.failure_diagnostic
+            self.assertEqual(event['reason'], 'candidate_chain_mismatch')
+            self.assertEqual(event['queryCategory'], category)
+            self.assertNotIn('private', json.dumps(event))
+            guard.controller.pin.assert_not_called()
+            guard.owned.process.send_signal.assert_not_called()
+
+    def test_candidate_sealed_regression_and_owned_cycle_fail_before_stop(self):
+        guard = self.guard()
+        with self.assertRaises(RuntimeError):
+            self.run_candidate_samples(guard, [[session()], [session() | {'query': 'BEGIN', 'blockers': []}]])
+        self.assertEqual(guard.failure_diagnostic['reason'], 'candidate_chain_mismatch')
+        guard.controller.pin.assert_called_once()
+        guard.owned.process.send_signal.assert_not_called()
+        guard = self.guard()
+        early = session() | {'query': 'BEGIN', 'blockers': []}
+        with self.assertRaises(RuntimeError):
+            self.run_candidate_samples(guard, [[early, session(101) | {'blockers': [102]},
+                session(102) | {'blockers': [101]}]])
+        self.assertEqual(guard.failure_diagnostic['reason'], 'unowned_barrier_blocker')
+        guard.controller.pin.assert_not_called()
+        guard.owned.process.send_signal.assert_not_called()
+
+    def test_candidate_wait_does_not_hide_duplicate_identity_or_later_bad_sample(self):
+        early = session() | {'query': 'BEGIN', 'blockers': []}
+        for bad in (session(101) | {'blockers': [999]}, session(101) | {'state': 42},
+                    session(101) | {'locks': [lock('unknown', 'ShareLock')]}):
+            guard = self.guard()
+            with self.assertRaises(RuntimeError): self.run_candidate_samples(guard, [[early, bad]])
+            guard.controller.pin.assert_not_called()
+        guard = self.guard()
+        frame = copy.deepcopy(guard.controller.snapshot.return_value)
+        record = copy.deepcopy(frame['records'][0]); record.update(generation=3, backend=101)
+        record['candidate']['generation'] = 4
+        frame['records'].append(record); frame['open'] = 2
+        with self.assertRaises(RuntimeError):
+            self.run_candidate_samples(guard, [[early, session(101)]], [frame])
+        self.assertEqual(guard.failure_diagnostic['reason'], 'candidate_ambiguous')
+        guard.controller.pin.assert_not_called()
+
+    def test_selected_candidate_post_stop_begin_remains_immediate_failure(self):
+        guard = self.guard()
+        with self.assertRaises(RuntimeError):
+            self.run_candidate_samples(guard, [[session()], [session()], [session() | {'query': 'BEGIN', 'blockers': []}]])
+        self.assertEqual(guard.failure_diagnostic['reason'], 'unsafe_transaction_query')
+        guard.owned.process.send_signal.assert_called_once_with(signal.SIGSTOP)
+        self.assertEqual(guard.owned.resume.call_count, 2)
+
+    def test_candidate_diagnostic_rejects_extra_fields_subclasses_and_unknown_values(self):
+        pending = g.candidate_activity_pending(session() | {'query': 'BEGIN', 'blockers': []}, [session()], 99)
+        valid = pending.candidate_diagnostic
+        for change in ({'transaction': 1}, {'queryCategory': 'private' * 10000}, {'extra': 'private'}):
+            value = RuntimeError('candidate activity not ready'); value.candidate_diagnostic = valid | change
+            self.assertNotIn('queryCategory', g.failure_event('candidate_binding', value))
+        class Sub(RuntimeError): pass
+        value = Sub('candidate activity not ready'); value.candidate_diagnostic = valid
+        self.assertEqual(g.failure_event('candidate_binding', value)['reason'], 'unclassified')
+
+    def test_runtime_projection_types_are_closed_and_never_freeze_whitelist(self):
+        shapes = {
+            'relation': lock('relation', 'AccessShareLock', relation='private_relation'),
+            'extend': lock('extend', 'ExclusiveLock', relation='private_relation'),
+            'page': lock('page', 'ShareLock', relation='private_relation'),
+            'tuple': lock('tuple', 'ExclusiveLock', relation='private_relation'),
+            'frozenid': lock('frozenid', 'ShareLock'),
+            'transactionid': lock('transactionid', 'ExclusiveLock'),
+            'virtualxid': lock('virtualxid', 'ExclusiveLock'),
+            'spectoken': lock('spectoken', 'ExclusiveLock', objid='1'),
+            'object': lock('object', 'AccessShareLock', classid='1', objid='2', objsubid=0),
+            'userlock': lock('userlock', 'ExclusiveLock', classid='0', objid='4294967295', objsubid=-32768),
+            'advisory': lock('advisory', 'ShareLock', classid='0', objid='1', objsubid=1),
+            'applytransaction': lock('applytransaction', 'ShareLock', objid='1', objsubid=32767),
+        }
+        self.assertEqual(set(shapes), g.RUNTIME_LOCK_TYPES)
+        for typ, value in shapes.items():
+            with self.subTest(typ=typ):
+                row = session(101) | {'query': 'private SQL', 'blockers': [], 'locks': [value]}
+                g.validate_running_observation([session(), row], 99)
+                with self.assertRaises(RuntimeError):
+                    g.validate_sessions([session(), row], 99)
+        for change in ({'type': 'private_unknown'}, {'mode': 'private_mode'}, {'granted': 1},
+                       {'relation': 'private_relation'}, {'classid': None}, {'classid': '01'},
+                       {'objid': '4294967296'}, {'objsubid': True}, {'objsubid': 32768}):
+            with self.subTest(change=change):
+                row = session(101) | {'blockers': [], 'locks': [shapes['object'] | change]}
+                with self.assertRaises(RuntimeError) as caught:
+                    g.validate_running_observation([session(), row], 99)
+                self.assertNotIn('private', json.dumps(g.failure_event('capture_readiness', caught.exception)))
+
+    def test_runtime_full_scan_does_not_hide_late_malformed_or_untrusted_rows(self):
+        busy = session(101) | {'query': 'private SQL', 'blockers': [], 'locks': [
+            lock('object', 'AccessShareLock', classid='1', objid='2', objsubid=0)]}
+        bad_rows = [session(102) | {'state': 4}, session(102) | {'blockers': [999]},
+            session(102) | {'locks': [lock('private_unknown', 'ShareLock')]},
+            session(102) | {'blockers': [103]}, session(100)]
+        for bad in bad_rows:
+            with self.assertRaises(RuntimeError):
+                g.validate_running_observation([session(), busy, bad], 99)
+        with self.assertRaises(RuntimeError):
+            g.validate_running_observation([session(), busy,
+                session(102) | {'blockers': [103]}, session(103) | {'blockers': [102]}], 99)
+
+    def test_owned_object_drains_after_pin_every_kind(self):
+        for kind in g.EXPORT_KINDS:
+            guard = self.guard(asset_kind=kind); guard.threads = Mock(return_value=['T'])
+            ready_frame = guard.controller.snapshot.return_value
+            busy_frame = copy.deepcopy(ready_frame)
+            busy_frame.update(status='draining', open=2)
+            busy_frame['records'].append({'generation': 3, 'state': 'open', 'backend': 101, 'candidate': None})
+            guard.controller.snapshot.side_effect = [busy_frame, ready_frame]
+            guard.controller.pin.return_value = busy_frame
+            running = task() | {'kind': g.export_kind(kind)[0]}
+            queued = running | {'state': 'queued', 'attempt': 0, 'snapshotCount': 0}
+            busy = session(101) | {'query': 'private SQL', 'blockers': [], 'locks': [
+                lock('object', 'AccessShareLock', classid='1', objid='2', objsubid=0)]}
+            observer, barrier = Mock(), Mock(pid=99)
+            observer.query.side_effect = [{'otherNonterminal': 0, 'journalCount': 0, 'task': queued, 'sessions': []},
+                {'task': running, 'sessions': [session(), busy]},
+                *[{'task': running, 'sessions': [session()]} for _ in range(3)]]
+            barrier.query.side_effect = [{'count': 1}, True]
+            with patch.object(g, 'Psql', side_effect=[observer, barrier]), patch.object(g.time, 'sleep'):
+                self.assertTrue(guard.checkpoint('task-one', 'worker')['admissionSealed'])
+            guard.controller.pin.assert_called_once()
+            guard.owned.process.send_signal.assert_called_once_with(signal.SIGSTOP)
+
+    def test_pending_and_cleanup_set_mismatch_wait_before_pin(self):
+        for pending in (False, True):
+            guard = self.guard(); guard.threads = Mock(return_value=['T'])
+            frame = guard.controller.snapshot.return_value
+            partial = copy.deepcopy(frame)
+            if pending:
+                partial['pending'] = 1
+                partial['records'].append({'generation': 3, 'state': 'pending', 'backend': 0, 'candidate': None})
+            guard.controller.snapshot.side_effect = [partial, frame]
+            busy = session(101) | {'query': '', 'transaction': False, 'state': None, 'blockers': [], 'locks': []}
+            rows = [session()] if pending else [session(), busy]
+            queued = task() | {'state': 'queued', 'attempt': 0, 'snapshotCount': 0}
+            observer, barrier = Mock(), Mock(pid=99)
+            observations = [{'otherNonterminal': 0, 'journalCount': 0, 'task': queued, 'sessions': []},
+                {'task': task(), 'sessions': rows}, *[{'task': task(), 'sessions': [session()]} for _ in range(3)]]
+            def observe(*args, **kwargs):
+                if len(observations) == 3:
+                    guard.controller.pin.assert_not_called()
+                return observations.pop(0)
+            observer.query.side_effect = observe
+            barrier.query.side_effect = [{'count': 1}, True]
+            with patch.object(g, 'Psql', side_effect=[observer, barrier]), patch.object(g.time, 'sleep'):
+                self.assertTrue(guard.checkpoint('task-one', 'worker')['checkpointCaught'])
+            guard.controller.pin.assert_called_once()
+
+    def test_sealed_cleanup_backend_waits_then_strictly_qualifies(self):
+        guard = self.guard(); guard.threads = Mock(return_value=['T'])
+        queued = task() | {'state': 'queued', 'attempt': 0, 'snapshotCount': 0}
+        busy = session(101) | {'query': 'private SQL', 'blockers': [], 'locks': [
+            lock('object', 'ShareLock', classid='1', objid='2', objsubid=0)]}
+        observer, barrier = Mock(), Mock(pid=99)
+        observer.query.side_effect = [{'otherNonterminal': 0, 'journalCount': 0, 'task': queued, 'sessions': []},
+            {'task': task(), 'sessions': [session()]},
+            {'task': task(), 'sessions': [session(), busy]},
+            *[{'task': task(), 'sessions': [session()]} for _ in range(3)]]
+        barrier.query.side_effect = [{'count': 1}, True]
+        with patch.object(g, 'Psql', side_effect=[observer, barrier]), patch.object(g.time, 'sleep'):
+            self.assertTrue(guard.checkpoint('task-one', 'worker')['checkpointCaught'])
+        guard.controller.pin.assert_called_once()
+        guard.owned.process.send_signal.assert_called_once_with(signal.SIGSTOP)
+
+    def test_poststop_object_backend_fails_without_capture_retry(self):
+        guard = self.guard(); guard.threads = Mock(return_value=['T'])
+        queued = task() | {'state': 'queued', 'attempt': 0, 'snapshotCount': 0}
+        busy = session(101) | {'query': 'private SQL', 'blockers': [], 'locks': [
+            lock('object', 'ShareLock', classid='1', objid='2', objsubid=0)]}
+        observer, barrier = Mock(), Mock(pid=99)
+        observer.query.side_effect = [{'otherNonterminal': 0, 'journalCount': 0, 'task': queued, 'sessions': []},
+            *[{'task': task(), 'sessions': [session()]} for _ in range(2)],
+            {'task': task(), 'sessions': [session(), busy]}]
+        barrier.query.side_effect = [{'count': 1}, True]
+        with patch.object(g, 'Psql', side_effect=[observer, barrier]):
+            with self.assertRaises(RuntimeError):
+                guard.checkpoint('task-one', 'worker')
+        guard.controller.pin.assert_called_once()
+        guard.owned.process.send_signal.assert_called_once_with(signal.SIGSTOP)
+        self.assertEqual(guard.owned.resume.call_count, 2)
+        self.assertEqual(observer.query.call_count, 4)
+
+    def test_registered_target_bad_chain_is_fatal_even_without_any_waiter(self):
+        for update in ({'blockers': []}, {'query': 'BEGIN'}, {'transaction': False}):
+            guard = self.guard(); guard.threads = Mock(return_value=['T'])
+            queued = task() | {'state': 'queued', 'attempt': 0, 'snapshotCount': 0}
+            observer, barrier = Mock(), Mock(pid=99)
+            observer.query.side_effect = [{'otherNonterminal': 0, 'journalCount': 0, 'task': queued, 'sessions': []},
+                {'task': task(), 'sessions': [session() | update]}]
+            barrier.query.return_value = {'count': 1}
+            with patch.object(g, 'Psql', side_effect=[observer, barrier]):
+                with self.assertRaises(RuntimeError):
+                    guard.checkpoint('task-one', 'worker')
+            guard.controller.pin.assert_not_called()
+            guard.owned.process.send_signal.assert_not_called()
+
+    def test_target_object_is_fatal_before_pin(self):
+        guard = self.guard(); guard.threads = Mock(return_value=['T'])
+        target = session()
+        target['locks'].append(lock('object', 'AccessShareLock', classid='1', objid='2', objsubid=0))
+        queued = task() | {'state': 'queued', 'attempt': 0, 'snapshotCount': 0}
+        observer, barrier = Mock(), Mock(pid=99)
+        observer.query.side_effect = [{'otherNonterminal': 0, 'journalCount': 0, 'task': queued, 'sessions': []},
+            {'task': task(), 'sessions': [target]}]
+        barrier.query.return_value = {'count': 1}
+        with patch.object(g, 'Psql', side_effect=[observer, barrier]):
+            with self.assertRaises(RuntimeError):
+                guard.checkpoint('task-one', 'worker')
+        guard.controller.pin.assert_not_called()
+        guard.owned.process.send_signal.assert_not_called()
+
+    def test_pinned_object_still_open_expires_without_stop(self):
+        guard = self.guard(); guard.threads = Mock(return_value=['T'])
+        frame = guard.controller.snapshot.return_value
+        frame.update(status='draining', open=2)
+        frame['records'].append({'generation': 3, 'state': 'closing', 'backend': 101, 'candidate': None})
+        busy = session(101) | {'blockers': [], 'locks': [lock('object', 'ShareLock', classid='1', objid='2', objsubid=0)]}
+        queued = task() | {'state': 'queued', 'attempt': 0, 'snapshotCount': 0}
+        observer, barrier = Mock(), Mock(pid=99)
+        observer.query.side_effect = [{'otherNonterminal': 0, 'journalCount': 0, 'task': queued, 'sessions': []},
+            {'task': task(), 'sessions': [session(), busy]}]
+        barrier.query.return_value = {'count': 1}
+        now = [0.]
+        with patch.object(g, 'Psql', side_effect=[observer, barrier]), patch.object(g.time, 'monotonic', side_effect=lambda: now[0]), patch.object(g.time, 'sleep', side_effect=lambda _: now.__setitem__(0, 1.5)):
+            with self.assertRaises(RuntimeError):
+                guard.checkpoint('task-one', 'worker')
+        guard.controller.pin.assert_called_once()
+        guard.owned.process.send_signal.assert_not_called()
+        self.assertEqual(guard.failure_diagnostic['lastNotReady']['reason'], 'registry_draining')
+
     def test_blocker_diagnostics_distinguish_three_fatal_paths(self):
         cases = {
             'outside_owned_sample': [session() | {'blockers': [999]}],
@@ -76,7 +721,7 @@ class ContractTests(unittest.TestCase):
         expected = {
             'validate_sessions': '4efb9b60ec57914d43c55c695e0916b07d71fbcd3f3cdac8c3cd06b630bbd092',
             'validate_checkpoint': '83ff1b7a711627ec7ee4e28761dde75f5e18ae3e81abb39927b8057022a06e74',
-            'checkpoint': '90a1f7723cbdb0f5edf0182bf8e14989bb3c1fd3e5b8c61e0ba38f71bd0fa9a2',
+            'checkpoint': '4ec2efbe87439fde416066a5aa3cf757166ab7468a9946fbab2c533d58408cb7',
         }
         actual = {node.name: hashlib.sha256(ast.get_source_segment(source, node).encode()).hexdigest()
                   for node in ast.walk(ast.parse(source)) if isinstance(node, ast.FunctionDef)
@@ -131,14 +776,14 @@ class ContractTests(unittest.TestCase):
             running = task() | {'kind': g.export_kind(kind)[0]}
             queued = running | {'state': 'queued', 'attempt': 0, 'snapshotCount': 0}
             observer, barrier = Mock(), Mock(pid=99)
-            observer.query.side_effect = [{'task': queued, 'sessions': []},
+            observer.query.side_effect = [{'otherNonterminal': 0, 'journalCount': 0, 'task': queued, 'sessions': []},
                 {'task': running, 'sessions': [session(), self.speculative_session()]},
                 {'task': running, 'sessions': [session()]},
-                {'task': running, 'sessions': [session()]}]
+                {'task': running, 'sessions': [session()]}, {'task': running, 'sessions': [session()]}]
             barrier.query.side_effect = [{'count': 1}, True]
             with patch.object(g, 'Psql', side_effect=[observer, barrier]), patch.object(g.time, 'sleep'):
                 self.assertTrue(guard.checkpoint('task-one', 'worker')['checkpointCaught'])
-            self.assertEqual(observer.query.call_count, 4)
+            self.assertEqual(observer.query.call_count, 5)
             guard.owned.process.send_signal.assert_called_once_with(signal.SIGSTOP)
             observer.close.assert_called_once(); barrier.close.assert_called_once()
 
@@ -148,7 +793,7 @@ class ContractTests(unittest.TestCase):
             running = task() | {'kind': g.export_kind(kind)[0]}
             queued = running | {'state': 'queued', 'attempt': 0, 'snapshotCount': 0}
             observer, barrier = Mock(), Mock(pid=99)
-            observer.query.side_effect = [{'task': queued, 'sessions': []},
+            observer.query.side_effect = [{'otherNonterminal': 0, 'journalCount': 0, 'task': queued, 'sessions': []},
                 {'task': running, 'sessions': [session(), self.speculative_session()]}]
             barrier.query.return_value = {'count': 1}
             now = [0.0]
@@ -162,7 +807,7 @@ class ContractTests(unittest.TestCase):
             self.assertEqual(guard.failure_diagnostic['reason'], 'capture_deadline_missed')
             self.assertEqual(guard.failure_diagnostic['lastNotReady'], {
                 'event': 'running_cancel_guard_failure', 'stage': 'capture',
-                'reason': 'speculative_insert_in_progress'})
+                'reason': 'registry_observation_incomplete'})
             self.assertNotIn('private', json.dumps(guard.failure_diagnostic))
             self.assertEqual(guard.owned.resume.call_count, 2)
             observer.close.assert_called_once(); barrier.close.assert_called_once()
@@ -173,15 +818,15 @@ class ContractTests(unittest.TestCase):
             running = task() | {'kind': g.export_kind(kind)[0]}
             queued = running | {'state': 'queued', 'attempt': 0, 'snapshotCount': 0}
             observer, barrier = Mock(), Mock(pid=99)
-            observer.query.side_effect = [{'task': queued, 'sessions': []},
+            observer.query.side_effect = [{'otherNonterminal': 0, 'journalCount': 0, 'task': queued, 'sessions': []},
                 {'task': running, 'sessions': [session()]},
-                {'task': running, 'sessions': [session(), self.speculative_session()]}]
+                {'task': running, 'sessions': [session()]}, {'task': running, 'sessions': [session(), self.speculative_session()]}]
             barrier.query.return_value = {'count': 1}
             with patch.object(g, 'Psql', side_effect=[observer, barrier]):
                 with self.assertRaises(RuntimeError):
                     guard.checkpoint('task-one', 'worker')
             guard.owned.process.send_signal.assert_called_once_with(signal.SIGSTOP)
-            self.assertEqual(observer.query.call_count, 3)
+            self.assertEqual(observer.query.call_count, 4)
             self.assertEqual(guard.owned.resume.call_count, 2)
             self.assertEqual(guard.failure_diagnostic['reason'], 'speculative_insert_in_progress')
             self.assertEqual(guard.failure_diagnostic['stage'], 'session_validation')
@@ -195,7 +840,7 @@ class ContractTests(unittest.TestCase):
             guard = self.guard(); guard.threads = Mock(return_value=['T'])
             queued = task() | {'state': 'queued', 'attempt': 0, 'snapshotCount': 0}
             observer, barrier = Mock(), Mock(pid=99)
-            observer.query.side_effect = [{'task': queued, 'sessions': []},
+            observer.query.side_effect = [{'otherNonterminal': 0, 'journalCount': 0, 'task': queued, 'sessions': []},
                 {'task': task() | update, 'sessions': [session(), self.speculative_session()]}]
             barrier.query.return_value = {'count': 1}
             with patch.object(g, 'Psql', side_effect=[observer, barrier]):
@@ -293,9 +938,151 @@ class ContractTests(unittest.TestCase):
         with patch.object(g, 'OwnedExportWorkerGuard') as factory:
             guard = g.RunningExportCancelGuard(Mock(), 'a'*32, '/fake/bin/adtr',
                 'adtr-auth-e2e-'+'a'*12, 'adtr-user-export-'+'a'*32, 'postgres://localhost/adtr_e2e', **options)
+        identity = {key: task()[key] for key in ('taskID', 'kind', 'attempt', 'leaseOwner', 'fencingToken', 'resultVersion')}
+        identity.update(activityKey='ci-fixture-key', kind=g.export_kind(options.get('asset_kind', 'user'))[0], generation=2, phase='first-fenced-progress-10')
+        frame = {'status': 'sealed', 'target': 2, 'pending': 0, 'open': 1,
+                 'records': [{'generation': 1, 'state': 'open', 'backend': 100, 'candidate': identity}]}
+        guard.prepared = True
+        guard.activity_key = "ci-fixture-key"
+        guard.prepare_activity_fixture = Mock()
+        guard.controller = Mock()
+        guard.controller.snapshot.return_value = frame
+        guard.controller.pin.return_value = frame
+        guard.controller.after_stop.return_value = True
+        guard.controller.commit_capture.return_value = True
+        guard.controller.armed = False
         guard.owned = factory.return_value
+        # Shared sequence spy preserves old event-order assertions; the real
+        # dedicated entry is separately exercised below.
+        guard.owned.resume_queued_checkpoint = guard.owned.resume
         guard.owned.assert_identity = Mock(return_value="T")
         return guard
+
+    def test_registry_binding_requires_every_authoritative_field(self):
+        guard = self.guard()
+        frame = guard.controller.snapshot.return_value
+        self.assertEqual(g.registered_candidate(frame, task(), [session()], 99), (2, 100))
+        for key, value in (('taskID', 'wrong'), ('kind', 'wrong'), ('attempt', 2),
+                           ('leaseOwner', 'worker-1'), ('fencingToken', 2), ('resultVersion', 3)):
+            changed = copy.deepcopy(frame)
+            changed['records'][0]['candidate'][key] = value
+            self.assertIsNone(g.registered_candidate(changed, task(), [session()], 99))
+        for update in ({'query': 'BEGIN'}, {'blockers': []}, {'transaction': False}):
+            with self.assertRaises(RuntimeError):
+                g.registered_candidate(frame, task(), [session() | update], 99)
+        duplicate = copy.deepcopy(frame)
+        duplicate['records'] *= 2
+        with self.assertRaises(RuntimeError):
+            g.registered_candidate(duplicate, task(), [session()], 99)
+        for rows in ([], [session(), session(101)], [session(101)]):
+            with self.assertRaises(RuntimeError):
+                g.validate_sealed_registry(frame, (2, 100), rows)
+        for update in ({'pending': 1}, {'open': 2}, {'status': 'draining'}, {'target': 3}):
+            with self.assertRaises(RuntimeError):
+                g.validate_sealed_registry(frame | update, (2, 100), [session()])
+
+    def test_stopped_witness_failure_continues_before_rescue_release(self):
+        guard = self.guard(); guard.threads = Mock(return_value=['T'])
+        queued = task() | {'state': 'queued', 'attempt': 0, 'snapshotCount': 0}
+        observer, barrier = Mock(), Mock(pid=99)
+        observer.query.side_effect = [{'otherNonterminal': 0, 'journalCount': 0, 'task': queued, 'sessions': []},
+            {'task': task(), 'sessions': [session()]}, {'task': task(), 'sessions': [session()]}]
+        barrier.query.return_value = {'count': 1}
+        events = []
+        guard.owned.resume.side_effect = lambda: events.append('cont')
+        guard.controller.resume_and_release.side_effect = lambda **kw: events.append(('release', kw['abort']))
+        guard.controller.after_stop.side_effect = RuntimeError('private frame must not escape')
+        with patch.object(g, 'Psql', side_effect=[observer, barrier]):
+            with self.assertRaisesRegex(RuntimeError, '^running checkpoint guard failed closed$'):
+                guard.checkpoint('task-one', 'worker')
+        self.assertEqual(events, ['cont', 'cont', ('release', True)])
+        self.assertNotIn('private', json.dumps(guard.failure_diagnostic))
+        self.assertEqual(observer.query.call_count, 3)
+        guard.owned.process.send_signal.assert_called_once_with(signal.SIGSTOP)
+
+    def test_no_controller_cannot_fall_back_to_legacy_capture(self):
+        guard = self.guard(); guard.controller = None
+        guard.threads = Mock(return_value=['T'])
+        with patch.object(g, 'Psql') as pg, self.assertRaises(RuntimeError):
+            guard.checkpoint('task-one', 'worker')
+        pg.assert_not_called()
+        guard.owned.process.send_signal.assert_not_called()
+        guard.owned.resume.assert_called_once()
+
+    def journal_specimen(self):
+        process = '12345678-1234-4123-8123-123456789012'
+        final = {'event': 'owned_ci_final_journal', 'processIDSHA256': g.digest(process),
+            'closeOK': True, 'acceptanceStopped': True, 'accepted': 20, 'acknowledged': 20,
+            'rejected': 0, 'queueFull': 0, 'writeFailures': 0, 'unacknowledged': 0, 'abandoned': 0}
+        proof = {'count': 5, 'processCount': 1, 'closed': True, 'reportConsistent': True,
+                 'terminal': True, 'processID': process, 'eventCount': 20}
+        return final, proof
+
+    def test_actual_journal_check_requires_closed_delivery_without_identity_output(self):
+        guard = self.guard(); guard.used = True; guard.journal_baseline = 4; guard.checkpoint_task_id = "task-one"
+        final, proof = self.journal_specimen()
+        observer = Mock(); observer.query.return_value = proof
+        with patch.object(g, 'Psql', return_value=observer), patch('builtins.print') as output:
+            guard.verify_journal_after_wait(0, final)
+        observer.query.assert_called_once_with(g.JOURNAL_PROOF_SQL.format(task_id="task-one"))
+        event = json.loads(output.call_args.args[0])
+        self.assertEqual(event, {'event': 'running_cancel_journal_verified',
+            'newQueueProgressEvents': 1, 'businessFieldsClosed': True, 'metadataFieldsClosed': True, 'finalDeliveryVerified': True})
+        for update in ({'count': 4}, {'count': 6}, {'processCount': 2}, {'closed': False},
+                       {'count': True}, {'candidate': 'private'}, {'reportConsistent': False}, {'terminal': False},
+                       {'eventCount': 19}, {'eventCount': 21}, {'processID': '22345678-1234-4123-8123-123456789012'}):
+            observer = Mock(); observer.query.return_value = proof | update
+            with patch.object(g, 'Psql', return_value=observer), patch('builtins.print') as output, self.assertRaises(RuntimeError):
+                guard.verify_journal_after_wait(0, final)
+            observer.close.assert_called_once()
+            event = json.loads(output.call_args.args[0])
+            self.assertEqual(event['event'], 'running_cancel_journal_failure')
+            self.assertNotIn(proof['processID'], json.dumps(event))
+            self.assertNotIn(final['processIDSHA256'], json.dumps(event))
+
+    def test_journal_final_witness_missing_bad_or_incomplete_always_fails(self):
+        final, proof = self.journal_specimen()
+        changes = [None, {}, final | {'closeOK': False}, final | {'acceptanceStopped': False},
+            final | {'acknowledged': 19}, final | {'accepted': 21}, final | {'processIDSHA256': 'f'*64},
+            final | {'processIDSHA256': 'private'}, final | {'extra': 'private'}]
+        changes += [final | {key: 1} for key in ('rejected', 'queueFull', 'writeFailures', 'unacknowledged', 'abandoned')]
+        changes += [final | {'accepted': value} for value in (True, -1, 2**63, '20')]
+        for record in changes:
+            guard = self.guard(); guard.used = True; guard.journal_baseline = 4; guard.checkpoint_task_id = 'task-one'
+            observer = Mock(); observer.query.return_value = proof
+            with patch.object(g, 'Psql', return_value=observer), patch('builtins.print') as output, self.assertRaises(RuntimeError):
+                guard.verify_journal_after_wait(0, record)
+            event = json.loads(output.call_args.args[0])
+            self.assertFalse(all(event['checks'].values()))
+            self.assertNotIn('private', json.dumps(event))
+            self.assertNotIn('processIDSHA256', json.dumps(event))
+
+    def test_journal_observer_read_and_close_failures_remain_closed(self):
+        final, proof = self.journal_specimen()
+        for failing in ('open', 'read', 'close'):
+            guard = self.guard(); guard.used = True; guard.journal_baseline = 4; guard.checkpoint_task_id = 'task-one'
+            observer = Mock(); observer.query.return_value = proof
+            if failing == 'read': observer.query.side_effect = RuntimeError('private SQL')
+            if failing == 'close': observer.close.side_effect = RuntimeError('private process')
+            with patch.object(g, 'Psql', side_effect=RuntimeError('private config') if failing == 'open' else None,
+                              return_value=observer), patch('builtins.print') as output, self.assertRaises(RuntimeError):
+                guard.verify_journal_after_wait(0, final)
+            event = json.loads(output.call_args.args[0])
+            self.assertFalse(event['checks']['observation'])
+            self.assertNotIn('private', json.dumps(event))
+
+    def test_final_journal_real_pg_case_is_selected_and_default_does_not_take_stats(self):
+        root = Path(g.__file__).resolve().parents[1]
+        source = (root / 'cmd/adtr/db_journal_integration_test.go').read_text()
+        self.assertIn('func TestActivityCandidateFinalJournalActualRecorderAndPostgres', source)
+        self.assertIn('acknowledged != 2', source)
+        self.assertIn('proof.Acknowledged != 3', source)
+        runner = (root / 'scripts/run_integration.py').read_text()
+        self.assertIn('"^TestActivityCandidate"', runner)
+        self.assertIn('"./cmd/adtr"', runner)
+        default = (root / 'cmd/adtr/db_journal_default.go').read_text()
+        self.assertNotIn('.Stats(', default)
+        self.assertNotIn('Stderr', default)
 
     def test_resume_records_real_monotonic_duration(self):
         guard = self.guard(); guard.stopped_at = 100.
@@ -341,6 +1128,35 @@ class ContractTests(unittest.TestCase):
         self.assertNotIn('ADTR_DATABASE_URL', ' '.join(argv))
         self.assertEqual(db.pid, 44)
 
+    def test_fixture_writers_leave_observers_read_only_and_fail_closed_on_session_end(self):
+        import ast
+        source = Path(g.__file__).read_text()
+        methods = {node.name: node for node in ast.walk(ast.parse(source))
+                   if isinstance(node, ast.FunctionDef)}
+        for name, expected in (('prepare', [True]), ('checkpoint', [True, False]),
+                               ('prepare_activity_fixture', [False]),
+                               ('cleanup_activity_fixture_after_wait', [False])):
+            calls = [node for node in ast.walk(methods[name]) if isinstance(node, ast.Call)
+                     and isinstance(node.func, ast.Name) and node.func.id == 'Psql']
+            self.assertEqual([node.args[1].value for node in calls], expected)
+        with patch.object(g.subprocess, 'Popen') as launch, patch.object(g.Psql, 'query', return_value=44), patch.object(g.threading, 'Thread'):
+            g.Psql('adtr-auth-e2e-' + 'b' * 12, False)
+        options = next(value for value in launch.call_args.args[0] if value.startswith('PGOPTIONS='))
+        self.assertNotIn('default_transaction_read_only', options)
+        self.assertIn('statement_timeout=1000', options)
+        self.assertIn('ON_ERROR_STOP=1', launch.call_args.args[0])
+        db = g.Psql.__new__(g.Psql)
+        db.deadline = None
+        db.process = Mock(); db.process.poll.return_value = None
+        db.lines = Mock(); db.lines.get.return_value = None
+        with self.assertRaises(RuntimeError) as caught:
+            db.query('private synthetic SQL')
+        self.assertEqual(g.failure_event('initial_boundary', caught.exception), {
+            'event': 'running_cancel_guard_failure', 'stage': 'initial_boundary',
+            'reason': 'database_session_ended'})
+        db.process.stdin.write.assert_called_once()
+        self.assertNotIn('private', str(caught.exception))
+
     def test_checkpoint_sql_read_only_and_exact_owned_scope(self):
         guard = self.guard(); sql = guard.observe_sql('task-one')
         self.assertIn("application_name='adtr-user-export-"+'a'*32+"'", sql)
@@ -355,10 +1171,10 @@ class ContractTests(unittest.TestCase):
         guard.threads = Mock(return_value=['T']*4)
         observer, barrier = Mock(), Mock(pid=99)
         initial = task(); initial.update(state='queued', attempt=0, snapshotCount=0)
-        observer.query.side_effect = [{'task': initial, 'sessions': []}, RuntimeError('missed')]
+        observer.query.side_effect = [{'otherNonterminal': 0, 'journalCount': 0, 'task': initial, 'sessions': []}, RuntimeError('missed')]
         barrier.query.return_value = {'count': 1}
         events = []
-        observer.query.side_effect = lambda *a, **k: events.append('observe') or ({'task': initial, 'sessions': []} if len(events) == 1 else (_ for _ in ()).throw(RuntimeError('missed')))
+        observer.query.side_effect = lambda *a, **k: events.append('observe') or ({'otherNonterminal': 0, 'journalCount': 0, 'task': initial, 'sessions': []} if len(events) == 1 else (_ for _ in ()).throw(RuntimeError('missed')))
         guard.owned.resume.side_effect = lambda: events.append('resume')
         with patch.object(g, 'Psql', side_effect=[observer, barrier]):
             with self.assertRaises(RuntimeError):
@@ -368,13 +1184,71 @@ class ContractTests(unittest.TestCase):
         observer.close.assert_called_once(); barrier.close.assert_called_once()
         self.assertTrue(guard.failed)
 
+    def test_capture_end_commit_precedes_barrier_release_and_failure_is_terminal(self):
+        for commit in (True, False):
+            guard = self.guard(); guard.threads = Mock(return_value=['T'])
+            queued = task() | {'state': 'queued', 'attempt': 0, 'snapshotCount': 0}
+            observer, barrier = Mock(), Mock(pid=99)
+            observer.query.side_effect = [{'otherNonterminal': 0, 'journalCount': 0, 'task': queued, 'sessions': []},
+                *[{'task': task(), 'sessions': [session()]} for _ in range(3)]]
+            events = []
+            barrier.query.side_effect = lambda sql, **kw: (events.append('rollback') or True) if sql.startswith('ROLLBACK') else {'count': 1}
+            guard.controller.commit_capture.side_effect = lambda *args: events.append('commit') or commit
+            with patch.object(g, 'Psql', side_effect=[observer, barrier]):
+                if commit:
+                    self.assertTrue(guard.checkpoint('task-one', 'worker')['checkpointCaught'])
+                    self.assertEqual(events, ['commit', 'rollback'])
+                else:
+                    with self.assertRaises(RuntimeError): guard.checkpoint('task-one', 'worker')
+                    self.assertEqual(events, ['commit'])
+                    self.assertTrue(guard.failed)
+            guard.controller.commit_capture.assert_called_once()
+            args = guard.controller.commit_capture.call_args.args
+            self.assertEqual(args[:2], (1, 2))
+            self.assertEqual(args[2], guard.controller.pin.call_args.args[1])
+
+    def test_browser_cont_routes_through_guard_without_signal_fallback(self):
+        root = Path(g.__file__).resolve().parents[1]
+        control = (root / 'web/e2e/owned-running-control.ts').read_text()
+        self.assertNotIn('terminal-helpers', control)
+        self.assertIn('redirect: "error"', control)
+        for kind in ('user', 'group', 'computer'):
+            source = (root / f'web/e2e/{kind}-asset-export-v3-terminal-helpers.ts').read_text()
+            signal_body = source.split('async function signalWorker(', 1)[1].split('async function queueActivity', 1)[0]
+            routing = signal_body.split('const worker = await checkedWorker()', 1)[0]
+            self.assertIn('signal === "SIGCONT"', routing)
+            self.assertIn('await runningGuard("resume");', routing)
+            self.assertIn('return;', routing)
+            self.assertNotIn('catch', routing)
+            self.assertLess(signal_body.index('await runningGuard'), signal_body.index('process.kill'))
+            spec = (root / f'web/e2e/{kind}-asset-export-v3-running-cancel.spec.ts').read_text()
+            self.assertIn('finally { await restoreOwnedExportWorker(); }', spec)
+
+    def test_all_armed_owned_resumes_delegate_and_never_signal_directly(self):
+        from user_asset_export_v3_worker_guard import OwnedExportWorkerGuard
+        guard = self.guard()
+        guard.controller.armed = True
+        owned = object.__new__(OwnedExportWorkerGuard)
+        owned.process = Mock(); owned.process.poll.return_value = None
+        owned.assert_identity = Mock()
+        owned.resume_delegate = guard._resume_capture_owned
+        owned.resume()
+        guard.controller.resume_and_release.assert_called_once_with(abort=False)
+        owned.process.send_signal.assert_not_called()
+        guard.controller.resume_and_release.side_effect = RuntimeError('closed')
+        with self.assertRaises(RuntimeError): owned.resume()
+        owned.process.send_signal.assert_not_called()
+        guard.controller.armed = False
+        owned.resume()
+        owned.process.send_signal.assert_called_once_with(signal.SIGCONT)
+
     def test_complete_checkpoint_locks_existing_row_and_releases(self):
         guard = self.guard(); guard.threads = Mock(return_value=['T'] * 4)
         queued = task(); queued.update(state='queued', attempt=0, snapshotCount=0)
         observer, barrier = Mock(), Mock(pid=99)
-        observer.query.side_effect = [{'task': queued, 'sessions': []},
+        observer.query.side_effect = [{'otherNonterminal': 0, 'journalCount': 0, 'task': queued, 'sessions': []},
                                       {'task': task(), 'sessions': [session()]},
-                                      {'task': task(), 'sessions': [session()]}]
+                                      {'task': task(), 'sessions': [session()]}, {'task': task(), 'sessions': [session()]}]
         barrier.query.side_effect = [{'count': 1}, True]
         with patch.object(g, 'Psql', side_effect=[observer, barrier]):
             result = guard.checkpoint('task-one', 'worker')
@@ -403,7 +1277,7 @@ class ContractTests(unittest.TestCase):
             queued = running | {'state': 'queued', 'attempt': 0, 'snapshotCount': 0}
             busy = {'task': running, 'sessions': [session(), self.busy_session()]}
             ready = {'task': running, 'sessions': [session()]}
-            samples = iter([{'task': queued, 'sessions': []}, busy, busy, ready, ready])
+            samples = iter([{'otherNonterminal': 0, 'journalCount': 0, 'task': queued, 'sessions': []}, busy, busy, ready, ready, ready])
             observer, barrier = Mock(), Mock(pid=99)
             events = []
             def observe(*args, **kwargs):
@@ -415,7 +1289,7 @@ class ContractTests(unittest.TestCase):
             with patch.object(g, 'Psql', side_effect=[observer, barrier]), patch.object(g.time, 'sleep'):
                 result = guard.checkpoint('task-one', 'worker')
             self.assertTrue(result['checkpointCaught'])
-            self.assertEqual(events, ['observe'] * 4 + ['stop', 'observe'])
+            self.assertEqual(events, ['observe'] * 5 + ['stop', 'observe'])
             guard.owned.process.send_signal.assert_called_once_with(signal.SIGSTOP)
             self.assertIsNone(guard.failure_diagnostic)
             observer.close.assert_called_once(); barrier.close.assert_called_once()
@@ -424,7 +1298,7 @@ class ContractTests(unittest.TestCase):
         guard = self.guard(); guard.threads = Mock(return_value=['T'])
         queued = task() | {'state': 'queued', 'attempt': 0, 'snapshotCount': 0}
         observer, barrier = Mock(), Mock(pid=99)
-        observer.query.side_effect = [{'task': queued, 'sessions': []},
+        observer.query.side_effect = [{'otherNonterminal': 0, 'journalCount': 0, 'task': queued, 'sessions': []},
             {'task': task(), 'sessions': [session(), self.busy_session()]}]
         barrier.query.return_value = {'count': 1}
         now = [0.0]
@@ -438,8 +1312,7 @@ class ContractTests(unittest.TestCase):
         guard.owned.process.send_signal.assert_not_called()
         self.assertEqual(guard.failure_diagnostic['reason'], 'capture_deadline_missed')
         pending = guard.failure_diagnostic['lastNotReady']
-        self.assertEqual(pending['reason'], 'unsafe_transaction_query')
-        self.assertEqual(pending['lockSafetyCategory'], 'unsafe_relation')
+        self.assertEqual(pending['reason'], 'registry_observation_incomplete')
         self.assertNotIn('private', json.dumps(guard.failure_diagnostic))
         self.assertEqual(guard.owned.resume.call_count, 2)
         observer.close.assert_called_once(); barrier.close.assert_called_once()
@@ -453,22 +1326,22 @@ class ContractTests(unittest.TestCase):
             unavailable = session(101) | {'state': None, 'query': '', 'transaction': False,
                                          'waitType': None, 'blockers': [], 'locks': []}
             observer, barrier = Mock(), Mock(pid=99)
-            observer.query.side_effect = [{'task': queued, 'sessions': []},
+            observer.query.side_effect = [{'otherNonterminal': 0, 'journalCount': 0, 'task': queued, 'sessions': []},
                 {'task': running, 'sessions': [session(), unavailable]},
                 {'task': running, 'sessions': [session()]},
-                {'task': running, 'sessions': [session()]}]
+                {'task': running, 'sessions': [session()]}, {'task': running, 'sessions': [session()]}]
             barrier.query.side_effect = [{'count': 1}, True]
             with patch.object(g, 'Psql', side_effect=[observer, barrier]), patch.object(g.time, 'sleep'):
                 self.assertTrue(guard.checkpoint('task-one', 'worker')['checkpointCaught'])
-            self.assertEqual(observer.query.call_count, 4)
+            self.assertEqual(observer.query.call_count, 5)
             guard.owned.process.send_signal.assert_called_once_with(signal.SIGSTOP)
             observer.close.assert_called_once(); barrier.close.assert_called_once()
 
-    def test_null_state_deadline_keeps_unavailable_reason_without_stop(self):
+    def test_null_target_is_fatal_before_pin_without_stop(self):
         guard = self.guard(); guard.threads = Mock(return_value=['T'])
         queued = task() | {'state': 'queued', 'attempt': 0, 'snapshotCount': 0}
         observer, barrier = Mock(), Mock(pid=99)
-        observer.query.side_effect = [{'task': queued, 'sessions': []},
+        observer.query.side_effect = [{'otherNonterminal': 0, 'journalCount': 0, 'task': queued, 'sessions': []},
             {'task': task(), 'sessions': [session() | {'state': None}]}]
         barrier.query.return_value = {'count': 1}
         now = [0.0]
@@ -480,8 +1353,8 @@ class ContractTests(unittest.TestCase):
                 guard.checkpoint('task-one', 'worker')
         guard.owned.process.send_signal.assert_not_called()
         self.assertEqual(guard.failure_diagnostic, {'event': 'running_cancel_guard_failure',
-            'stage': 'capture', 'reason': 'capture_deadline_missed', 'lastNotReady': {
-                'event': 'running_cancel_guard_failure', 'stage': 'capture', 'reason': 'state_unavailable'}})
+            'stage': 'candidate_strict', 'reason': 'state_unavailable'})
+        guard.controller.pin.assert_not_called()
         self.assertEqual(guard.owned.resume.call_count, 2)
         observer.close.assert_called_once(); barrier.close.assert_called_once()
 
@@ -491,15 +1364,15 @@ class ContractTests(unittest.TestCase):
             running = task() | {'kind': g.export_kind(kind)[0]}
             queued = running | {'state': 'queued', 'attempt': 0, 'snapshotCount': 0}
             observer, barrier = Mock(), Mock(pid=99)
-            observer.query.side_effect = [{'task': queued, 'sessions': []},
+            observer.query.side_effect = [{'otherNonterminal': 0, 'journalCount': 0, 'task': queued, 'sessions': []},
                 {'task': running, 'sessions': [session()]},
-                {'task': running, 'sessions': [session() | {'state': None}]}]
+                {'task': running, 'sessions': [session()]}, {'task': running, 'sessions': [session() | {'state': None}]}]
             barrier.query.return_value = {'count': 1}
             with patch.object(g, 'Psql', side_effect=[observer, barrier]):
                 with self.assertRaises(RuntimeError):
                     guard.checkpoint('task-one', 'worker')
             guard.owned.process.send_signal.assert_called_once_with(signal.SIGSTOP)
-            self.assertEqual(observer.query.call_count, 3)
+            self.assertEqual(observer.query.call_count, 4)
             self.assertEqual(guard.owned.resume.call_count, 2)
             self.assertEqual(guard.failure_diagnostic['reason'], 'state_unavailable')
             self.assertEqual(guard.failure_diagnostic['stage'], 'session_validation')
@@ -557,8 +1430,8 @@ class ContractTests(unittest.TestCase):
         guard = self.guard(); guard.threads = Mock(return_value=['T'])
         queued = task() | {'state': 'queued', 'attempt': 0, 'snapshotCount': 0}
         observer, barrier = Mock(), Mock(pid=99)
-        observer.query.side_effect = [{'task': queued, 'sessions': []},
-            {'task': task(), 'sessions': [session()]}]
+        observer.query.side_effect = [{'otherNonterminal': 0, 'journalCount': 0, 'task': queued, 'sessions': []},
+            {'task': task(), 'sessions': [session()]}, {'task': task(), 'sessions': [session()]}]
         barrier.query.return_value = {'count': 1}
         now = [0.0]
         guard.owned.assert_identity.side_effect = lambda: now.__setitem__(0, 1.5)
@@ -603,7 +1476,7 @@ class ContractTests(unittest.TestCase):
             guard = self.guard(); guard.threads = Mock(return_value=['T'])
             queued = task() | {'state': 'queued', 'attempt': 0, 'snapshotCount': 0}
             observer, barrier = Mock(), Mock(pid=99)
-            observer.query.side_effect = [{'task': queued, 'sessions': []}, sample]
+            observer.query.side_effect = [{'otherNonterminal': 0, 'journalCount': 0, 'task': queued, 'sessions': []}, sample]
             barrier.query.return_value = {'count': 1}
             with patch.object(g, 'Psql', side_effect=[observer, barrier]):
                 with self.assertRaises(RuntimeError):
@@ -619,15 +1492,15 @@ class ContractTests(unittest.TestCase):
             running = task() | {'kind': g.export_kind(kind)[0]}
             queued = running | {'state': 'queued', 'attempt': 0, 'snapshotCount': 0}
             observer, barrier = Mock(), Mock(pid=99)
-            observer.query.side_effect = [{'task': queued, 'sessions': []},
+            observer.query.side_effect = [{'otherNonterminal': 0, 'journalCount': 0, 'task': queued, 'sessions': []},
                 {'task': running, 'sessions': [session()]},
-                {'task': running, 'sessions': [session(), self.busy_session()]}]
+                {'task': running, 'sessions': [session()]}, {'task': running, 'sessions': [session(), self.busy_session()]}]
             barrier.query.return_value = {'count': 1}
             with patch.object(g, 'Psql', side_effect=[observer, barrier]):
                 with self.assertRaises(RuntimeError):
                     guard.checkpoint('task-one', 'worker')
             guard.owned.process.send_signal.assert_called_once_with(signal.SIGSTOP)
-            self.assertEqual(observer.query.call_count, 3)
+            self.assertEqual(observer.query.call_count, 4)
             self.assertEqual(guard.owned.resume.call_count, 2)
             self.assertEqual(guard.failure_diagnostic['stage'], 'session_validation')
             self.assertEqual(guard.failure_diagnostic['reason'], 'unsafe_transaction_query')
@@ -652,7 +1525,7 @@ class ContractTests(unittest.TestCase):
         guard = self.guard(); guard.threads = Mock(return_value=['T'])
         queued = task(); queued.update(state='queued', attempt=0, snapshotCount=0)
         observer, barrier = Mock(), Mock(pid=99)
-        observer.query.side_effect = [{'task': queued, 'sessions': []}, RuntimeError('missed')]
+        observer.query.side_effect = [{'otherNonterminal': 0, 'journalCount': 0, 'task': queued, 'sessions': []}, RuntimeError('missed')]
         barrier.query.return_value = {'count': 1}
         barrier.close.side_effect = RuntimeError('close failure')
         with patch.object(g, 'Psql', side_effect=[observer, barrier]):
@@ -666,7 +1539,7 @@ class ContractTests(unittest.TestCase):
         self.assertNotIn('UPDATE adtr.tasks', source)
         self.assertNotIn('SET lease_', source)
         self.assertNotIn('pg_terminate_backend', source)
-        self.assertIn("worker_id='\" + worker_id", source)
+        self.assertIn("worker_id='\" + self.activity_key", source)
         self.assertIn("AND cycle='queue' FOR UPDATE", source)
         self.assertIn("hmac.compare_digest", source)
         self.assertIn("ThreadingHTTPServer(('127.0.0.1', 0)", source)
@@ -727,7 +1600,7 @@ class ContractTests(unittest.TestCase):
                 with self.subTest(kind=kind, field=field, value=value), self.assertRaises(RuntimeError):
                     g.validate_checkpoint(bad, 'task-one', 'worker', kind)
 
-    def test_complete_checkpoint_each_new_kind_and_transitive_blockers(self):
+    def test_registry_rejects_additional_transitive_backend_each_kind(self):
         for kind in ('group', 'computer'):
             guard = self.guard(asset_kind=kind); guard.threads = Mock(return_value=['T'] * 4)
             running = task() | {'kind': kind + '_assets.v3.export'}
@@ -736,16 +1609,13 @@ class ContractTests(unittest.TestCase):
             rows[1]['blockers'] = [100]
             rows[1]['locks'][-1] = lock('tuple', 'ExclusiveLock', False, 'adtr.system_worker_activity')
             observer, barrier = Mock(), Mock(pid=99)
-            observer.query.side_effect = [{'task': queued, 'sessions': []},
-                {'task': running, 'sessions': rows}, {'task': running, 'sessions': rows}]
+            observer.query.side_effect = [{'otherNonterminal': 0, 'journalCount': 0, 'task': queued, 'sessions': []},
+                {'task': running, 'sessions': rows}, {'task': running, 'sessions': rows}, {'task': running, 'sessions': rows}]
             barrier.query.side_effect = [{'count': 1}, True]
             with patch.object(g, 'Psql', side_effect=[observer, barrier]):
-                result = guard.checkpoint('task-one', 'worker')
-            self.assertEqual(result['kind'], running['kind'])
-            self.assertEqual(result['blockedOwnedBackends'], 2)
-            self.assertTrue(result['allThreadsStopped'])
-            self.assertTrue(result['activityLockReleased'])
-            guard.owned.process.send_signal.assert_called_once_with(signal.SIGSTOP)
+                with self.assertRaises(RuntimeError):
+                    guard.checkpoint('task-one', 'worker')
+            guard.owned.process.send_signal.assert_not_called()
             observer.close.assert_called_once(); barrier.close.assert_called_once()
             for call in observer.query.call_args_list:
                 self.assertIn('adtr.' + kind + '_asset_export_snapshots', call.args[0])
@@ -768,7 +1638,7 @@ class ContractTests(unittest.TestCase):
             guard = self.guard(asset_kind=kind); guard.threads = Mock(return_value=['T'])
             queued = task() | {'kind': kind + '_assets.v3.export', 'state': 'queued', 'attempt': 0, 'snapshotCount': 0}
             observer, barrier = Mock(), Mock(pid=99)
-            observer.query.return_value = {'task': queued, 'sessions': []}
+            observer.query.return_value = {'otherNonterminal': 0, 'journalCount': 0, 'task': queued, 'sessions': []}
             barrier.query.return_value = {'count': 1}
             with patch.object(g, 'Psql', side_effect=[observer, barrier]), patch.object(g.time, 'monotonic', side_effect=[0., 0., 1.5, 1.5]):
                 with self.assertRaises(RuntimeError):
@@ -785,7 +1655,7 @@ class ContractTests(unittest.TestCase):
             running = task() | {'kind': kind + '_assets.v3.export'}
             queued = running | {'state': 'queued', 'attempt': 0, 'snapshotCount': 0}
             observer, barrier = Mock(), Mock(pid=99)
-            observer.query.side_effect = [{'task': queued, 'sessions': []}, {'task': running, 'sessions': [session()]}]
+            observer.query.side_effect = [{'otherNonterminal': 0, 'journalCount': 0, 'task': queued, 'sessions': []}, {'task': running, 'sessions': [session()]}, {'task': running, 'sessions': [session()]}]
             barrier.query.return_value = {'count': 1}
             with patch.object(g, 'Psql', side_effect=[observer, barrier]), patch.object(g.time, 'sleep'), patch.object(g.time, 'monotonic', side_effect=[0., 0., .1, .1, .1, .2, .6, .6]):
                 with self.assertRaises(RuntimeError):
@@ -1040,9 +1910,9 @@ class ContractTests(unittest.TestCase):
                 bad = session()
                 bad['locks'].append(lock('relation', 'private_mode_token', False, 'private.tenant'))
                 observer, barrier = Mock(), Mock(pid=99)
-                observer.query.side_effect = [{'task': queued, 'sessions': []},
+                observer.query.side_effect = [{'otherNonterminal': 0, 'journalCount': 0, 'task': queued, 'sessions': []},
                     {'task': running, 'sessions': [session()]},
-                    {'task': running, 'sessions': [bad]}]
+                    {'task': running, 'sessions': [session()]}, {'task': running, 'sessions': [bad]}]
                 barrier.query.return_value = {'count': 1}
                 events, lines = [], []
                 guard.owned.resume.side_effect = lambda: events.append('resume')
@@ -1096,9 +1966,9 @@ class ContractTests(unittest.TestCase):
                 bad = session()
                 bad['query'] = 'SELECT private_credential FROM private.tenant'
                 observer, barrier = Mock(), Mock(pid=99)
-                observer.query.side_effect = [{'task': queued, 'sessions': []},
+                observer.query.side_effect = [{'otherNonterminal': 0, 'journalCount': 0, 'task': queued, 'sessions': []},
                     {'task': running, 'sessions': [session()]},
-                    {'task': running, 'sessions': [bad]}]
+                    {'task': running, 'sessions': [session()]}, {'task': running, 'sessions': [bad]}]
                 barrier.query.return_value = {'count': 1}
                 events, lines = [], []
                 guard.owned.resume.side_effect = lambda: events.append('resume')

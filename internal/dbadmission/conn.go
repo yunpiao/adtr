@@ -21,11 +21,16 @@ type Conn struct {
 	closed bool
 }
 
+// closeObservation contains only already-computed close facts, never errors or identity.
+type closeObservation struct {
+	alreadyClosed, closeFailed, cleanupDone bool
+}
+
 type lifecyclePermit interface {
 	connected(*Conn)
 	closingConnection()
 	failed()
-	closed(clean bool)
+	closedObserved(closeObservation)
 }
 
 // ConnectConfig obtains admission before calling pgx, including its initialization.
@@ -38,11 +43,11 @@ func connectWith(ctx context.Context, config *pgx.ConnConfig, connect func(conte
 	if err != nil {
 		return nil, err
 	}
-	raw, err := connect(ctx, config)
+	raw, err := connect(ctx, observeLifecycleConfig(config, permit))
 	if err != nil || raw == nil {
 		if permit != nil {
 			// A failed startup may leave asynchronous cleanup. Never claim drain.
-			permit.failed()
+			observeLifecycleConnectFailure(ctx, permit, err, raw == nil)
 		}
 		if err == nil {
 			err = errors.New("database connection unavailable")
@@ -90,6 +95,6 @@ func (c *Conn) Close(ctx context.Context) error {
 		cleanupDone = true
 	default:
 	}
-	c.permit.closed(!alreadyClosed && err == nil && cleanupDone)
+	c.permit.closedObserved(closeObservation{alreadyClosed, err != nil, cleanupDone})
 	return err
 }

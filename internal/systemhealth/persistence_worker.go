@@ -44,22 +44,24 @@ func (s *Store) recordWorkerCycle(ctx context.Context, workerID string, cycle Wo
 	if !validWorkerCycle(workerID, cycle, status, code) {
 		return problem(400, "invalid_worker_activity")
 	}
-	transaction := s.withTx
+	transaction := func(c context.Context, fn func(context.Context, pgx.Tx, string) error) error {
+		return s.withTx(c, func(c context.Context, tx pgx.Tx) error { return fn(c, tx, workerID) })
+	}
 	if candidate != nil {
 		if cycle != WorkerQueue || status != WorkerCycleProgress || code != "" {
 			return problem(400, "invalid_worker_activity")
 		}
-		transaction = func(c context.Context, fn func(context.Context, pgx.Tx) error) error {
+		transaction = func(c context.Context, fn func(context.Context, pgx.Tx, string) error) error {
 			return s.withActivityTx(c, workerID, candidate, fn)
 		}
 	}
-	return transaction(ctx, func(ctx context.Context, tx pgx.Tx) error {
+	return transaction(ctx, func(ctx context.Context, tx pgx.Tx, activityKey string) error {
 		_, err := tx.Exec(ctx, `WITH observed AS (SELECT clock_timestamp() AS at)
 INSERT INTO adtr.system_worker_activity(tenant_id,worker_id,cycle,status,error_code,last_activity_at,last_success_at)
 SELECT $1,$2,$3,$4,$5,at,CASE WHEN $4='success' THEN at ELSE NULL END FROM observed
 ON CONFLICT(tenant_id,worker_id,cycle) DO UPDATE SET status=EXCLUDED.status,error_code=EXCLUDED.error_code,
  last_activity_at=EXCLUDED.last_activity_at,
- last_success_at=CASE WHEN EXCLUDED.status='success' THEN EXCLUDED.last_activity_at ELSE adtr.system_worker_activity.last_success_at END`, s.owner, workerID, string(cycle), string(status), code)
+ last_success_at=CASE WHEN EXCLUDED.status='success' THEN EXCLUDED.last_activity_at ELSE adtr.system_worker_activity.last_success_at END`, s.owner, activityKey, string(cycle), string(status), code)
 		return err
 	})
 }
