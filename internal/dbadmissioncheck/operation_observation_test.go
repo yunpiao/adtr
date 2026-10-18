@@ -130,13 +130,23 @@ func TestObserverRootBridgeIsInstalledOnly(t *testing.T) {
 }
 
 func TestBirthCaptureObservationCannotAuthorize(t *testing.T) {
+	t.Run("complete acquisition retains read-only birth cache", func(t *testing.T) {
+		files, imp := deadlineAdmissionFixtures(t)
+		if !strings.Contains(files["lifecycle_ci.go"], "birthCaptureEnded: g.seal != nil && g.seal.captureEnded") {
+			t.Fatal("real acquisition lost birth cache projection")
+		}
+		if ds := checkQueuedFiles(t, files, imp); len(ds) != 0 {
+			t.Fatalf("diagnostics=%v", ds)
+		}
+	})
+
 	source, imp := captureFixture(t)
 	source = strings.Replace(source, "type lifecycleTicket struct{", "type lifecycleTicket struct{birthCaptureEnded bool;", 1)
 	for _, tc := range []struct {
 		name, body string
 		bad        bool
 	}{
-		{"cached bit into new ticket", `func(g *lifecycleGate)acquire(){_=lifecycleTicket{birthCaptureEnded:g.seal!=nil&&g.seal.captureEnded}}`, false},
+		{"truncated acquire cannot copy cached bit", `func(g *lifecycleGate)acquire(){_=lifecycleTicket{birthCaptureEnded:g.seal!=nil&&g.seal.captureEnded}}`, true},
 		{"cache outside ticket", `func(g *lifecycleGate)acquire(){_=g.seal.captureEnded}`, true},
 		{"different destination", `type other struct{birthCaptureEnded bool};func(g *lifecycleGate)acquire(){_=other{birthCaptureEnded:g.seal!=nil&&g.seal.captureEnded}}`, true},
 		{"authorization mutation", `func(g *lifecycleGate)acquire(){g.seal.captureEnded=true}`, true},

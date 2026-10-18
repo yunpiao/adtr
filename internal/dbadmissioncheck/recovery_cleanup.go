@@ -189,7 +189,13 @@ var recoveryBodies = map[string]struct{ file, body string }{
 	"lifecycleGate.acquire": {"lifecycle_ci.go", `{
 	for {
 		g.mu.Lock()
-		if err := ctx.Err(); err != nil {
+		err := ctx.Err()
+		if err == nil {
+			if deadline, ok := ctx.Deadline(); ok && !time.Now().Before(deadline) {
+				err = context.DeadlineExceeded
+			}
+		}
+		if err != nil {
 			publish := g.invalidateWaitLocked()
 			g.mu.Unlock()
 			if publish != nil {
@@ -417,7 +423,7 @@ func recoveryDeclarations(fset *token.FileSet, path string, files []*ast.File, i
 			}
 			exact := exactRecoveryFunction(path, filename, name, fn)
 			observer := exactObserverFunction(path, filename, name, fn)
-			if expected, ok := recoveryBodies[name]; ok && path == managed && (expected.file == "recovery_cleanup_ci.go" || name == "lifecycleGate.locallyDrained" || name == "lifecycleGate.release") && !exact {
+			if expected, ok := recoveryBodies[name]; ok && path == managed && (expected.file == "recovery_cleanup_ci.go" || name == "lifecycleGate.locallyDrained" || name == "lifecycleGate.release" || name == "lifecycleGate.acquire") && !exact {
 				emit(decl, "recovery helpers must retain their complete reviewed qualification, budget and completion bodies")
 			}
 			var ancestors []ast.Node

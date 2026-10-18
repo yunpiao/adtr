@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"time"
 )
 
 var errAdmissionClosed = errors.New("database admission closed")
@@ -91,7 +92,13 @@ func (g *lifecycleGate) notifyLocked() {
 func (g *lifecycleGate) acquire(ctx context.Context) (*lifecycleTicket, error) {
 	for {
 		g.mu.Lock()
-		if err := ctx.Err(); err != nil {
+		err := ctx.Err()
+		if err == nil {
+			if deadline, ok := ctx.Deadline(); ok && !time.Now().Before(deadline) {
+				err = context.DeadlineExceeded
+			}
+		}
+		if err != nil {
 			publish := g.invalidateWaitLocked()
 			g.mu.Unlock()
 			if publish != nil {
