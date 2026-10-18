@@ -45,7 +45,7 @@ func deadlineAdmissionFixtures(t *testing.T) (map[string]string, fixtureImporter
 		"lifecycle_ci.go": `package dbadmission;import("context";"time");` + sourceText(declaration),
 		"fixture.go": `package dbadmission;import "sync"
  var errAdmissionClosed error
- type invalidationReason string;const invalidCapacity invalidationReason="record_capacity"
+ type invalidationReason string;const invalidCapacity invalidationReason="capacity"
  type lifecycleGate struct{
  mu sync.Mutex;seal *sealAttempt;invalid,closing,finalParked,queuedParked,recoveryFinalized bool
  changed chan struct{};witness *struct{};tickets map[uint64]*lifecycleTicket;next,total uint64;pending int
