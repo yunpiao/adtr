@@ -436,3 +436,17 @@
     padding: 12px;
   }
 }
+
+.message-workspace .message-timeline-note {
+  color: #52617a;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.message-workspace .message-day-heading {
+  margin: 18px 0 10px;
+  padding-left: 10px;
+  border-left: 3px solid #315fba;
+  color: #223550;
+  font-size: 15px;
+  overflow-wrap: anywhere;
+}

@@ -441,6 +441,23 @@ test("real health Worker → outbox → message snapshot → browser page and lo
   ).toBeFocused();
   await page.getByLabel("关键词", { exact: true }).fill("");
 
+  // Derive date boundaries independently from the real accepted API rows.
+  const timelineDates = snapshot.items.flatMap((item, index) => {
+    const date = item.occurredAt.slice(0, 10);
+    return index === 0 || snapshot.items[index - 1].occurredAt.slice(0, 10) !== date
+      ? [date] : [];
+  });
+  const timeline = page.getByRole("region", { name: "当前页时间线", exact: true });
+  await expect(timeline).toContainText("不代表全天消息汇总");
+  await expect(timeline.getByRole("heading", { name: /^发生日期（UTC）/ }))
+    .toHaveText(timelineDates.map((date) => `发生日期（UTC） · ${date}`));
+  const messageRows = timeline.getByRole("article");
+  await expect(messageRows).toHaveCount(snapshot.items.length);
+  for (let index = 0; index < snapshot.items.length; index++) {
+    await expect(messageRows.nth(index)).toHaveAttribute("data-message-id", snapshot.items[index].messageId);
+    await expect(messageRows.nth(index).locator(".message-row-number"))
+      .toHaveText(String(snapshot.offset + index + 1).padStart(2, "0"));
+  }
   const screenshots = [];
   for (const viewport of [
     { width: 1440, height: 900 },
@@ -493,6 +510,18 @@ test("real health Worker → outbox → message snapshot → browser page and lo
         sha256: createHash("sha256").update(bytes).digest("hex"),
       });
     }
+  }
+  // Additional timeline-focused viewports make the new date heading inspectable.
+  for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
+    await page.setViewportSize(viewport);
+    await timeline.locator(".message-day-heading").first().scrollIntoViewIfNeeded();
+    await expect(timeline.locator(".message-day-heading").first()).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    const file = `messages-timeline-${viewport.width}.png`;
+    const path = testInfo.outputPath(file);
+    const bytes = await page.screenshot({ path, fullPage: false });
+    await testInfo.attach(file, { path, contentType: "image/png" });
+    screenshots.push({ file, viewport, fullPage: false, sha256: createHash("sha256").update(bytes).digest("hex") });
   }
   // No auto-refresh, polling, read mutation, or navigation-created POST query.
   expect(requests.filter((r) => r.method === "POST")).toEqual([
@@ -968,6 +997,13 @@ test("real health Worker → outbox → message snapshot → browser page and lo
     browser: context.browser()!.version(),
     sources,
     snapshot,
+    timeline: {
+      scope: "accepted current page; adjacent occurredAt UTC dates; original order",
+      dates: timelineDates,
+      messageIds: snapshot.items.map((item) => item.messageId),
+      realDistinctDateCount: new Set(snapshot.items.map((item) => item.occurredAt.slice(0, 10))).size,
+      limitation: "real health messages may share one day; synthetic multi-day DOM tests are not real cross-day producer evidence",
+    },
     pages,
     browserRequests: requests,
     readRecovery,
@@ -976,6 +1012,7 @@ test("real health Worker → outbox → message snapshot → browser page and lo
       [
         "web/e2e/messages.spec.ts",
         "web/src/MessagesWorkspace.tsx",
+        "web/src/message-timeline.ts",
         "web/src/message-api.ts",
         "web/src/message-query.ts",
         "web/src/message-read-intent.ts",
