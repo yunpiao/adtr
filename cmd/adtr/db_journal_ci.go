@@ -34,8 +34,17 @@ func ciJournalProjection(s operationallogs.RecorderObservation, closeOK bool) ci
 // Only the installed CI worker invokes this after the recorder Close returns.
 // This private JSONL is parsed after Wait; it is never copied to public logs.
 func emitCIJournalFinal(recorder *operationallogs.Recorder, closeErr error) {
+	emitCIJournalFirstFailure(recorder)
 	snapshot := ciJournalProjection(recorder.Stats(), closeErr == nil)
 	data, err := json.Marshal(snapshot)
+	if err == nil {
+		_, _ = os.Stderr.Write(append(data, '\n'))
+	}
+}
+
+// Separate from the delivery proof: this closed observation never grants success.
+func emitCIJournalFirstFailure(recorder *operationallogs.Recorder) {
+	data, err := json.Marshal(recorder.CIJournalFirstFailure())
 	if err == nil {
 		_, _ = os.Stderr.Write(append(data, '\n'))
 	}

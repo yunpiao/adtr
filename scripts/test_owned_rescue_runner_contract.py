@@ -851,7 +851,8 @@ class Contracts(unittest.TestCase):
                     owner.report_first_invalidation_after_wait(logs)
                     rows = [json.loads(line) for line in output.getvalue().splitlines()]
                 self.assertEqual(rows[0], first)
-                self.assertEqual(len(rows), 2 if reason == 'connect_failed' else 1)
+                self.assertEqual(rows[-1], dict(event=r.FIRST_JOURNAL_FAILURE_EVENT, stage='unknown', errorCategory='unknown', contextState='unknown', recorderContextState='unknown'))
+                self.assertEqual(len(rows), 3 if reason == 'connect_failed' else 2)
                 if reason == 'connect_failed':
                     if missing: self.assertEqual(rows[1]['rawNil'], 'unknown')
                     else: self.assertEqual(rows[1], detail)
@@ -956,7 +957,8 @@ class Contracts(unittest.TestCase):
                     owner.report_first_invalidation_after_wait(logs)
                     rows = [json.loads(line) for line in output.getvalue().splitlines()]
                 self.assertEqual(rows[0], first)
-                self.assertEqual(len(rows), 3 if reason == 'unclean_close' else 1)
+                self.assertEqual(rows[-1], dict(event=r.FIRST_JOURNAL_FAILURE_EVENT, stage='unknown', errorCategory='unknown', contextState='unknown', recorderContextState='unknown'))
+                self.assertEqual(len(rows), 4 if reason == 'unclean_close' else 2)
                 if reason == 'unclean_close':
                     self.assertEqual(rows[2]['event'], r.UNCLEAN_OPERATION_EVENT)
                     if missing:
@@ -1131,8 +1133,9 @@ class Contracts(unittest.TestCase):
             owner.process.returncode = 1
             owner.report_first_invalidation_after_wait(logs)
             owner.report_first_invalidation_after_wait(logs)
-            self.assertEqual(len(output.getvalue().splitlines()), 1)
-            self.assertEqual(json.loads(output.getvalue())['reason'], 'abort')
+            self.assertEqual(len(output.getvalue().splitlines()), 2)
+            self.assertEqual(json.loads(output.getvalue().splitlines()[0])['reason'], 'abort')
+            self.assertEqual(json.loads(output.getvalue().splitlines()[1])['event'], r.FIRST_JOURNAL_FAILURE_EVENT)
         owner = r.OwnedCIWorker(); owner.process = Mock(returncode=0)
         with patch('builtins.print', side_effect=RuntimeError('private output failure')):
             owner.report_first_invalidation_after_wait(logs)

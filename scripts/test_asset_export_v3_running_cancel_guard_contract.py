@@ -366,7 +366,7 @@ class ContractTests(unittest.TestCase):
             self.assertIn('Number(queue.success) > Number(pause.queueSuccessBefore)', resume)
             self.assertIn('Number(queue.success) > Number(first.success)', resume)
             spec = (root / f'web/e2e/{kind}-asset-export-v3-running-cancel.spec.ts').read_text()
-            self.assertIn('resumeOwnedExportWorker(context, pause, taskID)', spec)
+            self.assertIn('resumeOwnedExportWorker(context, pause, taskID, pendingDatabase.databaseClock)', spec)
 
     def test_wrong_bound_activity_key_fails_before_pin(self):
         guard = self.guard(); guard.controller.snapshot.return_value['records'][0]['candidate']['activityKey'] = 'other-key'

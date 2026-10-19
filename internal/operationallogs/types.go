@@ -161,8 +161,9 @@ func problem(status int, code string) error { return &Error{Status: status, Code
 // whose commit response was lost. Unknown implementations are conservatively
 // treated as uncertain by Recorder.
 type AppendError struct {
-	Err       error
-	Uncertain bool
+	diagnostic appendDiagnostic
+	Err        error
+	Uncertain  bool
 }
 
 func (e *AppendError) Error() string { return e.Err.Error() }

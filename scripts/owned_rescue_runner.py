@@ -374,6 +374,54 @@ def first_invalidation_projection(logs):
                 pass
 
 
+FIRST_JOURNAL_FAILURE_EVENT = 'owned_ci_first_journal_failure'
+JOURNAL_FAILURE_STAGES = frozenset({'none', 'validation', 'connect', 'begin', 'schema',
+    'report', 'event_insert', 'event_read', 'commit', 'ack', 'store_unknown', 'unknown'})
+JOURNAL_FAILURE_ERRORS = frozenset({'none', 'canceled', 'deadline_exceeded', 'postgres',
+    'network', 'invalid_ack', 'validation', 'conflict', 'other', 'unknown'})
+JOURNAL_FAILURE_CONTEXTS = frozenset({'active', 'canceled', 'deadline_exceeded', 'unknown'})
+
+
+def first_journal_failure_projection(logs):
+    """Optional closed evidence; never changes the original journal success gate."""
+    unknown = {'event': FIRST_JOURNAL_FAILURE_EVENT, 'stage': 'unknown',
+               'errorCategory': 'unknown', 'contextState': 'unknown',
+               'recorderContextState': 'unknown'}
+    position = None
+    try:
+        logs.flush()
+        position = logs.tell()
+        logs.seek(0)
+        text = logs.read(MAX_FINAL_LOG_BYTES + 1)
+        if type(text) is not str or len(text.encode('utf-8')) > MAX_FINAL_LOG_BYTES:
+            return unknown
+        candidates = [line for line in text.splitlines(keepends=True) if FIRST_JOURNAL_FAILURE_EVENT in line]
+        if (len(candidates) != 1 or not candidates[0].endswith('\n')
+                or len(candidates[0].encode('utf-8')) > 1024):
+            return unknown
+        frame = json.loads(candidates[0], object_pairs_hook=_unique_object,
+                           parse_constant=lambda _: _fail())
+        if (type(frame) is not dict or set(frame) != set(unknown)
+                or frame['event'] != FIRST_JOURNAL_FAILURE_EVENT
+                or type(frame['stage']) is not str or frame['stage'] not in JOURNAL_FAILURE_STAGES
+                or type(frame['errorCategory']) is not str or frame['errorCategory'] not in JOURNAL_FAILURE_ERRORS
+                or any(type(frame[key]) is not str or frame[key] not in JOURNAL_FAILURE_CONTEXTS
+                       for key in ('contextState', 'recorderContextState'))
+                or ((frame['stage'] == 'none') != (frame['errorCategory'] == 'none'))
+                or (frame['stage'] == 'none' and any(frame[key] != 'unknown'
+                    for key in ('contextState', 'recorderContextState')))):
+            return unknown
+        return {key: frame[key] for key in unknown}
+    except Exception:
+        return unknown
+    finally:
+        if position is not None:
+            try:
+                logs.seek(position)
+            except Exception:
+                pass
+
+
 FIRST_UNCLEAN_EVENT = 'owned_ci_first_unclean_close'
 
 
@@ -1082,6 +1130,12 @@ class OwnedCIWorker:
                 print(json.dumps(operation, separators=(',', ':')), file=sys.stderr, flush=True)
             except Exception:
                 pass
+
+        journal_failure = first_journal_failure_projection(logs)
+        try:
+            print(json.dumps(journal_failure, separators=(',', ':')), file=sys.stderr, flush=True)
+        except Exception:
+            pass
 
     def prepare_final_shutdown(self, deadline):
         if self.process is None or self.process.poll() is not None:

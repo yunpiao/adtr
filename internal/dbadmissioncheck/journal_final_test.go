@@ -18,7 +18,7 @@ func journalFixtures(t *testing.T) (string, fixtureImporter) {
 		"encoding/hex":  `package hex;func EncodeToString([]byte)string{return "hash"}`,
 		"encoding/json": `package json;func Marshal(any)([]byte,error){return nil,nil}`,
 		"os":            `package os;type File struct{};var Stderr *File;func(*File)Write([]byte)(int,error){return 0,nil}`,
-		journalPackage:  `package operationallogs;type Module string;const Worker Module="worker";type RecorderObservation struct{ProcessID string;Module Module;Accepted,Acknowledged,Rejected,QueueFull,WriteFailures,Unacknowledged,Abandoned int64;AcceptanceStopped bool};type Recorder struct{};func(*Recorder)Stats()RecorderObservation{return RecorderObservation{}};func(*Recorder)Close(int)error{return nil}`,
+		journalPackage:  `package operationallogs;type Module string;const Worker Module="worker";type RecorderObservation struct{ProcessID string;Module Module;Accepted,Acknowledged,Rejected,QueueFull,WriteFailures,Unacknowledged,Abandoned int64;AcceptanceStopped bool};type Recorder struct{};func(*Recorder)Stats()RecorderObservation{return RecorderObservation{}};func(*Recorder)Close(int)error{return nil};type CIJournalFailure struct{};func(*Recorder)CIJournalFirstFailure()CIJournalFailure{return CIJournalFailure{}}`,
 	} {
 		p, _ := fixtureCheck(t, path, "fixture.go", source, imp)
 		imp[path] = p
@@ -61,6 +61,16 @@ func TestJournalFinalClosedWriter(t *testing.T) {
 		{"snapshot alias", original + `func other(r *operationallogs.Recorder){f:=r.Stats;_=f()}`, true},
 		{"snapshot outside writer", original + `func other(r *operationallogs.Recorder){_=r.Stats()}`, true},
 		{"projection alias", original + `var other=ciJournalProjection`, true},
+		{"failure writer alias", original + `var other=emitCIJournalFirstFailure`, true},
+		{"failure writer outside final", original + `func other(r *operationallogs.Recorder){emitCIJournalFirstFailure(r)}`, true},
+		{"failure getter alias", original + `func other(r *operationallogs.Recorder){f:=r.CIJournalFirstFailure;_=f()}`, true},
+		{"failure getter outside writer", original + `func other(r *operationallogs.Recorder){_=r.CIJournalFirstFailure()}`, true},
+		{"async failure writer", strings.Replace(original, "emitCIJournalFirstFailure(recorder)", "go emitCIJournalFirstFailure(recorder)", 1), true},
+		{"deferred failure writer", strings.Replace(original, "emitCIJournalFirstFailure(recorder)", "defer emitCIJournalFirstFailure(recorder)", 1), true},
+		{"substituted failure recorder", strings.Replace(original, "emitCIJournalFirstFailure(recorder)", "emitCIJournalFirstFailure(new(operationallogs.Recorder))", 1), true},
+		{"missing failure writer", strings.Replace(original, "emitCIJournalFirstFailure(recorder)", "", 1), true},
+		{"failure writer raw output", strings.Replace(original, "data, err := json.Marshal(recorder.CIJournalFirstFailure())", `data, err := json.Marshal("private")`, 1), true},
+		{"failure getter substitute", strings.Replace(original, "recorder.CIJournalFirstFailure()", "new(operationallogs.Recorder).CIJournalFirstFailure()", 1), true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if tc.bad && tc.source == original {
@@ -125,5 +135,62 @@ func TestJournalDefaultAndExistingSnapshot(t *testing.T) {
 	_, ds := fixtureCheck(t, journalPackage, "recorder.go", `package operationallogs;type Recorder struct{};func(*Recorder)Stats()int{return 0};func(r *Recorder)run(){_=r.Stats()}`, fixtureImporter{})
 	if len(ds) > 0 {
 		t.Fatalf("existing recorder snapshot rejected: %v", ds)
+	}
+}
+
+func TestJournalFailureClosedGetter(t *testing.T) {
+	data, err := os.ReadFile("../operationallogs/append_diagnostic_ci.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fs := token.NewFileSet()
+	file, err := parser.ParseFile(fs, "append_diagnostic_ci.go", data, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	original := "package operationallogs;type mutex struct{};func(*mutex)Lock(){};func(*mutex)Unlock(){};type appendDiagnostic struct{stage,category,contextState,recorderContextState string};type recorderDiagnostic struct{first appendDiagnostic;set bool};type Recorder struct{mu mutex;diagnostic recorderDiagnostic};"
+	foundType, foundGetter := false, false
+	for _, decl := range file.Decls {
+		if general, ok := decl.(*ast.GenDecl); ok {
+			for _, spec := range general.Specs {
+				if typ, ok := spec.(*ast.TypeSpec); ok && typ.Name.Name == "CIJournalFailure" {
+					original += "type " + sourceText(typ) + ";"
+					foundType = true
+				}
+			}
+		}
+		if fn, ok := decl.(*ast.FuncDecl); ok && fn.Name.Name == "CIJournalFirstFailure" {
+			original += sourceText(fn)
+			foundGetter = true
+		}
+	}
+	if !foundType || !foundGetter {
+		t.Fatal("missing reviewed getter or shape")
+	}
+	for _, tc := range []struct {
+		name, filename, source string
+		bad                    bool
+	}{
+		{"reviewed getter", "append_diagnostic_ci.go", original, false},
+		{"wrong file", "other.go", original, true},
+		{"extra field", "append_diagnostic_ci.go", strings.Replace(strings.Replace(original, "CIJournalFailure struct {", "CIJournalFailure struct { Private string;", 1), `CIJournalFailure{"owned_ci_first_journal_failure"`, `CIJournalFailure{"private", "owned_ci_first_journal_failure"`, 1), true},
+		{"renamed JSON field", "append_diagnostic_ci.go", strings.Replace(original, `json:"recorderContextState"`, `json:"rawError"`, 1), true},
+
+		{"getter outside writer", "append_diagnostic_ci.go", original + `;func other(r *Recorder){_=r.CIJournalFirstFailure()}`, true},
+		{"getter alias", "append_diagnostic_ci.go", original + `;func other(r *Recorder){f:=r.CIJournalFirstFailure;_=f()}`, true},
+		{"payload outside getter", "append_diagnostic_ci.go", original + `;var other=CIJournalFailure{}`, true},
+		{"invented stage", "append_diagnostic_ci.go", strings.Replace(original, `out.Stage = d.stage`, `out.Stage = "private"`, 1), true},
+		{"unknown category accepted", "append_diagnostic_ci.go", strings.Replace(original, `"conflict", "other"`, `"conflict", "other", "private"`, 1), true},
+		{"unlocked snapshot", "append_diagnostic_ci.go", strings.Replace(original, "r.mu.Lock()", "", 1), true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.bad && tc.filename == "append_diagnostic_ci.go" && tc.source == original {
+				t.Fatal("mutation unchanged")
+			}
+			_, diagnostics := fixtureCheck(t, journalPackage, tc.filename, tc.source, fixtureImporter{})
+			if (len(diagnostics) > 0) != tc.bad {
+				t.Fatalf("bad=%v diagnostics=%v", tc.bad, diagnostics)
+			}
+		})
 	}
 }
