@@ -105,6 +105,30 @@ PR126 directory-v3-facts.ts, never hyperlink or infer hostnames/membership/risk.
 
 ## Required verification and exclusions
 
+### UI-0438 page-local row numbers
+
+The computer table labels its first column `本页序号`: positions 1..N in the
+currently accepted response list, restarting at 1 on every page. It helps users
+refer to a visible row; it is not asset identity. Filtering, sorting, changing
+page size and refreshing recompute positions from the accepted list order.
+Draft edits leave the displayed list positions unchanged; loading, empty or
+rejected responses do not manufacture numbered rows. Expanded facts share the
+same row's six columns and do not consume a number. React keys remain objectGUID.
+
+The internal `pageRowNumber` prop is required only for rendering a computer row;
+it is derived locally from the accepted array index. There is no new API or
+configuration parameter, storage field or request. Removing the column loses
+page-local row references only; the extra column can increase horizontal table
+scrolling, especially on mobile. Desktop/mobile screenshots and horizontal
+scroll checks must accompany the existing real producer-chain tests.
+
+This is a bounded local UI-0438 slice under #30/#131. Original cross-page index
+semantics are not frozen, so no old-system parity or whole-feature/product
+acceptance follows. The 47 original fields and remaining eight controls retain
+their independent evidence requirements.
+
+### Verification gates
+
 Clean baseline, final full make check and integration-tag compile/vet; pure
 filter/order/null/Unicode/time/bounds/cancellation tests; exact query/auth HTTP
 contracts; real PostgreSQL current-authority/source/observation full-validation

@@ -1,3 +1,7 @@
+import {
+  credentialLeakDiagnostic,
+  type CredentialProbe,
+} from "./user-assets-v2-secret-diagnostic";
 import { diagnosticGrantSubmit } from "./safe-request-diagnostics";
 import { navigateTo } from "./navigation";
 import {
@@ -9,7 +13,7 @@ import {
   type APIResponse,
   type Request,
 } from "@playwright/test";
-import { createHmac } from "node:crypto";
+import { createHmac, randomBytes } from "node:crypto";
 import { writeFile } from "node:fs/promises";
 import { fixtureGET } from "./fixture-get";
 import { holdAssetResponse as holdGenuineAssetResponse } from "./user-assets-v2-held-response";
@@ -518,7 +522,7 @@ test("UserAssetsV2 real scoped reader revocation and native cross-tab held-respo
   test.setTimeout(900_000);
   let username = process.env.ADTR_E2E_USERNAME!;
   const initialPassword = process.env.ADTR_E2E_PASSWORD!;
-  let password = "Changed Directory Reader Admin 123";
+  let password = randomBytes(24).toString("base64url");
   const accountUser = process.env.ADTR_E2E_LDAP_USERNAME!;
   const accountPassword = process.env.ADTR_E2E_LDAP_PASSWORD!;
   const ldapIP = process.env.ADTR_E2E_LDAP_IP!;
@@ -526,35 +530,46 @@ test("UserAssetsV2 real scoped reader revocation and native cross-tab held-respo
   const groupName = "E2EDirectoryReadersScope";
   const accountLabel = "Synthetic private directory account";
   const readerUsername = "e2e.directory.reader";
-  const readerInitial = "Initial Directory Data Reader 123";
-  const readerPassword = "Changed Directory Data Reader 456";
+  const readerInitial = randomBytes(24).toString("base64url");
+  const readerPassword = randomBytes(24).toString("base64url");
   const roleName = "E2E Directory Data Reader";
   const producerUsername = "e2e.directory.producer";
-  const producerInitial = "Initial Directory Producer 123";
-  const producerPassword = "Changed Directory Producer 456";
+  const producerInitial = randomBytes(24).toString("base64url");
+  const producerPassword = randomBytes(24).toString("base64url");
   let roleID = "";
   let readerID = 0;
-  const secrets = [
-    initialPassword,
-    password,
-    accountUser,
-    accountPassword,
-    readerInitial,
-    readerPassword,
-    producerInitial,
-    producerPassword,
+  const secrets: CredentialProbe[] = [
+    { category: "password", value: initialPassword },
+    { category: "password", value: password },
+    { category: "account_name", value: accountUser },
+    { category: "password", value: accountPassword },
+    { category: "password", value: readerInitial },
+    { category: "password", value: readerPassword },
+    { category: "password", value: producerInitial },
+    { category: "password", value: producerPassword },
   ];
   const authenticators: Authenticator[] = [];
   const safe = (value: unknown) => {
     const serialized = JSON.stringify(value);
-    for (const secret of [
+    const probes: CredentialProbe[] = [
       ...secrets,
-      ...authenticators.flatMap((auth) => [auth.secret, ...auth.codes]),
-    ])
+      ...authenticators.flatMap((auth): CredentialProbe[] => [
+        { category: "mfa_seed", value: auth.secret },
+        ...auth.codes.map((code): CredentialProbe => ({
+          category: "totp",
+          value: code,
+        })),
+      ]),
+    ];
+    for (const { category, value: secret } of probes) {
+      const matched = serialized.includes(secret);
       expect(
-        serialized.includes(secret),
-        "Synthetic secret must stay write-only",
+        matched,
+        matched
+          ? `Synthetic secret must stay write-only: ${JSON.stringify(credentialLeakDiagnostic(serialized, secret, category))}`
+          : "Synthetic secret must stay write-only",
       ).toBe(false);
+    }
     expect(
       /"(?:actorPassword|totpCode|ciphertext|userInfo)"\s*:/u.test(serialized),
       "No secret-bearing public fields",
@@ -975,7 +990,7 @@ test("UserAssetsV2 real scoped reader revocation and native cross-tab held-respo
       readerContext,
       "/api/auth/me",
     )) as Session;
-    secrets.push(readerSession.csrfToken);
+    secrets.push({ category: "csrf", value: readerSession.csrfToken });
     expect(identity(readerSession)).toEqual({
       ID: readerID,
       username: readerUsername,

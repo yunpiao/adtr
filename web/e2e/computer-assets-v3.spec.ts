@@ -16,6 +16,21 @@ import {
   expectedComputers,
   computerEvidenceProvenance,
 } from "./computer-assets-v3-helpers";
+// Assert positions against the real accepted API order, including fact expansion.
+async function expectPagePositions(page: Page, rows: { samAccountName: string | null }[]) {
+  const table = page.getByRole("table", { name: "计算机资产列表", exact: true });
+  await expect(table.getByRole("columnheader", { name: "本页序号", exact: true }))
+    .toHaveAttribute("scope", "col");
+  const assets = table.locator("tbody > tr").filter({ has: page.getByRole("button") });
+  await expect(assets).toHaveCount(rows.length);
+  for (let i = 0; i < rows.length; i++) {
+    const cells = assets.nth(i).getByRole("cell");
+    await expect(cells).toHaveCount(6);
+    await expect(cells.nth(0)).toHaveText(String(i + 1));
+    await expect(cells.nth(1)).toHaveText(rows[i].samAccountName ?? "未返回");
+  }
+}
+
 test("computer assets real Worker TLS LDAP PG API browser pinned facts", async ({
   page,
   context,
@@ -97,6 +112,7 @@ test("computer assets real Worker TLS LDAP PG API browser pinned facts", async (
   ).toHaveLength(23);
   const ui = await computerResponse(page, () => openComputerList(page));
   expect(ui.value.list).toEqual(expected.slice(0, 10));
+  await expectPagePositions(page, ui.value.list);
   await page
     .getByRole("button", { name: "展开事实", exact: true })
     .first()
@@ -126,6 +142,8 @@ test("computer assets real Worker TLS LDAP PG API browser pinned facts", async (
     .getByRole("button", { name: "展开事实", exact: true })
     .first()
     .click();
+  await expectPagePositions(page, ui.value.list);
+  await expect(page.locator(`[id="computer-facts-${expected[0].objectGUID}"] > td`)).toHaveAttribute("colspan", "6");
   await page.screenshot({
     path: info.outputPath("computer-assets-v3-desktop-facts.png"),
     fullPage: true,
@@ -135,6 +153,7 @@ test("computer assets real Worker TLS LDAP PG API browser pinned facts", async (
   );
   expect(next.url.searchParams.get("observationId")).toBe(f.taskUUID);
   expect(next.value.list).toEqual(expected.slice(10, 20));
+  await expectPagePositions(page, next.value.list);
   await expect(
     page.getByText("主组 RID（primaryGroupID）", { exact: true }),
   ).toHaveCount(0);
@@ -145,8 +164,10 @@ test("computer assets real Worker TLS LDAP PG API browser pinned facts", async (
     page.getByRole("button", { name: "应用计算机筛选", exact: true }).click(),
   );
   expect(found.value.list).toEqual([expected[21]]);
+  await expectPagePositions(page, found.value.list);
   expect(found.url.searchParams.get("observationId")).toBe(f.taskUUID);
   await page.setViewportSize({ width: 390, height: 844 });
+  await expectPagePositions(page, found.value.list);
   await page.screenshot({
     path: info.outputPath("computer-assets-v3-mobile.png"),
     fullPage: true,
@@ -203,6 +224,8 @@ test("computer assets real Worker TLS LDAP PG API browser pinned facts", async (
   expect(expandedMobileGeometry.scroll).toBeLessThanOrEqual(
     expandedMobileGeometry.width + 1,
   );
+  await expectPagePositions(page, found.value.list);
+  await expect(mobileFacts.locator(":scope > td")).toHaveAttribute("colspan", "6");
   await page.screenshot({
     path: info.outputPath("computer-assets-v3-mobile-facts.png"),
     fullPage: true,
@@ -211,6 +234,26 @@ test("computer assets real Worker TLS LDAP PG API browser pinned facts", async (
   await computerResponse(page, () =>
     page.getByRole("button", { name: "清除计算机筛选", exact: true }).click(),
   );
+  await expectPagePositions(page, expected.slice(0, 10));
+  const resized = await computerResponse(page, () =>
+    page.getByLabel("计算机每页条数", { exact: true }).selectOption("20"),
+  );
+  expect(resized.value.list).toEqual(expected.slice(0, 20));
+  await expectPagePositions(page, resized.value.list);
+  await computerResponse(page, () =>
+    page.getByLabel("计算机每页条数", { exact: true }).selectOption("10"),
+  );
+  await expectPagePositions(page, expected.slice(0, 10));
+  await keyword.fill("no-computer-match");
+  const empty = await computerResponse(page, () =>
+    page.getByRole("button", { name: "应用计算机筛选", exact: true }).click(),
+  );
+  expect(empty.value.list).toEqual([]);
+  await expect(page.getByRole("table", { name: "计算机资产列表", exact: true })).toHaveCount(0);
+  await computerResponse(page, () =>
+    page.getByRole("button", { name: "清除计算机筛选", exact: true }).click(),
+  );
+  await expectPagePositions(page, expected.slice(0, 10));
   const newer = await f.post("/api/directory/v3/sync", {
     ...f.sync,
     idempotencyKey: "computer-second-real-wire",
@@ -227,6 +270,7 @@ test("computer assets real Worker TLS LDAP PG API browser pinned facts", async (
     page.getByRole("button", { name: "下一页", exact: true }).click(),
   );
   expect(pinned.value.observationId).toBe(f.taskUUID);
+  await expectPagePositions(page, pinned.value.list);
   const refreshed = await computerResponse(page, () =>
     page
       .getByRole("button", { name: "刷新计算机资产观测", exact: true })
@@ -234,6 +278,7 @@ test("computer assets real Worker TLS LDAP PG API browser pinned facts", async (
   );
   expect(refreshed.url.searchParams.has("observationId")).toBe(false);
   expect(refreshed.value.observationId).toBe(newer.task.taskUUID);
+  await expectPagePositions(page, refreshed.value.list);
   await captureAssetEmptyRefresh(
     page,
     info,
@@ -283,6 +328,12 @@ test("computer assets real Worker TLS LDAP PG API browser pinned facts", async (
             viewport: { width: 390, height: 844 },
             state: "pinned computer-22 search",
           },
+        },
+        pageLocalRowNumbers: {
+          label: "本页序号",
+          semantics: "accepted response order 1..N, restarted on every page",
+          checked: ["page1", "page2", "pageSize20", "filter", "empty", "refresh", "expanded facts"],
+          expandedFactColSpan: 6,
         },
         dictionary: 3,
         computerCount: 23,
