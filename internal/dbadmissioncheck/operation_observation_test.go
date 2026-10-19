@@ -139,14 +139,14 @@ func TestObserverConfigHasOnlyConnectCaller(t *testing.T) {
 		name, body string
 		bad        bool
 	}{
-		{"managed connect", `_=observeLifecycleConfig(config,permit)`, false},
+		{"unreviewed core body", `_=observeLifecycleConfig(config,permit)`, true},
 		{"config alias", `f:=observeLifecycleConfig;_=f(config,permit)`, true},
 		{"config async", `go observeLifecycleConfig(config,permit)`, true},
 		{"config defer", `defer observeLifecycleConfig(config,permit)`, true},
 		{"config closure", `func(){_=observeLifecycleConfig(config,permit)}()`, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			extra := map[string]string{"conn.go": `package dbadmission;import "github.com/jackc/pgx/v5";type Conn struct{raw *pgx.Conn};type lifecyclePermit interface{};func connectWith(config *pgx.ConnConfig,permit lifecyclePermit){` + tc.body + `}`}
+			extra := map[string]string{"conn.go": `package dbadmission;import "github.com/jackc/pgx/v5";type Conn struct{raw *pgx.Conn};type lifecyclePermit interface{};func connectWithPhase(config *pgx.ConnConfig,permit lifecyclePermit){` + tc.body + `}`}
 			ds := checkObserverFiles(t, source, extra, imp)
 			if (len(ds) > 0) != tc.bad {
 				t.Fatalf("bad=%v diagnostics=%v", tc.bad, ds)

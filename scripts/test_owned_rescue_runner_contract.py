@@ -851,7 +851,7 @@ class Contracts(unittest.TestCase):
                     owner.report_first_invalidation_after_wait(logs)
                     rows = [json.loads(line) for line in output.getvalue().splitlines()]
                 self.assertEqual(rows[0], first)
-                self.assertEqual(rows[-1], dict(event=r.FIRST_JOURNAL_FAILURE_EVENT, stage='unknown', errorCategory='unknown', contextState='unknown', recorderContextState='unknown'))
+                self.assertEqual(rows[-1], dict(event=r.FIRST_JOURNAL_FAILURE_EVENT, stage='unknown', errorCategory='unknown', contextState='unknown', recorderContextState='unknown', connectPhase='unknown'))
                 self.assertEqual(len(rows), 3 if reason == 'connect_failed' else 2)
                 if reason == 'connect_failed':
                     if missing: self.assertEqual(rows[1]['rawNil'], 'unknown')
@@ -957,7 +957,7 @@ class Contracts(unittest.TestCase):
                     owner.report_first_invalidation_after_wait(logs)
                     rows = [json.loads(line) for line in output.getvalue().splitlines()]
                 self.assertEqual(rows[0], first)
-                self.assertEqual(rows[-1], dict(event=r.FIRST_JOURNAL_FAILURE_EVENT, stage='unknown', errorCategory='unknown', contextState='unknown', recorderContextState='unknown'))
+                self.assertEqual(rows[-1], dict(event=r.FIRST_JOURNAL_FAILURE_EVENT, stage='unknown', errorCategory='unknown', contextState='unknown', recorderContextState='unknown', connectPhase='unknown'))
                 self.assertEqual(len(rows), 4 if reason == 'unclean_close' else 2)
                 if reason == 'unclean_close':
                     self.assertEqual(rows[2]['event'], r.UNCLEAN_OPERATION_EVENT)

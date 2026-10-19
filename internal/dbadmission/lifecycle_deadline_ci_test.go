@@ -84,7 +84,11 @@ func TestQueuedWakeRechecksAbsoluteDeadlineWithoutDispatch(t *testing.T) {
 	g := installTestGate(t)
 	g.queuedParked = true
 	ctx := &delayedDeadlineContext{Context: context.Background(), deadline: time.Now().Add(time.Hour), hasDeadline: true, waiting: make(chan struct{})}
-	result := make(chan error, 1)
+	type observed struct {
+		err   error
+		phase string
+	}
+	result := make(chan observed, 1)
 	finished := make(chan struct{})
 	t.Cleanup(func() {
 		ctx.mu.Lock()
@@ -103,11 +107,11 @@ func TestQueuedWakeRechecksAbsoluteDeadlineWithoutDispatch(t *testing.T) {
 	calls := 0
 	go func() {
 		defer close(finished)
-		_, err := connectWith(ctx, nil, func(context.Context, *pgx.ConnConfig) (*pgx.Conn, error) {
+		_, err, phase := connectWithPhase(ctx, nil, func(context.Context, *pgx.ConnConfig) (*pgx.Conn, error) {
 			calls++
 			return nil, errors.New("unexpected connector")
 		})
-		result <- err
+		result <- observed{err, phase}
 	}()
 	select {
 	case <-ctx.waiting:
@@ -122,8 +126,8 @@ func TestQueuedWakeRechecksAbsoluteDeadlineWithoutDispatch(t *testing.T) {
 	g.notifyLocked()
 	g.mu.Unlock()
 	select {
-	case err := <-result:
-		if err != context.DeadlineExceeded {
+	case got := <-result:
+		if got.err != context.DeadlineExceeded || got.phase != "admission" {
 			t.Fatal("wake did not preserve elapsed deadline")
 		}
 	case <-time.After(2 * time.Second):

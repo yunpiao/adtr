@@ -386,7 +386,7 @@ def first_journal_failure_projection(logs):
     """Optional closed evidence; never changes the original journal success gate."""
     unknown = {'event': FIRST_JOURNAL_FAILURE_EVENT, 'stage': 'unknown',
                'errorCategory': 'unknown', 'contextState': 'unknown',
-               'recorderContextState': 'unknown'}
+               'recorderContextState': 'unknown', 'connectPhase': 'unknown'}
     position = None
     try:
         logs.flush()
@@ -407,6 +407,11 @@ def first_journal_failure_projection(logs):
                 or type(frame['errorCategory']) is not str or frame['errorCategory'] not in JOURNAL_FAILURE_ERRORS
                 or any(type(frame[key]) is not str or frame[key] not in JOURNAL_FAILURE_CONTEXTS
                        for key in ('contextState', 'recorderContextState'))
+                or type(frame['connectPhase']) is not str
+                or frame['connectPhase'] not in {'none', 'admission', 'native', 'unknown'}
+                or (frame['stage'] == 'connect' and frame['connectPhase'] == 'none')
+                or (frame['stage'] != 'connect' and frame['connectPhase'] != 'none'
+                    and not (frame['stage'] == 'unknown' and frame['connectPhase'] == 'unknown'))
                 or ((frame['stage'] == 'none') != (frame['errorCategory'] == 'none'))
                 or (frame['stage'] == 'none' and any(frame[key] != 'unknown'
                     for key in ('contextState', 'recorderContextState')))):

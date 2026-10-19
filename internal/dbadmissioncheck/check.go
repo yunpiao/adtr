@@ -41,6 +41,7 @@ func Check(fset *token.FileSet, path string, files []*ast.File, info *types.Info
 	out = append(out, operationObservationDeclarations(fset, path, files, info)...)
 	out = append(out, recoveryDeclarations(fset, path, files, info)...)
 	out = append(out, connectFailureDeclarations(fset, path, files, info)...)
+	out = append(out, connectPhaseDeclarations(fset, path, files, info)...)
 	out = append(out, finalQuiesceDeclarations(fset, path, files, info)...)
 	out = append(out, queuedParkDeclarations(fset, path, files, info)...)
 	out = append(out, transportInvalidationDeclarations(fset, path, files, info)...)
@@ -105,12 +106,12 @@ func Check(fset *token.FileSet, path string, files []*ast.File, info *types.Info
 						}
 						if f, ok := obj.(*types.Func); ok && (p == pgx || p == pgx+"/pgconn") && rawResult(f.Type()) {
 							sig := f.Type().(*types.Signature)
-							if sig.Recv() == nil && !(trusted && p == pgx && obj.Name() == "ConnectConfig" && name == "ConnectConfig") {
+							if sig.Recv() == nil && !(p == pgx && obj.Name() == "ConnectConfig" && ((trusted && name == "ConnectConfig") || exactCIPhaseEntry(path, filepath.Base(fset.Position(file.Pos()).Filename), name, fn))) {
 								emit(id, "raw database connection constructor or factory")
 							}
 						}
 						if (p == pgx || p == pgx+"/pgconn") && strings.HasPrefix(obj.Name(), "Connect") {
-							if !(trusted && p == pgx && obj.Name() == "ConnectConfig" && name == "ConnectConfig") {
+							if !(p == pgx && obj.Name() == "ConnectConfig" && ((trusted && name == "ConnectConfig") || exactCIPhaseEntry(path, filepath.Base(fset.Position(file.Pos()).Filename), name, fn))) {
 								emit(id, "connection creation must use dbadmission.ConnectConfig")
 							}
 						}

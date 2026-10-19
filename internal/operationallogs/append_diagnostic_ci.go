@@ -7,7 +7,9 @@ import (
 	"errors"
 	"net"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/yunpiao/adtr/internal/dbadmission"
 )
 
 // This is an observation of the first failed attempt, not a delivery verdict.
@@ -17,6 +19,7 @@ import (
 // store returns). recorderContextState is the Recorder.run context after Append
 // returns, before its attempt cancel; it is not the worker business root.
 type appendDiagnostic struct {
+	connectPhase         string
 	stage                string
 	category             string
 	contextState         string
@@ -28,6 +31,7 @@ type recorderDiagnostic struct {
 }
 
 type CIJournalFailure struct {
+	ConnectPhase         string `json:"connectPhase"`
 	Event                string `json:"event"`
 	Stage                string `json:"stage"`
 	ErrorCategory        string `json:"errorCategory"`
@@ -89,7 +93,7 @@ func observeAppendFailure(ctx, root context.Context, err error) appendDiagnostic
 		return out
 	}
 	category := journalErrorCategory(err)
-	return appendDiagnostic{"store_unknown", category, journalContextState(ctx), journalContextState(root)}
+	return appendDiagnostic{stage: "store_unknown", category: category, contextState: journalContextState(ctx), recorderContextState: journalContextState(root)}
 }
 func invalidACKDiagnostic(observed appendDiagnostic) appendDiagnostic {
 	observed.stage, observed.category = "ack", "invalid_ack"
@@ -107,7 +111,7 @@ func (r *Recorder) recordAppendFailureLocked(diagnostic appendDiagnostic) {
 func (r *Recorder) CIJournalFirstFailure() CIJournalFailure {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	out := CIJournalFailure{"owned_ci_first_journal_failure", "none", "none", "unknown", "unknown"}
+	out := CIJournalFailure{Event: "owned_ci_first_journal_failure", Stage: "none", ErrorCategory: "none", ContextState: "unknown", RecorderContextState: "unknown", ConnectPhase: "none"}
 	if !r.diagnostic.set {
 		return out
 	}
@@ -128,6 +132,25 @@ func (r *Recorder) CIJournalFirstFailure() CIJournalFailure {
 	switch d.recorderContextState {
 	case "active", "canceled", "deadline_exceeded":
 		out.RecorderContextState = d.recorderContextState
+	}
+	if out.Stage == "connect" {
+		out.ConnectPhase = "unknown"
+		switch d.connectPhase {
+		case "admission", "native":
+			out.ConnectPhase = d.connectPhase
+		}
+	}
+	return out
+}
+
+func connectJournal(ctx context.Context, config *pgx.ConnConfig) (*dbadmission.Conn, error, string) {
+	return dbadmission.ConnectConfigWithCIPhase(ctx, config)
+}
+func newStoreConnectError(ctx context.Context, err error, phase string) *AppendError {
+	out := newStoreAppendError(ctx, "connect", err, false)
+	switch phase {
+	case "admission", "native":
+		out.diagnostic.connectPhase = phase
 	}
 	return out
 }

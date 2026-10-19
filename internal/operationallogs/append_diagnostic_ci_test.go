@@ -44,7 +44,7 @@ func TestActivityCandidateJournalFailureClassification(t *testing.T) {
 			r.recordAppendFailureLocked(d)
 			raw, err := json.Marshal(r.CIJournalFirstFailure())
 			var fields map[string]json.RawMessage
-			if err != nil || json.Unmarshal(raw, &fields) != nil || len(fields) != 5 || strings.Contains(string(raw), "private-") {
+			if err != nil || json.Unmarshal(raw, &fields) != nil || len(fields) != 6 || strings.Contains(string(raw), "private-") {
 				t.Fatal("diagnostic is not closed")
 			}
 		})
@@ -76,8 +76,8 @@ func TestActivityCandidateJournalFailureSnapshotsBeforeCancellation(t *testing.T
 func TestActivityCandidateJournalFailureClosedStagesAndFirstWins(t *testing.T) {
 	for _, stage := range []string{"validation", "connect", "begin", "schema", "report", "event_insert", "event_read", "commit", "ack", "store_unknown"} {
 		r := &Recorder{}
-		r.recordAppendFailureLocked(appendDiagnostic{stage, "other", "active", "active"})
-		r.recordAppendFailureLocked(appendDiagnostic{"commit", "canceled", "canceled", "canceled"})
+		r.recordAppendFailureLocked(appendDiagnostic{stage: stage, category: "other", contextState: "active", recorderContextState: "active"})
+		r.recordAppendFailureLocked(appendDiagnostic{stage: "commit", category: "canceled", contextState: "canceled", recorderContextState: "canceled"})
 		if got := r.CIJournalFirstFailure(); got.Stage != stage || got.ErrorCategory != "other" {
 			t.Fatal("first failure replaced")
 		}
@@ -86,7 +86,7 @@ func TestActivityCandidateJournalFailureClosedStagesAndFirstWins(t *testing.T) {
 	if got := r.CIJournalFirstFailure(); got.Stage != "none" || got.ErrorCategory != "none" {
 		t.Fatal("missing empty observation")
 	}
-	r.recordAppendFailureLocked(appendDiagnostic{"private-stage", "private-category", "private-context", "private-root"})
+	r.recordAppendFailureLocked(appendDiagnostic{stage: "private-stage", category: "private-category", contextState: "private-context", recorderContextState: "private-root"})
 	got := r.CIJournalFirstFailure()
 	if got.Stage != "unknown" || got.ErrorCategory != "unknown" || got.ContextState != "unknown" || got.RecorderContextState != "unknown" {
 		t.Fatal("unknown value escaped")
@@ -135,5 +135,38 @@ func TestActivityCandidateJournalInvalidACKStillFailsAndRetries(t *testing.T) {
 	d := r.CIJournalFirstFailure()
 	if d.Stage != "ack" || d.ErrorCategory != "invalid_ack" || d.ContextState != "active" {
 		t.Fatal("invalid ACK evidence missing")
+	}
+}
+
+func TestActivityCandidateJournalConnectPhasePreservesFirstFailure(t *testing.T) {
+	for _, phase := range []string{"admission", "native", "private-value", ""} {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		failure := newStoreConnectError(ctx, context.Canceled, phase)
+		if failure.Uncertain || !reflect.DeepEqual(failure.Err, safeError(context.Canceled)) {
+			t.Fatal("connect error semantics changed")
+		}
+		observed := observeAppendFailure(ctx, context.Background(), failure)
+		r := &Recorder{}
+		r.recordAppendFailureLocked(observed)
+		r.recordAppendFailureLocked(observeAppendFailure(ctx, context.Background(), newStoreConnectError(ctx, context.Canceled, "native")))
+		got := r.CIJournalFirstFailure()
+		want := phase
+		if phase != "admission" && phase != "native" {
+			want = "unknown"
+		}
+		if got.Stage != "connect" || got.ConnectPhase != want || got.ContextState != "canceled" || got.RecorderContextState != "active" {
+			t.Fatal("connect phase changed or first failure overwritten")
+		}
+		raw, err := json.Marshal(got)
+		if err != nil || strings.Contains(string(raw), "private") {
+			t.Fatal("private phase escaped")
+		}
+		r = &Recorder{}
+		observed.stage = "report"
+		r.recordAppendFailureLocked(observed)
+		if r.CIJournalFirstFailure().ConnectPhase != "none" {
+			t.Fatal("connect phase leaked into another stage")
+		}
 	}
 }

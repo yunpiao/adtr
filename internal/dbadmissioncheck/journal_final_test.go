@@ -148,7 +148,7 @@ func TestJournalFailureClosedGetter(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	original := "package operationallogs;type mutex struct{};func(*mutex)Lock(){};func(*mutex)Unlock(){};type appendDiagnostic struct{stage,category,contextState,recorderContextState string};type recorderDiagnostic struct{first appendDiagnostic;set bool};type Recorder struct{mu mutex;diagnostic recorderDiagnostic};"
+	original := "package operationallogs;type mutex struct{};func(*mutex)Lock(){};func(*mutex)Unlock(){};type appendDiagnostic struct{stage,category,contextState,recorderContextState,connectPhase string};type recorderDiagnostic struct{first appendDiagnostic;set bool};type Recorder struct{mu mutex;diagnostic recorderDiagnostic};"
 	foundType, foundGetter := false, false
 	for _, decl := range file.Decls {
 		if general, ok := decl.(*ast.GenDecl); ok {
@@ -173,7 +173,7 @@ func TestJournalFailureClosedGetter(t *testing.T) {
 	}{
 		{"reviewed getter", "append_diagnostic_ci.go", original, false},
 		{"wrong file", "other.go", original, true},
-		{"extra field", "append_diagnostic_ci.go", strings.Replace(strings.Replace(original, "CIJournalFailure struct {", "CIJournalFailure struct { Private string;", 1), `CIJournalFailure{"owned_ci_first_journal_failure"`, `CIJournalFailure{"private", "owned_ci_first_journal_failure"`, 1), true},
+		{"extra field", "append_diagnostic_ci.go", strings.Replace(original, "CIJournalFailure struct {", "CIJournalFailure struct { Private string;", 1), true},
 		{"renamed JSON field", "append_diagnostic_ci.go", strings.Replace(original, `json:"recorderContextState"`, `json:"rawError"`, 1), true},
 
 		{"getter outside writer", "append_diagnostic_ci.go", original + `;func other(r *Recorder){_=r.CIJournalFirstFailure()}`, true},
@@ -181,6 +181,9 @@ func TestJournalFailureClosedGetter(t *testing.T) {
 		{"payload outside getter", "append_diagnostic_ci.go", original + `;var other=CIJournalFailure{}`, true},
 		{"invented stage", "append_diagnostic_ci.go", strings.Replace(original, `out.Stage = d.stage`, `out.Stage = "private"`, 1), true},
 		{"unknown category accepted", "append_diagnostic_ci.go", strings.Replace(original, `"conflict", "other"`, `"conflict", "other", "private"`, 1), true},
+		{"connect phase leaks to other stages", "append_diagnostic_ci.go", strings.Replace(original, `out.Stage == "connect"`, `true`, 1), true},
+		{"arbitrary connect phase", "append_diagnostic_ci.go", strings.Replace(original, `"admission", "native"`, `"admission", "native", "private"`, 1), true},
+		{"unknown phase invented native", "append_diagnostic_ci.go", strings.Replace(original, `out.ConnectPhase = "unknown"`, `out.ConnectPhase = "native"`, 1), true},
 		{"unlocked snapshot", "append_diagnostic_ci.go", strings.Replace(original, "r.mu.Lock()", "", 1), true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

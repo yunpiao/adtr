@@ -2,7 +2,11 @@
 
 package operationallogs
 
-import "context"
+import (
+	"context"
+	"github.com/jackc/pgx/v5"
+	"github.com/yunpiao/adtr/internal/dbadmission"
+)
 
 type appendDiagnostic struct{}
 type recorderDiagnostic struct{}
@@ -15,3 +19,11 @@ func observeAppendFailure(context.Context, context.Context, error) appendDiagnos
 }
 func invalidACKDiagnostic(appendDiagnostic) appendDiagnostic { return appendDiagnostic{} }
 func (*Recorder) recordAppendFailureLocked(appendDiagnostic) {}
+
+func connectJournal(ctx context.Context, config *pgx.ConnConfig) (*dbadmission.Conn, error, string) {
+	conn, err := dbadmission.ConnectConfig(ctx, config)
+	return conn, err, "none"
+}
+func newStoreConnectError(ctx context.Context, err error, _ string) *AppendError {
+	return newStoreAppendError(ctx, "connect", err, false)
+}

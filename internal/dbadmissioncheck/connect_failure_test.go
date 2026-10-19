@@ -105,12 +105,16 @@ func TestConnectFailureCapabilitiesHaveSoleCallers(t *testing.T) {
 }
 func TestConnectFailureHelperOnlyAtExactFailedConnect(t *testing.T) {
 	original, imp := connectFailureFixtures(t)
-	body := connectFailureBodies["connectWith"].body
+	body := connectFailureBodies["connectWithPhase"].body
 	for _, tc := range []struct {
 		name, body string
 		bad        bool
 	}{
 		{"real managed connect", body, false},
+		{"admission phase relabelled", strings.Replace(body, `return nil, err, "admission"`, `return nil, err, "native"`, 1), true},
+		{"native phase relabelled", strings.Replace(body, `return nil, err, "native"`, `return nil, err, "admission"`, 1), true},
+		{"error identity substituted", strings.Replace(body, `return nil, err, "native"`, `return nil, errors.New("changed"), "native"`, 1), true},
+		{"success invented phase", strings.Replace(body, `return conn, nil, "none"`, `return conn, nil, "native"`, 1), true},
 		{"wrong failure predicate", strings.Replace(body, "err != nil || raw == nil", "err != nil && raw == nil", 1), true},
 		{"raw fact inverted", strings.Replace(body, "err, raw == nil", "err, raw != nil", 1), true},
 		{"async failure observation", strings.Replace(body, "observeLifecycleConnectFailure(", "go observeLifecycleConnectFailure(", 1), true},
@@ -125,7 +129,7 @@ func TestConnectFailureHelperOnlyAtExactFailedConnect(t *testing.T) {
 			for k, v := range original {
 				files[k] = v
 			}
-			files["conn.go"] = `package dbadmission;import("context";"errors";"github.com/jackc/pgx/v5");type Conn struct{raw *pgx.Conn;permit lifecyclePermit};var acquireLifecycle func(context.Context)(lifecyclePermit,error);var observeLifecycleConfig func(*pgx.ConnConfig,lifecyclePermit)*pgx.ConnConfig;func connectWith(ctx context.Context,config *pgx.ConnConfig,connect func(context.Context,*pgx.ConnConfig)(*pgx.Conn,error))(*Conn,error)` + tc.body
+			files["conn.go"] = `package dbadmission;import("context";"errors";"github.com/jackc/pgx/v5");type Conn struct{raw *pgx.Conn;permit lifecyclePermit};var acquireLifecycle func(context.Context)(lifecyclePermit,error);var observeLifecycleConfig func(*pgx.ConnConfig,lifecyclePermit)*pgx.ConnConfig;func connectWithPhase(ctx context.Context,config *pgx.ConnConfig,connect func(context.Context,*pgx.ConnConfig)(*pgx.Conn,error))(*Conn,error,string)` + tc.body
 			ds := checkCaptureFiles(t, files, imp)
 			if (len(ds) > 0) != tc.bad {
 				t.Fatalf("diagnostics=%v", ds)
