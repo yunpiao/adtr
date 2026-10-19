@@ -626,6 +626,7 @@ function Assets({
               <table aria-label="计算机资产列表">
                 <thead>
                   <tr>
+                    <th scope="col">本页序号</th>
                     <th>账户名（SAM）</th>
                     <th>安全标识（SID）</th>
                     <th>创建时间（UTC）</th>
@@ -634,10 +635,11 @@ function Assets({
                   </tr>
                 </thead>
                 <tbody>
-                  {list.list.map((row) => (
+                  {list.list.map((row, index) => (
                     <ComputerRow
                       key={row.objectGUID}
                       row={row}
+                      pageRowNumber={index + 1}
                       expanded={expanded === row.objectGUID && !dirty}
                       disabled={dirty || busy}
                       toggle={() =>
@@ -700,11 +702,13 @@ function Assets({
 }
 function ComputerRow({
   row,
+  pageRowNumber,
   expanded,
   disabled,
   toggle,
 }: {
   row: ComputerAssetV3Object;
+  pageRowNumber: number;
   expanded: boolean;
   disabled: boolean;
   toggle: () => void;
@@ -712,6 +716,7 @@ function ComputerRow({
   return (
     <>
       <tr>
+        <td>{pageRowNumber}</td>
         <td>{nullable(row.samAccountName)}</td>
         <td>{nullable(row.objectSid)}</td>
         <td>{nullable(row.whenCreated)}</td>
@@ -730,7 +735,7 @@ function ComputerRow({
       </tr>
       {expanded && (
         <tr id={`computer-facts-${row.objectGUID}`}>
-          <td colSpan={5}>
+          <td colSpan={6}>
             <Facts object={row} />
           </td>
         </tr>
