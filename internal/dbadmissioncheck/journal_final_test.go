@@ -150,11 +150,26 @@ func TestJournalFailureClosedGetter(t *testing.T) {
 	}
 	original := "package operationallogs;type mutex struct{};func(*mutex)Lock(){};func(*mutex)Unlock(){};type appendDiagnostic struct{stage,category,contextState,recorderContextState,connectPhase string};type recorderDiagnostic struct{first appendDiagnostic;set bool};type Recorder struct{mu mutex;diagnostic recorderDiagnostic};"
 	foundType, foundGetter := false, false
+	var originalShape, reorderedShape string
 	for _, decl := range file.Decls {
 		if general, ok := decl.(*ast.GenDecl); ok {
 			for _, spec := range general.Specs {
 				if typ, ok := spec.(*ast.TypeSpec); ok && typ.Name.Name == "CIJournalFailure" {
-					original += "type " + sourceText(typ) + ";"
+					structure, ok := typ.Type.(*ast.StructType)
+					if !ok || len(structure.Fields.List) != 6 {
+						t.Fatal("production shape drift")
+					}
+					expected := []string{"ConnectPhase", "Event", "Stage", "ErrorCategory", "ContextState", "RecorderContextState"}
+					for i, field := range structure.Fields.List {
+						if len(field.Names) != 1 || field.Names[0].Name != expected[i] {
+							t.Fatal("production field order drift")
+						}
+					}
+					originalShape = sourceText(typ)
+					structure.Fields.List[0], structure.Fields.List[1] = structure.Fields.List[1], structure.Fields.List[0]
+					reorderedShape = sourceText(typ)
+					structure.Fields.List[0], structure.Fields.List[1] = structure.Fields.List[1], structure.Fields.List[0]
+					original += "type " + originalShape + ";"
 					foundType = true
 				}
 			}
@@ -172,6 +187,7 @@ func TestJournalFailureClosedGetter(t *testing.T) {
 		bad                    bool
 	}{
 		{"reviewed getter", "append_diagnostic_ci.go", original, false},
+		{"field order changed", "append_diagnostic_ci.go", strings.Replace(original, originalShape, reorderedShape, 1), true},
 		{"wrong file", "other.go", original, true},
 		{"extra field", "append_diagnostic_ci.go", strings.Replace(original, "CIJournalFailure struct {", "CIJournalFailure struct { Private string;", 1), true},
 		{"renamed JSON field", "append_diagnostic_ci.go", strings.Replace(original, `json:"recorderContextState"`, `json:"rawError"`, 1), true},

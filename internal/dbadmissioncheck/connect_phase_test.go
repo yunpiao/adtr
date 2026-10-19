@@ -36,8 +36,8 @@ func TestJournalConnectPhaseEntryIsNarrow(t *testing.T) {
 		{"wrong file", "other.go", entry, true},
 		{"native alias", "connect_phase_ci.go", strings.Replace(entry, "return connectWithPhase(ctx, config, pgx.ConnectConfig)", "connect := pgx.ConnectConfig; return connectWithPhase(ctx, config, connect)", 1), true},
 		{"invented phase", "connect_phase_ci.go", strings.Replace(entry, "return connectWithPhase(ctx, config, pgx.ConnectConfig)", `conn,err,_:=connectWithPhase(ctx,config,pgx.ConnectConfig);return conn,err,"native"`, 1), true},
-		{"entry alias", "connect_phase_ci.go", entry + `;var alias=ConnectConfigWithCIPhase`, true},
-		{"other entry caller", "connect_phase_ci.go", entry + `;func other(ctx context.Context,c *pgx.ConnConfig){_,_,_=ConnectConfigWithCIPhase(ctx,c)}`, true},
+		{"entry alias", "connect_phase_ci.go", entry + "\n" + `var alias=ConnectConfigWithCIPhase`, true},
+		{"other entry caller", "connect_phase_ci.go", entry + "\n" + `func other(ctx context.Context,c *pgx.ConnConfig){_,_,_=ConnectConfigWithCIPhase(ctx,c)}`, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if tc.bad && tc.file == "connect_phase_ci.go" && tc.source == entry {

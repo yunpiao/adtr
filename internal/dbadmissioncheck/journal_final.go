@@ -240,8 +240,8 @@ func journalFailureShape(typ types.Type) bool {
 		return false
 	}
 	fields := []struct{ name, key string }{
-		{"Event", "event"}, {"Stage", "stage"}, {"ErrorCategory", "errorCategory"},
-		{"ContextState", "contextState"}, {"RecorderContextState", "recorderContextState"}, {"ConnectPhase", "connectPhase"},
+		{"ConnectPhase", "connectPhase"}, {"Event", "event"}, {"Stage", "stage"},
+		{"ErrorCategory", "errorCategory"}, {"ContextState", "contextState"}, {"RecorderContextState", "recorderContextState"},
 	}
 	for i, field := range fields {
 		if structure.Field(i).Name() != field.name || !types.Identical(structure.Field(i).Type(), types.Typ[types.String]) || structure.Tag(i) != `json:"`+field.key+`"` {
