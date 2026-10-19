@@ -163,3 +163,29 @@ backend-pinned Go Unicode17 simple-lowercase table and literal substring matcher
 SAM, SID and DN are independent fields. Mail, description, RID and SPN remain
 excluded. JavaScript locale/context-sensitive lowercase or normalization must not
 replace this mapping, because a valid backend row could otherwise be rejected.
+
+### UI-0437 draft-only keyword clear
+
+The accessible `清除计算机资产关键词` button (`清除关键词` visible text) clears
+only the keyword draft using the existing edit path and returns focus to the
+keyword input. It makes no request and preserves time/order drafts, current
+source/pin and the applied query. Explicit Apply subsequently requests page 1.
+The existing whole-filter clear retains its immediate reset-and-load behavior.
+The new button is disabled when the keyword is empty without a keyword transfer
+error, or the observation is stale; it remains usable during a pending read.
+
+Clearing closes expanded facts and removes only the keyword transfer error;
+time transfer errors and drafts remain. The existing shared submit-validation
+notice is cleared as on any edit, not reclassified by field; invalid time drafts
+are rejected again on Apply. Clearing a draft does not cancel a still-valid
+applied read: its response may be accepted under existing generation guards,
+while dirty drafts disable pagination/facts. Superseded, unmounted, source-lost
+or session-lost responses retain existing rejection behavior.
+
+The input ref is local and required only to return keyboard focus after clearing;
+removing it loses that focus restoration. No API/configuration parameter or
+permission is added. The extra button takes layout space; the 1440 desktop/390 mobile producer-chain
+screenshots and overflow checks must verify that layout.
+This local clear behavior is a UI-0437 slice under #30/#131; original clear-event
+query behavior remains unknown. It does not introduce maxlength truncation,
+DNS/IP search, old-system parity or product acceptance.

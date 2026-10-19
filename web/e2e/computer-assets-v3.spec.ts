@@ -166,7 +166,71 @@ test("computer assets real Worker TLS LDAP PG API browser pinned facts", async (
   expect(found.value.list).toEqual([expected[21]]);
   await expectPagePositions(page, found.value.list);
   expect(found.url.searchParams.get("observationId")).toBe(f.taskUUID);
+  // UI-0437: clear only the draft, with native keyboard/focus behavior.
+  await page.getByText("创建时间筛选与排序", { exact: true }).click();
+  const startTime = "2026-01-01T00:00:00Z";
+  const endTime = "2026-01-02T00:00:00Z";
+  await page.getByLabel("创建时间开始（含）", { exact: true }).fill(startTime);
+  await page.getByLabel("创建时间结束（不含）", { exact: true }).fill(endTime);
+  await page.getByLabel("创建时间排序", { exact: true }).selectOption("desc");
+  const beforeClear = await computerResponse(page, () =>
+    page.getByRole("button", { name: "应用计算机筛选", exact: true }).click(),
+  );
+  expect(beforeClear.value.list).toEqual([expected[21]]);
+  await page.getByRole("button", { name: "展开事实", exact: true }).click();
+  const clearRequests: string[] = [];
+  const observeClearRequest = (request: { url(): string }) => {
+    if (new URL(request.url()).pathname === "/api/computer-assets/v3")
+      clearRequests.push(request.url());
+  };
+  page.on("request", observeClearRequest);
+  await keyword.focus();
+  await keyword.press("Tab");
+  const clearKeyword = page.getByRole("button", { name: "清除计算机资产关键词", exact: true });
+  await expect(clearKeyword).toBeFocused();
+  await clearKeyword.press("Enter");
+  await expect(keyword).toHaveValue("");
+  await expect(keyword).toBeFocused();
+  await expect(clearKeyword).toBeDisabled();
+  await expect(page.getByLabel("创建时间开始（含）", { exact: true })).toHaveValue(startTime);
+  await expect(page.getByLabel("创建时间结束（不含）", { exact: true })).toHaveValue(endTime);
+  await expect(page.getByLabel("创建时间排序", { exact: true })).toHaveValue("desc");
+  await expect(page.getByText("主组 RID（primaryGroupID）", { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "展开事实", exact: true })).toBeDisabled();
+  await expectPagePositions(page, beforeClear.value.list);
+  await page.screenshot({
+    path: info.outputPath("computer-assets-v3-clear-keyword-desktop.png"),
+    fullPage: true,
+  });
   await page.setViewportSize({ width: 390, height: 844 });
+  await expect(keyword).toBeFocused();
+  const clearGeometry = await page.evaluate(() => ({
+    width: innerWidth,
+    scroll: document.documentElement.scrollWidth,
+  }));
+  expect(clearGeometry.scroll).toBeLessThanOrEqual(clearGeometry.width + 1);
+  await page.screenshot({
+    path: info.outputPath("computer-assets-v3-clear-keyword-mobile.png"),
+    fullPage: true,
+  });
+  expect(clearRequests).toEqual([]);
+  const cleared = await computerResponse(page, () =>
+    page.getByRole("button", { name: "应用计算机筛选", exact: true }).click(),
+  );
+  expect(clearRequests).toHaveLength(1);
+  page.off("request", observeClearRequest);
+  expect(Object.fromEntries(cleared.url.searchParams)).toEqual({
+    ...Object.fromEntries(beforeClear.url.searchParams), search: "", pageIdx: "1",
+  });
+  expect(cleared.value.list).toEqual(expected.slice(1, 11));
+  await expectPagePositions(page, cleared.value.list);
+  // Restore the pinned search for the existing mobile facts/scroll regression.
+  await keyword.fill("computer-22");
+  const restoredSearch = await computerResponse(page, () =>
+    page.getByRole("button", { name: "应用计算机筛选", exact: true }).click(),
+  );
+  expect(restoredSearch.value.list).toEqual(found.value.list);
+  await page.getByText("创建时间筛选与排序", { exact: true }).click();
   await expectPagePositions(page, found.value.list);
   await page.screenshot({
     path: info.outputPath("computer-assets-v3-mobile.png"),
@@ -334,6 +398,22 @@ test("computer assets real Worker TLS LDAP PG API browser pinned facts", async (
           semantics: "accepted response order 1..N, restarted on every page",
           checked: ["page1", "page2", "pageSize20", "filter", "empty", "refresh", "expanded facts"],
           expandedFactColSpan: 6,
+        },
+        keywordClear: {
+          semantics: "draft-only; time/order/source/pin preserved until explicit apply",
+          keyboard: "Tab then Enter; focus returns to keyword input",
+          noAutomaticListRequest: true,
+          clearGeometry,
+          screenshotBinding: {
+            observationId: f.taskUUID,
+            state: "empty keyword draft; applied computer-22 with time/order retained; facts closed",
+            desktop: { width: 1440, height: 900 },
+            mobile: { width: 390, height: 844 },
+          },
+          screenshotSHA256: {
+            desktop: createHash("sha256").update(await readFile(info.outputPath("computer-assets-v3-clear-keyword-desktop.png"))).digest("hex"),
+            mobile: createHash("sha256").update(await readFile(info.outputPath("computer-assets-v3-clear-keyword-mobile.png"))).digest("hex"),
+          },
         },
         dictionary: 3,
         computerCount: 23,
