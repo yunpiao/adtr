@@ -59,19 +59,25 @@ func run() (runErr error) {
 	if err != nil {
 		return err
 	}
-	defer admissionCleanup()
+	defer func() { admissionCleanup() }()
 	cfg, err := app.LoadConfig(*mode, os.Getenv)
 	if err != nil {
 		return err
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-	if admissionFailure != nil {
-		observeCIWorkerContext(ctx, stop)
+	cancelRoot := stop
+	if admissionFailure == nil {
+		defer stop()
+	} else {
+		logicalContext, logicalCancel, wrappedCleanup := splitCISignalLifetime(ctx, stop, admissionCleanup)
+		ctx = logicalContext
+		cancelRoot = logicalCancel
+		admissionCleanup = wrappedCleanup
+		observeCIWorkerContext(ctx, logicalCancel)
 		// A startup transport failure must be handled synchronously before any DB constructor.
 		select {
 		case <-admissionFailure:
-			stop()
+			cancelRoot()
 			return fmt.Errorf("CI database controller unavailable")
 		default:
 		}
@@ -80,11 +86,11 @@ func run() (runErr error) {
 			defer close(watchDone)
 			select {
 			case <-admissionFailure:
-				stop()
+				cancelRoot()
 			case <-ctx.Done():
 			}
 		}()
-		defer func() { stop(); <-watchDone }()
+		defer func() { cancelRoot(); <-watchDone }()
 	}
 	if *mode == "migrate" {
 		migrationCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
@@ -342,13 +348,13 @@ func run() (runErr error) {
 			close(maintenanceDone)
 		}()
 		messageDone := make(chan error, 1)
-		go func() { messageDone <- messageStore.Run(ctx); stop() }()
+		go func() { messageDone <- messageStore.Run(ctx); cancelRoot() }()
 		bulkDone := make(chan error, 1)
-		go func() { bulkDone <- messageStore.RunBulk(ctx, auth.NewTaskAuthorizer()); stop() }()
+		go func() { bulkDone <- messageStore.RunBulk(ctx, auth.NewTaskAuthorizer()); cancelRoot() }()
 		result := make(chan error, 1)
-		go func() { result <- worker.Run(ctx); stop() }()
+		go func() { result <- worker.Run(ctx); cancelRoot() }()
 		serverErr := app.Serve(ctx, server)
-		stop()
+		cancelRoot()
 		workerErr = <-result
 		<-schedulerDone
 		<-maintenanceDone
@@ -377,7 +383,7 @@ func run() (runErr error) {
 		done := make(chan error, 1)
 		go func() { done <- collector.Run(ctx) }()
 		serveErr := app.Serve(ctx, server)
-		stop()
+		cancelRoot()
 		<-done
 		return serveErr
 	}

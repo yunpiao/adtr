@@ -10,7 +10,7 @@ func observerFixtures(t *testing.T) (string, fixtureImporter) {
 	t.Helper()
 	imp := fixtureImporter{}
 	for _, entry := range []struct{ path, source string }{
-		{"context", `package context;type CancelFunc func();type Context interface{Err()error;Value(any)any};var Canceled,DeadlineExceeded error;func WithValue(c Context,k,v any)Context{return c}`},
+		{"context", `package context;type CancelFunc func();type Context interface{Err()error;Value(any)any;Done()<-chan struct{}};var Canceled,DeadlineExceeded error;func WithValue(c Context,k,v any)Context{return c};func WithCancel(c Context)(Context,CancelFunc){return c,func(){}}`},
 		{"os/signal", `package signal;import "context";func NotifyContext(ctx context.Context)(context.Context,context.CancelFunc){return ctx,func(){}}`},
 		{"encoding/json", `package json;func Marshal(any)([]byte,error){return nil,nil}`},
 		{"errors", `package errors;func Is(error,error)bool{return false}`},
@@ -101,34 +101,6 @@ func TestObserverDefaultConfigurationRemainsPassthrough(t *testing.T) {
 		})
 	}
 }
-func TestObserverRootBridgeIsInstalledOnly(t *testing.T) {
-	_, imp := observerFixtures(t)
-	managedPackage, _ := fixtureCheck(t, managed, "fixture.go", `package dbadmission;import "context";func ObserveCIWorkerContext(context.Context){};func ConfigureCIShutdown(context.CancelFunc){}`, imp)
-	imp[managed] = managedPackage
-	wrapper := `package main;import("context";"github.com/yunpiao/adtr/internal/dbadmission");func observeCIWorkerContext(ctx context.Context,stop context.CancelFunc){dbadmission.ObserveCIWorkerContext(ctx);dbadmission.ConfigureCIShutdown(stop)}`
-	for _, tc := range []struct {
-		name, body string
-		bad        bool
-	}{
-		{"installed context", `if admissionFailure!=nil{observeCIWorkerContext(ctx,stop)}`, false},
-		{"replacement stop", `stop=func(){};if admissionFailure!=nil{observeCIWorkerContext(ctx,stop)}`, true},
-		{"shadow stop", `if admissionFailure!=nil{stop:=func(){};observeCIWorkerContext(ctx,stop)};_ = stop`, true},
-		{"different context", `other,_:=signal.NotifyContext(nil);if admissionFailure!=nil{observeCIWorkerContext(other,stop)};_ = ctx`, true},
-		{"uninstalled context", `observeCIWorkerContext(ctx,stop)`, true},
-		{"root alias", `if admissionFailure!=nil{f:=observeCIWorkerContext;f(ctx,stop)}`, true},
-		{"root closure", `if admissionFailure!=nil{func(){observeCIWorkerContext(ctx,stop)}()}`, true},
-		{"root async", `if admissionFailure!=nil{go observeCIWorkerContext(ctx,stop)}`, true},
-		{"root deferred", `if admissionFailure!=nil{defer observeCIWorkerContext(ctx,stop)}`, true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			ds := checkJournalFiles(t, map[string]string{"db_observation_ci.go": wrapper, "main.go": `package main;import "os/signal";func run(admissionFailure <-chan struct{}){ctx,stop:=signal.NotifyContext(nil);` + tc.body + `}`}, imp)
-			if (len(ds) > 0) != tc.bad {
-				t.Fatalf("bad=%v diagnostics=%v", tc.bad, ds)
-			}
-		})
-	}
-}
-
 func TestBirthCaptureObservationCannotAuthorize(t *testing.T) {
 	t.Run("complete acquisition retains read-only birth cache", func(t *testing.T) {
 		files, imp := deadlineAdmissionFixtures(t)

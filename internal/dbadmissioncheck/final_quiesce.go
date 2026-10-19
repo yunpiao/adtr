@@ -87,7 +87,7 @@ var finalQuiesceBodies = map[string]struct{ file, body string }{
 	g.finalQuiesce.state = "cancelling"
 	stop := g.finalQuiesce.stop
 	g.mu.Unlock()
-	// NotifyContext's actual CancelFunc returns only after synchronous child
+	// The installed logical root CancelFunc returns only after synchronous child
 	// cancellation propagation. Observing root.Done alone does not supply this.
 	stop()
 	g.mu.Lock()
@@ -584,55 +584,6 @@ func finalTransportCleanupField(path, file, name string, field *ast.SelectorExpr
 	return false
 }
 func workerShutdownBinding(fn *ast.FuncDecl, call *ast.CallExpr, info *types.Info) bool {
-	if fn == nil || fn.Body == nil || call == nil || len(call.Args) != 2 || call.Ellipsis.IsValid() {
-		return false
-	}
-	ctx, ok := call.Args[0].(*ast.Ident)
-	if !ok {
-		return false
-	}
-	stop, ok := call.Args[1].(*ast.Ident)
-	if !ok {
-		return false
-	}
-	contextObject, stopObject := info.Uses[ctx], info.Uses[stop]
-	if contextObject == nil || stopObject == nil || !isNamed(stopObject.Type(), "context", "CancelFunc") {
-		return false
-	}
-	var binding *ast.AssignStmt
-	for _, statement := range fn.Body.List {
-		assignment, ok := statement.(*ast.AssignStmt)
-		if !ok || assignment.Pos() >= call.Pos() || len(assignment.Lhs) != 2 || len(assignment.Rhs) != 1 {
-			continue
-		}
-		first, ok := assignment.Lhs[0].(*ast.Ident)
-		if !ok {
-			continue
-		}
-		second, ok := assignment.Lhs[1].(*ast.Ident)
-		if !ok {
-			continue
-		}
-		initializer, ok := assignment.Rhs[0].(*ast.CallExpr)
-		if ok && info.Defs[first] == contextObject && info.Defs[second] == stopObject && objectCall(initializer, info, "os/signal", "NotifyContext") {
-			binding = assignment
-		}
-	}
-	if binding == nil {
-		return false
-	}
-	unchanged := true
-	ast.Inspect(fn.Body, func(n ast.Node) bool {
-		assignment, ok := n.(*ast.AssignStmt)
-		if !ok || assignment == binding || assignment.Pos() >= call.Pos() {
-			return true
-		}
-		for _, lhs := range assignment.Lhs {
-			if id, ok := lhs.(*ast.Ident); ok && (info.Uses[id] == contextObject || info.Uses[id] == stopObject) {
-				unchanged = false
-			}
-		}
-		return true
-	})
-	return unchanged
+	_, observe, valid := signalLifetimeBinding(fn, info)
+	return valid && call != nil && call == observe
 }

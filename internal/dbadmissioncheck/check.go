@@ -34,6 +34,7 @@ func (d Diagnostic) String() string { return fmt.Sprintf("%s: %s", d.Position, d
 // type check of the same package. Unknown protected operations are rejected.
 func Check(fset *token.FileSet, path string, files []*ast.File, info *types.Info) []Diagnostic {
 	out := criticalDeclarations(fset, path, files, info)
+	out = append(out, signalLifetimeDeclarations(fset, path, files, info)...)
 	out = append(out, captureEndDeclarations(fset, path, files, info)...)
 	out = append(out, journalFinalDeclarations(fset, path, files, info)...)
 	out = append(out, uncleanCloseDeclarations(fset, path, files, info)...)

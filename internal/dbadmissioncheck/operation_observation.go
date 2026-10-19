@@ -265,7 +265,7 @@ func operationObservationDeclarations(fset *token.FileSet, path string, files []
 						allowed := path == pkg && filename == "main.go" && name == "run" && directCallFor(x, ancestors) != nil
 						installed := false
 						for _, node := range ancestors {
-							if branch, ok := node.(*ast.IfStmt); ok && compactSource(branch.Cond) == "admissionFailure!=nil" {
+							if branch, ok := node.(*ast.IfStmt); ok && compactSource(branch.Cond) == "admissionFailure==nil" && branch.Else != nil && signalWithin(x, branch.Else) {
 								installed = true
 							}
 						}

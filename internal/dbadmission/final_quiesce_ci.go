@@ -96,7 +96,7 @@ func (g *lifecycleGate) cancelFinalQuiesce() error {
 	g.finalQuiesce.state = "cancelling"
 	stop := g.finalQuiesce.stop
 	g.mu.Unlock()
-	// NotifyContext's actual CancelFunc returns only after synchronous child
+	// The installed logical root CancelFunc returns only after synchronous child
 	// cancellation propagation. Observing root.Done alone does not supply this.
 	stop()
 	g.mu.Lock()
