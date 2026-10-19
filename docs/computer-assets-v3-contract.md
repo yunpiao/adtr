@@ -189,3 +189,51 @@ screenshots and overflow checks must verify that layout.
 This local clear behavior is a UI-0437 slice under #30/#131; original clear-event
 query behavior remains unknown. It does not introduce maxlength truncation,
 DNS/IP search, old-system parity or product acceptance.
+
+### FLD-0418 / UI-0437 bounded keyword edits
+
+Outside IME composition, a keyword value change exceeding 50 UTF-16 code units
+is rejected as a whole. The previous accepted draft and its recorded selection
+are restored with an explicit error; no truncation or query occurs. UTF-16 means
+JavaScript string length: a supplementary character uses two units. The input
+has no native maxlength because browser truncation could turn a rejected paste
+into a different accepted search. The existing server/parser 50 UTF-16, 200 UTF-8
+and malformed-surrogate validation remains unchanged.
+
+Paste checks the full replacement length using the selected range, rather than
+payload length alone. Control-character paste/drop rejection remains in force.
+Drop position is browser-dependent: payloads longer than the entire bound are
+rejected before insertion; other drops use the actual changed value for length
+validation, not an assumed selection-based landing position. Selection capture
+uses the existing valid value at select/keydown/beforeinput/paste/drop events;
+restoration cannot certify an OS-specific drag landing caret.
+
+IME composition may temporarily exceed the limit without interrupting composition.
+Apply, refresh and both clear buttons are disabled only during composition, so
+those actions cannot race an unfinished composition tail; the submit handler also
+rejects submission. All resume their normal behavior after compositionend.
+At compositionend, the entire result is accepted or restored to the pre-composition
+accepted value. A trailing input carrying the rejected or restored value does not
+clear the error or reintroduce overflow. The next distinct valid edit or explicit
+clear recovers. Composition temporarily pauses pagination/facts through dirty state. Refresh waits
+for compositionend rather than canceling the OS composition: a canceled composition's
+final input cannot be reliably distinguished from a later ordinary input on every
+engine. Source/session removal unmounts private composition state; an already-running
+read can still fail authorization and remove it immediately.
+
+Local refs store only the accepted draft, composition flag, recorded selection and
+rejected composition tail; they are necessary for rollback, synchronous submit
+protection and event-order handling, not API/configuration parameters. Removing
+them loses these guarantees. The error occupies layout space and invalid changes
+pause Apply/pagination/facts until edited or cleared. Source/pin, applied query,
+time/order, valid pending reads and their generation guards are unchanged; an
+accepted in-flight response can remain visible under a dirty/error draft. Existing
+keyword and whole-filter clear behavior and current-authority rejection remain.
+
+Synthetic DOM tests cover composition sequences, selection, drop changes and
+surrogates. Real producer-chain browser tests cover native keyboard/clipboard,
+selection replacement and supplementary-character insertion with desktop/mobile
+screenshots. OS IME and native drag/drop are not independently exercised by those
+browser tests; DOM handlers are not evidence of all OS/browser input methods.
+This bounded interaction does not establish original event parity, additional
+searchable facts, complete UI-0437 acceptance or product acceptance.

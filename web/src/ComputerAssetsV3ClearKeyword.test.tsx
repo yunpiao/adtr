@@ -367,7 +367,7 @@ describe("UI-0437 explicit draft-only keyword clear", () => {
 
   it("keeps invalid time drafts and revalidates them after clearing the shared validation notice", async () => {
     await start();
-    fill("计算机资产关键词", "x".repeat(51));
+    fill("计算机资产关键词", "valid-keyword");
     fill("创建时间开始（含）", "invalid-time");
     click("应用计算机筛选");
     const message = "请核对搜索长度与成对 RFC3339 创建时间；开始须早于结束，输入不会被截断。";
