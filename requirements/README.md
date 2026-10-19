@@ -16,7 +16,7 @@ Statuses are deliberately distinct:
   items; this is not the same as a PR, merge or deploy status
 
 Current product acceptance remains **0/209**: **19 implemented_verified_slice**
-requirements, **35 in_progress**, and **155 not_started**. These are requirement
+requirements, **36 in_progress**, and **154 not_started**. These are requirement
 status counts, not PR counts or 19 fully accepted features. AD-F-042 is now
 in_progress for [the bounded raw-group workspace](../docs/group-assets-v3-contract.md);
 its classification fields, source compatibility and real acceptance remain open.
@@ -113,3 +113,12 @@ Counts describe one validated dictionary3 observation before kind/page filters;
 unavailable null and successful empty zero counts stay distinct. Legacy asset
 total parity, risk/security summaries, charts and full source acceptance remain
 open. Candidate runtime CI and independent review are pending; product0/209.
+
+AD-F-040 is now `in_progress` in the
+[computer delivery reconciliation](../docs/computer-assets-v3-delivery-reconciliation.md):
+PR132 records the bounded dictionary3 list, PR175 page-local numbering, and PR176
+draft-only keyword clearing. The latest PR run passed on attempt2 after one
+failed-jobs retry; its separate main run passed71/71 on attempt1. Original
+47-field/9-control compatibility and real AD/Windows/capacity gates remain open.
+This corrects missing implementation evidence; product acceptance remains0/209.
+Historical failures, duplicate-check metadata and screenshot limits are retained.
