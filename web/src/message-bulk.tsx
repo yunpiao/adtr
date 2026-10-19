@@ -41,6 +41,7 @@ export function useMessageBulk(
   allowed: boolean,
   snapshot: MessageSnapshot | undefined,
   authorityLost: (e: ApiError) => void,
+  workspaceBusy = false,
 ) {
   const [operations, setOperations] = useState<Operation[]>([]),
     [storageError, setStorageError] = useState("");
@@ -301,6 +302,18 @@ export function useMessageBulk(
     (o) => o.phase !== "known" || !o.value || !bulkTerminal(o.value.state),
   );
   const blocked = !allowed || busy || unresolved || !!storageError;
+  const pageIDs = new Set(snapshot?.items.map((row) => row.messageId) ?? []);
+  const pageSelectionBlocked = blocked || workspaceBusy || currentSelection.all;
+  const pageSelected = [...pageIDs].filter((id) => currentSelection.ids.includes(id)).length;
+  const selectPage = (selected: boolean) => {
+    if (pageSelectionBlocked || locked.current || !permitted.current || !snapshot) return;
+    const ids = selected
+      ? [...new Set([...currentSelection.ids, ...pageIDs])]
+      : currentSelection.ids.filter((id) => !pageIDs.has(id));
+    if (ids.length === currentSelection.ids.length) return;
+    setPreview(undefined);
+    setSelection({ ...currentSelection, ids });
+  };
   const target = currentSelection.all
     ? (snapshot?.total ?? 0)
     : currentSelection.ids.length;
@@ -385,7 +398,22 @@ export function useMessageBulk(
             跨页选择只属于当前固定结果。已选 {target} / {snapshot.total}{" "}
             条；已读项也会计入目标。
           </p>
+          <p>本页操作仅调整当前已确认页的选择，保留其他页；不会标记已读。</p>
           <div className="message-read-actions">
+            <button
+              className="secondary"
+              disabled={pageSelectionBlocked || pageSelected === pageIDs.size}
+              onClick={() => selectPage(true)}
+            >
+              选择本页
+            </button>
+            <button
+              className="secondary"
+              disabled={pageSelectionBlocked || pageSelected === 0}
+              onClick={() => selectPage(false)}
+            >
+              取消选择本页
+            </button>
             <button
               className="secondary"
               disabled={blocked}

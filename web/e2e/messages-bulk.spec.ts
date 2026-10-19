@@ -242,7 +242,10 @@ test("real internally submitted health bulk: cross-page freeze, lost response, c
     expect(await r.json()).toEqual(snapshot);
   };
   const starts: Input[] = [];
+  const selectionRequests: string[] = [];
   page.on("request", (r) => {
+    const path = new URL(r.url()).pathname;
+    if (path.startsWith("/api/messages/")) selectionRequests.push(`${r.method()} ${path}`);
     if (
       new URL(r.url()).pathname === "/api/messages/bulk-read" &&
       r.method() === "POST"
@@ -283,10 +286,52 @@ test("real internally submitted health bulk: cross-page freeze, lost response, c
     conserved(op);
     return op;
   };
+  const selectionRegion = page.getByRole("region", { name: "批量目标选择", exact: true });
+  const selectPage = page.getByRole("button", { name: "选择本页", exact: true });
+  const deselectPage = page.getByRole("button", { name: "取消选择本页", exact: true });
+  const selectionScreenshots: {
+    file: string;
+    viewport: { width: number; height: number };
+    sha256: string;
+    fullPage: boolean;
+  }[] = [];
+  const reads = () => sql(container,
+    `SELECT COALESCE(json_agg(row_to_json(p)), '[]'::json) FROM (
+      SELECT tenant_id,user_id,message_id,first_read_at FROM adtr.message_reads
+      ORDER BY tenant_id,user_id,message_id) p`);
+  const otherReads = () => sql(container,
+    `SELECT COALESCE(json_agg(row_to_json(p)), '[]'::json) FROM (
+      SELECT tenant_id,user_id,message_id,first_read_at FROM adtr.message_reads
+      WHERE user_id NOT IN (SELECT id FROM adtr.users WHERE username='e2e-admin')
+      ORDER BY tenant_id,user_id,message_id) p`);
+  const readsBeforeSelection = reads(), otherReadsBeforeSelection = otherReads();
   const firstID = snapshot.items[0].messageId;
   await page
     .getByRole("checkbox", { name: `选择消息 ${firstID}`, exact: true })
     .check();
+  // Native keyboard activation selects the accepted page, without a write.
+  await selectPage.focus();
+  await expect(selectPage).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(selectionRegion).toContainText("已选 20 / 61");
+  await expect(selectPage).toBeDisabled();
+  const firstPageRows = page.getByRole("region", { name: "当前页时间线", exact: true }).getByRole("article");
+  await expect(firstPageRows).toHaveCount(snapshot.items.length);
+  for (const row of snapshot.items) {
+    await expect(page.getByRole("checkbox", { name: `选择消息 ${row.messageId}`, exact: true })).toBeChecked();
+  }
+  for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
+    await page.setViewportSize(viewport);
+    await selectionRegion.scrollIntoViewIfNeeded();
+    await expect(selectPage).toBeVisible();
+    await expect(deselectPage).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    const file = `messages-soc-bulk-page-selection-${viewport.width}.png`;
+    const path = testInfo.outputPath(file);
+    const bytes = await page.screenshot({ path, fullPage: false });
+    await testInfo.attach(file, { path, contentType: "image/png" });
+    selectionScreenshots.push({ file, viewport, fullPage: false, sha256: createHash("sha256").update(bytes).digest("hex") });
+  }
   const [secondPageResponse] = await Promise.all([
     page.waitForResponse(
       (r) => new URL(r.url()).pathname === "/api/messages/page",
@@ -296,6 +341,20 @@ test("real internally submitted health bulk: cross-page freeze, lost response, c
   const secondPage: Snapshot = await secondPageResponse.json();
   expect(secondPage.resultId).toBe(snapshot.resultId);
   const secondID = secondPage.items[0].messageId;
+  await selectPage.click();
+  await expect(selectionRegion).toContainText("已选 40 / 61");
+  await page.getByRole("button", { name: "预览批量目标", exact: true }).click();
+  const pagePreview = page.getByRole("region", { name: "批量目标预览", exact: true });
+  await pagePreview.getByText("查看全部已选消息 ID", { exact: true }).click();
+  await expect(pagePreview.getByRole("listitem")).toHaveText([
+    ...snapshot.items.map((row) => row.messageId), ...secondPage.items.map((row) => row.messageId),
+  ]);
+  await deselectPage.focus();
+  await expect(deselectPage).toBeFocused();
+  await page.keyboard.press("Space");
+  await expect(selectionRegion).toContainText("已选 20 / 61");
+  await expect(pagePreview).toHaveCount(0);
+  await expect(deselectPage).toBeDisabled();
   await page
     .getByRole("checkbox", { name: `选择消息 ${secondID}`, exact: true })
     .check();
@@ -303,6 +362,15 @@ test("real internally submitted health bulk: cross-page freeze, lost response, c
   await expect(
     page.getByRole("checkbox", { name: `选择消息 ${firstID}`, exact: true }),
   ).toBeChecked();
+  await deselectPage.click();
+  await expect(selectionRegion).toContainText("已选 1 / 61");
+  await page.getByRole("checkbox", { name: `选择消息 ${firstID}`, exact: true }).check();
+  await expect(selectionRegion).toContainText("已选 2 / 61");
+  expect(starts).toHaveLength(0);
+  expect(selectionRequests).toEqual(["GET /api/messages/page", "GET /api/messages/page"]);
+  const localSelectionRequests = [...selectionRequests];
+  expect(reads()).toEqual(readsBeforeSelection);
+  expect(otherReads()).toEqual(otherReadsBeforeSelection);
   const selected = await start();
   expect(selected.receipt.target).toBe(2);
   expect(starts[0]).toMatchObject({
@@ -322,6 +390,12 @@ test("real internally submitted health bulk: cross-page freeze, lost response, c
     alreadyRead: 0,
     remaining: 0,
   });
+  expect(otherReads()).toEqual(otherReadsBeforeSelection);
+  expect(selected.receipt.operationId).toMatch(/^[A-Za-z0-9_-]{1,128}$/);
+  const selectedTargets = sql(container,
+    `SELECT COALESCE(json_agg(message_id ORDER BY message_id), '[]'::json)
+      FROM adtr.message_bulk_targets WHERE operation_id='${selected.receipt.operationId}'`);
+  expect(selectedTargets).toEqual([firstID, secondID].sort());
   await oldSnapshot();
   // Stop only this harness's own worker, with a bounded finally resume. No SQL
   // producer or fabricated bulk response: the helper invokes production BulkOnce.
@@ -816,7 +890,16 @@ test("real internally submitted health bulk: cross-page freeze, lost response, c
     refreshed,
     persisted: proof(container, allInput.operationId),
     browserStarts: starts,
-    screenshots,
+    screenshots: [...selectionScreenshots, ...screenshots],
+    pageSelection: {
+      firstPageIDs: snapshot.items.map((row) => row.messageId),
+      secondPageIDs: secondPage.items.map((row) => row.messageId),
+      submittedIDs: [firstID, secondID].sort(),
+      selectedTargets,
+      localSelectionRequests,
+      otherReadsBeforeSelection,
+      evidenceBoundary: "Other-user read rows are compared unchanged; an empty isolated set is not non-empty cross-user history coverage.",
+    },
     sourceSHA256: Object.fromEntries(
       [
         "web/e2e/messages-bulk.spec.ts",

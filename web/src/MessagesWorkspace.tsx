@@ -180,6 +180,7 @@ function MessageSession({ profile, sessionChanged }: Props) {
     !!gate?.[5] && !!gate?.[6] && !!gate?.[7],
     snapshot,
     (e) => handleError(e, false),
+    !!busy,
   );
   const confirm = async () => {
     if (locked.current || !gate?.[0]) return;

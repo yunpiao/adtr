@@ -725,3 +725,219 @@ it("StrictMode discards the first immediate read and only accepts the live recov
   expect(calls("bulk-read-operation")).toHaveLength(2);
   expect(calls("bulk-read")).toHaveLength(0);
 });
+
+// AD-F-158 current-page selection: transport fixtures, not real producer evidence.
+const pageSelection = () => screen.getByRole("region", { name: "批量目标选择" });
+const pageButton = (name: string) => screen.getByRole("button", { name });
+const selectCurrentPage = () => fireEvent.click(pageButton("选择本页"));
+const deselectCurrentPage = () => fireEvent.click(pageButton("取消选择本页"));
+const pageSnapshot = (offset = 0) => ({
+  ...sampleSnapshot(), total: 21, offset,
+  counts: { all: 21, unread: 21, read: 0 },
+  items: Array.from({ length: offset === 0 ? 20 : 1 }, (_, n) => ({
+    ...sampleSnapshot().items[0],
+    messageId: `health-${String(offset + n + 1).padStart(2, "0")}`,
+  })),
+});
+function PageSelectionHarness({
+  value = sampleSnapshot(), workspaceBusy = false, allowed = true,
+}: {
+  value?: ReturnType<typeof sampleSnapshot>;
+  workspaceBusy?: boolean;
+  allowed?: boolean;
+}) {
+  const bulk = useMessageBulk(profile, allowed, value, changed, workspaceBusy);
+  return <>{bulk.controls}{bulk.panel}</>;
+}
+it("page union and difference preserve other pages, invalidate preview, and freeze only selected IDs", async () => {
+  query = () => json(pageSnapshot());
+  page = (u) => json(pageSnapshot(Number(new URL(u, "http://test").searchParams.get("offset"))));
+  post = (i) => json(result(i, 1));
+  await mount(profile, true);
+  await confirm();
+  expect(pageButton("取消选择本页")).toBeDisabled();
+  fireEvent.click(screen.getByRole("checkbox", { name: "选择消息 health-01" }));
+  fireEvent.click(pageButton("预览批量目标"));
+  const before = vi.mocked(fetch).mock.calls.length;
+  selectCurrentPage();
+  expect(vi.mocked(fetch).mock.calls).toHaveLength(before);
+  expect(screen.queryByRole("region", { name: "批量目标预览" })).not.toBeInTheDocument();
+  expect(pageSelection()).toHaveTextContent("已选 20 / 21");
+  expect(pageButton("选择本页")).toBeDisabled();
+  selectCurrentPage();
+  expect(pageSelection()).toHaveTextContent("已选 20 / 21");
+  expect(screen.getAllByRole("article")).toHaveLength(20);
+  fireEvent.change(screen.getByLabelText("关键词"), { target: { value: "unapplied draft" } });
+  fireEvent.click(pageButton("下一页"));
+  await screen.findByRole("checkbox", { name: "选择消息 health-21" });
+  selectCurrentPage();
+  expect(pageSelection()).toHaveTextContent("已选 21 / 21");
+  fireEvent.click(pageButton("预览批量目标"));
+  deselectCurrentPage();
+  expect(screen.queryByRole("region", { name: "批量目标预览" })).not.toBeInTheDocument();
+  expect(pageSelection()).toHaveTextContent("已选 20 / 21");
+  selectCurrentPage();
+  fireEvent.click(pageButton("上一页"));
+  await screen.findByRole("checkbox", { name: "选择消息 health-01" });
+  expect(screen.getByRole("checkbox", { name: "选择消息 health-01" })).toBeChecked();
+  deselectCurrentPage();
+  expect(pageSelection()).toHaveTextContent("已选 1 / 21");
+  expect(pageButton("取消选择本页")).toBeDisabled();
+  fireEvent.click(pageButton("预览批量目标"));
+  expect(screen.getByRole("region", { name: "批量目标预览" })).toHaveTextContent("health-21");
+  fireEvent.click(pageButton("确认启动批量已读"));
+  await waitFor(() => expect(panel()).toHaveTextContent("已接受，等待处理"));
+  expect(saved()[0].input).toMatchObject({ selection: "selected", messageIds: ["health-21"] });
+  expect(calls("query")).toHaveLength(1);
+  expect(calls("bulk-read")).toHaveLength(1);
+  expect(pageButton("选择本页")).toBeDisabled();
+  expect(pageButton("取消选择本页")).toBeDisabled();
+});
+it("deduplicates current page IDs and disables both page buttons for an empty page", () => {
+  const value = { ...sampleSnapshot(), total: 3, items: [sampleSnapshot().items[0], sampleSnapshot().items[0]] };
+  const view = render(<PageSelectionHarness value={value} />);
+  selectCurrentPage();
+  expect(pageSelection()).toHaveTextContent("已选 1 / 3");
+  fireEvent.click(pageButton("预览批量目标"));
+  expect(within(screen.getByRole("region", { name: "批量目标预览" })).getAllByRole("listitem", { hidden: true })).toHaveLength(1);
+  view.rerender(<PageSelectionHarness value={{ ...value, items: [] }} />);
+  expect(pageButton("选择本页")).toBeDisabled();
+  expect(pageButton("取消选择本页")).toBeDisabled();
+  deselectCurrentPage();
+  expect(pageSelection()).toHaveTextContent("已选 1 / 3");
+  view.rerender(<PageSelectionHarness value={{ ...value, total: 0, items: [] }} />);
+  expect(screen.queryByRole("button", { name: "选择本页" })).not.toBeInTheDocument();
+  expect(fetch).not.toHaveBeenCalled();
+});
+it("all-result mode blocks page exclusion and keeps the frozen all preview", async () => {
+  await mount();
+  await previewAll();
+  expect(pageButton("选择本页")).toBeDisabled();
+  expect(pageButton("取消选择本页")).toBeDisabled();
+  selectCurrentPage();
+  deselectCurrentPage();
+  expect(screen.getByRole("region", { name: "批量目标预览" })).toHaveTextContent("全部成员（含全部页）");
+  expect(calls("bulk-read")).toHaveLength(0);
+});
+it("workspace read lock blocks selecting the stale page until the accepted page arrives", async () => {
+  query = () => json(pageSnapshot());
+  let done!: (r: Response) => void;
+  page = () => new Promise((resolve) => { done = resolve; });
+  await mount();
+  await confirm();
+  selectCurrentPage();
+  fireEvent.click(pageButton("下一页"));
+  expect(pageButton("选择本页")).toBeDisabled();
+  expect(pageButton("取消选择本页")).toBeDisabled();
+  deselectCurrentPage();
+  expect(pageSelection()).toHaveTextContent("已选 20 / 21");
+  await act(async () => done(new Response(JSON.stringify(pageSnapshot(20)))));
+  selectCurrentPage();
+  expect(pageSelection()).toHaveTextContent("已选 21 / 21");
+  expect(calls("bulk-read")).toHaveLength(0);
+});
+it("workspace busy flag and storage errors independently disable page changes", () => {
+  const view = render(<PageSelectionHarness />);
+  selectCurrentPage();
+  view.rerender(<PageSelectionHarness workspaceBusy />);
+  expect(pageButton("取消选择本页")).toBeDisabled();
+  deselectCurrentPage();
+  expect(pageSelection()).toHaveTextContent("已选 1 / 1");
+  view.rerender(<PageSelectionHarness />);
+  expect(pageButton("取消选择本页")).toBeEnabled();
+  localStorage.setItem("adtr.message-bulk.v1.1.synthetic.broken", "{broken");
+  fireEvent(window, new Event("storage"));
+  expect(pageButton("取消选择本页")).toBeDisabled();
+  expect(panel()).toHaveTextContent("无法可靠读取");
+});
+it.each([401, 403, 404, 410])("page selection disappears on read status %i and does not create a new operation", async (status) => {
+  query = () => json(pageSnapshot());
+  page = () => json({ error: status === 403 ? "forbidden" : status === 410 ? "expired" : "not_found" }, status);
+  await mount();
+  await confirm();
+  selectCurrentPage();
+  fireEvent.click(pageButton("下一页"));
+  await waitFor(() => expect(screen.queryByRole("button", { name: "选择本页" })).not.toBeInTheDocument());
+  expect(calls("bulk-read")).toHaveLength(0);
+  expect(saved()).toEqual([]);
+});
+it.each(["result", "session", "unmount"])("late cancelled page cannot restore selection after %s replacement", async (kind) => {
+  query = () => json(pageSnapshot());
+  let done!: (r: Response) => void;
+  page = () => new Promise((resolve) => { done = resolve; });
+  const view = await mount();
+  await confirm();
+  selectCurrentPage();
+  fireEvent.click(pageButton("下一页"));
+  if (kind === "result") {
+    fireEvent.click(pageButton("停止等待"));
+    query = () => json({ ...sampleSnapshot(), resultId: "new-result" });
+    await confirm();
+    expect(pageSelection()).toHaveTextContent("已选 0 / 1");
+  } else if (kind === "session") {
+    view.rerender(<MessagesWorkspace profile={{ ...profile, csrfToken: "next" }} sessionChanged={changed} />);
+    await screen.findByRole("button", { name: "确认查询" });
+  } else view.unmount();
+  await act(async () => done(new Response(JSON.stringify(pageSnapshot(20)))));
+  expect(screen.queryByRole("checkbox", { name: "选择消息 health-21" })).not.toBeInTheDocument();
+  if (kind === "result") expect(pageSelection()).toHaveTextContent("已选 0 / 1");
+  else expect(screen.queryByRole("button", { name: "选择本页" })).not.toBeInTheDocument();
+  expect(calls("bulk-read")).toHaveLength(0);
+});
+it("revoking and restoring bulk authority never restores local page selection", () => {
+  const view = render(<PageSelectionHarness />);
+  selectCurrentPage();
+  view.rerender(<PageSelectionHarness allowed={false} />);
+  expect(screen.queryByRole("button", { name: "选择本页" })).not.toBeInTheDocument();
+  view.rerender(<PageSelectionHarness />);
+  expect(pageSelection()).toHaveTextContent("已选 0 / 1");
+  expect(pageButton("取消选择本页")).toBeDisabled();
+});
+it("page unions retain the existing 32 KiB preflight and never persist or send an oversized batch", () => {
+  const largePage = (offset: number) => ({
+    ...sampleSnapshot(), total: 400, offset, limit: 200,
+    counts: { all: 400, read: 0, unread: 400 },
+    items: Array.from({ length: 200 }, (_, n) => ({
+      ...sampleSnapshot().items[0], messageId: `id-${String(n + offset).padStart(4, "0")}-${"x".repeat(100)}`,
+    })),
+  });
+  const view = render(<PageSelectionHarness value={largePage(0)} />);
+  selectCurrentPage();
+  view.rerender(<PageSelectionHarness value={largePage(200)} />);
+  selectCurrentPage();
+  expect(pageSelection()).toHaveTextContent("已选 400 / 400");
+  fireEvent.click(pageButton("预览批量目标"));
+  fireEvent.click(pageButton("确认启动批量已读"));
+  expect(panel()).toHaveTextContent("32 KiB");
+  expect(saved()).toEqual([]);
+  expect(fetch).not.toHaveBeenCalled();
+  expect(pageButton("取消选择本页")).toBeDisabled();
+  fireEvent.click(pageButton("清空批量选择"));
+  expect(pageSelection()).toHaveTextContent("已选 0 / 400");
+  expect(pageButton("选择本页")).toBeEnabled();
+});
+it.each(["unknown", "missing"])("page actions cannot change the original target while a submitted operation is %s", async (phase) => {
+  post = () => Promise.reject(new TypeError("lost"));
+  lookup = () => json({ error: "not_found" }, 404);
+  await mount();
+  await confirm();
+  selectCurrentPage();
+  fireEvent.click(pageButton("预览批量目标"));
+  fireEvent.click(pageButton("确认启动批量已读"));
+  await waitFor(() => expect(panel()).toHaveTextContent("原批次结果尚未确认"));
+  if (phase === "missing") {
+    fireEvent.click(within(panel()).getByRole("button", { name: "查询原批次进度" }));
+    await screen.findByRole("button", { name: "重放原批量操作" });
+  }
+  const original = saved();
+  const before = vi.mocked(fetch).mock.calls.length;
+  expect(pageButton("选择本页")).toBeDisabled();
+  expect(pageButton("取消选择本页")).toBeDisabled();
+  selectCurrentPage();
+  deselectCurrentPage();
+  expect(saved()).toEqual(original);
+  expect(original[0].input).toMatchObject({ selection: "selected", messageIds: ["health-1"] });
+  expect(vi.mocked(fetch).mock.calls).toHaveLength(before);
+  expect(calls("bulk-read")).toHaveLength(1);
+  expect(screen.queryByRole("region", { name: "批量目标预览" })).not.toBeInTheDocument();
+});
