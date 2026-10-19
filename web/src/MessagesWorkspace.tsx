@@ -17,6 +17,7 @@ import "./message-soc.css";
 import { Field } from "./access-common";
 import { useMessageRead } from "./message-read";
 import { useMessageBulk } from "./message-bulk";
+import { messageTimelineDates } from "./message-timeline";
 
 type Props = { profile: Profile; sessionChanged: () => void };
 type ReadIntent =
@@ -304,6 +305,7 @@ function MessageSession({ profile, sessionChanged }: Props) {
   const edit = <K extends keyof MessageQuery>(key: K, value: MessageQuery[K]) =>
     setDraft((previous) => ({ ...previous, [key]: value }));
   const dirty = applied && JSON.stringify(draft) !== JSON.stringify(applied);
+  const timelineDates = messageTimelineDates(snapshot?.items ?? []);
   return (
     <section className="message-workspace" aria-labelledby="message-title">
       <header className="message-heading">
@@ -542,9 +544,18 @@ function MessageSession({ profile, sessionChanged }: Props) {
                   <p>这是已确认查询的实际空结果，可调整筛选后重新确认。</p>
                 </div>
               ) : (
+                <section aria-label="当前页时间线">
+                  <p className="message-timeline-note">
+                    当前页时间线 · 按发生日期（UTC）分段，沿用已确认结果顺序；日期可能跨页延续，不代表全天消息汇总。
+                  </p>
                 <ul className="message-list" aria-label="站内消息列表">
                   {snapshot.items.map((row, index) => (
                     <li key={row.messageId}>
+                      {timelineDates[index] !== null && (
+                        <h3 className="message-day-heading">
+                          发生日期（UTC） · {timelineDates[index]}
+                        </h3>
+                      )}
                       <article
                         tabIndex={-1}
                         ref={(node) => {
@@ -636,6 +647,7 @@ function MessageSession({ profile, sessionChanged }: Props) {
                     </li>
                   ))}
                 </ul>
+                </section>
               )}
               <nav className="message-pagination" aria-label="消息分页">
                 <span>
