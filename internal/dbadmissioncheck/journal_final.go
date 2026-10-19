@@ -83,7 +83,7 @@ func journalFinalDeclarations(fset *token.FileSet, path string, files []*ast.Fil
 					}
 				case *ast.TypeSpec:
 					if path == journalPackage && x.Name.Name == "CIJournalFailure" && !(filename == "append_diagnostic_ci.go" && journalFailureShape(info.TypeOf(x.Type))) {
-						emit(x, "journal first-failure record must have the exact five reviewed JSON fields")
+						emit(x, "journal first-failure record must have the exact six reviewed JSON fields")
 					}
 					if path == module+"/cmd/adtr" && x.Name.Name == "ciJournalFinal" && !(filename == "db_journal_ci.go" && journalShape(info.TypeOf(x.Type))) {
 						emit(x, "final journal record must have the exact eleven reviewed JSON fields")
@@ -199,7 +199,7 @@ func journalShape(typ types.Type) bool {
 const journalFailureGetterBody = `{
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	out := CIJournalFailure{"owned_ci_first_journal_failure", "none", "none", "unknown", "unknown"}
+	out := CIJournalFailure{Event: "owned_ci_first_journal_failure", Stage: "none", ErrorCategory: "none", ContextState: "unknown", RecorderContextState: "unknown", ConnectPhase: "none"}
 	if !r.diagnostic.set {
 		return out
 	}
@@ -221,6 +221,13 @@ const journalFailureGetterBody = `{
 	case "active", "canceled", "deadline_exceeded":
 		out.RecorderContextState = d.recorderContextState
 	}
+	if out.Stage == "connect" {
+		out.ConnectPhase = "unknown"
+		switch d.connectPhase {
+		case "admission", "native":
+			out.ConnectPhase = d.connectPhase
+		}
+	}
 	return out
 }`
 
@@ -229,12 +236,12 @@ func journalFailureShape(typ types.Type) bool {
 		return false
 	}
 	structure, ok := typ.Underlying().(*types.Struct)
-	if !ok || structure.NumFields() != 5 {
+	if !ok || structure.NumFields() != 6 {
 		return false
 	}
 	fields := []struct{ name, key string }{
-		{"Event", "event"}, {"Stage", "stage"}, {"ErrorCategory", "errorCategory"},
-		{"ContextState", "contextState"}, {"RecorderContextState", "recorderContextState"},
+		{"ConnectPhase", "connectPhase"}, {"Event", "event"}, {"Stage", "stage"},
+		{"ErrorCategory", "errorCategory"}, {"ContextState", "contextState"}, {"RecorderContextState", "recorderContextState"},
 	}
 	for i, field := range fields {
 		if structure.Field(i).Name() != field.name || !types.Identical(structure.Field(i).Type(), types.Typ[types.String]) || structure.Tag(i) != `json:"`+field.key+`"` {

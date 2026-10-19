@@ -88,9 +88,13 @@ var connectFailureBodies = map[string]struct{ file, body string }{
 	}
 }`},
 	"connectWith": {"conn.go", `{
+	conn, err, _ := connectWithPhase(ctx, config, connect)
+	return conn, err
+}`},
+	"connectWithPhase": {"conn.go", `{
 	permit, err := acquireLifecycle(ctx)
 	if err != nil {
-		return nil, err
+		return nil, err, "admission"
 	}
 	raw, err := connect(ctx, observeLifecycleConfig(config, permit))
 	if err != nil || raw == nil {
@@ -101,13 +105,13 @@ var connectFailureBodies = map[string]struct{ file, body string }{
 		if err == nil {
 			err = errors.New("database connection unavailable")
 		}
-		return nil, err
+		return nil, err, "native"
 	}
 	conn := &Conn{raw: raw, permit: permit}
 	if permit != nil {
 		permit.connected(conn)
 	}
-	return conn, nil
+	return conn, nil, "none"
 }`},
 }
 
@@ -174,7 +178,7 @@ func connectFailureDeclarations(fset *token.FileSet, path string, files []*ast.F
 					protected := true
 					switch obj.Name() {
 					case "observeLifecycleConnectFailure":
-						allowed = exact && name == "connectWith" && directCallFor(x, ancestors) != nil
+						allowed = exact && name == "connectWithPhase" && directCallFor(x, ancestors) != nil
 					case "failedObserved":
 						sig := callableSignature(obj.Type())
 						if sig == nil || sig.Recv() == nil || !isNamed(sig.Recv().Type(), managed, "lifecycleTicket") {

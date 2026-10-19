@@ -43,7 +43,7 @@ func TestConnectFailureIntegrationCancellationAdmissionBoundary(t *testing.T) {
 			calls := 0
 			var nativeErr error
 			var nativeRaw *pgx.Conn
-			conn, err := connectWith(root, config, func(c context.Context, cfg *pgx.ConnConfig) (*pgx.Conn, error) {
+			conn, err, phase := connectWithPhase(root, config, func(c context.Context, cfg *pgx.ConnConfig) (*pgx.Conn, error) {
 				calls++
 				// Cancel only after admission. Native pgx is the real connector;
 				// its original error is neither substituted nor reclassified here.
@@ -59,12 +59,12 @@ func TestConnectFailureIntegrationCancellationAdmissionBoundary(t *testing.T) {
 				t.Fatal("cancelled connection unexpectedly returned a managed handle")
 			}
 			if beforeAdmission {
-				if err != context.Canceled || calls != 0 || nativeErr != nil || g.invalid || g.pending != 0 || g.total != 0 || g.firstConnectFailure != nil || g.connectFailureDiagnostic() != nil || g.witness.(*diagnosticWitness).stores != 0 {
+				if phase != "admission" || err != context.Canceled || calls != 0 || nativeErr != nil || g.invalid || g.pending != 0 || g.total != 0 || g.firstConnectFailure != nil || g.connectFailureDiagnostic() != nil || g.witness.(*diagnosticWitness).stores != 0 {
 					t.Fatal("admission cancellation invented a native connect failure")
 				}
 				return
 			}
-			if calls != 1 || nativeErr == nil || err != nativeErr || !errors.Is(nativeErr, context.Canceled) || nativeRaw != nil {
+			if phase != "native" || calls != 1 || nativeErr == nil || err != nativeErr || !errors.Is(nativeErr, context.Canceled) || nativeRaw != nil {
 				t.Fatal("native cancelled connector facts or error identity changed")
 			}
 			d := g.connectFailureDiagnostic()

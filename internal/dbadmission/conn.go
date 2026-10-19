@@ -39,9 +39,16 @@ func ConnectConfig(ctx context.Context, config *pgx.ConnConfig) (*Conn, error) {
 }
 
 func connectWith(ctx context.Context, config *pgx.ConnConfig, connect func(context.Context, *pgx.ConnConfig) (*pgx.Conn, error)) (*Conn, error) {
+	conn, err, _ := connectWithPhase(ctx, config, connect)
+	return conn, err
+}
+
+// connectWithPhase reports the failing call boundary, not a network root cause.
+// It retains the original context, error identity and lifecycle transitions.
+func connectWithPhase(ctx context.Context, config *pgx.ConnConfig, connect func(context.Context, *pgx.ConnConfig) (*pgx.Conn, error)) (*Conn, error, string) {
 	permit, err := acquireLifecycle(ctx)
 	if err != nil {
-		return nil, err
+		return nil, err, "admission"
 	}
 	raw, err := connect(ctx, observeLifecycleConfig(config, permit))
 	if err != nil || raw == nil {
@@ -52,13 +59,13 @@ func connectWith(ctx context.Context, config *pgx.ConnConfig, connect func(conte
 		if err == nil {
 			err = errors.New("database connection unavailable")
 		}
-		return nil, err
+		return nil, err, "native"
 	}
 	conn := &Conn{raw: raw, permit: permit}
 	if permit != nil {
 		permit.connected(conn)
 	}
-	return conn, nil
+	return conn, nil, "none"
 }
 
 func (c *Conn) Begin(ctx context.Context) (pgx.Tx, error) {

@@ -24,6 +24,10 @@ func TestDefaultJournalDiagnosticDoesNotSampleContext(t *testing.T) {
 	if !got.Uncertain || !reflect.DeepEqual(got.Err, safeError(original)) {
 		t.Fatal("default error semantics changed")
 	}
+	connectFailure := newStoreConnectError(ctx, original, "private phase")
+	if connectFailure.Uncertain || !reflect.DeepEqual(connectFailure.Err, safeError(original)) {
+		t.Fatal("default connect error semantics changed")
+	}
 	observed := observeAppendFailure(ctx, ctx, original)
 	r := &Recorder{}
 	r.recordAppendFailureLocked(invalidACKDiagnostic(observed))

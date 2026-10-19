@@ -13,18 +13,31 @@ class JournalFailureDiagnostic(unittest.TestCase):
     def record(self):
         return dict(event=r.FIRST_JOURNAL_FAILURE_EVENT, stage='report',
                     errorCategory='deadline_exceeded', contextState='deadline_exceeded',
-                    recorderContextState='active')
+                    recorderContextState='active', connectPhase='none')
 
     def test_round_trip_restores_position_and_closed_enums(self):
         for stage in r.JOURNAL_FAILURE_STAGES - {'none'}:
             for category in r.JOURNAL_FAILURE_ERRORS - {'none'}:
-                frame = self.record() | dict(stage=stage, errorCategory=category)
+                frame = self.record() | dict(stage=stage, errorCategory=category, connectPhase="unknown" if stage=="connect" else "none")
                 logs = io.StringIO(json.dumps(frame) + '\n')
                 logs.seek(3)
                 self.assertEqual(r.first_journal_failure_projection(logs), frame)
                 self.assertEqual(logs.tell(), 3)
         frame = self.record() | dict(stage='none', errorCategory='none', contextState='unknown', recorderContextState='unknown')
         self.assertEqual(r.first_journal_failure_projection(io.StringIO(json.dumps(frame)+'\n')), frame)
+
+    def test_connect_phase_is_closed_and_only_describes_connect(self):
+        for phase in ('admission', 'native', 'unknown'):
+            frame = self.record() | dict(stage='connect', connectPhase=phase)
+            self.assertEqual(r.first_journal_failure_projection(io.StringIO(json.dumps(frame)+'\n')), frame)
+        for stage, phase in [('report', 'native'), ('none', 'admission'), ('connect', 'none'), ('connect', 'private'), ('connect', True)]:
+            frame = self.record() | dict(stage=stage, connectPhase=phase)
+            result = r.first_journal_failure_projection(io.StringIO(json.dumps(frame)+'\n'))
+            self.assertEqual(result['connectPhase'], 'unknown')
+            self.assertEqual(result['stage'], 'unknown')
+            self.assertNotIn('private', json.dumps(result))
+        frame = self.record(); del frame['connectPhase']
+        self.assertEqual(r.first_journal_failure_projection(io.StringIO(json.dumps(frame)+'\n'))['stage'], 'unknown')
 
     def test_malformed_duplicate_unknown_and_secret_fields_never_escape(self):
         frame = self.record()

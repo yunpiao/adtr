@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/yunpiao/adtr/internal/dbadmission"
 	"github.com/yunpiao/adtr/internal/tasks"
 )
 
@@ -86,9 +85,9 @@ func (s *Store) Append(ctx context.Context, e Event, o RecorderObservation) (Eve
 	ctx, cancel := context.WithTimeout(ctx, appendTimeout)
 	defer cancel()
 	stage = "connect"
-	conn, err := dbadmission.ConnectConfig(ctx, s.config.Copy())
+	conn, err, connectPhase := connectJournal(ctx, s.config.Copy())
 	if err != nil {
-		return definite(err)
+		return Event{}, newStoreConnectError(ctx, err, connectPhase)
 	}
 	defer func() {
 		closeCtx, stop := context.WithTimeout(context.Background(), 100*time.Millisecond)

@@ -255,7 +255,7 @@ func operationObservationDeclarations(fset *token.FileSet, path string, files []
 						break
 					}
 					pkg := obj.Pkg().Path()
-					if pkg == managed && obj.Name() == "observeLifecycleConfig" && !(path == managed && filename == "conn.go" && name == "connectWith" && directCallFor(x, ancestors) != nil) {
+					if pkg == managed && obj.Name() == "observeLifecycleConfig" && !(path == managed && filename == "conn.go" && name == "connectWithPhase" && exactConnectFailureFunction(path, filename, name, fn) && directCallFor(x, ancestors) != nil) {
 						emit(x, "observer configuration outside the sole managed connect entrypoint")
 					}
 					if pkg == managed && obj.Name() == "ObserveCIWorkerContext" && !(path == module+"/cmd/adtr" && filename == "db_observation_ci.go" && name == "observeCIWorkerContext" && directCallFor(x, ancestors) != nil) {
