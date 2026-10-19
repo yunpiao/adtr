@@ -1,11 +1,13 @@
 import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import ts from "typescript";
 
 // Execute the actual helper body with only in-memory doubles. No browser,
 // database, process identity inspection, signals or timer sleeps are involved.
 function fixture(kind: string, successes: number[], before = 10) {
-  const source = readFileSync(new URL(`../e2e/${kind}-asset-export-v3-terminal-helpers.ts`, import.meta.url), "utf8");
+  // npm test --prefix web runs from web; jsdom/Vite may rewrite import.meta.url.
+  const source = readFileSync(resolve(process.cwd(), "e2e", `${kind}-asset-export-v3-terminal-helpers.ts`), "utf8");
   const marker = "export async function resumeOwnedExportWorker(";
   expect(source.split(marker)).toHaveLength(2);
   const body = source.slice(source.indexOf(marker)).replace("export async", "async");
