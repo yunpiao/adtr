@@ -114,7 +114,7 @@ class IntegrationRunnerContract(unittest.TestCase):
         self.assertEqual(commands[2], [self.env["GO"], "test", "-race", "-count=1",
                                       "-tags=integration,adtr_ci_dbadmission", "-timeout=10m",
                                       "-run", "^TestActivityCandidate", "./internal/tasks",
-                                      "./internal/systemhealth", "./cmd/adtr"])
+                                      "./internal/systemhealth", "./cmd/adtr", "./internal/operationallogs"])
         source = Path('internal/systemhealth/activity_alias_health_integration_test.go').read_text()
         names = re.findall(r'^func (Test\w+)\(t \*testing.T\)', source, re.M)
         self.assertEqual(names, ['TestActivityCandidateSentinelHealthSideEffectAndExactCleanup'])

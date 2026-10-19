@@ -20,6 +20,7 @@ type Recorder struct {
 	store       EventStore
 	mu          sync.Mutex
 	observation RecorderObservation
+	diagnostic  recorderDiagnostic
 	queue       chan Event
 	stop        chan struct{}
 	done        chan struct{}
@@ -164,9 +165,11 @@ func (r *Recorder) run(ctx context.Context) error {
 		}
 		attemptCtx, cancel := context.WithTimeout(ctx, appendTimeout)
 		stored, err := r.store.Append(attemptCtx, pending, r.Stats())
+		diagnostic := observeAppendFailure(attemptCtx, ctx, err)
 		cancel()
 		if err == nil && (!sameEvent(pending, stored) || validateEvent(stored, true) != nil) {
 			err = &AppendError{Err: problem(503, "invalid_append_acknowledgement"), Uncertain: true}
+			diagnostic = invalidACKDiagnostic(diagnostic)
 		}
 		if err == nil {
 			r.mu.Lock()
@@ -179,6 +182,7 @@ func (r *Recorder) run(ctx context.Context) error {
 		}
 		r.mu.Lock()
 		increment(&r.observation.WriteFailures)
+		r.recordAppendFailureLocked(diagnostic)
 		r.mu.Unlock()
 		var failure *AppendError
 		if !errors.As(err, &failure) || failure.Uncertain {

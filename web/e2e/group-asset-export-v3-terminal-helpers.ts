@@ -227,7 +227,7 @@ export async function pauseOwnedExportWorker() {
 export async function restoreOwnedExportWorker() {
   if (ownedStopped) { await signalWorker("SIGCONT"); ownedStopped = false; }
 }
-export async function resumeOwnedExportWorker(context: BrowserContext, pause: Awaited<ReturnType<typeof pauseOwnedExportWorker>>, activityTaskID?: string) {
+export async function resumeOwnedExportWorker(context: BrowserContext, pause: Awaited<ReturnType<typeof pauseOwnedExportWorker>>, activityTaskID?: string, pendingDatabaseClock?: number) {
   await restoreOwnedExportWorker();
   await expect.poll(async () => (await checkedWorker()).states.every((s) => s !== "T" && s !== "t"), { timeout: 5000 }).toBe(true);
   const w = await checkedWorker();
@@ -236,10 +236,13 @@ export async function resumeOwnedExportWorker(context: BrowserContext, pause: Aw
   await expect.poll(async () => {
     const queue = await queueActivity(scope);
     expect(queue.workerID).toBe(pause.workerID);
-    return Number(queue.success) > Number(pause.queueSuccessBefore);
+    return Number(queue.success) > Number(pause.queueSuccessBefore)
+      && (pendingDatabaseClock === undefined || Number(queue.success) > pendingDatabaseClock);
   }, { timeout: 15_000 }).toBe(true);
   const first = await queueActivity(scope);
   expect(first.workerID).toBe(pause.workerID);
+  expect(Number(first.success)).toBeGreaterThan(Number(pause.queueSuccessBefore));
+  if (pendingDatabaseClock !== undefined) expect(Number(first.success)).toBeGreaterThan(pendingDatabaseClock);
   // One completion could be a pre-STOP poll whose activity write was pending.
   // A second strictly newer recorded success proves a fresh post-resume cycle.
   await expect.poll(async () => {
@@ -249,5 +252,6 @@ export async function resumeOwnedExportWorker(context: BrowserContext, pause: Aw
   }, { timeout: 20_000 }).toBe(true);
   const queue = await queueActivity(scope);
   expect(queue.workerID).toBe(pause.workerID);
+  expect(Number(queue.success)).toBeGreaterThan(Number(first.success));
   return { sameIdentity: w.pid === pause.pid && w.starttime === pause.starttime && hash(w.nonce) === pause.nonceSHA256, allThreadsRunning: true, readyStatus: 200, workerID: queue.workerID, queueSuccessAfterFirst: first.success, queueSuccessAfter: queue.success };
 }

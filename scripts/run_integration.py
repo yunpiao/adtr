@@ -63,7 +63,7 @@ def test_commands(args, env):
         commands.append([go, "test", "-race", "-count=1",
                          "-tags=integration,adtr_ci_dbadmission", "-timeout=10m",
                          "-run", "^TestActivityCandidate", "./internal/tasks",
-                         "./internal/systemhealth", "./cmd/adtr"])
+                         "./internal/systemhealth", "./cmd/adtr", "./internal/operationallogs"])
         print(f"Non-auth integration: {len(packages)} packages plus admission verification", flush=True)
     if args.suite in ("all", "auth"):
         output = subprocess.check_output(

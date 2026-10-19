@@ -75,7 +75,7 @@ test("real snapshot running export accepts cancellation then clears all artifact
     const recovered = await receiptAndDetail(page, setup.actorId, taskID);
     expect(recovered.detail).toMatchObject({ downloadReady: false, downloadStatus: "cancelled", task: { state: "cancelled" } });
     const unavailable = await unavailableDownload(context, taskID);
-    const cycles = await resumeOwnedExportWorker(context, pause, taskID);
+    const cycles = await resumeOwnedExportWorker(context, pause, taskID, pendingDatabase.databaseClock);
     expect(cycles.sameIdentity).toBe(true);
     const postResume = { ...await receiptAndDetail(page, setup.actorId, taskID), database: await terminalExport(taskID), unavailableDownload: await unavailableDownload(context, taskID) };
     expect(postResume.database).toEqual(database);

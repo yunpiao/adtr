@@ -75,7 +75,8 @@ func validateObservation(o RecorderObservation, e Event) error {
 }
 
 func (s *Store) Append(ctx context.Context, e Event, o RecorderObservation) (Event, error) {
-	definite := func(err error) (Event, error) { return Event{}, &AppendError{Err: safeError(err)} }
+	stage := "validation"
+	definite := func(err error) (Event, error) { return Event{}, newStoreAppendError(ctx, stage, err, false) }
 	if err := validateEvent(e, false); err != nil {
 		return definite(err)
 	}
@@ -84,6 +85,7 @@ func (s *Store) Append(ctx context.Context, e Event, o RecorderObservation) (Eve
 	}
 	ctx, cancel := context.WithTimeout(ctx, appendTimeout)
 	defer cancel()
+	stage = "connect"
 	conn, err := dbadmission.ConnectConfig(ctx, s.config.Copy())
 	if err != nil {
 		return definite(err)
@@ -93,14 +95,17 @@ func (s *Store) Append(ctx context.Context, e Event, o RecorderObservation) (Eve
 		defer stop()
 		_ = conn.Close(closeCtx)
 	}()
+	stage = "begin"
 	tx, err := conn.Begin(ctx)
 	if err != nil {
 		return definite(err)
 	}
 	defer tx.Rollback(ctx)
+	stage = "schema"
 	if err = tasks.CheckSchemaTx(ctx, tx, s.expectedSchema); err != nil {
 		return definite(err)
 	}
+	stage = "report"
 	var process string
 	err = tx.QueryRow(ctx, `INSERT INTO adtr.operational_log_reports(process_id,module,started_at,observed_at,accepted,acknowledged,rejected,queue_full,write_failures,unacknowledged,abandoned,acceptance_stopped)
  VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
@@ -116,9 +121,11 @@ func (s *Store) Append(ctx context.Context, e Event, o RecorderObservation) (Eve
 	if err != nil {
 		return definite(err)
 	}
+	stage = "event_insert"
 	stored, err := scanEvent(tx.QueryRow(ctx, `INSERT INTO adtr.operational_log_events(event_id,process_id,schema_version,module,code,outcome,severity,reason,observed_at)
  VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT(event_id) DO NOTHING RETURNING `+eventColumns, e.EventID, e.ProcessID, e.SchemaVersion, string(e.Module), string(e.Code), string(e.Outcome), string(e.Severity), string(e.Reason), e.ObservedAt))
 	if errors.Is(err, pgx.ErrNoRows) {
+		stage = "event_read"
 		stored, err = scanEvent(tx.QueryRow(ctx, `SELECT `+eventColumns+` FROM adtr.operational_log_events WHERE event_id=$1`, e.EventID))
 		if err == nil && !sameEvent(e, stored) {
 			return definite(problem(409, "event_conflict"))
@@ -128,7 +135,7 @@ func (s *Store) Append(ctx context.Context, e Event, o RecorderObservation) (Eve
 		return definite(err)
 	}
 	if err = tx.Commit(ctx); err != nil {
-		return Event{}, &AppendError{Err: safeError(err), Uncertain: !errors.Is(err, pgx.ErrTxCommitRollback)}
+		return Event{}, newStoreAppendError(ctx, "commit", err, !errors.Is(err, pgx.ErrTxCommitRollback))
 	}
 	return stored, nil
 }

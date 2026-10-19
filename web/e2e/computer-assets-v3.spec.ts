@@ -127,6 +127,54 @@ test("computer assets real Worker TLS LDAP PG API browser pinned facts", async (
     origin: new URL(page.url()).origin,
   });
   const keyword = page.getByLabel("计算机资产关键词", { exact: true });
+  // Real keyboard and clipboard editing, not fabricated input/composition events.
+  const limitRequests: string[] = [];
+  const observeLimitRequest = (request: { url(): string }) => {
+    if (new URL(request.url()).pathname === "/api/computer-assets/v3")
+      limitRequests.push(request.url());
+  };
+  page.on("request", observeLimitRequest);
+  await keyword.focus();
+  await keyword.pressSequentially("x".repeat(50));
+  await expect(keyword).toHaveValue("x".repeat(50));
+  await keyword.press("y");
+  await expect(keyword).toHaveValue("x".repeat(50));
+  const limitMessage = page.getByText("关键词最多 50 个 UTF-16 单元，已拒绝整次变更并保留此前内容；请重新编辑或清除关键词。", { exact: true });
+  await expect(limitMessage).toBeVisible();
+  await expect(keyword).toBeFocused();
+  await expect(page.getByRole("button", { name: "应用计算机筛选", exact: true })).toBeDisabled();
+  expect(await keyword.evaluate((node: HTMLInputElement) => [node.selectionStart, node.selectionEnd])).toEqual([50, 50]);
+  await keyword.press("Home");
+  await keyword.press("Shift+ArrowRight");
+  await keyword.press("Shift+ArrowRight");
+  await page.evaluate(() => navigator.clipboard.writeText("XYZ"));
+  await keyword.press("Control+V");
+  await expect(keyword).toHaveValue("x".repeat(50));
+  expect(await keyword.evaluate((node: HTMLInputElement) => [node.selectionStart, node.selectionEnd])).toEqual([0, 2]);
+  await expectPagePositions(page, ui.value.list);
+  await page.screenshot({ path: info.outputPath("computer-assets-v3-keyword-limit-desktop.png"), fullPage: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  const keywordLimitGeometry = await page.evaluate(() => ({ width: innerWidth, scroll: document.documentElement.scrollWidth }));
+  expect(keywordLimitGeometry.scroll).toBeLessThanOrEqual(keywordLimitGeometry.width + 1);
+  await page.screenshot({ path: info.outputPath("computer-assets-v3-keyword-limit-mobile.png"), fullPage: true });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.evaluate(() => navigator.clipboard.writeText("😀"));
+  await keyword.press("Control+V");
+  await expect(keyword).toHaveValue("😀" + "x".repeat(48));
+  await expect(limitMessage).toHaveCount(0);
+  // Replacing the whole selection is allowed; insertion of one pair at 49 is not.
+  await keyword.press("Control+A");
+  await page.evaluate(() => navigator.clipboard.writeText("x".repeat(49)));
+  await keyword.press("Control+V");
+  await expect(keyword).toHaveValue("x".repeat(49));
+  await page.keyboard.insertText("😀");
+  await expect(keyword).toHaveValue("x".repeat(49));
+  await expect(limitMessage).toBeVisible();
+  expect(limitRequests).toEqual([]);
+  page.off("request", observeLimitRequest);
+  await page.getByRole("button", { name: "清除计算机资产关键词", exact: true }).click();
+  await expect(keyword).toHaveValue("");
+  await expect(limitMessage).toHaveCount(0);
   const beforePaste = await keyword.inputValue();
   await page.evaluate(() => navigator.clipboard.writeText("computer-0\n2"));
   await keyword.focus();
@@ -414,6 +462,22 @@ test("computer assets real Worker TLS LDAP PG API browser pinned facts", async (
             desktop: createHash("sha256").update(await readFile(info.outputPath("computer-assets-v3-clear-keyword-desktop.png"))).digest("hex"),
             mobile: createHash("sha256").update(await readFile(info.outputPath("computer-assets-v3-clear-keyword-mobile.png"))).digest("hex"),
           },
+        },
+        keywordLimit: {
+          bound: "50 UTF-16 code units; whole-change rejection, no truncation",
+          nativeChecks: ["50 accepted", "51 rejected", "selected paste rejected", "pair replacement accepted", "49 plus pair rejected", "no automatic request"],
+          keywordLimitGeometry,
+          screenshotBinding: {
+            observationId: f.taskUUID,
+            state: "rejected 51-unit selected paste; previous 50-unit draft and selection retained; applied page1 unchanged",
+            desktop: { width: 1440, height: 900 },
+            mobile: { width: 390, height: 844 },
+          },
+          screenshotSHA256: {
+            desktop: createHash("sha256").update(await readFile(info.outputPath("computer-assets-v3-keyword-limit-desktop.png"))).digest("hex"),
+            mobile: createHash("sha256").update(await readFile(info.outputPath("computer-assets-v3-keyword-limit-mobile.png"))).digest("hex"),
+          },
+          limitations: ["OS IME and native drag/drop not exercised; synthetic DOM event contracts only"],
         },
         dictionary: 3,
         computerCount: 23,

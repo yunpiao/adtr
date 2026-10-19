@@ -9,8 +9,14 @@ import (
 
 const journalPackage = module + "/internal/operationallogs"
 const journalWriterBody = `{
+ emitCIJournalFirstFailure(recorder)
  snapshot := ciJournalProjection(recorder.Stats(), closeErr == nil)
  data, err := json.Marshal(snapshot)
+ if err == nil { _, _ = os.Stderr.Write(append(data, '\n')) }
+}`
+
+const journalFailureWriterBody = `{
+ data, err := json.Marshal(recorder.CIJournalFirstFailure())
  if err == nil { _, _ = os.Stderr.Write(append(data, '\n')) }
 }`
 
@@ -34,6 +40,12 @@ func journalFinalDeclarations(fset *token.FileSet, path string, files []*ast.Fil
 			if path == module+"/cmd/adtr" && name == "ciJournalProjection" && !(filename == "db_journal_ci.go" && captureBodyMatches(fn, journalProjectionBody)) {
 				emit(decl, "final journal projection must hash the process ID and emit only the reviewed counters")
 			}
+			if path == module+"/cmd/adtr" && name == "emitCIJournalFirstFailure" && !(filename == "db_journal_ci.go" && captureBodyMatches(fn, journalFailureWriterBody)) {
+				emit(decl, "journal first-failure writer must only serialize the reviewed getter")
+			}
+			if path == journalPackage && name == "Recorder.CIJournalFirstFailure" && !(filename == "append_diagnostic_ci.go" && captureBodyMatches(fn, journalFailureGetterBody)) {
+				emit(decl, "journal first-failure getter must use the exact closed projection")
+			}
 			var ancestors []ast.Node
 			ast.Inspect(decl, func(n ast.Node) bool {
 				if n == nil {
@@ -54,7 +66,15 @@ func journalFinalDeclarations(fset *token.FileSet, path string, files []*ast.Fil
 					if pkg == module+"/cmd/adtr" && obj.Name() == "ciJournalProjection" && !(path == pkg && filename == "db_journal_ci.go" && name == "emitCIJournalFinal" && directCallFor(x, ancestors) != nil) {
 						emit(x, "final journal projection outside the private final writer")
 					}
+					if pkg == module+"/cmd/adtr" && obj.Name() == "emitCIJournalFirstFailure" && !(path == pkg && filename == "db_journal_ci.go" && name == "emitCIJournalFinal" && directCallFor(x, ancestors) != nil && captureBodyMatches(fn, journalWriterBody)) {
+						emit(x, "journal first-failure writer outside synchronous post-Close final writer")
+					}
 					sig := callableSignature(obj.Type())
+					if pkg == journalPackage && obj.Name() == "CIJournalFirstFailure" && sig != nil && sig.Recv() != nil && isNamed(sig.Recv().Type(), journalPackage, "Recorder") {
+						if !(path == module+"/cmd/adtr" && filename == "db_journal_ci.go" && name == "emitCIJournalFirstFailure" && directCallFor(x, ancestors) != nil && captureBodyMatches(fn, journalFailureWriterBody)) {
+							emit(x, "journal first-failure getter outside reviewed private writer")
+						}
+					}
 					if pkg == journalPackage && obj.Name() == "Stats" && sig != nil && sig.Recv() != nil && isNamed(sig.Recv().Type(), journalPackage, "Recorder") {
 						allowed := directCallFor(x, ancestors) != nil && ((path == journalPackage && filename == "recorder.go" && name == "Recorder.run") || (path == module+"/cmd/adtr" && filename == "db_journal_ci.go" && name == "emitCIJournalFinal" && captureBodyMatches(fn, journalWriterBody)))
 						if !allowed {
@@ -62,10 +82,16 @@ func journalFinalDeclarations(fset *token.FileSet, path string, files []*ast.Fil
 						}
 					}
 				case *ast.TypeSpec:
+					if path == journalPackage && x.Name.Name == "CIJournalFailure" && !(filename == "append_diagnostic_ci.go" && journalFailureShape(info.TypeOf(x.Type))) {
+						emit(x, "journal first-failure record must have the exact five reviewed JSON fields")
+					}
 					if path == module+"/cmd/adtr" && x.Name.Name == "ciJournalFinal" && !(filename == "db_journal_ci.go" && journalShape(info.TypeOf(x.Type))) {
 						emit(x, "final journal record must have the exact eleven reviewed JSON fields")
 					}
 				case *ast.CompositeLit:
+					if isNamed(info.TypeOf(x), journalPackage, "CIJournalFailure") && !(path == journalPackage && filename == "append_diagnostic_ci.go" && name == "Recorder.CIJournalFirstFailure" && captureBodyMatches(fn, journalFailureGetterBody)) {
+						emit(x, "journal first-failure payload outside closed getter")
+					}
 					if isNamed(info.TypeOf(x), module+"/cmd/adtr", "ciJournalFinal") && !(path == module+"/cmd/adtr" && filename == "db_journal_ci.go" && name == "ciJournalProjection") {
 						emit(x, "final journal payload construction outside the closed projection")
 					}
@@ -164,6 +190,54 @@ func journalShape(typ types.Type) bool {
 	}
 	for i, field := range fields {
 		if structure.Field(i).Name() != field.name || !types.Identical(structure.Field(i).Type(), types.Typ[field.kind]) || structure.Tag(i) != `json:"`+field.key+`"` {
+			return false
+		}
+	}
+	return true
+}
+
+const journalFailureGetterBody = `{
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := CIJournalFailure{"owned_ci_first_journal_failure", "none", "none", "unknown", "unknown"}
+	if !r.diagnostic.set {
+		return out
+	}
+	out.Stage, out.ErrorCategory = "unknown", "unknown"
+	d := r.diagnostic.first
+	switch d.stage {
+	case "validation", "connect", "begin", "schema", "report", "event_insert", "event_read", "commit", "ack", "store_unknown":
+		out.Stage = d.stage
+	}
+	switch d.category {
+	case "canceled", "deadline_exceeded", "postgres", "network", "invalid_ack", "validation", "conflict", "other":
+		out.ErrorCategory = d.category
+	}
+	switch d.contextState {
+	case "active", "canceled", "deadline_exceeded":
+		out.ContextState = d.contextState
+	}
+	switch d.recorderContextState {
+	case "active", "canceled", "deadline_exceeded":
+		out.RecorderContextState = d.recorderContextState
+	}
+	return out
+}`
+
+func journalFailureShape(typ types.Type) bool {
+	if typ == nil {
+		return false
+	}
+	structure, ok := typ.Underlying().(*types.Struct)
+	if !ok || structure.NumFields() != 5 {
+		return false
+	}
+	fields := []struct{ name, key string }{
+		{"Event", "event"}, {"Stage", "stage"}, {"ErrorCategory", "errorCategory"},
+		{"ContextState", "contextState"}, {"RecorderContextState", "recorderContextState"},
+	}
+	for i, field := range fields {
+		if structure.Field(i).Name() != field.name || !types.Identical(structure.Field(i).Type(), types.Typ[types.String]) || structure.Tag(i) != `json:"`+field.key+`"` {
 			return false
 		}
 	}
