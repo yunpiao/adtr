@@ -362,6 +362,7 @@ function Assets({
     queryRef = useRef(initial);
   const [draft, setDraft] = useState(""),
     [filters, setFilters] = useState(emptyFilters);
+  const keywordInput = useRef<HTMLInputElement>(null);
   const [list, setList] = useState<ComputerAssetsV3List | null>(null),
     [expanded, setExpanded] = useState<string | null>(null);
   const [error, setError] = useState(""),
@@ -521,6 +522,7 @@ function Assets({
       <form className="asset-filter-form" onSubmit={submit}>
         <Field label="计算机资产关键词">
           <input
+            ref={keywordInput}
             aria-label="计算机资产关键词"
             value={draft}
             onChange={(e) => edit("search", e.target.value)}
@@ -528,6 +530,18 @@ function Assets({
             placeholder="搜索 SAM、SID 或 DN"
           />
         </Field>
+        <button
+          type="button"
+          className="secondary"
+          aria-label="清除计算机资产关键词"
+          disabled={stale || (draft === "" && !transfers.search)}
+          onClick={() => {
+            edit("search", "");
+            keywordInput.current?.focus();
+          }}
+        >
+          清除关键词
+        </button>
         <details>
           <summary>创建时间筛选与排序</summary>
           <div className="form-grid">
