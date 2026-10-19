@@ -90,6 +90,7 @@ type Message = {
   subType: string;
   read: boolean;
   firstReadAt: string | null;
+  occurredAt: string;
 };
 type Snapshot = {
   resultId: string;

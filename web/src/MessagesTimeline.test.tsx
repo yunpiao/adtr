@@ -91,7 +91,7 @@ const multipleDays = (): MessageSnapshot => ({
   })),
 });
 const headings = () => screen.queryAllByRole("heading", { name: /^发生日期（UTC）/ }).map((node) => node.textContent);
-const click = (name: string) => fireEvent.click(screen.getByRole("button", { name, exact: true }));
+const click = (name: string) => fireEvent.click(screen.getByRole("button", { name }));
 
 it("renders adjacent accepted UTC dates without changing IDs, order, absolute numbers or nanosecond fields", async () => {
   const value = multipleDays();
