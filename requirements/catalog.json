@@ -2653,9 +2653,38 @@
         "UI-0444",
         "UI-0445"
       ],
-      "status": "not_started",
+      "status": "in_progress",
       "product_accepted": false,
-      "evidence": null
+      "evidence": {
+        "local_contract": "docs/computer-assets-v3-contract.md",
+        "delivery_reconciliation": "docs/computer-assets-v3-delivery-reconciliation.md",
+        "engineering_issue": "https://github.com/yunpiao/adtr/issues/131",
+        "commit": "91e05b9d5790e1b9e4654ef6f03deb55195c925b",
+        "pr": [
+          "https://github.com/yunpiao/adtr/pull/132",
+          "https://github.com/yunpiao/adtr/pull/175",
+          "https://github.com/yunpiao/adtr/pull/176"
+        ],
+        "implemented_scope": "已合入的单授权来源、固定有效dictionary3观测只读computer列表；12事实闭集投影、SAM/SID/DN字面搜索、创建时间区间与排序、有界分页、行内事实和撤权/迟到响应隔离。UI-0438仅当前接受页1..N序号；UI-0437仅关键词草稿清除与焦点恢复，显式Apply才查询。12事实不等于原47字段中的12项完整兼容。",
+        "latest_regression": {
+          "pr_head": "0d34a88882207eb3e9bd99d7388bc8ea35f3e1fc",
+          "tree": "79723cf4435305fb27ebbe51f8944af9732db7be",
+          "pr_ci": "https://github.com/yunpiao/adtr/actions/runs/39205201921",
+          "pr_result": "attempt2终态success，latest71/71；attempt1 directory reader socket hangup后一次failed-jobs重试通过。4条历史同名queued/无runner但有completed steps的重复记录保留，不计额外成功执行。",
+          "main_commit": "91e05b9d5790e1b9e4654ef6f03deb55195c925b",
+          "main_ci": "https://github.com/yunpiao/adtr/actions/runs/39211561445",
+          "main_result": "attempt1独立main执行71/71；新main computer/readers产物、来源绑定和截图经独立复核。此为登记的既有运行证据，不是本账本文档提交运行结果。"
+        },
+        "remaining": [
+          "全部FLD-0412–0458与UI-0437–0445来源记录保留；DNSName/DNSAddress、OS、登录时间、业务状态/类型/应用、每行业务domain/name/id及地址关系未齐；不能由SPN/UAC/GUID/来源域猜造。",
+          "原sid/dn/sAMAccountName/created与现objectSid/distinguishedName/samAccountName/whenCreated键不同；原creatTm整数枚举、时间/搜索语义、跨页序号及clear-event查询行为未冻结。domainId单来源不等于多domainName；pageSize=-1全量不支持，独立导出不能代替原列表验收。",
+          "第二组17字段FLD-0442–0458原入口未知，不能借第一组通过或推定地址关联endpoint；动态列UI-0439–0444的column/slot及UI-0445 item.prop checkbox用途未明，事实按钮不能代替旧operation列。",
+          "UI-0437原maxlength仍未对齐：当前允许超长草稿、提交拒绝，不做maxlength截断；关键词清除仅有界本地行为。",
+          "真实AD、八版本Windows、原目标容量、完整旧协议/业务兼容与生产验收仍开放；sticky full-page移动端截图不能证明所有文字同时可见。",
+          "PR175历史secret substring及具体identity predicate、PR176历史candidate_strict及socket关闭原因未查明；后续成功不抹去失败或证明根因修复。详情见delivery_reconciliation。",
+          "本对账仅文档/证据登记；本轮未执行Node/Go/PostgreSQL/browser或重验历史产物，新的提交须单独通过自身检查。Issue30/131保持open，product_accepted=false。"
+        ]
+      }
     },
     {
       "id": "AD-F-041",
