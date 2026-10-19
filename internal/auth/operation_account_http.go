@@ -16,8 +16,8 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/yunpiao/adtr/internal/credentialuse"
+	"github.com/yunpiao/adtr/internal/dbadmission"
 	"github.com/yunpiao/adtr/internal/domains"
 	"github.com/yunpiao/adtr/internal/operationaccounts"
 	"github.com/yunpiao/adtr/internal/schemaversion"
@@ -189,7 +189,7 @@ func operationAccountHTTPError(err error) (int, string) {
 	return taskHTTPError(err)
 }
 func (s *Service) handleOperationAccount(ctx context.Context, r *http.Request, store *operationaccounts.Store, path string, route taskRoute, in operationAccountRequest, f operationaccounts.Filter) (any, error) {
-	conn, e := pgx.ConnectConfig(ctx, s.database.Copy())
+	conn, e := dbadmission.ConnectConfig(ctx, s.database.Copy())
 	if e != nil {
 		return nil, e
 	}

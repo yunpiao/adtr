@@ -14,7 +14,8 @@ import time
 class OwnedExportWorkerGuard:
     MAX_STOPPED_SECONDS = 120.0
 
-    def __init__(self, process, nonce, binary, proc_root=Path('/proc')):
+    def __init__(self, process, nonce, binary, proc_root=Path('/proc'), *, resume_delegate=None):
+        self.resume_delegate = resume_delegate
         self.process = process
         self.nonce = nonce
         self.binary = Path(binary).resolve()
@@ -55,7 +56,18 @@ class OwnedExportWorkerGuard:
             raise RuntimeError('owned export worker identity mismatch')
         return state
 
+    def resume_queued_checkpoint(self):
+        # Only the running checkpoint's already-verified initial boundary calls
+        # this entry. Watchdogs/cleanup keep using resume and its delegate.
+        if self.resume_delegate is None or self.process.poll() is not None:
+            raise RuntimeError('owned queued checkpoint resume unavailable')
+        if self.assert_identity() != 'T':
+            raise RuntimeError('owned queued checkpoint is not stopped')
+        self.process.send_signal(signal.SIGCONT)
+
     def resume(self):
+        if self.resume_delegate is not None and self.resume_delegate():
+            return
         if self.process.poll() is not None:
             return
         self.assert_identity()

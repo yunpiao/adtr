@@ -17,6 +17,7 @@ test("real group snapshot running export accepts cancellation then clears all ar
   let downloads = 0;
   page.on("download", () => { downloads++; });
   await chooseColumns(page, safeColumns);
+  expect(await runningGuard("prepare")).toEqual({ prepared: true });
   const pause = await pauseOwnedExportWorker();
   let checkpointStarted = false, resumed = false;
   try {
@@ -35,7 +36,7 @@ test("real group snapshot running export accepts cancellation then clears all ar
     const checkpoint = await runningGuard("checkpoint", { taskID, workerID: pause.workerID });
     expect(checkpoint).toMatchObject({ taskID, kind: "group_assets.v3.export", state: "running", attempt: 1, progress: 10,
       snapshotCount: 1, manifestCount: 0, chunkCount: 0, allThreadsStopped: true, unsafeTransactions: 0,
-      activityLockReleased: true, observerStartedBeforeResume: true, checkpointCaught: true });
+      captureEndAuthorized: true, activityLockReleased: true, observerStartedBeforeResume: true, checkpointCaught: true });
     expect(checkpoint.leaseRemainingSeconds).toBeGreaterThan(20);
     expect(checkpoint.fencingToken).toBeGreaterThan(0);
     expect(checkpoint.blockedOwnedBackends).toBeGreaterThan(0);
@@ -83,7 +84,7 @@ test("real group snapshot running export accepts cancellation then clears all ar
     const recovered = await receiptAndDetail(page, setup.actorId, taskID);
     expect(recovered.detail).toMatchObject({ downloadReady: false, downloadStatus: "cancelled", task: { state: "cancelled" } });
     const unavailable = await unavailableDownload(context, taskID);
-    const cycles = await resumeOwnedExportWorker(context, pause);
+    const cycles = await resumeOwnedExportWorker(context, pause, taskID);
     expect(cycles.sameIdentity).toBe(true);
     const postResume = { ...await receiptAndDetail(page, setup.actorId, taskID), database: await terminalExport(taskID), unavailableDownload: await unavailableDownload(context, taskID) };
     expect(postResume.database).toEqual(database);

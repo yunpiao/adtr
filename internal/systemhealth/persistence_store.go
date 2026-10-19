@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/yunpiao/adtr/internal/dbadmission"
 	"github.com/yunpiao/adtr/internal/tasks"
 )
 
@@ -106,7 +107,7 @@ func (s *Store) requireTx(ctx context.Context, tx pgx.Tx) error {
 func (s *Store) withTx(ctx context.Context, fn func(context.Context, pgx.Tx) error) error {
 	ctx, cancel := context.WithTimeout(ctx, databaseTimeout)
 	defer cancel()
-	conn, err := pgx.ConnectConfig(ctx, s.config.Copy())
+	conn, err := dbadmission.ConnectConfig(ctx, s.config.Copy())
 	if err != nil {
 		return safeError(err)
 	}
@@ -118,6 +119,38 @@ func (s *Store) withTx(ctx context.Context, fn func(context.Context, pgx.Tx) err
 	defer tx.Rollback(ctx)
 	if err = tasks.CheckSchemaTx(ctx, tx, s.expectedSchema); err == nil {
 		err = fn(ctx, tx)
+	}
+	if err == nil {
+		err = tx.Commit(ctx)
+	}
+	return safeError(err)
+}
+
+// withActivityTx is the only consumer of a task activity candidate. Binding is
+// scoped to this existing physical connection and revoked on every return.
+func (s *Store) withActivityTx(ctx context.Context, workerID string, candidate tasks.ActivityCandidate, fn func(context.Context, pgx.Tx, string) error) error {
+	ctx, cancel := context.WithTimeout(ctx, databaseTimeout)
+	defer cancel()
+	if err := tasks.AwaitActivityCandidate(ctx, candidate, workerID); err != nil {
+		return safeError(err)
+	}
+	conn, err := dbadmission.ConnectConfig(ctx, s.config.Copy())
+	if err != nil {
+		return safeError(err)
+	}
+	defer conn.Close(ctx)
+	release, activityKey, err := tasks.BindActivityCandidate(candidate, conn, workerID)
+	if err != nil {
+		return safeError(err)
+	}
+	defer release()
+	tx, err := conn.Begin(ctx)
+	if err != nil {
+		return safeError(err)
+	}
+	defer tx.Rollback(ctx)
+	if err = tasks.CheckSchemaTx(ctx, tx, s.expectedSchema); err == nil {
+		err = fn(ctx, tx, activityKey)
 	}
 	if err == nil {
 		err = tx.Commit(ctx)

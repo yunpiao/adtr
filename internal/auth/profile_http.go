@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/jackc/pgx/v5"
+	"github.com/yunpiao/adtr/internal/dbadmission"
 )
 
 // ServeProfileHTTP is mounted after migration11 and shares the current schema
@@ -113,7 +113,7 @@ type profileAvatarOwner int64
 
 func (s *Service) handleProfile(ctx context.Context, r *http.Request, in profileUpload, decode func(string) ([]byte, error)) (any, []byte, error) {
 
-	conn, err := pgx.ConnectConfig(ctx, s.database.Copy())
+	conn, err := dbadmission.ConnectConfig(ctx, s.database.Copy())
 	if err != nil {
 		return nil, nil, err
 	}

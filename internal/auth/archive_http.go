@@ -13,7 +13,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/jackc/pgx/v5"
+	"github.com/yunpiao/adtr/internal/dbadmission"
 	"github.com/yunpiao/adtr/internal/taskarchive"
 	"github.com/yunpiao/adtr/internal/tasks"
 )
@@ -162,7 +162,7 @@ func (s *Service) serveArchive(w http.ResponseWriter, r *http.Request, engine *t
 	write(w, 200, value)
 }
 func (s *Service) handleArchive(ctx context.Context, r *http.Request, engine *taskarchive.Engine, path string, route archiveRoute, in archiveRequest, filter taskarchive.Filter) (any, error) {
-	conn, err := pgx.ConnectConfig(ctx, s.database.Copy())
+	conn, err := dbadmission.ConnectConfig(ctx, s.database.Copy())
 	if err != nil {
 		return nil, err
 	}

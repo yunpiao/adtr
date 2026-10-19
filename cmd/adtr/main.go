@@ -55,12 +55,43 @@ func run() (runErr error) {
 		}
 		return nil
 	}
+	admissionFailure, admissionCleanup, err := configureCIAdmission(*mode)
+	if err != nil {
+		return err
+	}
+	defer func() { admissionCleanup() }()
 	cfg, err := app.LoadConfig(*mode, os.Getenv)
 	if err != nil {
 		return err
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
+	cancelRoot := stop
+	if admissionFailure == nil {
+		defer stop()
+	} else {
+		logicalContext, logicalCancel, wrappedCleanup := splitCISignalLifetime(ctx, stop, admissionCleanup)
+		ctx = logicalContext
+		cancelRoot = logicalCancel
+		admissionCleanup = wrappedCleanup
+		observeCIWorkerContext(ctx, logicalCancel)
+		// A startup transport failure must be handled synchronously before any DB constructor.
+		select {
+		case <-admissionFailure:
+			cancelRoot()
+			return fmt.Errorf("CI database controller unavailable")
+		default:
+		}
+		watchDone := make(chan struct{})
+		go func() {
+			defer close(watchDone)
+			select {
+			case <-admissionFailure:
+				cancelRoot()
+			case <-ctx.Done():
+			}
+		}()
+		defer func() { cancelRoot(); <-watchDone }()
+	}
 	if *mode == "migrate" {
 		migrationCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
@@ -135,6 +166,9 @@ func run() (runErr error) {
 			}
 			drain, stopDrain := context.WithTimeout(context.Background(), 5*time.Second)
 			closeErr := journal.Close(drain)
+			if admissionFailure != nil && *mode == "worker" {
+				emitCIJournalFinal(journal, closeErr)
+			}
 			stopDrain()
 			journalCancel()
 			if closeErr != nil {
@@ -279,11 +313,12 @@ func run() (runErr error) {
 			return fmt.Errorf("worker identity unavailable")
 		}
 		workerOwner := hex.EncodeToString(identity[:])
-		activityRecorder := newWorkerActivityRecorder(func(c context.Context, a tasks.WorkerActivity) error {
+		candidateRecorder := newWorkerActivityCandidateRecorder(func(c context.Context, a tasks.WorkerActivity, candidate tasks.ActivityCandidate) error {
 			recordOperationalWorkerActivity(journal, a)
-			return healthStore.RecordWorkerCycle(c, a.WorkerID, systemhealth.WorkerCycle(a.Cycle), systemhealth.WorkerCycleStatus(a.Status), a.Code)
+			return healthStore.RecordWorkerCycleCandidate(c, a.WorkerID, systemhealth.WorkerCycle(a.Cycle), systemhealth.WorkerCycleStatus(a.Status), a.Code, candidate)
 		})
-		worker, workerErr := tasks.NewWorker(taskEngine, tasks.WorkerConfig{Owner: workerOwner, Concurrency: 4, PollInterval: 250 * time.Millisecond, OnActivity: activityRecorder, OnError: func(error) { fmt.Fprintln(os.Stderr, "task worker cycle failed") }})
+		activityRecorder := func(c context.Context, a tasks.WorkerActivity) { candidateRecorder(c, a, nil) }
+		worker, workerErr := tasks.NewWorker(taskEngine, tasks.WorkerConfig{Owner: workerOwner, Concurrency: 4, PollInterval: 250 * time.Millisecond, OnActivity: activityRecorder, OnActivityCandidate: candidateRecorder, OnError: func(error) { fmt.Fprintln(os.Stderr, "task worker cycle failed") }})
 		if workerErr != nil {
 			return workerErr
 		}
@@ -313,13 +348,13 @@ func run() (runErr error) {
 			close(maintenanceDone)
 		}()
 		messageDone := make(chan error, 1)
-		go func() { messageDone <- messageStore.Run(ctx); stop() }()
+		go func() { messageDone <- messageStore.Run(ctx); cancelRoot() }()
 		bulkDone := make(chan error, 1)
-		go func() { bulkDone <- messageStore.RunBulk(ctx, auth.NewTaskAuthorizer()); stop() }()
+		go func() { bulkDone <- messageStore.RunBulk(ctx, auth.NewTaskAuthorizer()); cancelRoot() }()
 		result := make(chan error, 1)
-		go func() { result <- worker.Run(ctx); stop() }()
+		go func() { result <- worker.Run(ctx); cancelRoot() }()
 		serverErr := app.Serve(ctx, server)
-		stop()
+		cancelRoot()
 		workerErr = <-result
 		<-schedulerDone
 		<-maintenanceDone
@@ -348,7 +383,7 @@ func run() (runErr error) {
 		done := make(chan error, 1)
 		go func() { done <- collector.Run(ctx) }()
 		serveErr := app.Serve(ctx, server)
-		stop()
+		cancelRoot()
 		<-done
 		return serveErr
 	}

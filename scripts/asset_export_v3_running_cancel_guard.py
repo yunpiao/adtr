@@ -1,13 +1,15 @@
 """CI-only, first-asset-export checkpoint barrier. Never imported by production.
 
-Only SELECT FOR UPDATE of the pre-existing owned queue activity row mutates
-lock state. Persistent psql sessions avoid docker startup in the 2s callback.
+A nonce/task-specific synthetic failure row isolates the CI activity barrier.
+Only its exact owned row is inserted, locked and removed after worker Wait. Persistent psql sessions avoid docker startup in the 2s callback.
 All identifiers are validated; credentials are never accepted or serialized.
 """
 import hashlib
+import base64
 import hmac
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
+import math
 import os
 from pathlib import Path
 import queue
@@ -22,6 +24,7 @@ from urllib.parse import parse_qsl, urlsplit
 from types import MappingProxyType
 
 from user_asset_export_v3_worker_guard import OwnedExportWorkerGuard
+from owned_rescue_runner import ControlFailure, CONTROL_DIAGNOSTIC_VALUES
 
 ACTIVITY_SQL = """WITH observed AS (SELECT clock_timestamp() AS at)
 INSERT INTO adtr.system_worker_activity(tenant_id,worker_id,cycle,status,error_code,last_activity_at,last_success_at)
@@ -77,12 +80,52 @@ FAILURE_REASONS = MappingProxyType({
     'missed actual activity checkpoint': 'activity_waiter_missing',
     'invalid owned session observation': 'invalid_session_observation',
     'owned backend state unavailable': 'state_unavailable',
+    'owned speculative insertion in progress': 'speculative_insert_in_progress',
+    'owned registry observation incomplete': 'registry_observation_incomplete',
+    'owned connections still draining': 'registry_draining',
     'nonidle unclassified owned session': 'nonidle_session',
+    'invalid registry state': 'registry_state_invalid',
+    'ambiguous candidate identity': 'candidate_ambiguous',
+    'invalid candidate phase': 'candidate_phase_invalid',
+    'candidate backend unavailable': 'candidate_backend_unavailable',
+    'activity selection not prepared': 'activity_selection_unprepared',
+    'activity selection preparation failed': 'activity_selection_failed',
+    'activity fixture insertion failed': 'activity_fixture_failed',
+    'activity alias mismatch': 'activity_alias_mismatch',
+    'activity fixture cleanup failed': 'activity_cleanup_failed',
+    'candidate activity chain mismatch': 'candidate_chain_mismatch',
+    'candidate activity not ready': 'candidate_activity_pending',
+    'selected candidate changed': 'selected_candidate_changed',
+    'invalid registry counts': 'registry_counts_invalid',
+    'registry counts disagree': 'registry_counts_disagree',
+    'invalid registry record': 'registry_record_invalid',
+    'invalid registry generation': 'registry_generation_invalid',
+    'invalid registry lifecycle': 'registry_lifecycle_invalid',
+    'invalid pending registry entry': 'registry_pending_invalid',
+    'invalid registry backend': 'registry_backend_invalid',
+    'invalid registry candidate': 'registry_candidate_invalid',
+    'invalid registry candidate values': 'registry_candidate_values_invalid',
+    'registry not sealed for target': 'registry_target_unsealed',
+    'registry did not drain': 'registry_not_drained',
+    'registry target changed': 'registry_target_changed',
+    'registry and owned backends differ': 'registry_backend_set_mismatch',
+    'checkpoint may only run once': 'checkpoint_reused',
+    'CI admission controller required': 'controller_missing',
+    'invalid journal baseline': 'journal_baseline_invalid',
+    'checkpoint task is not isolated': 'checkpoint_not_isolated',
+    'stopped controller witness invalid': 'stopped_witness_invalid',
+    'capture end authorization failed': 'capture_end_failed',
+    'stopped candidate identity changed': 'stopped_candidate_changed',
+    'pinned candidate changed': 'pinned_candidate_changed',
+    'checkpoint task boundary pending': 'task_boundary_pending',
+    'owned candidate registration absent': 'candidate_absent',
 })
 FAILURE_STAGES = frozenset({'preflight', 'observer_open', 'initial_observation',
     'initial_boundary', 'barrier_open', 'barrier_lock', 'resume', 'capture', 'capture_readiness',
     'stop_identity', 'stop_signal', 'all_threads', 'stopped_observation',
-    'checkpoint_validation', 'session_validation', 'capture_window',
+    'checkpoint_validation', 'session_validation', 'capture_window', 'capture_end',
+    'registry_snapshot', 'registry_match', 'candidate_binding', 'candidate_strict',
+    'registry_pin', 'sealed_observation', 'sealed_registry',
     'barrier_release', 'cleanup', 'http_request'})
 RELATION_FAILURE_VALUES = MappingProxyType({
     'subreason': frozenset({'relation_not_allowlisted', 'lock_not_granted', 'mode_not_allowlisted'}),
@@ -112,7 +155,8 @@ FREEZE_NOT_READY = frozenset({'unsafe owned transaction query',
     'unsafe owned relation lock', 'unsafe owned advisory lock',
     'unsafe virtual transaction lock', 'unsafe transaction lock', 'unsafe tuple lock',
     'nonidle unclassified owned session', 'unexpected barrier waiter',
-    'missed actual activity checkpoint', 'owned backend state unavailable'})
+    'missed actual activity checkpoint', 'owned backend state unavailable',
+    'owned speculative insertion in progress'})
 
 
 # PostgreSQL 17 lock names are diagnostic categories, NOT accepted lock types.
@@ -217,6 +261,12 @@ def failure_event(stage, error):
     event = {'event': 'running_cancel_guard_failure',
              'stage': stage if stage in FAILURE_STAGES else 'unclassified',
              'reason': reason}
+    control = getattr(error, 'control_diagnostic', None) if type(error) is ControlFailure else None
+    if (type(control) is dict and set(control) == set(CONTROL_DIAGNOSTIC_VALUES) and
+            all(type(control[key]) is str and control[key] in values
+                for key, values in CONTROL_DIAGNOSTIC_VALUES.items())):
+        event['reason'] = 'controller_failure'
+        event.update({key: control[key] for key in CONTROL_DIAGNOSTIC_VALUES})
     detail = getattr(error, 'relation_diagnostic', None) if reason == 'unsafe_relation_lock' else None
     if (type(detail) is dict and set(detail) == set(RELATION_FAILURE_VALUES) | {'granted'}
             and type(detail['granted']) is bool and all(type(detail[key]) is str
@@ -240,10 +290,18 @@ def failure_event(stage, error):
     if (type(detail) is dict and set(detail) == {'blockerCheck'} and
             type(detail['blockerCheck']) is str and detail['blockerCheck'] in BLOCKER_CHECKS):
         event.update(detail)
+    detail = getattr(error, 'candidate_diagnostic', None) if reason in ('candidate_activity_pending', 'candidate_chain_mismatch') else None
+    if (type(detail) is dict and set(detail) == set(CANDIDATE_WAIT_VALUES) | {'transaction'}
+            and type(detail['transaction']) is bool and all(type(detail[key]) is str
+                and detail[key] in values for key, values in CANDIDATE_WAIT_VALUES.items())):
+        event.update({key: detail[key] for key in (*CANDIDATE_WAIT_VALUES, 'transaction')})
     pending = getattr(error, 'last_not_ready_error', None) if reason == 'capture_deadline_missed' else None
     if (type(pending) is RuntimeError and len(pending.args) == 1 and
-            type(pending.args[0]) is str and pending.args[0] in FREEZE_NOT_READY):
+            type(pending.args[0]) is str and pending.args[0] in FREEZE_NOT_READY | {'owned registry observation incomplete', 'owned connections still draining', 'checkpoint task boundary pending', 'owned candidate registration absent', 'candidate activity not ready'}):
         event['lastNotReady'] = failure_event('capture', pending)
+    observations = getattr(error, 'capture_observations', None) if reason == 'capture_deadline_missed' else None
+    if type(observations) is int and 0 <= observations <= 1000000:
+        event['observations'] = observations
     return event
 
 
@@ -292,7 +350,11 @@ def normalized(sql):
 
 class Psql:
     """One persistent bounded connection, with no DSN in argv or output."""
-    def __init__(self, container, readonly):
+    def __init__(self, container, readonly, deadline=None):
+        self.deadline = deadline
+        if deadline is not None:
+            require(type(deadline) in (int, float) and math.isfinite(deadline) and time.monotonic() < deadline,
+                    'final quiescence deadline or state invalid')
         require(re.fullmatch(r'adtr-auth-e2e-[0-9a-f]{12}', container), 'isolated database required')
         options = '-c statement_timeout=1000 -c idle_in_transaction_session_timeout=8000'
         if readonly:
@@ -318,6 +380,9 @@ class Psql:
             self.lines.put(None)
 
     def query(self, sql, timeout=1.5):
+        if self.deadline is not None:
+            timeout = min(timeout, self.deadline - time.monotonic())
+            require(timeout > 0, 'final quiescence deadline or state invalid')
         require(self.process.poll() is None, 'checkpoint database session exited')
         self.process.stdin.write(sql + ';\n')
         self.process.stdin.flush()
@@ -329,6 +394,25 @@ class Psql:
             raise RuntimeError('checkpoint database observation unavailable') from error
 
     def close(self):
+        if self.deadline is not None:
+            expired = time.monotonic() >= self.deadline
+            close_failed = False
+            if self.process.poll() is None:
+                try:
+                    self.process.stdin.close()
+                except OSError:
+                    close_failed = True
+                try:
+                    self.process.wait(timeout=max(0, self.deadline - time.monotonic()))
+                except subprocess.TimeoutExpired:
+                    # Failure-only owned observer reap, never additional grace.
+                    self.process.kill()
+                    self.process.wait(timeout=2)
+                    expired = True
+            self.reader.join(timeout=max(0, min(2, self.deadline - time.monotonic())))
+            require(not close_failed and not expired and time.monotonic() < self.deadline,
+                    'final quiescence deadline or state invalid')
+            return
         if self.process.poll() is None:
             self.process.stdin.close()  # EOF rolls back the barrier, never commits data.
             try:
@@ -412,6 +496,7 @@ def validate_session_observation(sessions, lock_pid):
     observation_require(type(lock_pid) is int and lock_pid > 0, 'barrier_pid', lock_pid)
     pids = set()
     state_unavailable = False
+    speculative_insertion = False
     for row in sessions:
         observation_require(type(row) is dict and set(row) == {'pid', 'transaction', 'state',
             'query', 'waitType', 'blockers', 'locks'}, 'session_fields', row)
@@ -436,7 +521,18 @@ def validate_session_observation(sessions, lock_pid):
                 observation_require(type(lock[key]) is typ, 'lock_' + key, lock[key])
             for key, typ in (('relation', str), ('classid', str), ('objid', str), ('objsubid', int)):
                 observation_require(lock[key] is None or type(lock[key]) is typ, 'lock_' + key, lock[key])
-            if lock['type'] not in ('relation', 'advisory', 'virtualxid', 'transactionid', 'tuple'):
+            if lock['type'] == 'spectoken':
+                # PG17 speculative INSERT decision locks are transient, but are
+                # NEVER safe to freeze. Recognize only the exact projection;
+                # still scan every subsequent row/lock and the blocker graph.
+                token = lock['objid']
+                if not (lock['mode'] in ('ExclusiveLock', 'ShareLock') and
+                        all(lock[key] is None for key in ('relation', 'classid', 'objsubid')) and
+                        type(token) is str and re.fullmatch(r'[1-9][0-9]{0,9}', token) and
+                        int(token) <= 4294967295):
+                    raise unrecognized_lock_failure(lock['type'])
+                speculative_insertion = True
+            elif lock['type'] not in ('relation', 'advisory', 'virtualxid', 'transactionid', 'tuple'):
                 raise unrecognized_lock_failure(lock['type'])
     if not all(set(row['blockers']) <= pids | {lock_pid} for row in sessions):
         raise blocker_failure('outside_owned_sample')
@@ -448,6 +544,104 @@ def validate_session_observation(sessions, lock_pid):
                 resolved.add(row['pid'])
     if not pids <= resolved:
         raise blocker_failure('cyclic_owned_graph')
+    if speculative_insertion:
+        return RuntimeError('owned speculative insertion in progress')
+    # PG17 STATE_UNDEFINED is SQL NULL. It is never a safe frozen state.
+    # Finish the full scan first so it cannot conceal a later fatal observation.
+    return RuntimeError('owned backend state unavailable') if state_unavailable else None
+
+
+# Official REL_17_6 lockfuncs.c LockTagTypeNames and lock.c lock mode names.
+# These are runtime observation types, not the strict frozen lock allowlist.
+RUNTIME_LOCK_TYPES = frozenset({'relation', 'extend', 'frozenid', 'page', 'tuple',
+    'transactionid', 'virtualxid', 'spectoken', 'object', 'userlock', 'advisory', 'applytransaction'})
+RUNTIME_LOCK_MODES = frozenset({'AccessShareLock', 'RowShareLock', 'RowExclusiveLock',
+    'ShareUpdateExclusiveLock', 'ShareLock', 'ShareRowExclusiveLock', 'ExclusiveLock',
+    'AccessExclusiveLock', 'SIReadLock'})
+
+
+def validate_running_observation(sessions, lock_pid):
+    """Complete runtime structure/trust check; grants NO freeze eligibility.
+
+    PG17.6 lockfuncs.c enumerates the recognized running lock types. Every
+    session and lock is scanned before registry matching or candidate selection.
+    Non-target owned lifetimes may drain; their SQL is never declared safe.
+    """
+    observation_require(type(sessions) is list, 'sessions', sessions)
+    observation_require(type(lock_pid) is int and lock_pid > 0, 'barrier_pid', lock_pid)
+    pids = set()
+    state_unavailable = False
+    speculative_insertion = False
+    for row in sessions:
+        observation_require(type(row) is dict and set(row) == {'pid', 'transaction', 'state',
+            'query', 'waitType', 'blockers', 'locks'}, 'session_fields', row)
+        observation_require(type(row['pid']) is int and row['pid'] > 0 and row['pid'] != lock_pid, 'pid', row['pid'])
+        for key, typ in (('transaction', bool), ('query', str), ('blockers', list), ('locks', list)):
+            observation_require(type(row[key]) is typ, key, row[key])
+        observation_require(row['state'] is None or type(row['state']) is str, 'state_type', row['state'])
+        observation_require(row['waitType'] is None or type(row['waitType']) is str, 'wait_type', row['waitType'])
+        observation_require(row['state'] is None or row['state'] in ('active', 'idle', 'idle in transaction',
+            'idle in transaction (aborted)', 'fastpath function call', 'disabled'), 'state_value', row['state'])
+        observation_require(row['waitType'] is None or row['waitType'] in ('Activity', 'BufferPin',
+            'Client', 'Extension', 'IO', 'IPC', 'Lock', 'LWLock', 'Timeout'), 'wait_value', row['waitType'])
+        state_unavailable |= row['state'] is None
+        require(row['pid'] not in pids, 'duplicate owned backend')
+        pids.add(row['pid'])
+        for pid in row['blockers']:
+            observation_require(type(pid) is int and pid > 0, 'blocker_pid', pid)
+        for lock in row['locks']:
+            observation_require(type(lock) is dict and set(lock) == {'type', 'mode', 'granted',
+                'relation', 'classid', 'objid', 'objsubid'}, 'lock_fields', lock)
+            for key, typ in (('type', str), ('mode', str), ('granted', bool)):
+                observation_require(type(lock[key]) is typ, 'lock_' + key, lock[key])
+            for key, typ in (('relation', str), ('classid', str), ('objid', str), ('objsubid', int)):
+                observation_require(lock[key] is None or type(lock[key]) is typ, 'lock_' + key, lock[key])
+            if lock['type'] not in RUNTIME_LOCK_TYPES:
+                raise unrecognized_lock_failure(lock['type'])
+            observation_require(lock['mode'] in RUNTIME_LOCK_MODES, 'lock_mode', lock['mode'])
+            if lock['mode'] == 'SIReadLock':
+                observation_require(lock['type'] in ('relation', 'page', 'tuple') and lock['granted'] is True, 'lock_mode', lock['mode'])
+            if lock['type'] == 'spectoken':
+                # PG17 speculative INSERT decision locks are transient, but are
+                # NEVER safe to freeze. Recognize only the exact projection;
+                # still scan every subsequent row/lock and the blocker graph.
+                token = lock['objid']
+                if not (lock['mode'] in ('ExclusiveLock', 'ShareLock') and
+                        all(lock[key] is None for key in ('relation', 'classid', 'objsubid')) and
+                        type(token) is str and re.fullmatch(r'[1-9][0-9]{0,9}', token) and
+                        int(token) <= 4294967295):
+                    raise unrecognized_lock_failure(lock['type'])
+                speculative_insertion = True
+            elif lock['type'] in ('relation', 'extend', 'page', 'tuple'):
+                observation_require(type(lock['relation']) is str and bool(lock['relation']), 'lock_relation', lock['relation'])
+                for key in ('classid', 'objid', 'objsubid'):
+                    observation_require(lock[key] is None, 'lock_' + key, lock[key])
+            elif lock['type'] in ('frozenid', 'transactionid', 'virtualxid'):
+                for key in ('relation', 'classid', 'objid', 'objsubid'):
+                    observation_require(lock[key] is None, 'lock_' + key, lock[key])
+            elif lock['type'] in ('object', 'userlock', 'advisory', 'applytransaction'):
+                observation_require(lock['relation'] is None, 'lock_relation', lock['relation'])
+                oid_keys = ('objid',) if lock['type'] == 'applytransaction' else ('classid', 'objid')
+                for key in oid_keys:
+                    value = lock[key]
+                    observation_require(type(value) is str and re.fullmatch(r'0|[1-9][0-9]{0,9}', value) is not None and
+                                        int(value) <= 4294967295, 'lock_' + key, value)
+                if lock['type'] == 'applytransaction':
+                    observation_require(lock['classid'] is None, 'lock_classid', lock['classid'])
+                observation_require(type(lock['objsubid']) is int and -32768 <= lock['objsubid'] <= 32767,
+                                        'lock_objsubid', lock['objsubid'])
+    if not all(set(row['blockers']) <= pids | {lock_pid} for row in sessions):
+        raise blocker_failure('outside_owned_sample')
+    # Acyclic owned chains must resolve to an unblocked owned backend or barrier.
+    resolved = {lock_pid}
+    for _ in sessions:
+        for row in sessions:
+            if set(row['blockers']) <= resolved:
+                resolved.add(row['pid'])
+    if not pids <= resolved:
+        raise blocker_failure('cyclic_owned_graph')
+    if speculative_insertion:
+        return RuntimeError('owned speculative insertion in progress')
     # PG17 STATE_UNDEFINED is SQL NULL. It is never a safe frozen state.
     # Finish the full scan first so it cannot conceal a later fatal observation.
     return RuntimeError('owned backend state unavailable') if state_unavailable else None
@@ -493,13 +687,166 @@ def validate_checkpoint(row, task_id, worker_id, asset_kind='user'):
     return {k: v for k, v in row.items() if k != 'leaseOwner'} | {'leaseOwnerSHA256': digest(row['leaseOwner'])}
 
 
+JOURNAL_PROOF_SQL = """SELECT jsonb_build_object(
+ 'terminal',EXISTS(SELECT FROM adtr.tasks WHERE task_id='{task_id}' AND state='cancelled')
+ AND NOT EXISTS(SELECT FROM adtr.tasks WHERE state IN ('queued','running','retry_wait','cancel_requested')),
+ 'reportConsistent', (SELECT count(*)=1 AND COALESCE(bool_and(r.accepted>=r.acknowledged
+ AND r.rejected=0 AND r.queue_full=0 AND r.write_failures=0 AND r.unacknowledged=0 AND r.abandoned=0
+ AND NOT EXISTS(SELECT FROM adtr.operational_log_events other WHERE other.module='worker' AND other.process_id<>r.process_id)),false)
+ FROM adtr.operational_log_reports r WHERE r.module='worker'),
+ 'eventCount',(SELECT count(*) FROM adtr.operational_log_events WHERE module='worker'),
+ 'processID',(SELECT min(process_id) FROM adtr.operational_log_events WHERE module='worker'),
+ 'count',count(*),'processCount',count(DISTINCT process_id),
+ 'closed',COALESCE(bool_and(module='worker' AND code='queue_progress' AND outcome='progress'
+ AND reason='' AND severity='info' AND schema_version=1 AND
+ (SELECT array_agg(key ORDER BY key) FROM jsonb_object_keys(to_jsonb(e)) key) =
+ ARRAY['code','event_id','module','observed_at','outcome','process_id','reason','recorded_at','schema_version','severity']::text[]),true))
+ FROM adtr.operational_log_events e WHERE module='worker' AND code='queue_progress'"""
+
+
+def candidate_identity(frame, task, sessions):
+    """Select identity only, never grant pin or frozen eligibility."""
+    require(frame['status'] in ('open', 'draining', 'sealed'), 'invalid registry state')
+    matches = []
+    by_pid = {row['pid']: row for row in sessions}
+    keys = ('taskID', 'kind', 'attempt', 'leaseOwner', 'fencingToken', 'resultVersion')
+    for record in frame['records']:
+        candidate = record['candidate']
+        if candidate is None:
+            continue
+        if all(candidate[key] == task[key] for key in keys):
+            require(candidate['phase'] == 'first-fenced-progress-10' and
+                    type(candidate['activityKey']) is str and re.fullmatch('[a-z0-9_-]{1,64}', candidate['activityKey']), 'invalid candidate phase')
+            require(record['state'] == 'open' and record['backend'] in by_pid,
+                    'candidate backend unavailable')
+            matches.append((candidate['generation'], record['backend'], record['generation'],
+                            *(candidate[key] for key in keys), candidate['phase'], candidate['activityKey']))
+    require(len(matches) <= 1, 'ambiguous candidate identity')
+    return matches[0] if matches else None
+
+
+def activity_direct(row, lock_pid):
+    return (normalized(row['query']) == normalized(ACTIVITY_SQL) and
+            row['transaction'] is True and lock_pid in row['blockers'])
+
+
+def registered_candidate(frame, task, sessions, lock_pid, activity_key=None):
+    identity = candidate_identity(frame, task, sessions)
+    if identity is None:
+        return None
+    if activity_key is not None:
+        require(identity[-1] == activity_key, 'activity alias mismatch')
+    row = next(row for row in sessions if row['pid'] == identity[1])
+    require(activity_direct(row, lock_pid), 'candidate activity chain mismatch')
+    return identity[:2]
+
+
+CANDIDATE_WAIT_VALUES = {
+    key: TRANSACTION_FAILURE_VALUES[key] for key in
+    ('queryCategory', 'stateCategory', 'waitTypeCategory')}
+CANDIDATE_WAIT_VALUES['blockerCategory'] = frozenset({'none', 'direct_barrier_only',
+    'direct_plus_owned', 'indirect_owned_activity', 'owned_nonactivity', 'unresolved'})
+
+
+def candidate_activity_pending(row, sessions, lock_pid):
+    # Same already trust-checked sample; no new query or retained private values.
+    detail = transaction_query_failure(row).transaction_diagnostic
+    reachable = {lock_pid}
+    for _ in sessions:
+        for item in sessions:
+            if (item['blockers'] and set(item['blockers']) <= reachable and
+                    normalized(item['query']) == normalized(ACTIVITY_SQL) and
+                    item['transaction'] is True and item['waitType'] == 'Lock'):
+                reachable.add(item['pid'])
+    blockers = set(row['blockers'])
+    if not blockers:
+        category = 'none'
+    elif blockers == {lock_pid}:
+        category = 'direct_barrier_only'
+    elif lock_pid in blockers:
+        category = 'direct_plus_owned'
+    elif blockers <= reachable:
+        category = 'indirect_owned_activity'
+    elif blockers <= {item['pid'] for item in sessions}:
+        category = 'owned_nonactivity'
+    else:
+        category = 'unresolved'
+    error = RuntimeError('candidate activity not ready')
+    error.candidate_diagnostic = {key: detail[key] for key in
+        ('queryCategory', 'stateCategory', 'waitTypeCategory')}
+    error.candidate_diagnostic.update(transaction=row['transaction'], blockerCategory=category)
+    return error
+
+
+def registry_matches_pg(frame, sessions):
+    """A partial startup/cleanup observation waits; malformed registry fails."""
+    require(type(frame['pending']) is int and frame['pending'] >= 0 and
+            type(frame['open']) is int and frame['open'] >= 0 and
+            type(frame['records']) is list and len(frame['records']) <= 128, 'invalid registry counts')
+    generations, backends, registrations = set(), set(), set()
+    pending = opened = 0
+    for record in frame['records']:
+        require(type(record) is dict and set(record) == {'generation', 'state', 'backend', 'candidate'},
+                'invalid registry record')
+        require(type(record['generation']) is int and record['generation'] > 0 and
+                record['generation'] not in generations, 'invalid registry generation')
+        generations.add(record['generation'])
+        require(record['state'] in ('pending', 'open', 'closing') and type(record['backend']) is int,
+                'invalid registry lifecycle')
+        if record['state'] == 'pending':
+            require(record['backend'] == 0 and record['candidate'] is None, 'invalid pending registry entry')
+            pending += 1
+        else:
+            require(0 < record['backend'] <= 4294967295 and record['backend'] not in backends,
+                    'invalid registry backend')
+            backends.add(record['backend']); opened += 1
+        candidate = record['candidate']
+        if candidate is not None:
+            require(type(candidate) is dict and set(candidate) == {'generation', 'taskID', 'kind', 'attempt',
+                    'leaseOwner', 'fencingToken', 'resultVersion', 'phase', 'activityKey'}, 'invalid registry candidate')
+            require(all(type(candidate[k]) is int and candidate[k] > 0 for k in
+                        ('generation', 'attempt', 'fencingToken', 'resultVersion')) and
+                    candidate['generation'] not in registrations and
+                    all(type(candidate[k]) is str and 0 < len(candidate[k]) <= 256 for k in
+                        ('taskID', 'kind', 'leaseOwner')) and candidate['phase'] == 'first-fenced-progress-10' and
+                    type(candidate['activityKey']) is str and re.fullmatch('[a-z0-9_-]{1,64}', candidate['activityKey']),
+                    'invalid registry candidate values')
+            registrations.add(candidate['generation'])
+    require(frame['pending'] == pending and frame['open'] == opened, 'registry counts disagree')
+    return pending == 0 and backends == {row['pid'] for row in sessions}
+
+
+def validate_sealed_registry(frame, candidate, sessions):
+    require(frame['status'] == 'sealed' and frame['target'] == candidate[0],
+            'registry not sealed for target')
+    require(frame['pending'] == 0 and frame['open'] == 1 and len(frame['records']) == 1,
+            'registry did not drain')
+    record = frame['records'][0]
+    require(record['state'] == 'open' and record['backend'] == candidate[1] and
+            record['candidate'] is not None and record['candidate']['generation'] == candidate[0],
+            'registry target changed')
+    require({row['pid'] for row in sessions} == {record['backend']} and len(sessions) == 1,
+            'registry and owned backends differ')
+
+
+
 class RunningExportCancelGuard:
     MAX_RUNNING_STOP_SECONDS = 10.0
 
-    def __init__(self, process, nonce, binary, database_container, application_name, database_url, proc_root=Path('/proc'), *, asset_kind='user'):
+    def __init__(self, process, nonce, binary, database_container, application_name, database_url, proc_root=Path('/proc'), *, asset_kind='user', controller=None):
         export_kind(asset_kind)  # Reject invalid selectors before creating any guard resources.
         self.asset_kind = asset_kind
-        self.owned = OwnedExportWorkerGuard(process, nonce, binary, proc_root)
+        self.controller = controller
+        self.journal_baseline = None
+        self.checkpoint_task_id = None
+        self.prepared = False
+        self.preparation_started = False
+        self.activity_key = None
+        self.activity_fixture_created = False
+        self.activity_owner = None
+        self.nonce = bytes.fromhex(nonce)
+        self.owned = OwnedExportWorkerGuard(process, nonce, binary, proc_root,
+            resume_delegate=self._resume_capture_owned)
         require(application_name == 'adtr-user-export-' + nonce and re.fullmatch('[0-9a-f]{32}', nonce), 'invalid application identity')
         self.application_name, self.container = application_name, database_container
         self.database_url = database_url
@@ -552,9 +899,9 @@ class RunningExportCancelGuard:
     def observe_sql(self, task_id):
         identifier(task_id)
         _, snapshots, manifests, chunks = export_kind(self.asset_kind)
-        return f"""SELECT jsonb_build_object('task', (SELECT jsonb_build_object(
+        return f"""SELECT jsonb_build_object('otherNonterminal',(SELECT count(*) FROM adtr.tasks WHERE task_id<>'{task_id}' AND state IN ('queued','running','retry_wait','cancel_requested')),'journalCount',(SELECT count(*) FROM adtr.operational_log_events WHERE module='worker' AND code='queue_progress'),'task', (SELECT jsonb_build_object(
  'taskID',t.task_id,'kind',t.kind,'state',t.state,'attempt',t.attempt,'progress',t.progress,
- 'fencingToken',t.fencing_token,'leaseOwner',t.lease_owner,
+ 'fencingToken',t.fencing_token,'leaseOwner',t.lease_owner,'resultVersion',t.result_version,
  'databaseClock',extract(epoch FROM n.at),'leaseUntilEpoch',extract(epoch FROM t.lease_until),
  'leaseRemainingSeconds',extract(epoch FROM t.lease_until-n.at),
  'snapshotCount',(SELECT count(*) FROM {snapshots} WHERE task_id=t.task_id),
@@ -569,53 +916,207 @@ class RunningExportCancelGuard:
  'classid',l.classid::text,'objid',l.objid::text,'objsubid',l.objsubid)) FROM pg_locks l WHERE l.pid=a.pid),'[]'::jsonb)))
  FROM pg_stat_activity a WHERE datname=current_database() AND application_name='{self.application_name}'),'[]'::jsonb))"""
 
+    def prepare(self):
+        require(not self.preparation_started and not self.prepared and not self.used and self.controller is not None,
+                'activity selection preparation failed')
+        require(all(state not in ('T', 't') for state in self.threads()), 'activity selection preparation failed')
+        self.preparation_started = True
+        deadline = time.monotonic() + 2.0
+        observer = None
+        try:
+            observer = Psql(self.container, True, deadline=deadline)
+            count = observer.query("SELECT to_json(count(*)) FROM adtr.tasks WHERE state IN ('queued','running','retry_wait','cancel_requested')")
+            require(type(count) is int and count == 0, 'activity selection preparation failed')
+            self.controller.prepare_selection(export_kind(self.asset_kind)[0], deadline)
+            require(re.fullmatch('adtr-user-export-[0-9a-f]{32}', self.application_name) is not None,
+                    'invalid application identity')
+            proof = observer.query("SELECT jsonb_build_object('database',current_database(),'backendCount',"
+                "(SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() AND application_name='"
+                + self.application_name + "'))")
+            require(type(proof) is dict and set(proof) == {'database', 'backendCount'} and
+                    type(proof['database']) is str and proof['database'] == 'adtr_e2e' and
+                    type(proof['backendCount']) is int and proof['backendCount'] == 0,
+                    'activity selection preparation failed')
+            closing_observer, observer = observer, None
+            closing_observer.close()
+            require(time.monotonic() < deadline, 'activity selection preparation failed')
+            self.prepared = True
+            return {'prepared': True}
+        except Exception:
+            self.failed = True
+            self.resume()
+            raise
+        finally:
+            if observer is not None:
+                observer.close()
+
+    def prepare_activity_fixture(self, task_id, worker_id):
+        key = self.controller.prepare_target(task_id, worker_id, time.monotonic() + .5)
+        expected = 'ci-activity-' + base64.b32encode(hashlib.sha256(
+            b'adtr-ci-activity-v1\x00' + self.nonce + b'\x00' + task_id.encode('utf-8')).digest()).decode('ascii').lower().rstrip('=')
+        require(type(key) is str and key == expected and len(key) == 64 and key != worker_id,
+                'activity alias mismatch')
+        self.activity_key, self.activity_owner = key, worker_id
+        # A committed synthetic FAILURE sentinel never fabricates healthy state.
+        # An existing/colliding row is never overwritten or later deleted.
+        writer = Psql(self.container, False)
+        try:
+            count = writer.query("WITH inserted AS (INSERT INTO adtr.system_worker_activity(tenant_id,worker_id,cycle,status,error_code,last_success_at) VALUES('default','" + key + "','queue','failure','cycle_failed',NULL) RETURNING 1) SELECT to_json(count(*)) FROM inserted")
+            require(type(count) is int and count == 1, 'activity fixture insertion failed')
+            self.activity_fixture_created = True
+        finally:
+            writer.close()
+
+    def cleanup_activity_fixture_after_wait(self, worker_exit_code):
+        if not self.activity_fixture_created:
+            return
+        require(type(worker_exit_code) is int and self.owned.process.poll() is not None,
+                'activity fixture cleanup failed')
+        key, owner = identifier(self.activity_key), identifier(self.activity_owner)
+        # identifier validates in place and returns the string.
+        writer = Psql(self.container, False)
+        try:
+            count = writer.query("WITH removed AS (DELETE FROM adtr.system_worker_activity WHERE tenant_id='default' AND worker_id='" + key + "' AND cycle='queue' AND last_success_at IS NULL AND ((status='failure' AND error_code='cycle_failed') OR (status='progress' AND error_code='')) RETURNING 1) SELECT to_json(count(*)) FROM removed")
+            require(type(count) is int and count == 1, 'activity fixture cleanup failed')
+            verified = writer.query("SELECT jsonb_build_object('remaining',(SELECT count(*) FROM adtr.system_worker_activity WHERE tenant_id='default' AND worker_id='" + key + "'),'ordinary',(SELECT count(*) FROM adtr.system_worker_activity WHERE tenant_id='default' AND worker_id='" + owner + "' AND cycle='queue'))")
+            require(type(verified) is dict and set(verified) == {'remaining', 'ordinary'} and
+                    all(type(verified[key]) is int for key in verified) and
+                    verified == {'remaining': 0, 'ordinary': 1},
+                    'activity fixture cleanup failed')
+            self.activity_fixture_created = False
+        finally:
+            writer.close()
+
     def checkpoint(self, task_id, worker_id):
         identifier(task_id); identifier(worker_id)
         require(not self.used and not self.failed, 'checkpoint may only run once')
         self.used = True
+        require(self.prepared, 'activity selection not prepared')
         require(all(s == 'T' for s in self.threads()), 'initial strict queued pause required')
         lock = observer = None
         stage = 'observer_open'
         try:
+            require(self.controller is not None, 'CI admission controller required')
             observer = Psql(self.container, True)
             # Persistent observer exists AND successfully sampled before CONT.
             stage = 'initial_observation'
             initial = observer.query(self.observe_sql(task_id))
             stage = 'initial_boundary'
+            require(type(initial.get('journalCount')) is int and initial['journalCount'] >= 0, 'invalid journal baseline')
+            require(type(initial.get('otherNonterminal')) is int and initial['otherNonterminal'] == 0, 'checkpoint task is not isolated')
+            self.journal_baseline = initial['journalCount']
+            self.checkpoint_task_id = task_id
             require(initial['task'] and initial['task']['kind'] == export_kind(self.asset_kind)[0] and initial['task']['state'] == 'queued' and initial['task']['attempt'] == 0
                     and initial['task']['snapshotCount'] == 0 and
-                    all(not s['transaction'] for s in initial['sessions']), 'initial queued transaction-free boundary missed')
+                    initial['sessions'] == [], 'initial queued transaction-free boundary missed')
+            self.prepare_activity_fixture(task_id, worker_id)
             stage = 'barrier_open'
             lock = Psql(self.container, False)
             stage = 'barrier_lock'
-            locked = lock.query("BEGIN; SELECT jsonb_build_object('count',count(*)) FROM (SELECT worker_id FROM adtr.system_worker_activity WHERE tenant_id='default' AND worker_id='" + worker_id + "' AND cycle='queue' FOR UPDATE) owned")
+            locked = lock.query("BEGIN; SELECT jsonb_build_object('count',count(*)) FROM (SELECT worker_id FROM adtr.system_worker_activity WHERE tenant_id='default' AND worker_id='" + self.activity_key + "' AND cycle='queue' FOR UPDATE) owned")
             require(locked['count'] == 1, 'exact pre-existing activity row required')
             observer_started = time.monotonic()
             stage = 'resume'
-            self.owned.resume()
+            self.owned.resume_queued_checkpoint()
             resumed = time.monotonic()
             deadline = resumed + 1.5  # fail closed before the production 2s callback expires
+            self.controller.arm(deadline)
+            self.controller.finish_target(deadline)
+            candidate = None
+            selected_identity = None
+            sealed_frame = None
             sample = None
             last_not_ready = None
+            observations = 0
             stage = 'capture'
             while time.monotonic() < deadline:
                 sample = observer.query(self.observe_sql(task_id), timeout=.5)
+                observations += 1
                 stage = 'capture_readiness'
-                pending = validate_session_observation(sample['sessions'], lock.pid)
+                pending = validate_running_observation(sample['sessions'], lock.pid)
                 if pending is not None:
                     last_not_ready = pending
                 stage = 'capture'
                 task = sample['task']
-                if task and task['state'] == 'running' and task['progress'] == 10 and task['snapshotCount'] == 1 and any(lock.pid in s['blockers'] and normalized(s['query']) == normalized(ACTIVITY_SQL) for s in sample['sessions']):
+                if selected_identity is not None:
+                    validate_checkpoint(task, task_id, worker_id, self.asset_kind)
+                    require(tuple(task[key] for key in ('taskID', 'kind', 'attempt',
+                        'leaseOwner', 'fencingToken', 'resultVersion')) == selected_identity[3:9],
+                        'selected candidate changed')
+                if task and task['state'] == 'running' and task['progress'] == 10 and task['snapshotCount'] == 1:
                     stage = 'checkpoint_validation'
                     validate_checkpoint(task, task_id, worker_id, self.asset_kind)
-                    stage = 'capture_readiness'
-                    pending = freeze_readiness(sample['sessions'], lock.pid)
-                    if pending is not None:
-                        last_not_ready = pending
+                    stage = 'registry_snapshot'
+                    frame = self.controller.snapshot(deadline)
+                    stage = 'registry_match'
+                    registry_complete = registry_matches_pg(frame, sample['sessions'])
+                    if selected_identity is not None:
+                        require(candidate_identity(frame, task, sample['sessions']) == selected_identity,
+                                'selected candidate changed')
+                    if not registry_complete:
+                        last_not_ready = RuntimeError('owned registry observation incomplete')
                         stage = 'capture'
                         time.sleep(.002)
                         continue
+                    if candidate is None:
+                        stage = 'candidate_binding'
+                        identity = candidate_identity(frame, task, sample['sessions'])
+                        if identity is None:
+                            last_not_ready = RuntimeError('owned candidate registration absent')
+                            time.sleep(.002)
+                            continue
+                        require(identity[-1] == self.activity_key, 'activity alias mismatch')
+                        if selected_identity is None:
+                            selected_identity = identity
+                        require(identity == selected_identity, 'selected candidate changed')
+                        target = next(row for row in sample['sessions'] if row['pid'] == identity[1])
+                        if not activity_direct(target, lock.pid):
+                            last_not_ready = candidate_activity_pending(target, sample['sessions'], lock.pid)
+                            if normalized(target['query']) not in {normalized(ACTIVITY_SQL),
+                                    normalized(SCHEMA_SQL), normalized(GATE_SQL), '', 'begin', 'BEGIN'}:
+                                rejected = RuntimeError('candidate activity chain mismatch')
+                                rejected.candidate_diagnostic = last_not_ready.candidate_diagnostic
+                                raise rejected
+                            time.sleep(.002)
+                            continue
+                        candidate = identity[:2]
+                        # Only this exact existing candidate may be pinned. Its
+                        # singleton sample must pass the unchanged strict rules.
+                        stage = 'candidate_strict'
+                        target = next(row for row in sample['sessions'] if row['pid'] == candidate[1])
+                        target_pending = validate_session_observation([target], lock.pid)
+                        if target_pending is not None:
+                            raise target_pending
+                        validate_sessions([target], lock.pid)
+                        stage = 'registry_pin'
+                        frame = self.controller.pin(candidate[0], deadline)
+                    if frame['status'] != 'sealed':
+                        last_not_ready = RuntimeError('owned connections still draining')
+                        stage = 'capture'
+                        time.sleep(.002)
+                        continue
+                    # Admission remains shut. Re-sample PG after the registry
+                    # sealed reply, then demand a complete bidirectional set.
+                    stage = 'sealed_observation'
+                    sample = observer.query(self.observe_sql(task_id), timeout=.5)
+                    observations += 1
+                    task = sample['task']
+                    validate_checkpoint(task, task_id, worker_id, self.asset_kind)
+                    validate_running_observation(sample['sessions'], lock.pid)
+                    stage = 'sealed_registry'
+                    if not registry_matches_pg(frame, sample['sessions']):
+                        last_not_ready = RuntimeError('owned registry observation incomplete')
+                        stage = 'capture'
+                        time.sleep(.002)
+                        continue
+                    require(registered_candidate(frame, task, sample['sessions'], lock.pid, self.activity_key) == candidate,
+                            'pinned candidate changed')
+                    validate_sealed_registry(frame, candidate, sample['sessions'])
+                    sealed_frame = frame
+                    pending = validate_session_observation(sample['sessions'], lock.pid)
+                    if pending is not None:
+                        raise pending
+                    validate_sessions(sample['sessions'], lock.pid)
                     observed = time.monotonic()
                     stage = 'stop_identity'
                     self.owned.assert_identity()
@@ -624,15 +1125,19 @@ class RunningExportCancelGuard:
                         if issued >= deadline:
                             expired = RuntimeError('missed two-second activity checkpoint')
                             expired.last_not_ready_error = last_not_ready
+                            expired.capture_observations = observations
                             raise expired
                         self.stopped_at = issued
                         stage = 'stop_signal'
                         self.owned.process.send_signal(signal.SIGSTOP)
                     break
+                else:
+                    last_not_ready = RuntimeError('checkpoint task boundary pending')
                 time.sleep(.002)
             else:
                 expired = RuntimeError('missed two-second activity checkpoint')
                 expired.last_not_ready_error = last_not_ready
+                expired.capture_observations = observations
                 raise expired
             stage = 'all_threads'
             while time.monotonic() < issued + .5:
@@ -642,6 +1147,7 @@ class RunningExportCancelGuard:
                 time.sleep(.002)
             require(all(s == 'T' for s in states), 'not all owned threads stopped')
             stage = 'stopped_observation'
+            require(self.controller.after_stop(deadline) is True, 'stopped controller witness invalid')
             sample = observer.query(self.observe_sql(task_id), timeout=.5)
             stage = 'checkpoint_validation'
             task = validate_checkpoint(sample['task'], task_id, worker_id, self.asset_kind)
@@ -650,13 +1156,23 @@ class RunningExportCancelGuard:
             if pending is not None:
                 raise pending
             sessions, blocked, txs = validate_sessions(sample['sessions'], lock.pid)
+            validate_sealed_registry(sealed_frame, candidate, sample['sessions'])
+            require(registered_candidate(sealed_frame, sample['task'], sample['sessions'], lock.pid, self.activity_key) == candidate,
+                    'stopped candidate identity changed')
             stage = 'capture_window'
             require(time.monotonic() < deadline, 'activity checkpoint exceeded safe callback window')
+            stage = 'capture_end'
+            require(self.controller.after_stop(deadline) is True, 'stopped controller witness invalid')
+            require(all(s == 'T' for s in self.threads()), 'not all owned threads stopped')
+            require(self.controller.commit_capture(sealed_frame['records'][0]['generation'],
+                    candidate[0], deadline) is True, 'capture end authorization failed')
+            require(time.monotonic() < deadline, 'activity checkpoint exceeded safe callback window')
+            require(all(s == 'T' for s in self.threads()), 'not all owned threads stopped')
             stage = 'barrier_release'
             released = lock.query("ROLLBACK; SELECT to_json(true)", timeout=.5)
             require(released is True, 'activity barrier release unverified')
             return task | {'workerIDSHA256': digest(worker_id), 'applicationNameSHA256': digest(self.application_name),
-                'allThreadsStopped': True, 'threadCount': len(states), 'ownedSessionCount': len(sessions),
+                'admissionSealed': True, 'stickyWitnessValid': True, 'captureEndAuthorized': True, 'allThreadsStopped': True, 'threadCount': len(states), 'ownedSessionCount': len(sessions),
                 'allowedActivityTransactions': txs, 'unsafeTransactions': 0, 'blockedOwnedBackends': blocked,
                 'activityLockReleased': True, 'observerStartedBeforeResume': True, 'checkpointCaught': True,
                 'observerStartedMonotonic': observer_started, 'resumedForCheckpointMonotonic': resumed,
@@ -681,12 +1197,29 @@ class RunningExportCancelGuard:
                 self.resume()
                 raise RuntimeError('checkpoint session cleanup failed') from None
 
+    def _resume_capture_owned(self):
+        if self.controller is not None and self.preparation_started and not self.controller.armed:
+            self.failed = True
+            self.controller.resume_and_release(abort=True)
+            return True
+        # After ARM only the independent rescuer may issue CONT. This also
+        # covers OwnedExportWorkerGuard's cumulative watchdog and close path.
+        if self.controller is not None and self.controller.armed:
+            self.controller.resume_and_release(abort=self.failed)
+            return True
+        return False
+
     def resume(self):
         with self._mutex:
             now = time.monotonic()
             duration = 0 if self.stopped_at is None else now - self.stopped_at
             started = self.stopped_at
             self.owned.resume()
+            if self.controller is not None and self.preparation_started and not self.used:
+                self.failed = True
+                self.controller.resume_and_release(abort=True)
+            elif self.controller is not None and self.used:
+                self.controller.resume_and_release(abort=self.failed)
             self.stopped_at = None
             if duration >= self.MAX_RUNNING_STOP_SECONDS:
                 self.failed = True
@@ -716,7 +1249,9 @@ class RunningExportCancelGuard:
                     length = int(self.headers.get('Content-Length', '0'))
                     require(0 < length <= 1024 and self.headers.get('Transfer-Encoding') is None, 'invalid control body')
                     data = json.loads(self.rfile.read(length))
-                    if self.path == '/checkpoint' and set(data) == {'taskID', 'workerID'}:
+                    if self.path == '/prepare' and data == {}:
+                        result = guard.prepare()
+                    elif self.path == '/checkpoint' and set(data) == {'taskID', 'workerID'}:
                         result = guard.checkpoint(data['taskID'], data['workerID'])
                     elif self.path == '/resume' and data == {}:
                         result = guard.resume()
@@ -745,6 +1280,133 @@ class RunningExportCancelGuard:
     def check(self):
         require(not self.failed and self.stopped_at is None and self.used, 'running checkpoint guard incomplete or failed')
         self.owned.check()
+
+    def verify_final_quiescence(self, deadline):
+        require(type(deadline) in (int, float) and math.isfinite(deadline) and
+                time.monotonic() < deadline and self.used and not self.failed,
+                'final quiescence deadline or state invalid')
+        require(re.fullmatch('adtr-user-export-[0-9a-f]{32}', self.application_name) is not None,
+                'invalid application identity')
+        observer = None
+        try:
+            observer = Psql(self.container, True, deadline=deadline)
+            remaining = deadline - time.monotonic()
+            require(remaining > 0, 'final quiescence deadline or state invalid')
+            proof = observer.query("SELECT jsonb_build_object('database',current_database(),'backendCount',"
+                "(SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() AND application_name='"
+                + self.application_name + "'))", timeout=min(1.5, remaining))
+            require(type(proof) is dict and set(proof) == {'database', 'backendCount'} and
+                    type(proof['database']) is str and proof['database'] == 'adtr_e2e' and
+                    type(proof['backendCount']) is int and proof['backendCount'] == 0,
+                    'final quiescence owned backend observation failed')
+        finally:
+            if observer is not None:
+                observer.close()
+        require(time.monotonic() < deadline, 'final quiescence deadline or state invalid')
+        return True
+
+    def verify_recovery_cleanup_after_wait(self, worker_exit_code, summary=None):
+        counts = ('qualified', 'completed', 'pending', 'open', 'connectPending', 'failed')
+        keys = {'event', 'captureAuthorized', 'released', 'settled', *counts}
+        valid = (type(summary) is dict and set(summary) == keys and
+            summary['event'] == 'owned_ci_recovery_cleanup' and
+            all(type(summary[k]) is bool for k in ('captureAuthorized', 'released', 'settled')) and
+            all(type(summary[k]) is int and 0 <= summary[k] <= 2**63-1 for k in counts))
+        checks = {'workerWait': type(worker_exit_code) is int and worker_exit_code == 0 and self.used and not self.failed,
+                  'summary': valid,
+                  'authorized': valid and summary['captureAuthorized'] and summary['released'],
+                  'settled': valid and summary['settled'],
+                  'completed': valid and summary['qualified'] == summary['completed'],
+                  'remainingZero': valid and all(summary[k] == 0 for k in ('pending', 'open', 'connectPending', 'failed'))}
+        proof = None
+        observer = None
+        observed = True
+        if checks['workerWait']:
+            try:
+                require(re.fullmatch('adtr-user-export-[0-9a-f]{32}', self.application_name) is not None,
+                        'invalid application identity')
+                observer = Psql(self.container, True)
+                proof = observer.query("SELECT jsonb_build_object('database',current_database(),'backendCount',"
+                    "(SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() AND application_name='"
+                    + self.application_name + "'))")
+            except Exception:
+                observed = False
+            finally:
+                if observer is not None:
+                    try:
+                        observer.close()
+                    except Exception:
+                        observed = False
+        valid_proof = (type(proof) is dict and set(proof) == {'database', 'backendCount'} and
+            type(proof['database']) is str and proof['database'] == 'adtr_e2e' and type(proof['backendCount']) is int and
+            0 <= proof['backendCount'] <= 2**63-1)
+        checks['ownedBackendsZero'] = observed and valid_proof and proof['backendCount'] == 0
+        event = {'event': 'running_cancel_recovery_cleanup', 'verified': all(checks.values()),
+                 'checks': checks, 'counts': {k: summary[k] if valid else None for k in counts},
+                 'ownedBackendCount': proof['backendCount'] if valid_proof else None}
+        print(json.dumps(event, sort_keys=True), flush=True)
+        require(all(checks.values()), 'owned recovery cleanup unverified')
+
+    def verify_journal_after_wait(self, worker_exit_code, final_record=None):
+        # Persisted reports precede Append's acknowledgement. Final delivery is
+        # instead witnessed after recorder Close and bound to this DB process.
+        counts = ('accepted', 'acknowledged', 'rejected', 'queueFull',
+                  'writeFailures', 'unacknowledged', 'abandoned')
+        keys = {'event', 'processIDSHA256', 'closeOK', 'acceptanceStopped', *counts}
+        valid_final = (type(final_record) is dict and set(final_record) == keys and
+            final_record['event'] == 'owned_ci_final_journal' and
+            type(final_record['processIDSHA256']) is str and
+            re.fullmatch('[0-9a-f]{64}', final_record['processIDSHA256']) is not None and
+            all(type(final_record[k]) is int and 0 <= final_record[k] <= 2**63-1 for k in counts) and
+            all(type(final_record[k]) is bool for k in ('closeOK', 'acceptanceStopped')))
+        checks = {'workerWait': type(worker_exit_code) is int and worker_exit_code == 0 and self.used and not self.failed,
+                  'finalRecord': valid_final}
+        proof = None
+        if checks['workerWait']:
+            identifier(self.checkpoint_task_id)
+            observer = None
+            try:
+                observer = Psql(self.container, True)
+                proof = observer.query(JOURNAL_PROOF_SQL.format(task_id=self.checkpoint_task_id))
+            except Exception:
+                checks['observation'] = False
+            finally:
+                if observer is not None:
+                    try:
+                        observer.close()
+                    except Exception:
+                        checks['observation'] = False
+        proof_keys = {'count', 'processCount', 'closed', 'reportConsistent', 'terminal', 'eventCount', 'processID'}
+        valid_proof = (type(proof) is dict and set(proof) == proof_keys and
+            all(type(proof[k]) is int and 0 <= proof[k] <= 2**63-1 for k in ('count', 'processCount', 'eventCount')) and
+            all(type(proof[k]) is bool for k in ('closed', 'reportConsistent', 'terminal')) and
+            type(proof['processID']) is str and re.fullmatch('[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}', proof['processID']) is not None)
+        checks['observation'] = checks.get('observation', True) and valid_proof
+        checks.update(closeOK=valid_final and final_record['closeOK'],
+            acceptanceStopped=valid_final and final_record['acceptanceStopped'],
+            acceptedAcknowledged=valid_final and final_record['accepted'] == final_record['acknowledged'],
+            errorsZero=valid_final and all(final_record[k] == 0 for k in counts[2:]),
+            processMatch=valid_final and valid_proof and hmac.compare_digest(final_record['processIDSHA256'], digest(proof['processID'])),
+            eventCountMatches=valid_final and valid_proof and proof['eventCount'] == final_record['accepted'],
+            queueProgressDelta=valid_proof and type(self.journal_baseline) is int and proof['count'] == self.journal_baseline + 1,
+            singleProcess=valid_proof and proof['processCount'] == 1,
+            closedFields=valid_proof and proof['closed'],
+            reportConsistent=valid_proof and proof['reportConsistent'],
+            terminal=valid_proof and proof['terminal'])
+        if not all(checks.values()):
+            event = {'event': 'running_cancel_journal_failure', 'stage': 'after_worker_wait',
+                'reason': next(key for key, ok in checks.items() if not ok), 'checks': checks,
+                'finalCounters': {key: final_record[key] if valid_final else None for key in counts},
+                'queueProgressCount': proof['count'] if valid_proof else None,
+                'baselineCount': self.journal_baseline if type(self.journal_baseline) is int and 0 <= self.journal_baseline <= 2**63-1 else None,
+                'eventCount': proof['eventCount'] if valid_proof else None,
+                'accepted': final_record['accepted'] if valid_final else None,
+                'acknowledged': final_record['acknowledged'] if valid_final else None}
+            print(json.dumps(event, sort_keys=True), flush=True)
+            raise RuntimeError('candidate journal fields or delivery unverified')
+        print(json.dumps({'event': 'running_cancel_journal_verified',
+                          'newQueueProgressEvents': 1, 'businessFieldsClosed': True,
+                          'metadataFieldsClosed': True, 'finalDeliveryVerified': True}, sort_keys=True), flush=True)
 
     def close(self):
         try:

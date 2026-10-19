@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/yunpiao/adtr/internal/dbadmission"
 )
 
 // QuiescedAttempt is an engine-issued witness that the exact started executor
@@ -126,7 +127,7 @@ type quiescenceTransaction func(context.Context, func(context.Context, pgx.Tx) e
 func (e *Engine) quiescenceTx(ctx context.Context, fn func(context.Context, pgx.Tx) error) error {
 	ctx, cancel := operationContext(ctx)
 	defer cancel()
-	conn, err := pgx.ConnectConfig(ctx, e.database.Copy())
+	conn, err := dbadmission.ConnectConfig(ctx, e.database.Copy())
 	if err != nil {
 		return err
 	}

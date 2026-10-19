@@ -54,8 +54,17 @@ def test_commands(args, env):
         packages = [package for package in packages if package != AUTH_PACKAGE]
         if not packages:
             raise ValueError("non-auth package discovery must be nonempty")
+        # Run the admission package first so its existing 10-minute timeout can
+        # produce a stack before the enclosing CI job budget is exhausted.
+        commands.append([go, "test", "-race", "-count=1",
+                         "-tags=integration,adtr_ci_dbadmission", "-timeout=10m", "-v",
+                         "./internal/dbadmission"])
         commands.append([go, "test", *TEST_FLAGS, "-v", *packages])
-        print(f"Non-auth integration: {len(packages)} packages", flush=True)
+        commands.append([go, "test", "-race", "-count=1",
+                         "-tags=integration,adtr_ci_dbadmission", "-timeout=10m",
+                         "-run", "^TestActivityCandidate", "./internal/tasks",
+                         "./internal/systemhealth", "./cmd/adtr"])
+        print(f"Non-auth integration: {len(packages)} packages plus admission verification", flush=True)
     if args.suite in ("all", "auth"):
         output = subprocess.check_output(
             [go, "test", *TEST_FLAGS, "-list", ".", AUTH_PACKAGE], env=env, text=True)

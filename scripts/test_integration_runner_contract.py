@@ -20,6 +20,23 @@ class IntegrationRunnerContract(unittest.TestCase):
     def quiet(self):
         return contextlib.redirect_stdout(io.StringIO())
 
+    def test_owned_rescue_runtime_is_required_in_non_auth_entry(self):
+        source = Path('scripts/test_integration.py').read_text()
+        self.assertIn('if args.suite in ("all", "non-auth"):', source)
+        self.assertIn('subprocess.run(["make", "test-owned-rescue-ci"], check=True)', source)
+        makefile = Path('Makefile').read_text()
+        self.assertIn('ADTR_RUN_OWNED_RESCUE_TESTS=1 python3 scripts/test_owned_rescue_runner_runtime.py', makefile)
+
+    def test_actual_psql_regression_reuses_ready_owned_container_before_go(self):
+        source = Path('scripts/test_integration.py').read_text()
+        self.assertIn('fixture_psql = args.suite in ("all", "non-auth")', source)
+        self.assertIn('("adtr-auth-e2e-" if fixture_psql else "adtr-test-") + uuid.uuid4().hex[:12]', source)
+        self.assertIn('env=dict(env, ADTR_RUN_ACTIVITY_PSQL_TESTS="1"), check=True)', source)
+        self.assertLess(source.index('"POSTGRES_DB=adtr_test"'), source.index('"pg_isready"'))
+        self.assertLess(source.index('"pg_isready"'), source.index('"scripts/test_activity_fixture_psql_runtime.py"'))
+        self.assertLess(source.index('"scripts/test_activity_fixture_psql_runtime.py"'), source.index('return run_tests(args, env)'))
+        self.assertIn('["python3", "scripts/test_activity_fixture_psql_runtime.py", "--container", name]', source)
+
     def test_partitions_are_disjoint_exhaustive_and_deterministic(self):
         shards = runner.partition_auth_tests(self.discovery)
         self.assertEqual(len(shards), runner.AUTH_SHARDS)
@@ -82,10 +99,51 @@ class IntegrationRunnerContract(unittest.TestCase):
         packages = ["example/cmd/service", runner.AUTH_PACKAGE, "example/internal/newpackage"]
         with patch.object(runner.subprocess, "check_output", side_effect=["\n".join(packages), self.discovery]), self.quiet():
             commands = runner.test_commands(runner.parse_args([]), self.env)
-        self.assertEqual(len(commands), 1 + runner.AUTH_SHARDS)
-        self.assertEqual(commands[0][-2:], [packages[0], packages[2]])
-        self.assertNotIn(runner.AUTH_PACKAGE, commands[0])
-        self.assertTrue(all(command[-1] == runner.AUTH_PACKAGE for command in commands[1:]))
+        self.assertEqual(len(commands), 3 + runner.AUTH_SHARDS)
+        self.assertEqual(commands[1][-2:], [packages[0], packages[2]])
+        self.assertNotIn(runner.AUTH_PACKAGE, commands[1])
+        self.assertEqual(commands[0], [self.env["GO"], "test", "-race", "-count=1",
+                                      "-tags=integration,adtr_ci_dbadmission", "-timeout=10m", "-v",
+                                      "./internal/dbadmission"])
+        self.assertTrue(all(command[-1] == runner.AUTH_PACKAGE for command in commands[3:]))
+
+    def test_candidate_verification_uses_isolated_fixture_and_exact_packages(self):
+        packages = [runner.AUTH_PACKAGE, "example/internal/service"]
+        with patch.object(runner.subprocess, "check_output", return_value="\n".join(packages)), self.quiet():
+            commands = runner.test_commands(runner.parse_args(["--suite", "non-auth"]), self.env)
+        self.assertEqual(commands[2], [self.env["GO"], "test", "-race", "-count=1",
+                                      "-tags=integration,adtr_ci_dbadmission", "-timeout=10m",
+                                      "-run", "^TestActivityCandidate", "./internal/tasks",
+                                      "./internal/systemhealth", "./cmd/adtr"])
+        source = Path('internal/systemhealth/activity_alias_health_integration_test.go').read_text()
+        names = re.findall(r'^func (Test\w+)\(t \*testing.T\)', source, re.M)
+        self.assertEqual(names, ['TestActivityCandidateSentinelHealthSideEffectAndExactCleanup'])
+        pattern = commands[2][commands[2].index('-run') + 1]
+        self.assertTrue(all(re.search(pattern, name) for name in names))
+
+    def test_non_auth_always_includes_tagged_lifecycle_contracts(self):
+        packages = [runner.AUTH_PACKAGE, "example/internal/service"]
+        with patch.object(runner.subprocess, "check_output", return_value="\n".join(packages)), self.quiet():
+            commands = runner.test_commands(runner.parse_args(["--suite", "non-auth"]), self.env)
+        self.assertEqual(len(commands), 3)
+        self.assertEqual(commands[0], [self.env["GO"], "test", "-race", "-count=1",
+                                      "-tags=integration,adtr_ci_dbadmission", "-timeout=10m", "-v",
+                                      "./internal/dbadmission"])
+
+    def test_admission_diagnostics_run_first_without_changing_other_groups_or_budgets(self):
+        packages = [runner.AUTH_PACKAGE, "example/one", "example/two"]
+        with patch.object(runner.subprocess, "check_output", return_value="\n".join(packages)), self.quiet():
+            commands = runner.test_commands(runner.parse_args(["--suite", "non-auth"]), self.env)
+        self.assertEqual(commands[1], [self.env["GO"], "test", *runner.TEST_FLAGS,
+                                      "-v", "example/one", "example/two"])
+        self.assertEqual(commands[0][-2:], ["-v", "./internal/dbadmission"])
+        self.assertNotIn("-run", commands[0])
+        self.assertNotIn("-skip", commands[0])
+        self.assertTrue(all(command.count("-race") == 1 and command.count("-count=1") == 1
+                            and command.count("-timeout=10m") == 1 for command in commands))
+        workflow = Path('.github/workflows/ci.yml').read_text()
+        contracts = re.split(r'\n  [A-Za-z][A-Za-z0-9_-]*:', workflow.split('  contracts:\n', 1)[1], maxsplit=1)[0]
+        self.assertIn('timeout-minutes: 20', contracts)
 
     def test_non_auth_rejects_incomplete_or_duplicate_package_discovery(self):
         for output in ("", "example/other", runner.AUTH_PACKAGE,

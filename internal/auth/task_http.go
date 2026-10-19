@@ -15,9 +15,9 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/yunpiao/adtr/internal/audit"
 	"github.com/yunpiao/adtr/internal/credentialuse"
+	"github.com/yunpiao/adtr/internal/dbadmission"
 	"github.com/yunpiao/adtr/internal/domains"
 	"github.com/yunpiao/adtr/internal/operationallogs"
 	"github.com/yunpiao/adtr/internal/tasks"
@@ -229,7 +229,7 @@ func parseTaskFilter(q url.Values) (tasks.Filter, error) {
 	return f, nil
 }
 func (s *Service) handleTask(ctx context.Context, r *http.Request, engine *tasks.Engine, path string, route taskRoute, in taskRequest, filter tasks.Filter) (any, error) {
-	conn, err := pgx.ConnectConfig(ctx, s.database.Copy())
+	conn, err := dbadmission.ConnectConfig(ctx, s.database.Copy())
 	if err != nil {
 		return nil, err
 	}

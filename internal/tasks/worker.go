@@ -12,11 +12,12 @@ import (
 type WorkerActivity struct{ WorkerID, Cycle, Status, Code string }
 
 type WorkerConfig struct {
-	Owner        string
-	Concurrency  int
-	PollInterval time.Duration
-	OnError      func(error)
-	OnActivity   func(context.Context, WorkerActivity)
+	Owner               string
+	Concurrency         int
+	PollInterval        time.Duration
+	OnError             func(error)
+	OnActivity          func(context.Context, WorkerActivity)
+	OnActivityCandidate func(context.Context, WorkerActivity, ActivityCandidate)
 }
 type Worker struct {
 	engine *Engine
@@ -51,7 +52,9 @@ func (w *Worker) Run(ctx context.Context) error {
 			owner := fmt.Sprintf("%s-%d", w.config.Owner, slot)
 			delay := w.config.PollInterval
 			for ctx.Err() == nil {
-				worked, err := w.engine.runOne(ctx, owner, func(c context.Context) { w.activity(c, "queue", "progress", "") })
+				worked, err := w.engine.runOne(ctx, owner, func(c context.Context, candidate ActivityCandidate) {
+					w.activityWithCandidate(c, "queue", "progress", "", candidate)
+				})
 				if err == nil {
 					w.activity(ctx, "queue", "success", "")
 				} else {
@@ -105,12 +108,21 @@ func (w *Worker) Run(ctx context.Context) error {
 	return w.engine.drainQuiescence(cleanup, w.config.PollInterval)
 }
 func (w *Worker) activity(ctx context.Context, cycle, status, code string) {
-	if ctx.Err() != nil || w.config.OnActivity == nil {
+	w.activityWithCandidate(ctx, cycle, status, code, nil)
+}
+
+func (w *Worker) activityWithCandidate(ctx context.Context, cycle, status, code string, candidate ActivityCandidate) {
+	if ctx.Err() != nil || (w.config.OnActivity == nil && w.config.OnActivityCandidate == nil) {
 		return
 	}
 	bounded, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
-	w.config.OnActivity(bounded, WorkerActivity{w.config.Owner, cycle, status, code})
+	observation := WorkerActivity{w.config.Owner, cycle, status, code}
+	if w.config.OnActivityCandidate != nil {
+		w.config.OnActivityCandidate(bounded, observation, candidate)
+	} else {
+		w.config.OnActivity(bounded, observation)
+	}
 }
 
 func pause(ctx context.Context, d time.Duration) bool {
@@ -140,7 +152,7 @@ func (e *Engine) RunOne(ctx context.Context, owner string) (bool, error) {
 	return e.runOne(ctx, owner, nil)
 }
 
-func (e *Engine) runOne(ctx context.Context, owner string, activity func(context.Context)) (bool, error) {
+func (e *Engine) runOne(ctx context.Context, owner string, activity func(context.Context, ActivityCandidate)) (bool, error) {
 	slot, err := e.acquireOwner(owner)
 	if err != nil {
 		return false, err
@@ -179,15 +191,11 @@ func (e *Engine) runOne(ctx context.Context, owner string, activity func(context
 	// with the heartbeat without sharing mutable lease state.
 	stable := lease
 	ex := Execution{Task: lease.Task, Probe: e.probe, WithTx: func(c context.Context, v int64, work FencedWork) (int64, error) {
-		version, err := e.WithTx(c, stable, v, work)
-		if err == nil && activity != nil {
-			activity(c)
-		}
-		return version, err
+		return e.withActivityCandidate(c, stable, v, work, activity)
 	}, Checkpoint: func(c context.Context, p int, cursor, result json.RawMessage, v int64) (int64, error) {
 		version, err := e.Progress(c, stable, p, cursor, result, v)
 		if err == nil && activity != nil {
-			activity(c)
+			activity(c, nil)
 		}
 		return version, err
 	}}
@@ -274,7 +282,7 @@ func (e *Engine) runOne(ctx context.Context, owner string, activity func(context
 			switch {
 			case herr == nil:
 				if activity != nil {
-					activity(executionCtx)
+					activity(executionCtx, nil)
 				}
 			case errors.Is(herr, ErrCancelRequested):
 				stopReason = "cancel"

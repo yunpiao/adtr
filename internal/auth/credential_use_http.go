@@ -17,6 +17,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/yunpiao/adtr/internal/credentialuse"
+	"github.com/yunpiao/adtr/internal/dbadmission"
 	"github.com/yunpiao/adtr/internal/domains"
 	"github.com/yunpiao/adtr/internal/operationaccounts"
 	"github.com/yunpiao/adtr/internal/schemaversion"
@@ -309,7 +310,7 @@ func (s *Service) handleCredentialUse(ctx context.Context, r *http.Request, stor
 }
 
 func (s *Service) handleCredentialUseForPurpose(ctx context.Context, r *http.Request, store *credentialuse.Store, path string, route taskRoute, in credentialUseRequest, q url.Values, purpose string) (*credentialUseResult, error) {
-	conn, err := pgx.ConnectConfig(ctx, s.database.Copy())
+	conn, err := dbadmission.ConnectConfig(ctx, s.database.Copy())
 	if err != nil {
 		return nil, fail(http.StatusServiceUnavailable, "schema_unavailable")
 	}

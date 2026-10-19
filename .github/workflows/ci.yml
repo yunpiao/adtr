@@ -181,6 +181,12 @@ jobs:
       max-parallel: 8
       matrix:
         include:
+          - name: group-asset-export-v3-running-cancel
+            command: python3 scripts/test_auth_e2e.py --suite group-asset-export-v3-running-cancel
+          - name: computer-asset-export-v3-running-cancel
+            command: python3 scripts/test_auth_e2e.py --suite computer-asset-export-v3-running-cancel
+          - name: user-asset-export-v3-running-cancel
+            command: python3 scripts/test_auth_e2e.py --suite user-asset-export-v3-running-cancel
           - name: account-references
             command: python3 scripts/test_auth_e2e.py --suite account-references
           - name: messages
@@ -205,12 +211,6 @@ jobs:
             command: python3 scripts/test_auth_e2e.py --suite user-asset-export-v3-failure
           - name: user-asset-export-v3-cancel
             command: python3 scripts/test_auth_e2e.py --suite user-asset-export-v3-cancel
-          - name: group-asset-export-v3-running-cancel
-            command: python3 scripts/test_auth_e2e.py --suite group-asset-export-v3-running-cancel
-          - name: computer-asset-export-v3-running-cancel
-            command: python3 scripts/test_auth_e2e.py --suite computer-asset-export-v3-running-cancel
-          - name: user-asset-export-v3-running-cancel
-            command: python3 scripts/test_auth_e2e.py --suite user-asset-export-v3-running-cancel
           - name: user-asset-export-v3
             command: python3 scripts/test_auth_e2e.py --suite user-asset-export-v3
           - name: user-assets-v3

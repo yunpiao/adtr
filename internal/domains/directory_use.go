@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/yunpiao/adtr/internal/dbadmission"
 	"github.com/yunpiao/adtr/internal/schemaversion"
 	"github.com/yunpiao/adtr/internal/tasks"
 )
@@ -278,7 +279,7 @@ func (s *Store) reconcileReservedDirectoryUsesForProfile(ctx context.Context, cf
 	}
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	conn, err := pgx.ConnectConfig(ctx, cfg)
+	conn, err := dbadmission.ConnectConfig(ctx, cfg)
 	if err != nil {
 		return 0, err
 	}
@@ -327,11 +328,11 @@ func (s *Store) reconcileReservedDirectoryUsesForProfile(ctx context.Context, cf
 	return total, nil
 }
 
-func reconcileReservedDirectoryUse(ctx context.Context, conn *pgx.Conn, tenant, id string) (bool, error) {
+func reconcileReservedDirectoryUse(ctx context.Context, conn *dbadmission.Conn, tenant, id string) (bool, error) {
 	return reconcileReservedDirectoryUseForProfile(ctx, conn, directoryTaskV1, tenant, id)
 }
 
-func reconcileReservedDirectoryUseForProfile(ctx context.Context, conn *pgx.Conn, profile directoryTaskProfile, tenant, id string) (bool, error) {
+func reconcileReservedDirectoryUseForProfile(ctx context.Context, conn *dbadmission.Conn, profile directoryTaskProfile, tenant, id string) (bool, error) {
 	if _, ok := profile.identity(); !ok {
 		return false, errDirectoryUseEvidence
 	}

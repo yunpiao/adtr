@@ -14,7 +14,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/jackc/pgx/v5"
+	"github.com/yunpiao/adtr/internal/dbadmission"
 	"github.com/yunpiao/adtr/internal/schedules"
 	"github.com/yunpiao/adtr/internal/tasks"
 )
@@ -186,7 +186,7 @@ func (s *Service) serveSchedules(w http.ResponseWriter, r *http.Request, engine 
 	write(w, 200, value)
 }
 func (s *Service) handleSchedule(ctx context.Context, r *http.Request, engine *schedules.Engine, path string, route taskRoute, in scheduleRequest, f schedules.Filter, id string) (any, error) {
-	conn, err := pgx.ConnectConfig(ctx, s.database.Copy())
+	conn, err := dbadmission.ConnectConfig(ctx, s.database.Copy())
 	if err != nil {
 		return nil, err
 	}

@@ -8,10 +8,9 @@ package schedules
 const IntegrationColumns = columns
 
 var (
-	IntegrationValidCreate     = validCreate
-	IntegrationGridAt          = gridAt
-	IntegrationHash            = hash
-	IntegrationScan            = scan
-	IntegrationCloseConnection = closeConnection
-	IntegrationRollback        = rollback
+	IntegrationValidCreate = validCreate
+	IntegrationGridAt      = gridAt
+	IntegrationHash        = hash
+	IntegrationScan        = scan
+	IntegrationRollback    = rollback
 )

@@ -13,13 +13,20 @@ import (
 // Reports only observations delivered by actual worker operations. This has no
 // timer and cannot manufacture liveness while a queue or executor is stuck.
 func newWorkerActivityRecorder(record func(context.Context, tasks.WorkerActivity) error) func(context.Context, tasks.WorkerActivity) {
+	recorder := newWorkerActivityCandidateRecorder(func(ctx context.Context, a tasks.WorkerActivity, _ tasks.ActivityCandidate) error {
+		return record(ctx, a)
+	})
+	return func(ctx context.Context, a tasks.WorkerActivity) { recorder(ctx, a, nil) }
+}
+
+func newWorkerActivityCandidateRecorder(record func(context.Context, tasks.WorkerActivity, tasks.ActivityCandidate) error) func(context.Context, tasks.WorkerActivity, tasks.ActivityCandidate) {
 	type lastObservation struct {
 		at     time.Time
 		status string
 	}
 	var mu sync.Mutex
 	last := map[string]lastObservation{}
-	return func(ctx context.Context, a tasks.WorkerActivity) {
+	return func(ctx context.Context, a tasks.WorkerActivity, candidate tasks.ActivityCandidate) {
 		now := time.Now()
 		key := a.WorkerID + "/" + a.Cycle
 		mu.Lock()
@@ -32,7 +39,7 @@ func newWorkerActivityRecorder(record func(context.Context, tasks.WorkerActivity
 		mu.Unlock()
 		bounded, cancel := context.WithTimeout(ctx, 2*time.Second)
 		defer cancel()
-		if err := record(bounded, a); err != nil && ctx.Err() == nil {
+		if err := record(bounded, a, candidate); err != nil && ctx.Err() == nil {
 			fmt.Fprintln(os.Stderr, "system worker observation failed")
 		}
 	}

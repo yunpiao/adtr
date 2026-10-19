@@ -16,8 +16,8 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/yunpiao/adtr/internal/dbadmission"
 	"github.com/yunpiao/adtr/internal/domains"
 	"github.com/yunpiao/adtr/internal/tasks"
 )
@@ -215,7 +215,7 @@ func domainHTTPError(err error) (int, string) {
 	return taskHTTPError(err)
 }
 func (s *Service) handleDomain(ctx context.Context, r *http.Request, store *domains.Store, engine *tasks.Engine, path string, route taskRoute, in domainRequest, filter domains.Filter) (any, error) {
-	conn, e := pgx.ConnectConfig(ctx, s.database.Copy())
+	conn, e := dbadmission.ConnectConfig(ctx, s.database.Copy())
 	if e != nil {
 		return nil, e
 	}

@@ -9,7 +9,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/jackc/pgx/v5"
+	"github.com/yunpiao/adtr/internal/dbadmission"
 	"github.com/yunpiao/adtr/internal/domains"
 	"github.com/yunpiao/adtr/internal/schemaversion"
 	"github.com/yunpiao/adtr/internal/tasks"
@@ -145,7 +145,7 @@ func (s *Service) writeGroupAssetsV3Error(w http.ResponseWriter, ctx context.Con
 }
 
 func (s *Service) handleGroupAssetsV3(ctx context.Context, r *http.Request, store *domains.Store, f domains.GroupAssetsV3Filter) (*credentialUseResult, error) {
-	conn, err := pgx.ConnectConfig(ctx, s.database.Copy())
+	conn, err := dbadmission.ConnectConfig(ctx, s.database.Copy())
 	if err != nil {
 		return nil, directorySchemaError(err)
 	}

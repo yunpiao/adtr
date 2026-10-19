@@ -16,8 +16,8 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/yunpiao/adtr/internal/dbadmission"
 	"github.com/yunpiao/adtr/internal/domains"
 	"github.com/yunpiao/adtr/internal/schemaversion"
 	"github.com/yunpiao/adtr/internal/tasks"
@@ -152,7 +152,7 @@ func (s *Service) serveDomainSource(w http.ResponseWriter, r *http.Request, stor
 }
 
 func (s *Service) handleDomainSource(ctx context.Context, r *http.Request, store *domains.Store, path string, route taskRoute, in domainSourceRequest, q url.Values) (*credentialUseResult, error) {
-	conn, e := pgx.ConnectConfig(ctx, s.database.Copy())
+	conn, e := dbadmission.ConnectConfig(ctx, s.database.Copy())
 	if e != nil {
 		return nil, fail(503, "schema_unavailable")
 	}
