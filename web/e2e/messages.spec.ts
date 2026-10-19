@@ -518,7 +518,7 @@ test("real health Worker → outbox → message snapshot → browser page and lo
     await timeline.locator(".message-day-heading").first().scrollIntoViewIfNeeded();
     await expect(timeline.locator(".message-day-heading").first()).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-    const file = `messages-timeline-${viewport.width}.png`;
+    const file = `messages-soc-timeline-${viewport.width}.png`;
     const path = testInfo.outputPath(file);
     const bytes = await page.screenshot({ path, fullPage: false });
     await testInfo.attach(file, { path, contentType: "image/png" });
