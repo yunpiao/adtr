@@ -164,6 +164,8 @@ LOCK_TYPE_CATEGORIES = frozenset({'relation', 'extend', 'frozenid', 'page',
     'tuple', 'transactionid', 'virtualxid', 'spectoken', 'object', 'userlock',
     'advisory', 'applytransaction', 'other'})
 BLOCKER_CHECKS = frozenset({'outside_owned_sample', 'cyclic_owned_graph', 'strict_barrier_chain'})
+STRICT_CANDIDATE_VALUES = MappingProxyType({key: TRANSACTION_FAILURE_VALUES[key]
+    for key in ('queryCategory', 'stateCategory', 'waitTypeCategory')})
 OBSERVATION_FAILURE_VALUES = MappingProxyType({
     'observationCheck': frozenset({'sessions', 'barrier_pid', 'session_fields',
         'pid', 'transaction', 'state_type', 'state_value', 'query', 'wait_type',
@@ -290,6 +292,16 @@ def failure_event(stage, error):
     if (type(detail) is dict and set(detail) == {'blockerCheck'} and
             type(detail['blockerCheck']) is str and detail['blockerCheck'] in BLOCKER_CHECKS):
         event.update(detail)
+    detail = getattr(error, 'strict_candidate_diagnostic', None) if (
+        type(error) is RuntimeError and reason == 'unowned_barrier_blocker'
+        and event.get('blockerCheck') == 'strict_barrier_chain') else None
+    if (type(detail) is dict and set(detail) == set(STRICT_CANDIDATE_VALUES)
+            | {'transaction', 'directBarrier', 'otherBlockers'}
+            and all(type(detail[key]) is bool for key in ('transaction', 'directBarrier', 'otherBlockers'))
+            and all(type(detail[key]) is str and detail[key] in values
+                    for key, values in STRICT_CANDIDATE_VALUES.items())):
+        event.update({key: detail[key] for key in
+            (*STRICT_CANDIDATE_VALUES, 'transaction', 'directBarrier', 'otherBlockers')})
     detail = getattr(error, 'candidate_diagnostic', None) if reason in ('candidate_activity_pending', 'candidate_chain_mismatch') else None
     if (type(detail) is dict and set(detail) == set(CANDIDATE_WAIT_VALUES) | {'transaction'}
             and type(detail['transaction']) is bool and all(type(detail[key]) is str
@@ -645,6 +657,28 @@ def validate_running_observation(sessions, lock_pid):
     # PG17 STATE_UNDEFINED is SQL NULL. It is never a safe frozen state.
     # Finish the full scan first so it cannot conceal a later fatal observation.
     return RuntimeError('owned backend state unavailable') if state_unavailable else None
+
+
+def validate_candidate_strict(target, lock_pid):
+    # This is the exact already-observed singleton, not another PG sample.
+    # Diagnostic classification never changes strict eligibility or retries.
+    try:
+        return validate_sessions([target], lock_pid)
+    except RuntimeError as error:
+        if (type(error) is RuntimeError and len(error.args) == 1
+                and type(error.args[0]) is str
+                and error.args[0] == 'unowned or cyclic barrier blocker'):
+            error.blocker_diagnostic = {'blockerCheck': 'strict_barrier_chain'}
+            try:
+                detail = transaction_query_failure(target).transaction_diagnostic
+                error.strict_candidate_diagnostic = {key: detail[key] for key in STRICT_CANDIDATE_VALUES}
+                error.strict_candidate_diagnostic.update(
+                    transaction=target['transaction'],
+                    directBarrier=lock_pid in target['blockers'],
+                    otherBlockers=any(pid != lock_pid for pid in target['blockers']))
+            except Exception:
+                pass  # The original strict rejection remains authoritative.
+        raise
 
 
 def freeze_readiness(sessions, lock_pid):
@@ -1087,7 +1121,7 @@ class RunningExportCancelGuard:
                         target_pending = validate_session_observation([target], lock.pid)
                         if target_pending is not None:
                             raise target_pending
-                        validate_sessions([target], lock.pid)
+                        validate_candidate_strict(target, lock.pid)
                         stage = 'registry_pin'
                         frame = self.controller.pin(candidate[0], deadline)
                     if frame['status'] != 'sealed':

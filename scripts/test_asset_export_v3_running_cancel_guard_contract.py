@@ -718,6 +718,11 @@ class ContractTests(unittest.TestCase):
         import ast
         import hashlib
         source = Path(g.__file__).read_text()
+        # The sole checkpoint delta is the diagnostic wrapper at the existing
+        # strict call. Restore that exact call before checking the prior bytes.
+        wrapped = '                        validate_candidate_strict(target, lock.pid)'
+        self.assertEqual(source.count(wrapped), 1)
+        source = source.replace(wrapped, '                        validate_sessions([target], lock.pid)', 1)
         expected = {
             'validate_sessions': '4efb9b60ec57914d43c55c695e0916b07d71fbcd3f3cdac8c3cd06b630bbd092',
             'validate_checkpoint': '83ff1b7a711627ec7ee4e28761dde75f5e18ae3e81abb39927b8057022a06e74',
@@ -1335,6 +1340,88 @@ class ContractTests(unittest.TestCase):
                 self.assertTrue(guard.checkpoint('task-one', 'worker')['checkpointCaught'])
             self.assertEqual(observer.query.call_count, 5)
             guard.owned.process.send_signal.assert_called_once_with(signal.SIGSTOP)
+            observer.close.assert_called_once(); barrier.close.assert_called_once()
+
+    def test_candidate_strict_same_sample_wait_none_rejects_lock_control_passes(self):
+        target = session() | {'waitType': None, 'locks': []}
+        original = copy.deepcopy(target)
+        self.assertIsNone(g.validate_session_observation([target], 99))
+        with self.assertRaisesRegex(RuntimeError, '^unowned or cyclic barrier blocker$') as caught:
+            g.validate_candidate_strict(target, 99)
+        self.assertEqual(target, original)
+        event = g.failure_event('candidate_strict', caught.exception)
+        self.assertEqual(event, {'event': 'running_cancel_guard_failure', 'stage': 'candidate_strict',
+            'reason': 'unowned_barrier_blocker', 'blockerCheck': 'strict_barrier_chain',
+            'queryCategory': 'activity', 'stateCategory': 'active', 'waitTypeCategory': 'none',
+            'transaction': True, 'directBarrier': True, 'otherBlockers': False})
+        control = target | {'waitType': 'Lock'}
+        self.assertEqual(g.validate_candidate_strict(control, 99), g.validate_sessions([control], 99))
+
+    def test_candidate_strict_preserves_original_error_and_private_values(self):
+        original = RuntimeError('unowned or cyclic barrier blocker')
+        target = session(123456789) | {'query': 'PRIVATE_SQL_SENTINEL', 'locks': [],
+                                     'blockers': [987654321, 112233445], 'state': 'PRIVATE_STATE',
+                                     'waitType': 'PRIVATE_WAIT'}
+        with patch.object(g, 'validate_sessions', side_effect=original):
+            with self.assertRaises(RuntimeError) as caught:
+                g.validate_candidate_strict(target, 987654321)
+        self.assertIs(caught.exception, original)
+        event = g.failure_event('candidate_strict', original)
+        self.assertEqual((event['queryCategory'], event['stateCategory'], event['waitTypeCategory']), ('other', 'other', 'other'))
+        self.assertTrue(event['directBarrier']); self.assertTrue(event['otherBlockers'])
+        encoded = json.dumps(event)
+        for secret in ('PRIVATE', '123456789', '987654321', '112233445'):
+            self.assertNotIn(secret, encoded)
+        original = RuntimeError('unowned or cyclic barrier blocker')
+        with patch.object(g, 'validate_sessions', side_effect=original), patch.object(g, 'transaction_query_failure', side_effect=ValueError('PRIVATE')):
+            with self.assertRaises(RuntimeError) as caught: g.validate_candidate_strict(target, 99)
+        self.assertIs(caught.exception, original)
+        self.assertEqual(g.failure_event('candidate_strict', original)['blockerCheck'], 'strict_barrier_chain')
+        self.assertNotIn('queryCategory', g.failure_event('candidate_strict', original))
+        class ForeignError(RuntimeError): pass
+        for error in (ForeignError('unowned or cyclic barrier blocker'), RuntimeError('PRIVATE')):
+            with patch.object(g, 'validate_sessions', side_effect=error):
+                with self.assertRaises(RuntimeError) as caught: g.validate_candidate_strict(target, 99)
+            self.assertIs(caught.exception, error)
+            self.assertFalse(hasattr(error, 'strict_candidate_diagnostic'))
+
+    def test_candidate_strict_projection_rejects_bad_detail(self):
+        valid = dict(queryCategory='activity', stateCategory='active', waitTypeCategory='none',
+                     transaction=True, directBarrier=True, otherBlockers=False)
+        for update in ({'transaction': 1}, {'directBarrier': 'PRIVATE'}, {'otherBlockers': None},
+                       {'queryCategory': 'PRIVATE'}, {'stateCategory': 'active\nPRIVATE'},
+                       {'waitTypeCategory': 'x'*10000}, {'extra': 'PRIVATE'}):
+            error = RuntimeError('unowned or cyclic barrier blocker')
+            error.blocker_diagnostic = {'blockerCheck': 'strict_barrier_chain'}
+            error.strict_candidate_diagnostic = valid | update
+            event = g.failure_event('candidate_strict', error)
+            self.assertNotIn('queryCategory', event)
+            self.assertNotIn('PRIVATE', json.dumps(event))
+        for check in ('outside_owned_sample', 'cyclic_owned_graph'):
+            error = g.blocker_failure(check); error.strict_candidate_diagnostic = valid
+            self.assertNotIn('queryCategory', g.failure_event('candidate_strict', error))
+
+    def test_candidate_strict_failure_never_pins_or_stops_and_cleans_up(self):
+        for blockers, expected in (([99], 'strict_barrier_chain'), ([999], 'outside_owned_sample'), ([100], 'cyclic_owned_graph')):
+            guard = self.guard(); guard.threads = Mock(return_value=['T'])
+            queued = task() | {'state': 'queued', 'attempt': 0, 'snapshotCount': 0}
+            observer, barrier = Mock(), Mock(pid=99)
+            observer.query.side_effect = [{'otherNonterminal': 0, 'journalCount': 0, 'task': queued, 'sessions': []},
+                {'task': task(), 'sessions': [session() | {'waitType': None, 'locks': [], 'blockers': blockers}]}]
+            barrier.query.return_value = {'count': 1}
+            with patch.object(g, 'Psql', side_effect=[observer, barrier]), patch.object(g.time, 'sleep') as sleep:
+                with self.assertRaises(RuntimeError): guard.checkpoint('task-one', 'worker')
+            guard.controller.pin.assert_not_called()
+            guard.owned.process.send_signal.assert_not_called()
+            sleep.assert_not_called()
+            self.assertEqual(observer.query.call_count, 2)
+            self.assertEqual(guard.failure_diagnostic['blockerCheck'], expected)
+            if expected == 'strict_barrier_chain':
+                self.assertEqual(guard.failure_diagnostic['stage'], 'candidate_strict')
+                self.assertEqual(guard.failure_diagnostic['waitTypeCategory'], 'none')
+            else: self.assertNotIn('directBarrier', guard.failure_diagnostic)
+            self.assertTrue(guard.failed)
+            self.assertEqual(guard.owned.resume.call_count, 2)
             observer.close.assert_called_once(); barrier.close.assert_called_once()
 
     def test_null_target_is_fatal_before_pin_without_stop(self):
