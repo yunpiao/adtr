@@ -248,6 +248,127 @@ afterEach(() => {
 });
 
 describe("task list navigation in the real App component", () => {
+  it("opens the original audit detail and preserves the task query and selection across history and remount", async () => {
+    const auditTask = task(secondID, { taskName: "audit.export" });
+    override = (url) => {
+      if (url.startsWith("/api/tasks/detail?"))
+        return response({ task: auditTask, events: [] });
+      if (url.startsWith("/api/audit/exports/detail?"))
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          headers: new Headers({ "X-ADTR-User-ID": String(profile.ID) }),
+          json: async () => ({
+            task: auditTask,
+            downloadReady: true,
+            rowCount: 0,
+            snapshotAt: "2026-10-10T00:00:01Z",
+            downloadPath: `/api/audit/exports/download?taskUUID=${secondID}`,
+          }),
+        } as Response);
+      return undefined;
+    };
+    const mounted = render(<App />);
+    await screen.findByRole("table", { name: "任务列表" });
+    await filterPageTwo();
+    await openDetail(secondID);
+    const saved = currentEntry();
+    const authReads = calls("/api/auth/me").length;
+    fireEvent.click(screen.getByRole("link", { name: "查看原审计导出" }));
+    await screen.findByRole("heading", { name: "审计导出任务" });
+    expect(window.location.hash).toBe(`#audit/detail/${secondID}`);
+    expect(calls("/api/auth/me").length).toBeGreaterThan(authReads);
+    expect(calls("/api/audit/exports/detail").at(-1)![0]).toBe(
+      `/api/audit/exports/detail?taskUUID=${secondID}`,
+    );
+    await screen.findByText(/XLSX 仅包含所选列的表头/);
+    act(() => window.history.back());
+    await screen.findByTestId("task-detail-identity");
+    expect(currentEntry()).toEqual(saved);
+    act(() => window.history.forward());
+    await screen.findByRole("heading", { name: "审计导出任务" });
+    mounted.unmount();
+    render(<App />);
+    await screen.findByRole("button", { name: "下载 XLSX" });
+    expect(window.location.hash).toBe(`#audit/detail/${secondID}`);
+    act(() => window.history.back());
+    await screen.findByTestId("task-detail-identity");
+    click("返回任务列表");
+    const selected = await screen.findByRole("button", {
+      name: `详情 ${secondID}`,
+    });
+    expect(selected).toHaveFocus();
+    expectInputs(applied);
+    expect(calls("/api/audit/exports/download")).toHaveLength(0);
+    expect(
+      fetcher.mock.calls.filter(
+        ([url, init]) =>
+          init.method === "POST" && url !== "/api/access/check",
+      ),
+    ).toHaveLength(0);
+  });
+
+  it("uses the original audit endpoint's current denial after following the task link", async () => {
+    override = (url) => {
+      if (url.startsWith("/api/tasks/detail?"))
+        return response({
+          task: task(firstID, { taskName: "audit.export" }),
+          events: [],
+        });
+      if (url.startsWith("/api/audit/exports/detail?"))
+        return response({ error: "forbidden" }, 403);
+      return undefined;
+    };
+    render(<App />);
+    await screen.findByRole("table", { name: "任务列表" });
+    await openDetail();
+    fireEvent.click(screen.getByRole("link", { name: "查看原审计导出" }));
+    await screen.findByRole("heading", { name: "审计导出任务" });
+    await screen.findByRole("alert");
+    expect(screen.queryByRole("button", { name: "下载 XLSX" })).toBeNull();
+    expect(calls("/api/audit/exports/detail").length).toBeGreaterThan(0);
+    expect(calls("/api/audit/exports/download")).toHaveLength(0);
+    expectNoMutation();
+  });
+
+  it("never restores an old audit link after a pending task read changes actor", async () => {
+    save({ view: { type: "detail", id: firstID } });
+    const held = deferred();
+    override = (url) =>
+      url.startsWith("/api/tasks/detail?") ? held.promise : undefined;
+    const mounted = render(
+      <TaskWorkspace profile={profile} sessionChanged={vi.fn()} />,
+    );
+    await waitFor(() => expect(calls("/api/tasks/detail")).toHaveLength(1));
+    expect(screen.queryByRole("link", { name: "查看原审计导出" })).toBeNull();
+    const signal = calls("/api/tasks/detail")[0][1].signal;
+    mounted.rerender(
+      <TaskWorkspace
+        profile={{
+          ...profile,
+          ID: 102,
+          username: "navigation_other",
+          csrfToken: "navigation-replaced-session",
+        }}
+        sessionChanged={vi.fn()}
+      />,
+    );
+    await screen.findByRole("table", { name: "任务列表" });
+    expect(signal?.aborted).toBe(true);
+    await act(async () =>
+      held.resolve(
+        await response({
+          task: task(firstID, { taskName: "audit.export" }),
+          events: [],
+        }),
+      ),
+    );
+    expect(screen.queryByRole("link", { name: "查看原审计导出" })).toBeNull();
+    expect(screen.queryByTestId("task-detail-identity")).toBeNull();
+    expect(calls("/api/audit/exports/detail")).toHaveLength(0);
+    expectNoMutation();
+  });
+
   it("preserves applied page two filters and row focus, but drops input drafts on detail return", async () => {
     window.history.replaceState({}, "", "#account");
     render(<App />);

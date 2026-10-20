@@ -69,6 +69,31 @@ class SelectionContract(unittest.TestCase):
         src=dict(self.sources,**{dep:''});self.graph[root]={dep}
         self.assertEqual(self.names(self.choose([dep],src)),{'messages'})
 
+    def test_task_workspace_only_keeps_original_audit_detail_consumer(self):
+        # Browser navigation is not a TypeScript import edge. Keep this explicit
+        # consumer even when audit.spec.ts itself is absent from the changed set.
+        root='web/src/TaskWorkspace.tsx'
+        expected={
+            'tasks', 'audit', 'messages', 'maintenance', 'user-assets-v2',
+            'directory-v3', 'group-members-v4',
+            'user-asset-export-v3', 'user-asset-export-v3-failure',
+            'user-asset-export-v3-cancel', 'computer-asset-export-v3',
+            'computer-asset-export-v3-failure', 'computer-asset-export-v3-cancel',
+            'group-asset-export-v3', 'group-asset-export-v3-failure',
+            'group-asset-export-v3-cancel',
+        }
+        self.assertEqual(self.graph['web/e2e/audit.spec.ts'],set())
+        plan=self.choose([root])
+        self.assertEqual(self.names(plan),expected)
+        self.assertEqual(plan['fixed'],['user-assets-v2'])
+        self.assertTrue(plan['groups']['contracts'])
+        self.assertTrue(plan['groups']['browser'])
+        self.assertFalse(plan['groups']['auth-integration'])
+        self.assertFalse(plan['groups']['native-no-store'])
+        self.assertFalse(plan['groups']['native-no-store-fixed'])
+        # The mapping edit itself must still receive full shared-CI validation.
+        self.assertTrue(all(self.choose(['scripts/ci_inventory.json'])['groups'].values()))
+
     def test_unmapped_production_consumer_widens_shared_dependency(self):
         dep='web/src/shared.ts';other='web/src/UnmappedPage.tsx'
         src=dict(self.sources,**{dep:'',other:''})

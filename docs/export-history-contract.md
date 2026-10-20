@@ -202,3 +202,27 @@ Workbook evidence was read directly from grouped-plan F38 and workbook-extracted
 | Regression/aggregate | existing audit/task/access/archive tests, focused race, TypeScript/DOM/build, applicable make check; actual PostgreSQL/browser/lifecycle and exact-head CI recorded separately if executable. Missing environment means blocked, not passing. No external AD or code publication |
 
 Local checks and actual runtime evidence are recorded separately in delivery.md. Current all-209/product acceptance accounting is unchanged; complete F38 and Issue #26 stay open for unsupported types/appType/source parity and genuine runtime evidence.
+## Task-center original-detail entry (bounded candidate)
+
+Issue #26 AD-F-151/152 is the outcome basis for the task center's
+`查看原审计导出` navigation, not evidence that the original requirements specified
+this precise cross-page link. The existing audit export/history/download
+implementation remains the result owner.
+
+A loaded exact `audit.export` task with a valid, matching task UUID links to the
+existing `#audit/detail/{taskUUID}` route. This includes non-success states so the
+original status is discoverable; only the original detail/download checks decide
+whether a file is available. The existing failure instruction to create a new
+export, current session/authorization checks and protected artifact semantics
+remain unchanged. There is no new backend, DTO, producer, format, permission gate,
+automatic download, mutation or idempotency key.
+
+The existing real `web/e2e/audit.spec.ts` is extended to follow that entry for its
+own nonempty and header-only exports, compare downloaded filename/bytes/SHA-256
+against the same original tasks, and cover task query/selection plus browser
+Back/Forward/reload without a business POST. It adds source-bound 1440/390 entry
+and result captures under the existing `audit-soc-*` artifact pattern, without
+replacing earlier screenshot proof or removing stale/session/revocation assertions.
+New test and capture code is not execution evidence: local runtime validation was
+not run under the current execution hold, and exact-head CI plus independent review
+remain required. See [task UI boundaries](soc-task-ui.md#audit-task-to-original-export-detail-bounded-candidate).

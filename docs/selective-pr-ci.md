@@ -41,10 +41,14 @@ short setup work in exchange for independently checking a correct selection.
 - UserAssetExportV3 is rendered by UserAssetsV3Workspace. Its API is also consumed
   by UserAssetExportTaskResult inside TaskWorkspace, so API edits include task-page
   consumers as well as export acceptance
-- TaskWorkspace has 15 reviewed browser consumers: tasks, messages, maintenance,
+- TaskWorkspace has 16 reviewed browser consumers: tasks, audit, messages, maintenance,
   user-assets-v2, directory-v3, group-members-v4 and normal/failure/queued-cancel
   export suites for each of user/computer/group. The fixed user-assets-v2 variant
-  follows automatically
+  follows automatically. Audit exercises the task-center link to the existing
+  original export detail; browser navigation is not a TypeScript import edge, so
+  the explicit `frontend_roots` mapping must retain it even when only
+  TaskWorkspace changes. The existing CI-discovered selector contract asserts
+  that exact 16-consumer set without relying on an audit-spec edit or full fallback
 - Each of the three v3 asset roots includes directory-v3-controls, whose empty
   observation helper navigates all three asset pages
 - `messages-bulk.spec.ts` belongs to the messages job: the real runner executes it

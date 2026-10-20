@@ -3,6 +3,7 @@ import ComputerAssetExportTaskResult from "./ComputerAssetExportTaskResult";
 import { isDomainConnectionTask } from "./task-api";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ApiError, type Profile } from "./api";
+import { validExportID } from "./audit-history";
 import {
   accessRequest,
   queryString,
@@ -1101,8 +1102,19 @@ function TaskDetails({
           )}
           {task.taskName === "audit.export" && (
             <p className="warning">
-              审计导出文件请在「操作审计」使用此任务 ID
-              查看。失败后通过该页面重新创建导出，生成新的受保护控制记录。
+              审计导出文件请在「操作审计」查看。
+              {!read.busy &&
+                !read.error &&
+                task.taskUUID === id &&
+                validExportID(task.taskUUID) && (
+                  <>
+                    <a href={`#audit/detail/${task.taskUUID}`}>
+                      查看原审计导出
+                    </a>
+                    。此入口仅查看原任务状态；能否下载以原页面的当前授权和文件校验为准。
+                  </>
+                )}
+              失败后通过该页面重新创建导出，生成新的受保护控制记录。
             </p>
           )}
           {action &&
