@@ -250,3 +250,37 @@ it.each(["user_assets.v3.export", "group_assets.v3.export"])("rejects current do
   expect(fetcher).toHaveBeenCalledTimes(1);
   expect(fetcher.mock.calls[0][0]).toContain("/api/computer-assets/v3/exports/detail?");
 });
+
+describe("task-ID-only original export read", () => {
+  it("uses the protected detail GET without a recovery key and accepts canonical original request", async () => {
+    const fetcher = vi.fn().mockResolvedValue(exportJSON(readyExport)); vi.stubGlobal("fetch", fetcher);
+    expect(await computerAssetExportAPI.detailByTask(readyExport.taskID, exportRequest.domainId, 1, signal())).toEqual(readyExport);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(fetcher.mock.calls[0][0]).toBe(`/api/computer-assets/v3/exports/detail?taskID=${readyExport.taskID}`);
+    expect(fetcher.mock.calls[0][1]).toMatchObject({ method: "GET", cache: "no-store", redirect: "error", credentials: "same-origin" });
+    expect(fetcher.mock.calls[0][1]).not.toHaveProperty("body");
+  });
+  it.each([
+    { taskID: "other-task" },
+    { task: { ...readyExport.task, taskUUID: "other-task" } },
+    { task: { ...readyExport.task, taskName: "user_assets.v3.export" } },
+    { task: { ...readyExport.task, domainId: "other-domain" } },
+    { request: { ...exportRequest, domainId: "other-domain" } },
+    { request: { ...exportRequest, observationId: "" } },
+    { artifact: { ...readyExport.artifact, filename: "foreign.xlsx" } },
+    { task: { ...readyExport.task, result: { privatePayload: "not allowed" } } },
+  ])("rejects unbound or invalid task metadata %j", async (patch) => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(exportJSON({ ...readyExport, ...patch })));
+    await expect(computerAssetExportAPI.detailByTask(readyExport.taskID, exportRequest.domainId, 1, signal())).rejects.toMatchObject({ code: "invalid_response" });
+  });
+  it("rejects another actor even on the first original-task lookup", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(exportJSON(readyExport, 200, 2)));
+    await expect(computerAssetExportAPI.detailByTask(readyExport.taskID, exportRequest.domainId, 1, signal())).rejects.toMatchObject({ status: 401 });
+  });
+  it("rejects bad lookup input without transport", async () => {
+    vi.stubGlobal("fetch", vi.fn());
+    await expect(computerAssetExportAPI.detailByTask("../other", exportRequest.domainId, 1, signal())).rejects.toMatchObject({ code: "invalid_input" });
+    await expect(computerAssetExportAPI.detailByTask(readyExport.taskID, "", 1, signal())).rejects.toMatchObject({ code: "invalid_input" });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+});

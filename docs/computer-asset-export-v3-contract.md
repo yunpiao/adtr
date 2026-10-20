@@ -200,3 +200,56 @@ network and signals rejected; local Go/Node/PG/browser/build are not run. This
 candidate does not establish chunk-stage cancellation, fencing races, legacy field
 parity, capacity or real AD/Windows acceptance. AD-F-053 stays in_progress;
 Issue30/151 and product acceptance0/209 remain open.
+
+
+## Task-ID original result read (AD-F-152 / AD-F-151, Issue #26)
+
+This bounded follow-on to AD-F-053 / EXP-007 exposes an independent read-only
+`ComputerAssetExportTaskResult` only for exact `computer_assets.v3.export` task
+records. It does not extend the five permitted columns or the computer search
+predicate, and does not add a producer, API, permission, database change or LDAP use.
+User and group result behavior is unchanged. Generic task viewing remains governed
+by its original permissions; denied dedicated detail disables only this entrance.
+
+The dedicated gate probes only the existing detail/download read paths, and requires
+readable domains, directory_assets, computer_asset_exports and tasks. Download is
+independently disabled if its path is denied. The access/check POST is a permission
+probe, not an export mutation; export traffic is GET only. Current actor headers,
+server tenant/domain ownership and authorization epoch checks remain mandatory.
+First detail-by-task validates the exact task ID, domain and kind plus the complete
+canonical request/artifact. That first request is locked for subsequent reads,
+including close/reopen; refresh cannot substitute a new observation or revision.
+The panel displays original source pins, canonical filters/sort/ordered columns,
+status and artifact. source_changed keeps the original source visible and disables
+download rather than adopting the latest observation. Pending, failed, cancelled,
+source_unavailable and artifact_invalid are also non-downloadable.
+
+The original download implementation is unchanged: fresh detail, strict headers,
+bounded complete bytes and SHA256, then another fresh detail binding the same
+request and manifest before a browser file may be created. Close, task/domain,
+account/session change, unmount or parent generic-task refresh abort and invalidate
+outstanding metadata/body/postcheck work. Authority failure clears private detail;
+401/session loss requests session refresh. Permission recheck is manual; there is
+no polling or automatic retry. This read path does not read or write recovery
+storage, generate an idempotency key, submit, cancel or replace unknown intent.
+Original creation/cancellation/recovery remains in the computer asset export panel.
+
+Named DOM/API tests exercise first binding, changed sources, independent permissions,
+all non-ready statuses, late metadata, actual streamed-body/postcheck interruption,
+byte/manifest corruption and postcheck revocation. These synthetic tests are not
+real source evidence. The existing computer export browser suite retains its
+three real default/allMatched/empty producer flows, source pins, database/sensitive
+operation budgets, XLSX validations and original ready-status/task-ID/download
+viewport assertions. After removing the persisted recovery locator, a new tab
+opens each actual task, reads its original result and downloads identical bytes;
+its export traffic must be exactly detail/detail/download/detail GETs with no
+receipt lookup or export POST. The original XLSX artifact remains independently
+validated, and the task-view copy must be byte-for-byte equal.
+
+The existing validator and upload allowlist admit only default-ready.png,
+allMatched-ready.png and empty-ready.png. Those three 1440 x 900 evidence slots
+now show the task original-result panel, while retaining the original flow/layout
+assertions before navigation. They do not establish new pixel acceptance for the
+old ready panel or mobile/narrow layouts. Evidence must be generated and reviewed
+from the exact submitted CI head; local runtime was not executed for this change.
+Issue #26 and Issue #30 remain open; this is not full product acceptance.
