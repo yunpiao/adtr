@@ -58,6 +58,10 @@ def fixture_worker():
                 # Synthetic EOF acknowledgement only, not Go cleanup evidence.
                 page[24:28] = (1).to_bytes(4, 'little')
                 os._exit(0)
+            # Keep this synthetic thread alive until owned process cleanup.
+            # Returning on normal EOF races the rescuer's /proc task snapshot;
+            # socket failure must not change the fixture's thread lifetime.
+            threading.Event().wait()
             return
 
     threading.Thread(target=normal_loop, daemon=True).start()
@@ -322,12 +326,16 @@ class RuntimeTests(unittest.TestCase):
             c.arm(time.monotonic() + 1.5)
             c.pin(1, time.monotonic() + 1)
             owner.process.send_signal(signal.SIGSTOP)
+            task_root = Path('/proc') / str(owner.process.pid) / 'task'
+            threads = {p.name for p in task_root.iterdir()}
+            self.assertGreaterEqual(len(threads), 2)
             fd = c.normal.read_fd
             c.normal.close(); owner.fds.remove(fd)
             with self.assertRaises(r.ControlFailure):
                 c.snapshot(time.monotonic() + .1)
             c.resume_and_release(abort=True)
             self.assertNotIn(owner.identity.verify(), ('T', 't'))
+            self.assertEqual({p.name for p in task_root.iterdir()}, threads)
         finally:
             try:
                 owner.shutdown()
