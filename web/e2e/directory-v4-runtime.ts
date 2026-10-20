@@ -9,7 +9,8 @@ import { parseGroupMembersV4 } from "../src/group-members-v4-api";
 import { directoryV4DisplayMember } from "../src/directory-v4-facts";
 import { freshCode, fillSecret, totp, type Authenticator } from "./directory-v4-fixture";
 import type { Task } from "../src/task-api";
-import { boundedV4, v4Phase } from "./directory-v4-diagnostics";
+import { v4Phase } from "./directory-v4-diagnostics";
+import { recordV4BodyClass, readV4ObservedObject, waitForV4RawMembers } from "./directory-v4-result-observation";
 
 export const V4 = "/api/directory/v4/";
 export function invariant(ok: unknown, message: string): asserts ok { if (!ok) throw new Error(message); }
@@ -74,16 +75,12 @@ export async function actualJSON(response: Response | APIResponse, actorId: numb
   invariant(response.status() === 200, "Expected genuine successful API response");
   const headers = response.headers();
   invariant(headers["cache-control"] === "no-store" && headers["x-adtr-user-id"] === String(actorId) && headers["x-content-type-options"] === "nosniff", "Real response metadata did not match actor/no-store contract");
-  let value: unknown;
   v4Phase("body-start");
-  try {
-    const body = await boundedV4(response.body(), 15_000, "V4 response body deadline exceeded");
-    invariant(body.length <= 8 * 1024 * 1024, "Real response exceeded acceptance budget");
-    value = parseDirectoryV4UniqueJSON(new TextDecoder("utf-8", { fatal: true }).decode(body));
-  } catch { throw new Error("Real response body was not bounded valid unique-key JSON"); }
+  // Only a closed transport/media-type enum, never actual headers or URLs.
+  recordV4BodyClass("request" in response, headers["content-type"]);
+  const value = await readV4ObservedObject(() => response.body());
   v4Phase("body-complete");
-  invariant(value && typeof value === "object" && !Array.isArray(value), "Real response must be an object");
-  return value as Record<string, unknown>;
+  return value;
 }
 export async function taskResponse(response: Response | APIResponse, actor: Actor, domainId: string, operation: "sync" | "cancel" | "read", taskUUID?: string) {
   const value = await actualJSON(response, actor.actorId);
@@ -222,7 +219,7 @@ export async function pinnedResults(page: Page, actor: Actor, original: Original
     const region = page.getByRole("region", { name: "组原始成员详情", exact: true });
     if (row.rawMember === null) { semantics.absent = true; await expect(region).toContainText("无法区分属性不存在与 ACL 隐藏"); }
     else if (!row.rawMember.length) { semantics.empty = true; await expect(region).toContainText("不证明该组为空"); }
-    else { semantics.values = true; invariant(JSON.stringify(await region.locator("ol > li").allTextContents()) === JSON.stringify(row.rawMember.map(directoryV4DisplayMember)), "Raw member values/order not preserved"); }
+    else { semantics.values = true; await waitForV4RawMembers(() => region.locator("ol > li").allTextContents(), row.rawMember.map(directoryV4DisplayMember)); }
   }
   invariant(Object.values(semantics).every(Boolean), "Real fixture did not cover absent/empty/value raw semantics");
   for (const size of [50, 25]) {
