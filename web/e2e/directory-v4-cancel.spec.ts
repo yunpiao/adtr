@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { configureV4Deadlines, v4Phase } from "./directory-v4-diagnostics";
+import { waitForV4CancelUnknownUI } from "./directory-v4-runtime";
 import { setupV4, requireFixture, lateFreshCode, fillSecret, totp } from "./directory-v4-fixture";
 import { V4, invariant, guardLeaks, originalEvidence, mutationEvidence, observeMutations, openCollection, prepareSync, enterProof, clickMutation, originalFrom, terminal, recover, refreshOriginal, acknowledge, committedLoss, proofEmpty, form, workerControl, writeEvidence, taskResponse, type Original, type Actor } from "./directory-v4-runtime";
 import { readDirectoryV4Use, assertQueuedReserved, assertQueuedQuiesced, assertRunningOpened, assertExecutorReturned, type DirectoryV4LedgerSnapshot } from "./directory-v4-ledger-observer";
@@ -36,6 +37,7 @@ test("queued never-opened cancellation and exact original executor return during
     await form(page, "cancel").getByRole("button", { name: "确认取消原任务", exact: true }).click();
     const queuedCancelled = await queuedLoss.completed;
     invariant(queuedCancelled.attempt === 0, "Queued cancellation consumed an executor attempt");
+    await waitForV4CancelUnknownUI(page, mutations.counts, { sync: 1, cancel: 1 });
     const queuedReceipt = await recover(page, actor, queued);
     invariant(mutations.counts().sync === 1 && mutations.counts().cancel === 1, "Queued recovery repeated business POST");
     const cancelledBeforeWorker = await readDirectoryV4Use(queuedPins); assertQueuedReserved(cancelledBeforeWorker, true);
@@ -89,6 +91,7 @@ test("queued never-opened cancellation and exact original executor return during
     await form(page, "cancel").getByRole("button", { name: "确认取消原任务", exact: true }).click();
     const accepted = await runningLoss.completed, cancelDispatch = mutations.entries.at(-1)!;
     invariant(accepted.attempt === 1 && accepted.progress >= 42 && accepted.progress < 95 && cancelDispatch.currentProof && cancelDispatch.at - dispatch.at < 10_000, "Real running cancel missed bounded I/O or proof window");
+    await waitForV4CancelUnknownUI(page, mutations.counts, { sync: 2, cancel: 2 });
     const runningReceipt = await recover(page, actor, running);
     await terminal(context, actor, running, "cancelled");
     await expect.poll(async () => (await readDirectoryV4Use(runningPins)).facts.state, { timeout: 15_000, intervals: [100, 250] }).toBe("quiesced");

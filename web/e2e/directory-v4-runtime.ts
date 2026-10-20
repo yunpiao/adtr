@@ -147,7 +147,30 @@ export async function terminal(context: BrowserContext, actor: Actor, original: 
   return result!;
 }
 let recoveryMarkers = 0;
-function recoveryPhase(phase: "start" | "main-frame-navigated" | "dom-content-loaded" | "load" | "reload-returned" | "receipt-response" | "receipt-not-observed") {
+export function v4CancelUnknownUIReady(root: Element): boolean {
+  const notice = "结果尚未确认或响应未通过校验。请查询原操作；不会自动重新采集或取消。 请点击“重新核验并恢复”查询原回执。";
+  const statuses = Array.from(root.querySelectorAll('[role="status"]'));
+  if (!statuses.some(node => node.textContent === notice)) return false;
+  const buttons = Array.from(root.querySelectorAll("button"));
+  const recover = buttons.filter(node => node.textContent?.trim() === "重新核验并恢复");
+  if (recover.length !== 1 || recover[0].disabled) return false;
+  if (root.querySelector('form, input[type="password"], input[inputmode="numeric"], input[autocomplete="one-time-code"]')) return false;
+  if (root.querySelector('[aria-label="原操作恢复"], [aria-label="原任务状态"], [aria-label="本任务的原始组成员结果"], [aria-label="组原始成员详情"], [aria-label="字典 4 已保存来源"]')) return false;
+  const forbidden = ["准备采集字典 4", "申请取消原任务", "确认提交采集", "确认取消原任务", "使用原键和原版本显式重试", "查看本任务的原始组成员结果", "确认结束原操作并清除恢复记录"];
+  return buttons.every(node => !forbidden.includes(node.textContent?.trim() ?? ""));
+}
+export async function waitForV4CancelUnknownUI(page: Page, counts: () => { sync: number; cancel: number }, expected: { sync: number; cancel: number }) {
+  const workspace = page.getByRole("region", { name: "字典 4 采集工作区", exact: true });
+  await expect.poll(async () => {
+    const current = counts();
+    return current.sync === expected.sync && current.cancel === expected.cancel && await workspace.isVisible() &&
+      await workspace.getByRole("status").filter({ hasText: "结果尚未确认或响应未通过校验。" }).isVisible() &&
+      await workspace.getByRole("button", { name: "重新核验并恢复", exact: true }).isVisible() && await workspace.evaluate(v4CancelUnknownUIReady);
+  }, { timeout: 5000, message: "Committed cancel loss did not render query-only unknown UI" }).toBe(true);
+  const after = counts();
+  invariant(after.sync === expected.sync && after.cancel === expected.cancel, "Unknown cancel UI changed business POST count");
+}
+function recoveryPhase(phase: "start" | "main-frame-navigated" | "dom-content-loaded" | "load" | "reload-returned" | "receipt-response" | "receipt-not-observed" | "navigation-request" | "navigation-response-2xx" | "navigation-response-3xx" | "navigation-response-4xx" | "navigation-response-5xx" | "navigation-response-other" | "navigation-finished" | "navigation-failed" | "page-closed" | "page-crashed") {
   if (recoveryMarkers++ < 64) console.log("[v4-recovery] " + phase);
 }
 export async function recover(page: Page, actor: Actor, original: Original) {
@@ -156,12 +179,31 @@ export async function recover(page: Page, actor: Actor, original: Original) {
   void receipt.then(() => recoveryPhase("receipt-response"), () => recoveryPhase("receipt-not-observed"));
   const commit = (frame: import("@playwright/test").Frame) => { if (frame === page.mainFrame()) recoveryPhase("main-frame-navigated"); };
   const dom = () => recoveryPhase("dom-content-loaded"), load = () => recoveryPhase("load");
+  const navigation = new Set<import("@playwright/test").Request>();
+  const request = (value: import("@playwright/test").Request) => {
+    if (navigation.size < 32 && value.isNavigationRequest() && value.resourceType() === "document" && value.frame() === page.mainFrame()) {
+      navigation.add(value); recoveryPhase("navigation-request");
+    }
+  };
+  const navigationResponse = (value: Response) => {
+    if (!navigation.has(value.request())) return;
+    const status = value.status();
+    recoveryPhase(status >= 200 && status < 300 ? "navigation-response-2xx" : status >= 300 && status < 400 ? "navigation-response-3xx" : status >= 400 && status < 500 ? "navigation-response-4xx" : status >= 500 && status < 600 ? "navigation-response-5xx" : "navigation-response-other");
+  };
+  const finished = (value: import("@playwright/test").Request) => { if (navigation.has(value)) recoveryPhase("navigation-finished"); };
+  const failed = (value: import("@playwright/test").Request) => { if (navigation.has(value)) recoveryPhase("navigation-failed"); };
+  const closed = () => recoveryPhase("page-closed"), crashed = () => recoveryPhase("page-crashed");
   page.on("framenavigated", commit); page.on("domcontentloaded", dom); page.on("load", load);
+  page.on("request", request); page.on("response", navigationResponse); page.on("requestfinished", finished); page.on("requestfailed", failed); page.on("close", closed); page.on("crash", crashed);
   try {
     recoveryPhase("start");
     await page.reload(); // Preserve existing load readiness and 15-second bound.
     recoveryPhase("reload-returned");
-  } finally { page.off("framenavigated", commit); page.off("domcontentloaded", dom); page.off("load", load); }
+  } finally {
+    page.off("framenavigated", commit); page.off("domcontentloaded", dom); page.off("load", load);
+    page.off("request", request); page.off("response", navigationResponse); page.off("requestfinished", finished); page.off("requestfailed", failed); page.off("close", closed); page.off("crash", crashed);
+    navigation.clear();
+  }
   const response = await receipt, query = new URL(response.url()).searchParams;
   invariant(query.get("domainId") === original.domainId && query.get("idempotencyKey") === original.idempotencyKey, "Recovery did not query exact original receipt");
   await taskResponse(response, actor, original.domainId, "read", original.taskUUID);
@@ -182,20 +224,47 @@ export async function proofEmpty(page: Page) {
   invariant(await fields.evaluateAll(nodes => nodes.every(node => (node as HTMLInputElement).value === "")), "Proof not empty at safe boundary");
 }
 // Real layout/scroll only: never alter document content or CSS for evidence.
-export function v4ScreenshotTargetVisible(node: Element): boolean {
+export function v4ScreenshotTargetStatus(node: Element): "visible" | "header_missing" | "style_hidden" | "target_bounds" | "text_missing" | "text_limit" | "text_bounds" | "text_occluded" {
   const header = document.querySelector(".soc-topbar");
-  if (!header) return false;
+  if (!header) return "header_missing";
   const box = node.getBoundingClientRect(), bottom = Math.max(0, header.getBoundingClientRect().bottom);
   const style = getComputedStyle(node);
-  if (style.visibility !== "visible" || style.display === "none" || style.opacity === "0" || box.width <= 0 || box.height <= 0 || box.top < bottom + 4 || box.left < 0 || box.right > innerWidth || box.bottom > innerHeight) return false;
-  const insetX = Math.min(2, box.width / 4), insetY = Math.min(2, box.height / 4);
-  return [[box.left + insetX, box.top + insetY], [box.right - insetX, box.top + insetY],
-    [box.left + insetX, box.bottom - insetY], [box.right - insetX, box.bottom - insetY],
-    [box.left + box.width / 2, box.top + box.height / 2]].every(([x, y]) => {
-    const hit = document.elementFromPoint(x, y);
-    return hit !== null && (hit === node || node.contains(hit));
-  });
+  if (style.visibility !== "visible" || style.display === "none" || style.opacity === "0") return "style_hidden";
+  if (box.width <= 0 || box.height <= 0 || box.top < bottom + 4 || box.left < 0 || box.right > innerWidth || box.bottom > innerHeight) return "target_bounds";
+  // Probe actual text line interiors, not transparent rounded control corners.
+  const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT);
+  let current: Node | null, nodes = 0, lines = 0;
+  while ((current = walker.nextNode())) {
+    if (!current.textContent?.trim()) continue;
+    if (++nodes > 128) return "text_limit";
+    const parent = current.parentElement;
+    if (!parent) return "text_missing";
+    for (let ancestor: Element | null = parent; ancestor; ancestor = ancestor.parentElement) {
+      const textStyle = getComputedStyle(ancestor);
+      if (textStyle.visibility !== "visible" || textStyle.display === "none" || textStyle.opacity === "0") return "style_hidden";
+    }
+    const range = document.createRange(); range.selectNodeContents(current);
+    const rectList = range.getClientRects();
+    if (rectList.length > 256 - lines) return "text_limit";
+    const rects = Array.from(rectList);
+    if (!rects.length) return "text_missing";
+    for (const rect of rects) {
+      if (++lines > 256) return "text_limit";
+      if (rect.width <= 0 || rect.height <= 0 || rect.top < bottom + 4 || rect.left < 0 || rect.right > innerWidth || rect.bottom > innerHeight) return "text_bounds";
+      const dx = Math.min(2, rect.width / 4), dy = Math.min(2, rect.height / 4);
+      const clear = [[rect.left + dx, rect.top + dy], [rect.right - dx, rect.top + dy],
+        [rect.left + dx, rect.bottom - dy], [rect.right - dx, rect.bottom - dy],
+        [rect.left + rect.width / 2, rect.top + rect.height / 2]].every(([x, y]) => {
+        const hit = document.elementFromPoint(x, y);
+        return hit !== null && (hit === parent || parent.contains(hit));
+      });
+      if (!clear) return "text_occluded";
+    }
+  }
+  return lines ? "visible" : "text_missing";
 }
+export function v4ScreenshotTargetVisible(node: Element): boolean { return v4ScreenshotTargetStatus(node) === "visible"; }
+let framingMarkers = 0;
 export async function frameV4Screenshot(anchor: Locator, required: Locator[]) {
   await bounded(anchor.evaluate(node => {
     node.scrollIntoView({ block: "start", behavior: "instant" });
@@ -207,8 +276,18 @@ export async function frameV4Screenshot(anchor: Locator, required: Locator[]) {
     if (scroller) scroller.scrollBy({ top, behavior: "instant" });
     else window.scrollBy({ top, behavior: "instant" });
   }), 5000, "Screenshot target positioning deadline exceeded");
-  for (const target of required) {
-    await expect.poll(() => target.evaluate(v4ScreenshotTargetVisible), { timeout: 5000, message: "Screenshot target is clipped or occluded" }).toBe(true);
+  for (const [ordinal, target] of required.entries()) {
+    let status: ReturnType<typeof v4ScreenshotTargetStatus> | "pending" = "pending";
+    try {
+      await expect.poll(async () => { status = await target.evaluate(v4ScreenshotTargetStatus); return status; }, { timeout: 5000, message: "Screenshot target is clipped or occluded" }).toBe("visible");
+    } catch (error) {
+      const viewport = anchor.page().viewportSize();
+      const allowed = ["pending", "visible", "header_missing", "style_hidden", "target_bounds", "text_missing", "text_limit", "text_bounds", "text_occluded"];
+      if (framingMarkers++ < 32 && ordinal < 128 && viewport && [1440, 390].includes(viewport.width) && [900, 844].includes(viewport.height) && allowed.includes(status)) {
+        console.log(`[v4-capture] target=${ordinal} width=${viewport.width} height=${viewport.height} reason=${status}`);
+      }
+      throw error;
+    }
   }
 }
 export async function safeScreenshots(page: Page, info: TestInfo, stem: string, secrets: readonly string[], prepareView?: () => Promise<void>) {
