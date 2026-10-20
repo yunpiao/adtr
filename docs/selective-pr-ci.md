@@ -126,3 +126,17 @@ business acceptance jobs remain skipped. Its outcome and observed duration must 
 recorded from that follow-up's own run. At the time of this entry, that runtime
 result and the merged rollout's fresh main-push result are still pending. Any
 measured documentation-only saving must not be generalized to all code changes.
+
+
+Test helper dependencies are classified from the parsed reverse import graph in
+each immutable snapshot, not from a `fixtures` filename. An isolated unit-test
+entry can establish test-only ownership; a helper needs at least one importer and
+all its importers must already be proved test-only. Runtime roots, composition,
+and e2e dependencies are excluded. Cycles, orphan helpers, and unknown runtime
+edges retain conservative coverage. Unknown outgoing imports from an isolated
+unit-test entry can only add test consumers; unknown edges elsewhere prevent the
+proof. A module also imported by a production page retains that page's browser
+coverage. A helper used exclusively by tests still runs contracts when changed.
+The current-source probe checks the computer export API and its synthetic helper
+using the actual TypeScript graph; future production imports invalidate a narrow
+expectation instead of silently skipping their tests.
