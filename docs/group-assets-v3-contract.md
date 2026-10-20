@@ -62,12 +62,12 @@ continues to pause pagination, facts and new export creation. Explicit Apply sen
 empty search with the retained sort/source/pin/page size and pageIdx1. Pending
 responses still belong to their applied query; clearing does not promote the draft
 to an applied query. Existing **清除组筛选** still clears search and sorting and
-immediately queries. No maxLength interception, parser/API/producer/permissions,
-export/recovery or cancellation behavior is changed.
+immediately queries. Parser/API/producer/permissions, export/recovery and read
+cancellation behavior remain unchanged; input-limit interception is described below.
 
 The native `type="button"` prevents accidental form submission and supplies
-keyboard activation. The local input ref is needed only to restore focus after
-clear; deleting it removes focus restoration, not query behavior. Removing this
+keyboard activation. The local input ref restores focus after clear and selection on rejected edits;
+deleting it removes those restorations, not query behavior. Removing this
 control removes the keyword-only shortcut; manual editing and full clear remain.
 The added control occupies form space, so desktop1440/mobile390 geometry and
 keyboard behavior are covered in the existing real group E2E, retaining all prior
@@ -137,3 +137,42 @@ v3-governance slices, preserving every existing suite. Main-push CI is separatel
 verified. Parent and engineering Issues remain open. Real AD, eight Windows
 versions, large-scale capacity, full old field parity and deployment are not
 accepted by this slice.
+
+
+## UI-0446 / FLD-0464 bounded keyword input limit
+
+Issue #30's maxlength20 clue is implemented as a current engineering interaction,
+not verified legacy behavior. Ordinary edits exceeding 20 UTF-16 code units are
+rejected whole, restoring the previous accepted draft and selection without
+truncation, normalization or requests. Native maxLength is intentionally absent:
+it can silently truncate a paste instead of explaining rejection. This input
+length guard supplements, never replaces, the unchanged Apply/parser/API checks
+for 20 UTF-16 units, 80 UTF-8 bytes and legal Unicode. Lone surrogates still reach
+the Apply validation boundary; input interception does not reject every surrogate
+code unit (which would also reject valid emoji).
+
+Paste checks the actual replacement selection. Drop rejects payloads above the
+entire cap, then validates the actual input result rather than assuming the drop
+caret equals selection. Existing control-character transfer rejection takes
+priority. A rejected edit marks the field invalid, closes facts, blocks Apply,
+paging, facts and new export until a valid edit or clear; the accepted query,
+source, sort, observation pin, pending read/retry and export recovery stay intact.
+Refresh retains its existing applied-query behavior outside composition.
+
+IME may stage an over-limit draft while composing; Apply, refresh, both clears,
+paging, facts and new export are paused until compositionend or blur fallback.
+Completion accepts the whole valid draft or restores the accepted value/selection;
+trailing rejected-composition inputs cannot erase the error. Unmount/session loss
+discards local composing state. Independent clear resumes its existing always-
+available behavior after composition, including empty/repeated/stale recovery;
+full clear still resets sorting and immediately queries.
+
+Accepted-value, selection and composition refs/state are required only for this
+whole-edit/IME interaction. Removing the guard restores oversized drafts until
+Apply; removing composition staging risks rejecting partial IME input. The tradeoff
+is temporary control suspension and an explicit correction step after rejection.
+Synthetic tests cover IME/drop, blur, session loss and pending responses; the real
+E2E adds native Chromium keyboard/clipboard/selection/emoji and 1440/390 error
+screenshots without removing existing checks. Native OS IME/drop, full real-chain
+execution and produced pixels must be reported separately, not inferred from DOM
+tests or test discovery. No legacy parity or product acceptance claim is made.

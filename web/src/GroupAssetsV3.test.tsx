@@ -558,9 +558,9 @@ describe("group search boundaries and current authority", () => {
     fill("组资产关键词", "😀".repeat(11));
     click("应用组筛选");
     expect(screen.getByLabelText("组资产关键词", { exact: true })).toHaveValue(
-      "😀".repeat(11),
+      "",
     );
-    expect(screen.getByText(/搜索最多20个UTF-16/)).toBeVisible();
+    expect(screen.getByText(/已拒绝整次变更/)).toBeVisible();
     expect(calls()).toHaveLength(count);
     expect(screen.getByRole("button", { name: "下一页" })).toBeDisabled();
   });

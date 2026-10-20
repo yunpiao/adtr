@@ -337,12 +337,13 @@ describe("UI-0446 independent group keyword clear", () => {
   it("clears an overlength rejected draft and its validation error without submitting", async () => {
     await start();
     fill("组资产关键词", "x".repeat(21));
+    expect(keyword()).toHaveValue("");
     apply();
-    expect(screen.getByText(/搜索最多20个UTF-16/)).toBeVisible();
+    expect(screen.getByText(/已拒绝整次变更/)).toBeVisible();
     const count = calls().length;
     fireEvent.click(clear());
     expect(keyword()).toHaveValue("");
-    expect(screen.queryByText(/搜索最多20个UTF-16/)).toBeNull();
+    expect(screen.queryByText(/已拒绝整次变更/)).toBeNull();
     expect(calls()).toHaveLength(count);
   });
 
