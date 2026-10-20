@@ -1,4 +1,5 @@
 import { test, expect, type Page, type APIResponse, type Route } from "@playwright/test";
+import { configureV4Deadlines, v4Phase } from "./directory-v4-diagnostics";
 import { randomUUID } from "node:crypto";
 import { setupV4, requireFixture, fillSecret, login, changePassword, enrollMfa, freshCode, readJSON } from "./directory-v4-fixture";
 import { V4, invariant, bounded, guardLeaks, evidenceDigest, originalEvidence, mutationEvidence, observeMutations, openCollection, prepareSync, enterProof, clickMutation, originalFrom, terminal, refreshOriginal, pinnedResults, safeScreenshots, proofEmpty, form, writeEvidence, actualJSON } from "./directory-v4-runtime";
@@ -22,19 +23,20 @@ async function privateCleared(page: Page) {
 }
 test("actual reader authority, native lifecycle and stale original reads never restore private state", async ({ page, context }, info) => {
   test.setTimeout(630_000);
+  configureV4Deadlines(context);
   // Deliberately unavailable notification transports exercise the real native
   // focus fallback, not manufactured focus events or fake authentication.
   await page.addInitScript(() => {
     Object.defineProperty(window, "BroadcastChannel", { configurable: true, value: class { constructor() { throw new DOMException("Unavailable", "SecurityError"); } } });
     Object.defineProperty(window, "localStorage", { configurable: true, get() { throw new DOMException("Unavailable", "SecurityError"); } });
   });
-  await useNativeTabLifecycle(page);
+  await bounded(useNativeTabLifecycle(page), 15_000, "Initial native lifecycle setup deadline exceeded");
   const fixture = await setupV4(page, context, { reader: true }), actor = fixture.producer;
   invariant(fixture.reader, "Actual reader setup absent");
   const reader = fixture.reader, mutations = observeMutations(context, actor);
   const leaks = guardLeaks(context, fixture.secrets);
-  const switching = await context.newPage(); await useNativeTabLifecycle(switching); await switching.goto("/");
-  await requireSameNativeWindow([page, switching]);
+  v4Phase("readers-tabs");
+  const switching = await context.newPage();
   let release = () => {}, delayedFinished: Promise<void> | undefined;
   let readerMonitoring = false, readerUiBusinessPosts = 0;
   const writeListener = (request: import("@playwright/test").Request) => {
@@ -43,6 +45,10 @@ test("actual reader authority, native lifecycle and stale original reads never r
   };
   context.on("request", writeListener);
   try {
+    await bounded(useNativeTabLifecycle(switching), 15_000, "Switching native lifecycle setup deadline exceeded");
+    await switching.goto("/");
+    await bounded(requireSameNativeWindow([page, switching]), 15_000, "Native window identity deadline exceeded");
+    v4Phase("readers-focus");
     await page.bringToFront(); await openCollection(page); await prepareSync(page); await draft(page);
     const lifecycle = await page.evaluateHandle(() => {
       const events: { type: string; trusted: boolean; visible: boolean }[] = [];
@@ -59,6 +65,7 @@ test("actual reader authority, native lifecycle and stale original reads never r
     await expect(form(page, "sync")).toHaveCount(0); await proofEmpty(page);
     await prepareSync(page); await draft(page);
     // Real browser history navigation, not synthetic popstate/hashchange events.
+    v4Phase("readers-history");
     await navigateTo(page, "账户概览"); await page.goBack();
     await expect(page.getByRole("heading", { name: "字典 4 目录采集", exact: true })).toBeVisible(); await proofEmpty(page);
     await page.goForward(); await page.goBack(); await proofEmpty(page);
@@ -71,8 +78,10 @@ test("actual reader authority, native lifecycle and stale original reads never r
     // Hold an actual old-actor success. Returning its exact server response after
     // native deactivation must not resurrect rows. A cancelled browser transport
     // is recorded as such; it is not claimed as an ignored-AbortSignal test.
+    v4Phase("readers-stale");
     let fetched!: () => void, failed!: (error: Error) => void, finish!: () => void;
     const ready = new Promise<void>((yes, no) => { fetched = yes; failed = no; });
+    void ready.catch(() => undefined);
     delayedFinished = new Promise<void>(yes => { finish = yes; });
     const gate = new Promise<void>(yes => { release = yes; });
     let genuineOldResponse = false;
@@ -90,7 +99,8 @@ test("actual reader authority, native lifecycle and stale original reads never r
       finally { await response?.dispose(); finish(); }
     };
     await page.route("**" + V4 + "observation?**", handler, { times: 1 });
-    await page.getByRole("button", { name: "刷新原始结果", exact: true }).click(); await ready;
+    await page.getByRole("button", { name: "刷新原始结果", exact: true }).click();
+    await bounded(ready, 20_000, "Genuine delayed read was not ready");
     await switching.bringToFront();
     await expect.poll(() => page.evaluate(() => ({ visibility: document.visibilityState, focused: document.hasFocus() }))).toEqual({ visibility: "hidden", focused: false });
     await privateCleared(page);
@@ -104,16 +114,16 @@ test("actual reader authority, native lifecycle and stale original reads never r
     const menu = (await readJSON(context, "/api/access/menu")).menu as { mark: string; auth: { readable: boolean; writeable: boolean } }[];
     invariant(JSON.stringify(menu.map(v => v.mark).sort()) === JSON.stringify(["directory_assets", "domains"]) && menu.every(v => v.auth.readable && !v.auth.writeable), "Actual reader has unexpected authority");
     readerMonitoring = true;
-    release(); await delayedFinished; delayedFinished = undefined;
+    release(); await bounded(delayedFinished, 15_000, "Genuine delayed read did not drain"); delayedFinished = undefined;
     invariant(genuineOldResponse && delivery.value !== "not_attempted", "Held genuine response was not drained");
     await privateCleared(page);
     const currentMe = page.waitForResponse(r => new URL(r.url()).pathname === "/api/auth/me" && r.status() === 200);
     await page.bringToFront();
     const checked = await currentMe;
-    invariant((await checked.json()).ID === reader.actorId, "Native focus did not recheck actual changed actor");
+    invariant((await bounded(checked.json(), 15_000, "Reader identity body deadline exceeded")).ID === reader.actorId, "Native focus did not recheck actual changed actor");
     await privateCleared(page);
     // The previous actor's genuine hint exists, but cannot authorize this reader.
-    await openCollection(page);
+    v4Phase("readers-authority"); await openCollection(page);
     await expect(page.getByRole("button", { name: "准备采集字典 4", exact: true })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "申请取消原任务", exact: true })).toHaveCount(0);
     await privateCleared(page);

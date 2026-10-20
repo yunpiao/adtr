@@ -9,6 +9,7 @@ import { parseGroupMembersV4 } from "../src/group-members-v4-api";
 import { directoryV4DisplayMember } from "../src/directory-v4-facts";
 import { freshCode, fillSecret, totp, type Authenticator } from "./directory-v4-fixture";
 import type { Task } from "../src/task-api";
+import { boundedV4, v4Phase } from "./directory-v4-diagnostics";
 
 export const V4 = "/api/directory/v4/";
 export function invariant(ok: unknown, message: string): asserts ok { if (!ok) throw new Error(message); }
@@ -74,11 +75,13 @@ export async function actualJSON(response: Response | APIResponse, actorId: numb
   const headers = response.headers();
   invariant(headers["cache-control"] === "no-store" && headers["x-adtr-user-id"] === String(actorId) && headers["x-content-type-options"] === "nosniff", "Real response metadata did not match actor/no-store contract");
   let value: unknown;
+  v4Phase("body-start");
   try {
-    const body = await response.body();
+    const body = await boundedV4(response.body(), 15_000, "V4 response body deadline exceeded");
     invariant(body.length <= 8 * 1024 * 1024, "Real response exceeded acceptance budget");
     value = parseDirectoryV4UniqueJSON(new TextDecoder("utf-8", { fatal: true }).decode(body));
   } catch { throw new Error("Real response body was not bounded valid unique-key JSON"); }
+  v4Phase("body-complete");
   invariant(value && typeof value === "object" && !Array.isArray(value), "Real response must be an object");
   return value as Record<string, unknown>;
 }
@@ -90,26 +93,36 @@ export async function taskResponse(response: Response | APIResponse, actor: Acto
   catch { throw new Error("Real task failed exact v4 identity/grammar checks"); }
 }
 export async function openCollection(page: Page) {
+  v4Phase("workspace-open");
   await page.goto("/#directory-v4");
   await expect(page.getByRole("heading", { name: "字典 4 目录采集", exact: true })).toBeVisible();
+  v4Phase("workspace-ready");
 }
 export async function prepareSync(page: Page) {
+  v4Phase("source-select");
   await page.getByRole("region", { name: "字典 4 已保存来源", exact: true }).getByRole("button", { name: /^synthetic\.invalid · 配置 /u }).click();
+  v4Phase("sync-prepare");
   await page.getByRole("button", { name: "准备采集字典 4", exact: true }).click();
 }
 export function form(page: Page, operation: "sync" | "cancel") {
   return page.getByRole("form", { name: operation === "sync" ? "字典 4 采集证明" : "原任务取消证明", exact: true });
 }
 export async function enterProof(page: Page, actor: Actor, operation: "sync" | "cancel", code?: string) {
+  v4Phase("proof-start");
   await expect(form(page, operation).locator('input[type="password"], input[inputmode="numeric"]')).toHaveCount(2);
   await fillSecret(form(page, operation).getByLabel("当前用户密码", { exact: true }), actor.password);
   await fillSecret(form(page, operation).getByLabel("当前六位验证码", { exact: true }), code ?? await freshCode(actor.auth));
   invariant(await form(page, operation).locator('input[type="password"], input[inputmode="numeric"]').evaluateAll(nodes => nodes.length === 2 && nodes.every(node => (node as HTMLInputElement).value.length > 0)), "Actual proof inputs were not populated");
+  v4Phase("proof-ready");
 }
 export async function clickMutation(page: Page, actor: Actor, domainId: string, operation: "sync" | "cancel", taskUUID?: string) {
+  v4Phase("mutation-click");
   const pending = page.waitForResponse(r => new URL(r.url()).pathname === V4 + operation && r.request().method() === "POST");
+  void pending.catch(() => undefined);
   await form(page, operation).getByRole("button", { name: operation === "sync" ? "确认提交采集" : "确认取消原任务", exact: true }).click();
-  return taskResponse(await pending, actor, domainId, operation, taskUUID);
+  const response = await pending;
+  v4Phase("mutation-response");
+  return taskResponse(response, actor, domainId, operation, taskUUID);
 }
 export function originalFrom(task: Task, mutation: Mutation): Original {
   const v = mutation.original;

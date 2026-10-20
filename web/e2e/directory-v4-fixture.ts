@@ -2,6 +2,7 @@ import { expect, type BrowserContext, type Locator, type Page } from "@playwrigh
 import { createHmac, randomUUID } from "node:crypto";
 import { isIP } from "node:net";
 import { navigateTo } from "./navigation";
+import { boundedV4, v4Phase } from "./directory-v4-diagnostics";
 
 // Source-only candidate. All setup writes go through the real UI except the
 // existing v4 credential-use grant, whose management UI does not yet exist.
@@ -89,14 +90,14 @@ export async function proof(page: Page, password: string, auth: Authenticator) {
 export async function readJSON(context: BrowserContext, path: string, actorId?: number) {
   const response = await context.request.get(path,{maxRedirects:0,timeout:15000});
   if (response.status() !== 200 || response.headers()["cache-control"] !== "no-store" || (actorId !== undefined && response.headers()["x-adtr-user-id"] !== String(actorId))) throw new Error("Real fixture read failed identity or status checks");
-  return response.json();
+  return boundedV4(response.json(), 15_000, "Fixture JSON body deadline exceeded");
 }
 export async function submit(page: Page, path: string, name: string, status = 200) {
   const [response] = await Promise.all([page.waitForResponse(r => new URL(r.url()).pathname === path && r.request().method() === "POST"), button(page,name).click()]);
   if (response.status() !== status || response.headers()["cache-control"] !== "no-store") throw new Error("Real fixture UI mutation failed");
   // Setup endpoints use ordinary JSON; do not apply this helper to native-stream
   // v4 controls, whose response observer belongs to the scenario helper.
-  const value = await response.json();
+  const value = await boundedV4(response.json(), 15_000, "Fixture UI JSON body deadline exceeded");
   return {value};
 }
 export function safeAssertion(secrets: string[]) {
@@ -117,6 +118,7 @@ async function createUser(page: Page, creator: Actor, username: string, initial:
   return value.ID as number;
 }
 async function bindAccount(page: Page, actor: Actor, domain: string, accountLabel: string, safe: (value: unknown) => void) {
+  v4Phase("binding-start");
   await navigateTo(page,"管理操作账户"); await button(page,"新增操作账户").click(); await button(page,`选择 ${domain}`).click(); await label(page,"登记标签（可选）").fill(accountLabel);
   await fillSecret(label(page,"AD 用户名"),required("ADTR_E2E_LDAP_USERNAME")); await fillSecret(label(page,"AD 密码"),required("ADTR_E2E_LDAP_PASSWORD")); await proof(page,actor.password,actor.auth);
   const {value} = await submit(page,"/api/operation-accounts/create","保存本地登记"); safe(value); const accountId = value.accountId as string;
@@ -126,10 +128,11 @@ async function bindAccount(page: Page, actor: Actor, domain: string, accountLabe
   await navigateTo(page,"域连接"); if (await button(page,"返回域连接列表").isVisible()) await button(page,"返回域连接列表").click();
   await button(page,`查看 ${domain}`).click(); await button(page,"管理凭据来源").click(); await label(page,"新的凭据来源").selectOption("reference"); await button(page,`选择账户 ${accountLabel}`).click(); await proof(page,actor.password,actor.auth);
   const bound = (await submit(page,"/api/domains/credential-source/reference","保存凭据来源")).value; safe(bound); expect(bound).toMatchObject({result:"SUCCESS",credentialSource:"operation_account",replayed:false});
-  return accountId;
+  v4Phase("binding-complete"); return accountId;
 }
 
 export async function setupV4(page: Page, context: BrowserContext, options: {reader: boolean}) {
+  v4Phase("setup-start");
   const domain = "synthetic.invalid", groupName = "E2EV4ControlsScope", accountLabel = "Synthetic v4 controls reader";
   const password = required("ADTR_E2E_V4_CONTROLS_PASSWORD"), initial = required("ADTR_E2E_PASSWORD");
   const producerInitial = required("ADTR_E2E_V4_CONTROLS_PRODUCER_INITIAL_PASSWORD"), producerPassword = required("ADTR_E2E_V4_CONTROLS_PRODUCER_PASSWORD");
@@ -137,6 +140,7 @@ export async function setupV4(page: Page, context: BrowserContext, options: {rea
   const safe = safeAssertion(secrets);
   await page.goto("/"); await login(page,required("ADTR_E2E_USERNAME"),initial); await changePassword(page,initial,password);
   const bootstrap: Actor = {username:required("ADTR_E2E_USERNAME"),password,auth:await enrollMfa(page,password),actorId:(await readJSON(context,"/api/auth/me")).ID}; secrets.push(bootstrap.auth.secret);
+  v4Phase("bootstrap-ready");
   await navigateTo(page,"域连接"); await button(page,"新增域连接").click(); await label(page,"域 DNS 名称").fill(domain); await label(page,"域控 DNS 名称").fill("dc.synthetic.invalid"); await label(page,"连接 IP（可选）").fill(required("ADTR_E2E_LDAP_IP")); await label(page,"初始凭据来源").selectOption("unconfigured"); await proof(page,password,bootstrap.auth);
   const created = (await submit(page,"/api/domains/create-unconfigured","保存本地连接")).value; safe(created); expect(created).toMatchObject({result:"SUCCESS",revision:"1",requiresResourceAssignment:true}); const domainId = created.domainId as string;
   await navigateTo(page,"资源与租户"); await button(page,"资源组").click(); await button(page,"新增资源组").click(); await label(page,"资源组名称").fill(groupName); await label(page,"域 ID").fill(domainId); await proof(page,password,bootstrap.auth); expect((await submit(page,"/api/resources/groups/create","保存资源组")).value).toMatchObject({result:"SUCCESS"});
@@ -158,21 +162,32 @@ export async function setupV4(page: Page, context: BrowserContext, options: {rea
   // uses ten by creating its real role/user; producer instead does binding work.
   let accountId: string | undefined;
   if (!options.reader) accountId = await bindAccount(page,bootstrap,domain,accountLabel,safe);
+  v4Phase("producer-login");
   await navigateTo(page,"退出登录"); await login(page,"v4-controls-producer",producerInitial); await changePassword(page,producerInitial,producerPassword);
   const producer: Actor = {username:"v4-controls-producer",password:producerPassword,auth:await enrollMfa(page,producerPassword),actorId:(await readJSON(context,"/api/auth/me")).ID}; secrets.push(producer.auth.secret); expect(producer.actorId).toBe(producerId);
+  v4Phase("producer-ready");
   if (options.reader) accountId = await bindAccount(page,producer,domain,accountLabel,safe);
   if (!accountId) throw new Error("Missing real account binding");
+  v4Phase("source-read");
   const connection = (await readJSON(context,`/api/domains/detail?domainId=${domainId}`,producer.actorId)).connection;
+  v4Phase("account-read");
   const account = (await readJSON(context,`/api/operation-accounts/detail?accountId=${accountId}`,producer.actorId)).account;
+  v4Phase("effective-read");
   expect(await readJSON(context,`/api/directory-credential-use/v4/effective?accountId=${accountId}`,producer.actorId)).toMatchObject({purpose:"domain.directory_read.v4",explicitlyGranted:false,eligible:false,consumerEnabled:true});
+  v4Phase("identity-read");
   const me = await readJSON(context,"/api/auth/me"); expect(me.ID).toBe(producer.actorId); secrets.push(me.csrfToken);
   // A setup-only management POST. No v4 task is admitted here. Fresh current
   // proof and exact account/grant revisions exercise normal server authorization.
   let response;
+  v4Phase("grant-proof");
+  const grantCode = await freshCode(producer.auth);
+  v4Phase("grant-request");
   try {
-    response = await context.request.post("/api/directory-credential-use/v4/grant",{headers:{Origin:new URL(page.url()).origin,"X-CSRF-Token":me.csrfToken},data:{accountId,roleId:"platform_admin",purpose:"domain.directory_read.v4",expectedAccountRevision:account.revision,expectedCredentialRevision:account.credentialRevision,expectedGrantRevision:"0",idempotencyKey:randomUUID(),actorPassword:producer.password,totpCode:await freshCode(producer.auth)},maxRedirects:0,timeout:15000});
+    response = await context.request.post("/api/directory-credential-use/v4/grant",{headers:{Origin:new URL(page.url()).origin,"X-CSRF-Token":me.csrfToken},data:{accountId,roleId:"platform_admin",purpose:"domain.directory_read.v4",expectedAccountRevision:account.revision,expectedCredentialRevision:account.credentialRevision,expectedGrantRevision:"0",idempotencyKey:randomUUID(),actorPassword:producer.password,totpCode:grantCode},maxRedirects:0,timeout:15000});
   } catch { throw new Error("Real v4 fixture management grant failed"); }
   if (response.status() !== 200 || response.headers()["cache-control"] !== "no-store" || response.headers()["x-adtr-user-id"] !== String(producer.actorId)) throw new Error("Real v4 management grant rejected");
-  const granted = await response.json(); safe(granted); expect(granted).toMatchObject({purpose:"domain.directory_read.v4",allowed:true,replayed:false,consumerEnabled:true});
+  v4Phase("grant-body");
+  const granted = await boundedV4(response.json(), 15_000, "Fixture grant JSON body deadline exceeded"); safe(granted); expect(granted).toMatchObject({purpose:"domain.directory_read.v4",allowed:true,replayed:false,consumerEnabled:true});
+  v4Phase("setup-complete");
   return {producer,reader,domainId,accountId,connection,safe,secrets};
 }

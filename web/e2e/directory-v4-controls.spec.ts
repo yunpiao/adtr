@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { configureV4Deadlines, v4Phase } from "./directory-v4-diagnostics";
 import { setupV4, requireFixture } from "./directory-v4-fixture";
 import { readDirectoryV4KeyCounts, readDirectoryV4Use } from "./directory-v4-ledger-observer";
 import { V4, invariant, guardLeaks, evidenceDigest, originalEvidence, mutationEvidence, observeMutations, openCollection, prepareSync, enterProof, clickMutation, originalFrom, terminal, recover, refreshOriginal, acknowledge, committedLoss, pinnedResults, safeScreenshots, proofEmpty, form, writeEvidence } from "./directory-v4-runtime";
@@ -12,11 +13,13 @@ function assertPersistedOriginal(value: Awaited<ReturnType<typeof readDirectoryV
 }
 test("real UI admissions, original pinned results and two distinct response-loss recoveries", async ({ page, context }, info) => {
   test.setTimeout(630_000);
+  configureV4Deadlines(context);
   const fixture = await setupV4(page, context, { reader: false });
   const actor = fixture.producer, mutations = observeMutations(context, actor);
   const leaks = guardLeaks(context, fixture.secrets);
   let newer: import("@playwright/test").Page | undefined;
   try {
+    v4Phase("controls-first");
     await openCollection(page); await prepareSync(page); await enterProof(page, actor, "sync");
     const firstTask = await clickMutation(page, actor, fixture.domainId, "sync");
     const first = originalFrom(firstTask, mutations.entries.at(-1)!);
@@ -28,6 +31,7 @@ test("real UI admissions, original pinned results and two distinct response-loss
 
     // A new tab starts with no operation hint. Its key originates in its own UI
     // submit; no copied/injected storage, invented task link or historical key.
+    v4Phase("controls-loss");
     newer = await context.newPage(); await newer.bringToFront(); await openCollection(newer);
     await expect(newer.getByRole("region", { name: "原操作恢复", exact: true })).toHaveCount(0);
     await prepareSync(newer); await enterProof(newer, actor, "sync");
@@ -53,6 +57,7 @@ test("real UI admissions, original pinned results and two distinct response-loss
 
     // Genuine before-dispatch loss: route aborts without route.fetch/continue.
     // Receipt 404 must be produced by the actual server, not interception.
+    v4Phase("controls-absent");
     await prepareSync(page); await enterProof(page, actor, "sync");
     let prevented = 0;
     await page.route("**" + V4 + "sync", async route => { prevented++; await route.abort("failed"); }, { times: 1 });

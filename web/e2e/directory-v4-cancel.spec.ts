@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { configureV4Deadlines, v4Phase } from "./directory-v4-diagnostics";
 import { setupV4, requireFixture, lateFreshCode, fillSecret, totp } from "./directory-v4-fixture";
 import { V4, invariant, guardLeaks, originalEvidence, mutationEvidence, observeMutations, openCollection, prepareSync, enterProof, clickMutation, originalFrom, terminal, recover, refreshOriginal, acknowledge, committedLoss, proofEmpty, form, workerControl, writeEvidence, taskResponse, type Original, type Actor } from "./directory-v4-runtime";
 import { readDirectoryV4Use, assertQueuedReserved, assertQueuedQuiesced, assertRunningOpened, assertExecutorReturned, type DirectoryV4LedgerSnapshot } from "./directory-v4-ledger-observer";
@@ -13,6 +14,7 @@ async function queryUI(page: import("@playwright/test").Page, actor: Actor, orig
 }
 test("queued never-opened cancellation and exact original executor return during genuine paged I/O", async ({ page, context }, info) => {
   test.setTimeout(900_000);
+  configureV4Deadlines(context);
   const control = workerControl();
   const initialControl = await control.state();
   invariant(initialControl.state === "not_started" && initialControl.launchCount === 0 && initialControl.failure === null, "Worker must not exist before queued scenario");
@@ -21,6 +23,7 @@ test("queued never-opened cancellation and exact original executor return during
   const leaks = guardLeaks(context, fixture.secrets);
   let pendingOpened: Promise<DirectoryV4LedgerSnapshot> | undefined;
   try {
+    v4Phase("cancel-queued");
     await openCollection(page); await prepareSync(page); await enterProof(page, actor, "sync");
     const queuedTask = await clickMutation(page, actor, fixture.domainId, "sync");
     invariant(queuedTask.state === "queued" && queuedTask.attempt === 0, "Queued fixture started unexpectedly");
@@ -37,12 +40,12 @@ test("queued never-opened cancellation and exact original executor return during
     invariant(mutations.counts().sync === 1 && mutations.counts().cancel === 1, "Queued recovery repeated business POST");
     const cancelledBeforeWorker = await readDirectoryV4Use(queuedPins); assertQueuedReserved(cancelledBeforeWorker, true);
     invariant((await control.state()).launchCount === 0, "Queued original opened before controller release");
-    await control.startOnce();
+    v4Phase("cancel-worker"); await control.startOnce();
     await expect.poll(async () => (await readDirectoryV4Use(queuedPins)).facts.state, { timeout: 15_000, intervals: [100, 250] }).toBe("quiesced");
     const queuedQuiesced = await readDirectoryV4Use(queuedPins); assertQueuedQuiesced(queuedQuiesced, reserved);
     await acknowledge(page);
 
-    await prepareSync(page);
+    v4Phase("cancel-running"); await prepareSync(page);
     await enterProof(page, actor, "sync", await lateFreshCode(actor.auth));
     const runningTask = await clickMutation(page, actor, fixture.domainId, "sync");
     const running = originalFrom(runningTask, mutations.entries.at(-1)!), runningPins = { ...running, actorId: actor.actorId };
