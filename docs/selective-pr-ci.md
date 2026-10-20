@@ -37,7 +37,12 @@ short setup work in exchange for independently checking a correct selection.
 - Reviewed page roots: MessagesWorkspace; User, Computer and GroupAssetsV3Workspace;
   TaskWorkspace. Their dependency closures cover API modules and helper components.
   Other production consumers, App/global composition, shared APIs and unknown
-  frontend dependencies conservatively expand to all browser/fixed/native checks
+  frontend dependencies conservatively expand to all seven groups, including
+  contracts, all eight auth shards and every browser/fixed/native check. This
+  intentionally costs more than the previous browser/fixed/native fallback:
+  until the dependency boundary is proved, frontend location alone cannot
+  justify omitting auth. Proved spec/page/test-only/native selections retain
+  their existing narrower groups
 - UserAssetExportV3 is rendered by UserAssetsV3Workspace. Its API is also consumed
   by UserAssetExportTaskResult inside TaskWorkspace, so API edits include task-page
   consumers as well as export acceptance
@@ -54,8 +59,15 @@ short setup work in exchange for independently checking a correct selection.
 - `messages-bulk.spec.ts` belongs to the messages job: the real runner executes it
   recursively after messages. `auth.spec.ts` belongs to both authentication and
   expired-password. `resource.spec.ts` belongs to resources. The native-stream
-  spec selects both engines. Inventory checks cover all 52 specs, 51 browser jobs
+  spec selects both engines. Inventory checks cover all 55 specs, 54 browser jobs
   and seven fixed-engine variants in both directions
+- Dictionary4 controls, cancellation and readers are three explicit browser suites.
+  The new collection workspace, its transport and existing member-reader roots
+  remain unclassified production consumers, so their changes conservatively
+  select full coverage until a complete page-to-suite mapping is independently
+  proved. Inventory/workflow edits themselves also select full coverage. The
+  native-stream job runs the unchanged five legacy cases and the same five cases
+  against the direct dictionary4 bounded reader in both existing browser families
 - The owned running-cancel controller/guard selects its three real running-cancel
   consumers plus contracts. Other shared runners/fixtures conservatively expand
 - Shared Go/auth/DB/tasks, build files, dependency locks, CI/selector files and
@@ -79,11 +91,24 @@ Fixed variants must be exactly the selected-browser/fixed-inventory intersection
 The summary labels unselected suites as **not run**, rather than passed.
 
 Existing workflow contracts use an exact, reversible projection of this reviewed
-CI-only delta. The original full-workflow hash still protects all old commands,
+CI-only delta, plus a separately hash-bound additive dictionary4 evidence-step
+projection. The original full-workflow hash still protects all old commands,
 permissions, concurrency budgets and evidence steps. Separate contracts mutate
 selection conditions, dependencies, matrices and verification to ensure changes
 cannot be erased by that projection. Future intentional workflow edits must
 update this boundary under review.
+
+Dictionary4 evidence has a closed screenshot inventory: six controls images,
+four readers images and no cancellation images. Controls retain the original
+result-list and recovered-operation pairs, and require
+`original-result-values-1440.png` and `original-result-values-390.png` from the
+first original task's opened nonempty member detail. Captures must follow the
+actual pinned response, complete ordered DOM assertions and per-viewport
+readiness/proof-empty checks. The validator binds exact filenames, dimensions,
+bytes, digests and source/run identity before the explicit upload allowlist runs.
+Those structural checks do not establish visible content: independent inspection
+of the actual pixels is still required. Unit-only synthetic PNGs exercise
+rejection and are never runtime acceptance evidence.
 
 ## Validation
 

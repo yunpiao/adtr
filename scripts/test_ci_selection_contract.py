@@ -57,7 +57,10 @@ class SelectionContract(unittest.TestCase):
         snapshots=[old,old,newer,newer]
         with patch.object(selection,'dependency_graph',side_effect=[({p:self.graph.get(p,set()) for p in s},set()) for s in snapshots]):
             plan=selection.select([path],self.inventory,snapshots)
-        self.assertEqual(len(plan['browser']),51)
+        self.assertEqual(plan['browser'],self.inventory['browser'])
+        self.assertEqual(plan['fixed'],self.inventory['fixed'])
+        self.assertEqual(plan['auth'],list(range(1,9)))
+        self.assertTrue(all(plan['groups'].values()))
         calls=[]
         def loader(sha):calls.append(sha);return old
         with patch.object(selection,'pr_diff',return_value=('c'*40,[path])),patch.object(selection,'dependency_graph',return_value=(self.graph,set())):
@@ -98,7 +101,7 @@ class SelectionContract(unittest.TestCase):
         dep='web/src/shared.ts';other='web/src/UnmappedPage.tsx'
         src=dict(self.sources,**{dep:'',other:''})
         self.graph['web/src/MessagesWorkspace.tsx']={dep};self.graph[other]={dep}
-        self.assertEqual(len(self.choose([dep],src)['browser']),51)
+        self.assertEqual(len(self.choose([dep],src)['browser']),54)
 
     def helper_graph(self):
         api='web/src/messages-api.ts'; helper='web/src/sample-data.ts'
@@ -125,7 +128,7 @@ class SelectionContract(unittest.TestCase):
             src[consumer]='';self.graph[consumer]={helper}
             with self.subTest(consumer=consumer):
                 self.assertNotIn(helper,selection.test_only_dependencies(self.graph,set(),self.inventory))
-                self.assertEqual(len(self.choose([api],src)['browser']),51)
+                self.assertEqual(len(self.choose([api],src)['browser']),54)
             self.graph.pop(consumer)
 
     def test_unknown_edges_or_cycles_or_orphans_never_prove_helpers(self):
@@ -133,12 +136,12 @@ class SelectionContract(unittest.TestCase):
         self.assertEqual(self.names(self.choose([api],src,uncertain={test})),{'messages'})
         for unknown in (helper, 'web/src/MessagesWorkspace.tsx', 'web/e2e/messages.spec.ts'):
             with self.subTest(unknown=unknown):
-                self.assertEqual(len(self.choose([api],src,uncertain={unknown})['browser']),51)
+                self.assertEqual(len(self.choose([api],src,uncertain={unknown})['browser']),54)
         self.graph[helper].add(bridge)
-        self.assertEqual(len(self.choose([api],src)['browser']),51)
+        self.assertEqual(len(self.choose([api],src)['browser']),54)
         self.graph[helper].remove(bridge)
         self.graph[test]=set()
-        self.assertEqual(len(self.choose([api],src)['browser']),51)
+        self.assertEqual(len(self.choose([api],src)['browser']),54)
 
     def test_uncertain_test_imported_by_runtime_is_not_a_test_only_seed(self):
         for consumer in ('web/src/MessagesWorkspace.tsx', 'web/e2e/messages.spec.ts'):
@@ -146,7 +149,7 @@ class SelectionContract(unittest.TestCase):
             self.graph[consumer]={test,api}
             with self.subTest(consumer=consumer):
                 self.assertEqual(selection.test_only_dependencies(self.graph,{test},self.inventory),set())
-                self.assertEqual(len(self.choose([api],src,uncertain={test})['browser']),51)
+                self.assertEqual(len(self.choose([api],src,uncertain={test})['browser']),54)
             self.graph[consumer]=set()
 
     def test_old_or_base_runtime_consumer_cannot_be_erased_by_new_test_only_graph(self):
@@ -158,13 +161,17 @@ class SelectionContract(unittest.TestCase):
             snapshots=[src]*4;graphs=[(new_graph,set())]*4
             snapshots[position]=old;graphs[position]=(old_graph,set())
             with self.subTest(position=position),patch.object(selection,'dependency_graph',side_effect=graphs):
-                self.assertEqual(len(selection.select([api],self.inventory,snapshots)['browser']),51)
+                plan=selection.select([api],self.inventory,snapshots)
+                self.assertEqual(plan['browser'],self.inventory['browser'])
+                self.assertEqual(plan['fixed'],self.inventory['fixed'])
+                self.assertEqual(plan['auth'],list(range(1,9)))
+                self.assertTrue(all(plan['groups'].values()))
 
     def test_unit_test_only_and_production_import_of_test(self):
         path='web/src/Example.test.tsx';src=dict(self.sources,**{path:''})
         self.assertFalse(self.choose([path],src)['groups']['browser'])
         self.graph['web/src/MessagesWorkspace.tsx']={path}
-        self.assertEqual(len(self.choose([path],src)['browser']),51)
+        self.assertEqual(len(self.choose([path],src)['browser']),54)
 
     def test_native_both_engines_and_order_independence(self):
         native='web/e2e/native-no-store-completion.spec.ts';unknown='web/src/NewPage.tsx'
@@ -172,7 +179,7 @@ class SelectionContract(unittest.TestCase):
         plans=[self.choose(list(paths),src) for paths in itertools.permutations([native,unknown])]
         self.assertEqual(plans[0]['groups'],plans[1]['groups'])
         self.assertEqual(plans[0]['browser'],plans[1]['browser'])
-        self.assertEqual(len(plans[0]['browser']),51)
+        self.assertEqual(len(plans[0]['browser']),54)
         native_plan=self.choose([native])
         self.assertTrue(native_plan['groups']['native-no-store'])
         self.assertTrue(native_plan['groups']['native-no-store-fixed'])
@@ -182,11 +189,11 @@ class SelectionContract(unittest.TestCase):
         dep='web/src/messages-api.ts';root='web/src/MessagesWorkspace.tsx'
         other='web/src/UnknownPage.tsx';src=dict(self.sources,**{dep:'',other:''})
         self.graph[root]={dep}
-        self.assertEqual(len(self.choose([dep],src,uncertain={other})['browser']),51)
+        self.assertEqual(len(self.choose([dep],src,uncertain={other})['browser']),54)
 
     def test_uncertain_graph_fails_safe(self):
         p='web/e2e/messages.spec.ts'
-        self.assertEqual(len(self.choose([p],uncertain={p})['browser']),51)
+        self.assertEqual(len(self.choose([p],uncertain={p})['browser']),54)
 
     def test_docs_only_is_explicit_without_fake_test(self):
         p=self.choose(['docs/design.md','README.md'])
@@ -199,6 +206,56 @@ class SelectionContract(unittest.TestCase):
         p=self.choose(['scripts/owned_rescue_runner.py'])
         self.assertEqual(self.names(p),{k+'-asset-export-v3-running-cancel' for k in ('user','computer','group')})
         self.assertTrue(p['groups']['contracts'])
+
+    def test_dictionary4_suites_and_unmapped_roots_remain_complete(self):
+        expected = {'directory-v4-controls', 'directory-v4-cancel', 'directory-v4-readers'}
+        for suite in expected:
+            plan = self.choose(['web/e2e/' + suite + '.spec.ts'])
+            self.assertEqual(self.names(plan), {suite})
+            self.assertEqual(plan['fixed'], [])
+            self.assertEqual(plan['auth'], [])
+            self.assertFalse(plan['groups']['native-no-store'])
+            self.assertFalse(plan['groups']['native-no-store-fixed'])
+        for path in ('web/src/DirectoryV4Workspace.tsx', 'web/src/DirectoryV4TaskResult.tsx',
+                     'web/src/directory-v4-controls-api.ts', 'web/src/directory-v4-controls-json.ts',
+                     'web/src/GroupMembersV4Workspace.tsx', 'web/src/group-members-v4-api.ts'):
+            sources = dict(self.sources, **{path: ''})
+            with self.subTest(path=path):
+                plan = self.choose([path], sources)
+                self.assertEqual(plan['browser'], self.inventory['browser'])
+                self.assertEqual(plan['fixed'], self.inventory['fixed'])
+                self.assertEqual(plan['auth'], list(range(1, 9)))
+                self.assertTrue(all(plan['groups'].values()))
+        self.assertNotIn('web/src/DirectoryV4Workspace.tsx', self.inventory['frontend_roots'])
+
+    def test_full_unknown_fallback_preserves_proved_narrow_groups(self):
+        src,api,helper,test,bridge=self.helper_graph()
+        cases=[(['web/e2e/messages.spec.ts'],src,{'messages'},False),
+               ([api],src,{'messages'},False),
+               ([helper],src,set(),False),
+               ([test],src,set(),False),
+               (['web/e2e/native-no-store-completion.spec.ts'],src,set(),True)]
+        for paths,sources,names,native in cases:
+            with self.subTest(paths=paths):
+                plan=self.choose(paths,sources)
+                self.assertEqual(self.names(plan),names)
+                self.assertEqual(plan['fixed'],[])
+                self.assertEqual(plan['auth'],[])
+                self.assertEqual(plan['groups'],{
+                    'contracts':True,'auth-integration':False,'browser':bool(names),
+                    'native-no-store':native,'native-no-store-fixed':native,
+                    'user-assets-fixed':False,'prepare-postgres':True})
+        # A missing/deleted path cannot establish a safe frontend boundary.
+        # The uncertain-import case also must not silently omit auth shards.
+        for path,uncertain in [('web/src/Missing.ts',()),
+                               ('web/e2e/messages.spec.ts',('web/e2e/messages.spec.ts',))]:
+            with self.subTest(path=path):
+                plan=self.choose([path],src,uncertain=uncertain)
+                self.assertEqual(plan['browser'],self.inventory['browser'])
+                self.assertEqual(plan['fixed'],self.inventory['fixed'])
+                self.assertEqual(plan['auth'],list(range(1,9)))
+                self.assertTrue(all(plan['groups'].values()))
+                self.assertIn('unproved frontend dependency: '+path,plan['reasons'])
 
     def test_duplicate_json_keys_are_rejected_before_planning_or_summary(self):
         for value in ('{"version":1,"version":1}', '{"groups":{"browser":true,"browser":false}}'):
@@ -223,12 +280,12 @@ class SelectionContract(unittest.TestCase):
         expected={str(p) for p in Path('web/e2e').glob('*.spec.ts')}
         actual={p for e in self.inventory['browser'] for p in e['specs']}|{'web/e2e/native-no-store-completion.spec.ts'}
         self.assertEqual(actual,expected)
-        self.assertEqual(len(self.inventory['browser']),51)
+        self.assertEqual(len(self.inventory['browser']),54)
         self.assertEqual(len(self.inventory['fixed']),7)
         self.assertEqual(summary.INVENTORY,self.inventory)
         old=restore_selection(Path('.github/workflows/ci.yml').read_text())
         matrix=old.split('  browser:\n',1)[1].split('    steps:\n',1)[0]
-        self.assertEqual([(e['name'],e['command']) for e in self.inventory['browser']], re.findall(r'          - name: ([^\n]+)\n            command: ([^\n]+)',matrix))
+        self.assertEqual([(e['name'],e['command']) for e in self.inventory['browser'] if e['name'] not in {'directory-v4-controls', 'directory-v4-cancel', 'directory-v4-readers'}], re.findall(r'          - name: ([^\n]+)\n            command: ([^\n]+)',matrix))
         for command in ('true','python3 scripts/test_auth_e2e.py; true','python3 scripts/test_auth_e2e.py --suite messages || true'):
             bad=copy.deepcopy(self.inventory);bad['browser'][0]['command']=command
             with self.assertRaises(ValueError):selection.inventory_checked(bad)
@@ -279,7 +336,7 @@ class SelectionContract(unittest.TestCase):
             p=selection.make_plan(event,'a'*40,'b'*40,self.inventory,loader=lambda _:self.fail('no PR snapshots'))
             n={g:{'result':'success'} for g in selection.GROUPS};n['plan']={'result':'success'}
             summary.verify(p,n,event,'a'*40,'b'*40,p)
-            self.assertEqual(len(p['browser']),51)
+            self.assertEqual(len(p['browser']),54)
             self.assertEqual(p['auth'],list(range(1,9)))
             self.assertEqual(p['fixed'],self.inventory['fixed'])
 

@@ -11,6 +11,7 @@ import unittest
 from directory_e2e_credentials import (
     DRAFT_CODE_NAME, PASSWORD_NAMES, MEMBERSHIP_PASSWORD_NAMES,
     SUITE_PASSWORD_NAMES, configure_directory_credentials,
+    V4_PASSWORD_NAMES, V4_READER_PASSWORD_NAMES, V4_DRAFT_CODE_NAME,
 )
 
 
@@ -37,7 +38,8 @@ def restore_credentials_runner(text):
 
 class DirectoryCredentialsContract(unittest.TestCase):
     def test_suite_isolation_and_membership_generation(self):
-        self.assertEqual(set(SUITE_PASSWORD_NAMES), {"directory-v3", "group-members-v4"})
+        self.assertEqual(set(SUITE_PASSWORD_NAMES), {"directory-v3", "group-members-v4",
+                         "directory-v4-controls", "directory-v4-cancel", "directory-v4-readers"})
         for suite, names in SUITE_PASSWORD_NAMES.items():
             env = {}
             output = io.StringIO()
@@ -45,6 +47,8 @@ class DirectoryCredentialsContract(unittest.TestCase):
             with contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
                 configure_directory_credentials(env, suite)
             expected = set(names) | ({DRAFT_CODE_NAME} if suite == "directory-v3" else set())
+            if suite.startswith("directory-v4-"):
+                expected.add(V4_DRAFT_CODE_NAME)
             self.assertEqual(set(env), expected)
             first = dict(env)
             with contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
@@ -111,6 +115,18 @@ class DirectoryCredentialsContract(unittest.TestCase):
         self.assertTrue(len(set(values)) == len(values), "inputs must be independent")
         self.assertTrue(all(re.fullmatch(r"[0-9]{6}", env[DRAFT_CODE_NAME])
                             for env in (first, second)))
+
+    def test_v4_exact_purpose_and_inherited_values(self):
+        for suite in ("directory-v4-controls", "directory-v4-cancel", "directory-v4-readers"):
+            names = V4_READER_PASSWORD_NAMES if suite == "directory-v4-readers" else V4_PASSWORD_NAMES
+            self.assertEqual(SUITE_PASSWORD_NAMES[suite], names)
+            env = dict.fromkeys((*names, V4_DRAFT_CODE_NAME), "inherited")
+            configure_directory_credentials(env, suite)
+            self.assertTrue(all(env[name] != "inherited" for name in names))
+            self.assertRegex(env[V4_DRAFT_CODE_NAME], r"^[0-9]{6}$")
+            self.assertTrue(all(name.startswith("ADTR_E2E_V4_CONTROLS_") for name in env))
+            if suite != "directory-v4-readers":
+                self.assertFalse(any("READER" in name for name in env))
 
     def test_inherited_values_replaced_without_output(self):
         sentinel = object()

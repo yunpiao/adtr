@@ -628,6 +628,64 @@ jobs:
           # may leave partial/no evidence; retain it without replacing its error.
           if-no-files-found: warn
           retention-days: 14
+      - name: Validate dictionary4 controls original-operation evidence
+        id: v4-controls-evidence
+        if: ${{ success() && matrix.name == 'directory-v4-controls' }}
+        env:
+          ADTR_V4_EVIDENCE_SUITE: directory-v4-controls
+        run: python3 scripts/validate_directory_v4_controls_evidence.py --source-root .
+      - name: Retain validated dictionary4 controls evidence
+        if: ${{ success() && matrix.name == 'directory-v4-controls' && steps.v4-controls-evidence.outcome == 'success' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: directory-v4-controls-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            web/playwright-report/directory-v4-controls-validated/evidence.json
+            web/playwright-report/directory-v4-controls-validated/original-raw-members-1440.png
+            web/playwright-report/directory-v4-controls-validated/original-raw-members-390.png
+            web/playwright-report/directory-v4-controls-validated/recovered-original-1440.png
+            web/playwright-report/directory-v4-controls-validated/recovered-original-390.png
+            web/playwright-report/directory-v4-controls-validated/original-result-values-1440.png
+            web/playwright-report/directory-v4-controls-validated/original-result-values-390.png
+          # Only closed, post-cleanup validated data and explicit proof-empty PNGs.
+          if-no-files-found: error
+          retention-days: 7
+      - name: Validate dictionary4 cancel original-operation evidence
+        id: v4-cancel-evidence
+        if: ${{ success() && matrix.name == 'directory-v4-cancel' }}
+        env:
+          ADTR_V4_EVIDENCE_SUITE: directory-v4-cancel
+        run: python3 scripts/validate_directory_v4_controls_evidence.py --source-root .
+      - name: Retain validated dictionary4 cancel evidence
+        if: ${{ success() && matrix.name == 'directory-v4-cancel' && steps.v4-cancel-evidence.outcome == 'success' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: directory-v4-cancel-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            web/playwright-report/directory-v4-cancel-validated/evidence.json
+          # Only closed, post-cleanup validated data and explicit proof-empty PNGs.
+          if-no-files-found: error
+          retention-days: 7
+      - name: Validate dictionary4 readers original-operation evidence
+        id: v4-readers-evidence
+        if: ${{ success() && matrix.name == 'directory-v4-readers' }}
+        env:
+          ADTR_V4_EVIDENCE_SUITE: directory-v4-readers
+        run: python3 scripts/validate_directory_v4_controls_evidence.py --source-root .
+      - name: Retain validated dictionary4 readers evidence
+        if: ${{ success() && matrix.name == 'directory-v4-readers' && steps.v4-readers-evidence.outcome == 'success' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: directory-v4-readers-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            web/playwright-report/directory-v4-readers-validated/evidence.json
+            web/playwright-report/directory-v4-readers-validated/producer-proof-cleared-1440.png
+            web/playwright-report/directory-v4-readers-validated/producer-proof-cleared-390.png
+            web/playwright-report/directory-v4-readers-validated/readonly-members-1440.png
+            web/playwright-report/directory-v4-readers-validated/readonly-members-390.png
+          # Only closed, post-cleanup validated data and explicit proof-empty PNGs.
+          if-no-files-found: error
+          retention-days: 7
       - name: Validate dictionary4 backend evidence
         if: ${{ success() && matrix.name == 'directory-v4-backend' }}
         run: python3 scripts/validate_directory_v4_evidence.py --source-root .
@@ -751,6 +809,9 @@ jobs:
         run: cd web && npx playwright install --with-deps chromium
       - name: Require complete application reads and record native outcomes
         run: xvfb-run -a npm run test:e2e --prefix web -- e2e/native-no-store-completion.spec.ts --headed
+      - name: Validate both production readers and exact native evidence
+        if: ${{ success() }}
+        run: python3 scripts/validate_directory_v4_controls_evidence.py --source-root . --native
       - name: Retain synthetic native stream diagnostics
         if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -808,6 +869,9 @@ jobs:
           cat "$fixture/provenance.txt"
       - name: Require identical native stream proof on the fixed engine
         run: xvfb-run -a npm run test:e2e --prefix web -- e2e/native-no-store-completion.spec.ts --headed
+      - name: Validate both production readers and exact native evidence
+        if: ${{ success() }}
+        run: python3 scripts/validate_directory_v4_controls_evidence.py --source-root . --native
       - name: Retain fixed-build synthetic diagnostics and provenance
         if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

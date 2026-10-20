@@ -290,6 +290,9 @@ RUNNER_DELTAS = [('from user_asset_export_v3_terminal_ci import SUITES as EXPORT
 
 
 def restore_owned_runner(text):
+    if "V4_CONTROLS_BUDGETS" in text:
+        from test_directory_v4_runner_contract import restore_v4_runner
+        text = restore_v4_runner(text)
     for old, new in reversed(RUNNER_DELTAS):
         if text.count(new) != 1:
             raise ValueError('owned rescue runner delta absent or altered')
@@ -375,7 +378,9 @@ class Contracts(unittest.TestCase):
             self.assertTrue(c.invalid)
 
     def test_running_final_success_requires_cancel_ack_even_after_early_exit_zero(self):
+        from test_directory_v4_runner_contract import restore_v4_runner
         source = (Path(__file__).parent / 'test_auth_e2e.py').read_text()
+        source = restore_v4_runner(source)
         tree = ast.parse(source)
         prepare = next(n for n in ast.walk(tree) if isinstance(n, ast.If)
                        and 'worker.poll() is None' in ast.unparse(n.test)
@@ -401,7 +406,9 @@ class Contracts(unittest.TestCase):
             self.assertIs(env['shutdown_error'], prior)
 
     def test_final_quiesce_runner_order_and_remaining_wait(self):
+        from test_directory_v4_runner_contract import restore_v4_runner
         source = (Path(__file__).parent / 'test_auth_e2e.py').read_text()
+        source = restore_v4_runner(source)
         calls = ['owned_ci_worker.controller.resume_and_release(abort=True)',
                  'worker_shutdown_deadline = time.monotonic() + 30',
                  'owned_ci_worker.prepare_final_shutdown(worker_shutdown_deadline)',
@@ -1012,7 +1019,9 @@ class Contracts(unittest.TestCase):
         self.assertEqual(broken.seek.call_args.args, (12,))
 
     def test_recovery_cleanup_must_pass_before_journal_and_keeps_finally(self):
+        from test_directory_v4_runner_contract import restore_v4_runner
         source = Path(__file__).with_name('test_auth_e2e.py').read_text()
+        source = restore_v4_runner(source)
         tree = ast.parse(source)
         gates = [node for node in ast.walk(tree) if isinstance(node, ast.If)
                  and ast.unparse(node.test) == 'running_cancel_guard is not None and shutdown_error is None']
@@ -1139,7 +1148,9 @@ class Contracts(unittest.TestCase):
         owner = r.OwnedCIWorker(); owner.process = Mock(returncode=0)
         with patch('builtins.print', side_effect=RuntimeError('private output failure')):
             owner.report_first_invalidation_after_wait(logs)
+        from test_directory_v4_runner_contract import restore_v4_runner
         source = Path(__file__).with_name('test_auth_e2e.py').read_text()
+        source = restore_v4_runner(source)
         tree = ast.parse(source)
         calls = [node for node in ast.walk(tree) if isinstance(node, ast.Call)
                  and isinstance(node.func, ast.Attribute)
@@ -1224,7 +1235,9 @@ class Contracts(unittest.TestCase):
         self.assertIn(signal.SIGTERM, events)
 
     def test_activity_fixture_cleanup_runs_after_wait_even_on_prior_failure(self):
+        from test_directory_v4_runner_contract import restore_v4_runner
         source = Path(__file__).with_name('test_auth_e2e.py').read_text()
+        source = restore_v4_runner(source)
         tree = ast.parse(source)
         gate = next(node for node in ast.walk(tree) if isinstance(node, ast.If)
                     and ast.unparse(node.test) == 'running_cancel_guard is not None and worker is not None and (worker.returncode is not None)')
@@ -1254,7 +1267,9 @@ class Contracts(unittest.TestCase):
                     self.assertIs(scope['shutdown_error'], prior)
 
     def test_journal_proof_must_run_after_wait_before_database_cleanup(self):
+        from test_directory_v4_runner_contract import restore_v4_runner
         source = Path(__file__).with_name('test_auth_e2e.py').read_text()
+        source = restore_v4_runner(source)
         tree = ast.parse(source)
         calls = [node for node in ast.walk(tree) if isinstance(node, ast.Call)
                  and isinstance(node.func, ast.Attribute)
@@ -1373,7 +1388,9 @@ class Contracts(unittest.TestCase):
             self.assertNotIn('private', output.getvalue())
         self.assertEqual(result, {'event': 'ci_worker_admission_failure',
                                  'reason': 'unavailable', 'phase': 'unavailable'})
+        from test_directory_v4_runner_contract import restore_v4_runner
         source = Path(__file__).with_name('test_auth_e2e.py').read_text()
+        source = restore_v4_runner(source)
         self.assertIn('if sys.exc_info()[0] is not None and owned_ci_worker is not None:', source)
         self.assertLess(source.index('owned_ci_worker.report_failure_diagnostic()'),
                         source.index('diagnostics.snapshot(server, worker)'))
@@ -1455,7 +1472,9 @@ class Contracts(unittest.TestCase):
 
     def test_exact_runner_delta_and_mutations(self):
         import hashlib
+        from test_directory_v4_runner_contract import restore_v4_runner
         source = Path(__file__).with_name('test_auth_e2e.py').read_text()
+        source = restore_v4_runner(source)
         self.assertEqual(hashlib.sha256(restore_owned_runner(source).encode()).hexdigest(), BASE_RUNNER_SHA256)
         for _, new in RUNNER_DELTAS:
             with self.assertRaises(ValueError):
@@ -1506,7 +1525,9 @@ class Contracts(unittest.TestCase):
             self.assertIn('--capture-provenance', helper)
 
     def test_only_three_suites_build_and_spawn(self):
+        from test_directory_v4_runner_contract import restore_v4_runner
         source = Path(__file__).with_name('test_auth_e2e.py').read_text()
+        source = restore_v4_runner(source)
         tree = ast.parse(source)
         for node in ast.walk(tree):
             if isinstance(node, ast.If) and isinstance(node.test, ast.Compare):

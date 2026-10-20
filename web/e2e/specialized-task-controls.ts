@@ -15,8 +15,8 @@ const destinations = {
     heading: "字典 3 目录采集",
   },
   "domain.directory_read.v4": {
-    hash: "#group-members-v4",
-    heading: "组成员原始观测 · 字典 4",
+    hash: "#directory-v4",
+    heading: "字典 4 目录采集",
   },
   "user_assets.v3.export": {
     hash: "#user-assets-v3",
@@ -155,7 +155,10 @@ async function expectReadOnlyDetail(
   ).toBeVisible();
   if (checkpoint.taskName === "domain.directory_read.v4") {
     await expect(detail).toContainText("只读");
-    await expect(detail).toContainText("API");
+    await expect(detail).toContainText("通用工作区");
+    await expect(detail).toContainText("不会重新打开当前选中的历史任务");
+    await expect(detail).toContainText("本标签页同一身份保存的原操作记录");
+    await expect(detail).toContainText("重新核验当前权限");
   }
   if (checkpoint.taskName === "user_assets.v3.export" || checkpoint.taskName === "computer_assets.v3.export" || checkpoint.taskName === "group_assets.v3.export") {
     await expect(detail).toContainText("查看原导出结果");
@@ -175,6 +178,8 @@ export async function expectSpecializedTaskReadOnly(
 ) {
   const page = await context.newPage();
   const genericWrites: string[] = [];
+  const v4BusinessWrites: string[] = [];
+  const v4OriginalReads: string[] = [];
   const onRequest = (request: Request) => {
     const path = new URL(request.url()).pathname;
     if (
@@ -182,6 +187,21 @@ export async function expectSpecializedTaskReadOnly(
       !["GET", "HEAD"].includes(request.method())
     )
       genericWrites.push(`${request.method()} ${path}`);
+    if (
+      ["/api/directory/v4/sync", "/api/directory/v4/cancel"].includes(path) &&
+      !["GET", "HEAD"].includes(request.method())
+    )
+      v4BusinessWrites.push(`${request.method()} ${path}`);
+    if (
+      request.method() === "GET" &&
+      [
+        "/api/directory/v4/receipt",
+        "/api/directory/v4/task",
+        "/api/directory/v4/observation",
+        "/api/group-assets/v4/members",
+      ].includes(path)
+    )
+      v4OriginalReads.push(`${request.method()} ${path}`);
   };
   page.on("request", onRequest);
   try {
@@ -255,14 +275,51 @@ export async function expectSpecializedTaskReadOnly(
     );
     await expectReadOnlyDetail(page, checkpoint, refreshed, safe);
     const destination = destinations[checkpoint.taskName];
-    await page
-      .getByRole("region", { name: "任务执行详情", exact: true })
-      .locator(`a[href="${destination.hash}"]`)
-      .click();
+    const [v4Permissions] = await Promise.all([
+      checkpoint.taskName === "domain.directory_read.v4"
+        ? page.waitForResponse((response) => {
+            if (
+              new URL(response.url()).pathname !== "/api/access/check" ||
+              response.request().method() !== "POST"
+            )
+              return false;
+            const paths = response.request().postDataJSON().paths;
+            return Array.isArray(paths) && paths.includes("POST /api/directory/v4/sync");
+          })
+        : Promise.resolve(null),
+      page
+        .getByRole("region", { name: "任务执行详情", exact: true })
+        .locator(`a[href="${destination.hash}"]`)
+        .click(),
+    ]);
     await expect.poll(() => new URL(page.url()).hash).toBe(destination.hash);
     await expect(
       page.getByRole("heading", { name: destination.heading, exact: true }),
     ).toBeVisible();
+    if (checkpoint.taskName === "domain.directory_read.v4") {
+      // This new same-session tab has no opener-cloned original-operation hint.
+      // The link opens a general workspace, never adopts the selected task UUID.
+      // Permitted source/new-operation choices remain visible; no user action
+      // selects one here. Auth/access-check POSTs are not business mutations.
+      expect(v4Permissions).not.toBeNull();
+      expect(v4Permissions!.status()).toBe(200);
+      const v4Paths: string[] = v4Permissions!.request().postDataJSON().paths;
+      const v4Checks = await v4Permissions!.json();
+      for (const [index] of v4Paths.entries())
+        expect(v4Checks.results[index], "actual workspace sync preflight").toBe(true);
+      await expect(
+        page.getByRole("region", { name: "字典 4 已保存来源", exact: true }),
+      ).toBeVisible();
+      await expect(
+        page.getByRole("button", { name: "重新核验并恢复", exact: true }),
+      ).toBeEnabled();
+      await expect(page.locator('input[type="password"]')).toHaveCount(0);
+      await expect(page.getByLabel("当前六位验证码", { exact: true })).toHaveCount(0);
+      for (const name of ["原操作恢复", "原任务状态", "本任务的原始组成员结果"])
+        await expect(page.getByRole("region", { name, exact: true })).toHaveCount(0);
+      expect(v4OriginalReads, "general workspace must not adopt a historical task").toEqual([]);
+      expect(v4BusinessWrites, "general workspace must issue no v4 business writes").toEqual([]);
+    }
     // Export links open the workspace's normal safe initial view. A task ID
     // alone must not manufacture an export locator or a download operation.
     if (checkpoint.taskName.endsWith(".export")) {

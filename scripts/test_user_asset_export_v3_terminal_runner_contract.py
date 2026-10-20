@@ -1,10 +1,29 @@
 from ci_workflow_contract import reviewed_workflow, reviewed_source
 """Exact terminal-suite delta; stripping only its frozen additions restores all 60 jobs."""
+import ast
 import hashlib
 from pathlib import Path
 import re
 import unittest
 from test_group_asset_export_v3_runner_contract import restore_runner as restore_group_runner, restore_workflow as restore_group_workflow
+
+
+def legacy_main_cleanup(source):
+    """Select the actual legacy main-finally path, never a helper definition."""
+    tree = ast.parse(source)
+    mains = [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "main"]
+    if len(mains) != 1:
+        raise ValueError("expected one runner main")
+    finalizers = [node for node in mains[0].body if isinstance(node, ast.Try) and node.finalbody]
+    if len(finalizers) != 1 or len(finalizers[0].finalbody) != 1:
+        raise ValueError("expected one runner finally dispatch")
+    dispatch = finalizers[0].finalbody[0]
+    if (not isinstance(dispatch, ast.If)
+            or ast.unparse(dispatch.test) != "args.suite in V4_CONTROLS_BUDGETS"
+            or not dispatch.orelse):
+        raise ValueError("legacy runner cleanup path changed")
+    return "\n".join(ast.get_source_segment(source, node) for node in dispatch.orelse)
+
 
 BASE_RUNNER_SHA256 = 'c2fb0e247fb11c078b05c9db097a341ed14bc6f16f2ed686a0b03583d017d7f3'
 RUNNER_CHANGES = [('from user_asset_export_v3_ci import configure as configure_user_export, capture as capture_user_export, '
@@ -208,10 +227,35 @@ class TerminalRunnerContract(unittest.TestCase):
         source = Path('scripts/test_auth_e2e.py').read_text()
         self.assertLess(source.index('capture_terminal_export(args.suite)'), source.index('creation_attempted = True'))
         self.assertLess(source.index('export_worker_guard.check()'), source.index('validate_terminal_export(args.suite)'))
-        self.assertLess(source.index('export_worker_guard.close()'), source.index('process.terminate()'))
+        cleanup = legacy_main_cleanup(source)
+        self.assertLess(cleanup.index('export_worker_guard.close()'), cleanup.index('process.terminate()'))
         delta = ''.join(new for old, new in RUNNER_CHANGES)
         self.assertNotIn('RATE_LIMIT', delta)
         self.assertNotIn('MFA_BYPASS', delta)
+
+    def test_cleanup_order_ignores_helper_decoys_but_rejects_reversed_main_order(self):
+        source = Path('scripts/test_auth_e2e.py').read_text()
+        cleanup = legacy_main_cleanup(source)
+        decoy = "def unrelated_helper():\n    process.terminate()\n    export_worker_guard.close()\n\n"
+        self.assertEqual(legacy_main_cleanup(decoy + source), cleanup)
+        self.assertLess(cleanup.index('export_worker_guard.close()'), cleanup.index('process.terminate()'))
+        # Swap the real calls in runner source, then prepend the unchanged
+        # misleading helper. Re-select via AST to reject the real regression.
+        reversed_source = source.replace('export_worker_guard.close()', '__guard_close__')
+        reversed_source = reversed_source.replace('process.terminate()', 'export_worker_guard.close()')
+        reversed_source = reversed_source.replace('__guard_close__', 'process.terminate()')
+        reversed_cleanup = legacy_main_cleanup(decoy + reversed_source)
+        with self.assertRaises(AssertionError):
+            self.assertLess(reversed_cleanup.index('export_worker_guard.close()'),
+                            reversed_cleanup.index('process.terminate()'))
+
+    def test_cleanup_selector_rejects_missing_or_wrong_finally_dispatch(self):
+        source = Path('scripts/test_auth_e2e.py').read_text()
+        for changed in (
+                source.replace('def main():', 'def other_main():'),
+                source.replace('if args.suite in V4_CONTROLS_BUDGETS:', 'if False:')):
+            with self.assertRaises(ValueError):
+                legacy_main_cleanup(changed)
 
 
 if __name__ == '__main__':

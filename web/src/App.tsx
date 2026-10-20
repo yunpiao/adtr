@@ -40,6 +40,8 @@ import UserAssetsV2Workspace from "./UserAssetsV2Workspace";
 import UserAssetsV3Workspace from "./UserAssetsV3Workspace";
 import ComputerAssetsV3Workspace from "./ComputerAssetsV3Workspace";
 import GroupAssetsV3Workspace from "./GroupAssetsV3Workspace";
+import DirectoryV4Workspace from "./DirectoryV4Workspace";
+import { createDirectoryV4RecoveryContext } from "./directory-v4-controls-api";
 import GroupMembersV4Workspace from "./GroupMembersV4Workspace";
 import DirectoryV2CredentialUseWorkspace from "./DirectoryV2CredentialUseWorkspace";
 import {
@@ -73,6 +75,7 @@ function pageFromHash(): Page {
       "directory-credential-use",
       "directory-v2",
       "directory-v3",
+      "directory-v4",
       "directory-credential-use-v3",
       "user-assets-v2",
       "user-assets-v3",
@@ -168,6 +171,14 @@ function values(event: FormEvent<HTMLFormElement>) {
   >;
 }
 export default function App() {
+  // Memory-only original-operation safety survives route and actor remounts.
+  // Neither this opaque handle nor its stable adapter stores proof/session data.
+  const [directoryV4Recovery] = useState(createDirectoryV4RecoveryContext);
+  const [directoryV4Storage] = useState(() => ({
+    getItem: (key: string) => window.sessionStorage.getItem(key),
+    setItem: (key: string, value: string) => window.sessionStorage.setItem(key, value),
+    removeItem: (key: string) => window.sessionStorage.removeItem(key),
+  }));
   const [profile, setProfile] = useState<Profile | null>(null),
     [loading, setLoading] = useState(true),
     [busy, setBusy] = useState(false),
@@ -396,6 +407,7 @@ export default function App() {
       page === "directory-credential-use" ||
       page === "directory-v2" ||
       page === "directory-v3" ||
+      page === "directory-v4" ||
       page === "directory-credential-use-v3" ||
       page === "user-assets-v2" ||
       page === "user-assets-v3" ||
@@ -702,6 +714,17 @@ export default function App() {
                           }}
                         />
                       )}
+                    {active === "directory-v4" && (
+                      <DirectoryV4Workspace
+                        profile={profile}
+                        recoveryContext={directoryV4Recovery}
+                        storage={directoryV4Storage}
+                        sessionChanged={() => {
+                          setPage("account");
+                          refresh();
+                        }}
+                      />
+                    )}
                     {active === "directory-v3" && (
                       <DirectoryV3Workspace
                         profile={profile}

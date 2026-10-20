@@ -19,6 +19,7 @@ export type SocPage =
   | "credential-use"
   | "directory"
   | "directory-credential-use"
+  | "directory-v4"
   | "directory-v3"
   | "directory-credential-use-v3"
   | "directory-v2"
@@ -52,6 +53,7 @@ export const SOC_NAVIGATION_GROUPS: ReadonlyArray<{
       "directory-v2",
       "directory-credential-use-v2",
       "directory-v3",
+      "directory-v4",
       "directory-credential-use-v3",
     ],
   },
@@ -82,6 +84,7 @@ export const SOC_WORKSPACE_LABELS: Record<SocPage, string> = {
   "directory-credential-use": "目录读取授权",
   "directory-v2": "补充目录资产",
   "directory-v3": "字典 3 目录采集",
+  "directory-v4": "字典 4 目录采集",
   "directory-credential-use-v3": "字典 3 目录凭据授权",
   "user-assets-v2": "用户资产",
   "user-assets-v3": "用户资产 · 字典 3",
