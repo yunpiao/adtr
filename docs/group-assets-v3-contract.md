@@ -45,6 +45,36 @@ the existing codec meaning. No inferred name, application, groupMold/scope/type,
 sensitivity, membership, relationship or export fields. Canonical facts may be
 shown inline; no separate detail or membership endpoint is introduced.
 
+## UI-0446 independent keyword clear
+
+Issue #30 records `UI-0446｜el-input｜输入关键词搜索组名或SID｜search｜{"maxlength": "20", "clearable": null}`.
+This establishes a clearable-keyword clue, not verified legacy auto-query behavior.
+The current workspace explicitly keeps its draft/Apply model: **清除组关键词**
+clears only the search draft through the existing edit path, removes that field's
+rejected paste/drop and input-validation errors, closes expanded facts and focuses
+the keyword input. It never submits, fetches, cancels a pending read or changes
+creation-time sorting, applied query, source revisions, observation pin, page size
+or accepted rows. Empty/repeated clears are permitted, including recovery from a
+rejected transfer whose draft is empty. Loading/stale guards remain unchanged.
+
+If the cleared draft differs from the applied search, the existing dirty state
+continues to pause pagination, facts and new export creation. Explicit Apply sends
+empty search with the retained sort/source/pin/page size and pageIdx1. Pending
+responses still belong to their applied query; clearing does not promote the draft
+to an applied query. Existing **清除组筛选** still clears search and sorting and
+immediately queries. No maxLength interception, parser/API/producer/permissions,
+export/recovery or cancellation behavior is changed.
+
+The native `type="button"` prevents accidental form submission and supplies
+keyboard activation. The local input ref is needed only to restore focus after
+clear; deleting it removes focus restoration, not query behavior. Removing this
+control removes the keyword-only shortcut; manual editing and full clear remain.
+The added control occupies form space, so desktop1440/mobile390 geometry and
+keyboard behavior are covered in the existing real group E2E, retaining all prior
+assertions and screenshots. Synthetic focused cases live in
+`GroupAssetsV3KeywordClear.test.tsx`; real-chain execution must be reported
+separately. Source parity and complete product acceptance remain unverified.
+
 ## UI-0447 page-local row numbers
 
 Issue #30 records `UI-0447｜el-table-column｜序号｜未声明直接绑定｜{"type": "index"}`.

@@ -256,6 +256,68 @@ test("group assets real Worker TLS LDAP PG API browser pinned facts", async ({
     path: info.outputPath("group-assets-v3-mobile-facts.png"),
     fullPage: true,
   });
+  // UI-0446: independent draft clear, not the legacy auto-query contract.
+  let keywordRequests = 0;
+  const countKeywordRequests = (
+    request: import("@playwright/test").Request,
+  ) => {
+    if (new URL(request.url()).pathname === "/api/group-assets/v3")
+      keywordRequests++;
+  };
+  page.on("request", countKeywordRequests);
+  await page.locator("summary").filter({ hasText: "创建时间排序" }).click();
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    await keyword.fill("group-22");
+    await page.getByLabel("创建时间排序", { exact: true }).selectOption("desc");
+    const sortedSearch = await groupResponse(page, () =>
+      page.getByRole("button", { name: "应用组筛选", exact: true }).click(),
+    );
+    expect(sortedSearch.value.list).toEqual([expected[21]]);
+    const beforeClear = keywordRequests;
+    const keywordClear = page.getByRole("button", {
+      name: "清除组关键词",
+      exact: true,
+    });
+    await expect(keywordClear).toHaveAttribute("type", "button");
+    await keywordClear.focus();
+    await keywordClear.press("Enter");
+    await expect(keyword).toHaveValue("");
+    await expect(keyword).toBeFocused();
+    await expect(page.getByLabel("创建时间排序", { exact: true })).toHaveValue(
+      "desc",
+    );
+    await expectGroupPositions(page, [expected[21]]);
+    await expect(
+      page.getByRole("button", { name: "展开事实", exact: true }),
+    ).toBeDisabled();
+    await expect(page.getByLabel("组每页条数", { exact: true })).toBeDisabled();
+    await expect(
+      page.getByRole("button", { name: "下一页", exact: true }),
+    ).toBeDisabled();
+    await page.screenshot({
+      path: info.outputPath(`group-assets-v3-keyword-clear-${width}.png`),
+      fullPage: true,
+    });
+    expect(keywordRequests).toBe(beforeClear);
+    const cleared = await groupResponse(page, () =>
+      page.getByRole("button", { name: "应用组筛选", exact: true }).click(),
+    );
+    expect(keywordRequests).toBe(beforeClear + 1);
+    expect(Object.fromEntries(cleared.url.searchParams)).toEqual({
+      ...Object.fromEntries(sortedSearch.url.searchParams),
+      search: "",
+      pageIdx: "1",
+    });
+    expect(cleared.value.list).toEqual(expected.slice(1, 11));
+    await expectGroupPositions(page, expected.slice(1, 11));
+    const clearGeometry = await page.evaluate(() => ({
+      width: innerWidth,
+      scroll: document.documentElement.scrollWidth,
+    }));
+    expect(clearGeometry.scroll).toBeLessThanOrEqual(clearGeometry.width + 1);
+  }
+  page.off("request", countKeywordRequests);
   await page.setViewportSize({ width: 1440, height: 960 });
   await groupResponse(page, () =>
     page.getByRole("button", { name: "清除组筛选", exact: true }).click(),
@@ -338,6 +400,27 @@ test("group assets real Worker TLS LDAP PG API browser pinned facts", async ({
         observationId: f.taskUUID,
         newObservationId: newer.task.taskUUID,
         storedDigest: evidence.sha256,
+        keywordClear: {
+          contract:
+            "draft-only; explicit Apply; retained sort/source/pin/page size",
+          widths: [1440, 390],
+          screenshotSHA256: Object.fromEntries(
+            await Promise.all(
+              [1440, 390].map(async (width) => [
+                String(width),
+                createHash("sha256")
+                  .update(
+                    await readFile(
+                      info.outputPath(
+                        `group-assets-v3-keyword-clear-${width}.png`,
+                      ),
+                    ),
+                  )
+                  .digest("hex"),
+              ]),
+            ),
+          ),
+        },
         screenshotSHA256: {
           desktop: createHash("sha256")
             .update(
