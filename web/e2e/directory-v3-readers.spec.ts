@@ -1,4 +1,5 @@
 import { navigateTo } from "./navigation";
+import { directoryV3VerificationGET } from "./directory-v3-verification-get";
 import {
   test,
   expect,
@@ -188,7 +189,7 @@ async function readJSON(
   path: string,
   actorId?: number,
 ) {
-  const response = await context.request.get(path);
+  const response = await directoryV3VerificationGET(context.request, path);
   expect(response.status(), `GET ${path}`).toBe(200);
   expect(response.headers()["cache-control"]).toBe("no-store");
   if (actorId !== undefined)

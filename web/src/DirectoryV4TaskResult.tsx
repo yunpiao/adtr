@@ -28,7 +28,7 @@ export default function DirectoryV4TaskResult({ api, taskUUID, close, failure }:
   return <section aria-label="本任务的原始组成员结果">
     <h3>本任务的原始组成员结果</h3><p>固定原始观测：{display(taskUUID)}。不会读取最新观测；不是 AD 全域原子快照。</p>
     <button onClick={close}>关闭原始结果</button><button disabled={busy} onClick={() => void load(page?.page.pageIdx ?? 1)}>刷新原始结果</button>
-    <label>每页组数<select value={size} onChange={event => { const next = Number(event.target.value); setSize(next); void load(1, next); }}>{[25,50,100].map(value => <option key={value}>{value}</option>)}</select></label>
+    <label>每页组数<select aria-label="每页组数" value={size} onChange={event => { const next = Number(event.target.value); setSize(next); void load(1, next); }}>{[25,50,100].map(value => <option key={value}>{value}</option>)}</select></label>
     {busy && <p role="status">正在核验原始观测…</p>}
     {page && <><p>本观测共有 {page.page.total} 个组行；零组行不等于未采集。</p><ul>{page.list.map(row => <li key={row.objectGUID}><button onClick={() => void inspect(row.objectGUID)}>{display(row.samAccountName ?? row.distinguishedName)}</button></li>)}</ul><nav aria-label="原始结果分页"><button disabled={page.page.pageIdx <= 1} onClick={() => void load(page.page.pageIdx - 1)}>上一页组</button><span>第 {page.page.pageIdx} 页</span><button disabled={page.page.pageIdx >= page.page.totalPage} onClick={() => void load(page.page.pageIdx + 1)}>下一页组</button></nav></>}
     {detail && <section aria-label="组原始成员详情"><h4>{display(detail.object.distinguishedName)}</h4><button onClick={clearDetail}>关闭成员详情</button>

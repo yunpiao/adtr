@@ -7,6 +7,7 @@ import {
   directoryV2RequestDiagnostic,
   directoryV2ResponseWitness,
   directoryV2RequestIdentity,
+  directoryV4ControlsResponseJSON,
 } from "../e2e/directory-v2-response-observer";
 import { createHash, webcrypto } from "node:crypto";
 import { EventEmitter } from "node:events";
@@ -73,13 +74,14 @@ async function takeRecord(id: string, ordinal: number) {
 function install(
   fetch: typeof globalThis.fetch,
   register: (epoch: string) => Promise<void> = async () => {},
+  mode: "legacy" | "v4-controls" = "legacy",
 ) {
   vi.stubGlobal("window", {
     fetch,
     __adtrDirectoryV2Document: register,
   });
   Object.assign(window, { top: window });
-  installDirectoryV2ResponseObserver();
+  installDirectoryV2ResponseObserver(mode);
 }
 function response(body: BodyInit) {
   return new Response(body, {
@@ -900,7 +902,7 @@ describe("raw-byte witness lifecycle and document budgets", () => {
 });
 
 describe("host directory response identity", () => {
-  async function harness(options: { status?: number; body?: BodyInit } = {}) {
+  async function harness(options: { status?: number; body?: BodyInit; mode?: "legacy" | "v4-controls"; path?: string; method?: string } = {}) {
     const context = new EventEmitter() as EventEmitter & {
       exposeBinding: ReturnType<typeof vi.fn>;
       addInitScript: ReturnType<typeof vi.fn>;
@@ -918,9 +920,9 @@ describe("host directory response identity", () => {
       register = callback;
     });
     context.addInitScript = vi.fn(async () => {});
-    await observeDirectoryV2Responses(context as unknown as BrowserContext);
+    await observeDirectoryV2Responses(context as unknown as BrowserContext, options.mode ?? "legacy");
     const newDocument = () =>
-      install(fetch, async (epoch) => register({ page, frame }, epoch));
+      install(fetch, async (epoch) => register({ page, frame }, epoch), options.mode ?? "legacy");
     let last!: BrowserResponse;
     let count = 0;
     let omitNextRequest = false;
@@ -951,7 +953,7 @@ describe("host directory response identity", () => {
       ).href;
       const request = {
         url: () => requestURL,
-        method: () => "GET",
+        method: () => (init?.method ?? (input instanceof Request ? input.method : "GET")).toUpperCase(),
         frame: () => frame,
         resourceType: () => "fetch",
       };
@@ -972,12 +974,14 @@ describe("host directory response identity", () => {
       return Promise.resolve(native);
     });
     const consume = async (controller = new AbortController()) => {
-      const ordinal = observer().count(identity);
+      const route = options.path ?? path, method = options.method ?? "GET";
+      const key = `${method} ${new URL(route, origin).href}`;
+      const ordinal = observer().count(key);
       await readDirectoryV2JSON(
-        await window.fetch(path, { signal: controller.signal }),
+        await window.fetch(route, { method, signal: controller.signal }),
         controller.signal,
       );
-      await settle(identity, ordinal);
+      await settle(key, ordinal);
       return last;
     };
     newDocument();
@@ -1005,6 +1009,86 @@ describe("host directory response identity", () => {
   }
 
   const errorBody = '{"error":"not_found"}';
+  const v4Pairs = [
+    ["POST", "/api/directory/v4/sync"], ["POST", "/api/directory/v4/cancel"],
+    ["GET", "/api/directory/v4/receipt"], ["GET", "/api/directory/v4/task"],
+    ["GET", "/api/directory/v4/observation"], ["GET", "/api/group-assets/v4/members"],
+  ];
+  it.each(v4Pairs)("observes only opted-in original v4 %s %s without a second fetch", async (method, route) => {
+    const { consume, fetch } = await harness({ mode: "v4-controls", path: route, method });
+    const original = await consume();
+    await expect(directoryV4ControlsResponseJSON(original)).resolves.toEqual({ sequence: 1 });
+    await expect(directoryV2ResponseWitness(original)).resolves.toMatchObject({ state: "complete", uncanceledEOF: true, released: 1 });
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+  it.each(v4Pairs)("does not observe v4 %s %s in legacy mode or with the wrong method", async (method, route) => {
+    for (const mode of ["legacy", "v4-controls"] as const) {
+      const { latest } = await harness({ mode });
+      const actualMethod = mode === "legacy" ? method : method === "GET" ? "POST" : "GET";
+      await readDirectoryV2JSON(await window.fetch(route, { method: actualMethod }), signal());
+      expect(observer().count(`${actualMethod} ${origin}${route}`)).toBe(0);
+      await expect(directoryV4ControlsResponseJSON(latest())).rejects.toThrow("V4 controls response was not observed");
+    }
+  });
+  it("rejects unlisted v4 paths and leaves legacy-only paths out of opt-in scope", async () => {
+    for (const route of ["/api/directory/v4/other", "/api/directory/v4/task/extra", "/api/group-assets/v4/members/extra", "/api/directory/v3/task"]) {
+      const { latest } = await harness({ mode: "v4-controls" });
+      await readDirectoryV2JSON(await window.fetch(route), signal());
+      expect(observer().count(`GET ${origin}${route}`)).toBe(0);
+      await expect(directoryV4ControlsResponseJSON(latest())).rejects.toThrow("V4 controls response was not observed");
+    }
+  });
+  it("keeps same-mode installation idempotent and rejects scope upgrades", async () => {
+    for (const mode of ["legacy", "v4-controls"] as const) {
+      const { context } = await harness({ mode });
+      await observeDirectoryV2Responses(context as unknown as BrowserContext, mode);
+      expect(context.addInitScript).toHaveBeenCalledTimes(1);
+      await expect(observeDirectoryV2Responses(context as unknown as BrowserContext, mode === "legacy" ? "v4-controls" : "legacy")).rejects.toThrow("Conflicting directory observer mode");
+      expect(context.addInitScript).toHaveBeenCalledTimes(1);
+    }
+  });
+  it("does not copy original sync proof or CSRF headers into response records", async () => {
+    const { latest } = await harness({ mode: "v4-controls" });
+    const native = await window.fetch("/api/directory/v4/sync", { method: "POST", headers: { "X-CSRF-Token": "private-csrf" }, body: JSON.stringify({ actorPassword: "private-password", totpCode: "private-code" }) });
+    await readDirectoryV2JSON(native, signal());
+    await expect(directoryV4ControlsResponseJSON(latest())).resolves.toEqual({ sequence: 1 });
+    expect(JSON.stringify(observer().peek(`POST ${origin}/api/directory/v4/sync`, 0))).not.toContain("private-");
+  });
+  it.each(['{"key":1,"key":2}', '{"key":1,"\\u006bey":2}'])("rejects duplicate v4 keys before discarding original text", async body => {
+    const { consume } = await harness({ mode: "v4-controls", path: "/api/directory/v4/task", body });
+    await expect(directoryV4ControlsResponseJSON(await consume())).rejects.toThrow("json_valid=false");
+    expect(observer().peek(`GET ${origin}/api/directory/v4/task`, 0)?.text).toBe("");
+  });
+  it("keeps the legacy JSON parser and unlisted-response fallback unchanged", async () => {
+    const { consume } = await harness({ body: '{"key":1,"key":2}' });
+    await expect(directoryV2ResponseJSON(await consume())).resolves.toEqual({ key: 2 });
+    const json = vi.fn(async () => ({ legacy: true }));
+    await expect(directoryV2ResponseJSON({ url: () => origin + "/api/group-assets/v4/members", json } as unknown as BrowserResponse)).resolves.toEqual({ legacy: true });
+    expect(json).toHaveBeenCalledTimes(1);
+  });
+  it("preserves v4 historical completed JSON but not native witness after cleanup abort", async () => {
+    const { consume } = await harness({ mode: "v4-controls", path: "/api/directory/v4/task" });
+    const controller = new AbortController(), original = await consume(controller);
+    controller.abort();
+    await expect(directoryV4ControlsResponseJSON(original)).resolves.toEqual({ sequence: 1 });
+    await expect(directoryV2ResponseWitness(original)).rejects.toThrow("body observation failed");
+  });
+  it("rejects v4 abort before EOF/release rather than inventing a completed body", async () => {
+    const { latest } = await harness({ mode: "v4-controls" });
+    const controller = new AbortController();
+    const native = await window.fetch("/api/directory/v4/task", { signal: controller.signal });
+    const reader = native.body!.getReader();
+    await reader.read(); controller.abort(); reader.releaseLock();
+    await expect(directoryV4ControlsResponseJSON(latest())).rejects.toThrow("body observation failed");
+  });
+  it("keeps v4 out-of-order response identity and rejects an old document", async () => {
+    const { consume, newDocument } = await harness({ mode: "v4-controls", path: "/api/directory/v4/task" });
+    const first = await consume(), second = await consume();
+    await expect(directoryV4ControlsResponseJSON(second)).resolves.toEqual({ sequence: 2 });
+    await expect(directoryV4ControlsResponseJSON(first)).resolves.toEqual({ sequence: 1 });
+    const old = await consume(); newDocument();
+    await expect(directoryV4ControlsResponseJSON(old)).rejects.toThrow("document changed");
+  });
   const detailQuery = {
     domainId: "synthetic-domain",
     expectedRevision: "1",

@@ -3,6 +3,7 @@ import { createHmac, randomUUID } from "node:crypto";
 import { isIP } from "node:net";
 import { navigateTo } from "./navigation";
 import { boundedV4, v4Phase } from "./directory-v4-diagnostics";
+import { observeDirectoryV2Responses } from "./directory-v2-response-observer";
 
 // Source-only candidate. All setup writes go through the real UI except the
 // existing v4 credential-use grant, whose management UI does not yet exist.
@@ -132,6 +133,8 @@ async function bindAccount(page: Page, actor: Actor, domain: string, accountLabe
 }
 
 export async function setupV4(page: Page, context: BrowserContext, options: {reader: boolean}) {
+  // Install before the first application document, including future tabs/reloads.
+  await observeDirectoryV2Responses(context, "v4-controls");
   v4Phase("setup-start");
   const domain = "synthetic.invalid", groupName = "E2EV4ControlsScope", accountLabel = "Synthetic v4 controls reader";
   const password = required("ADTR_E2E_V4_CONTROLS_PASSWORD"), initial = required("ADTR_E2E_PASSWORD");

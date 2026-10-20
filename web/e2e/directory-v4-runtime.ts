@@ -11,6 +11,7 @@ import { freshCode, fillSecret, totp, type Authenticator } from "./directory-v4-
 import type { Task } from "../src/task-api";
 import { v4Phase } from "./directory-v4-diagnostics";
 import { recordV4BodyClass, readV4ObservedObject, waitForV4RawMembers } from "./directory-v4-result-observation";
+import { directoryV4ControlsResponseJSON } from "./directory-v2-response-observer";
 
 export const V4 = "/api/directory/v4/";
 export function invariant(ok: unknown, message: string): asserts ok { if (!ok) throw new Error(message); }
@@ -78,9 +79,16 @@ export async function actualJSON(response: Response | APIResponse, actorId: numb
   v4Phase("body-start");
   // Only a closed transport/media-type enum, never actual headers or URLs.
   recordV4BodyClass("request" in response, headers["content-type"]);
-  const value = await readV4ObservedObject(() => response.body());
+  // Browser reads use the exact original native reader's completed/released
+  // historical bytes, not the disposable CDP body copy. This is a JSON
+  // cross-check, not strict native-finish or live-delivery proof. Node
+  // APIResponse (including route.fetch) keeps its existing direct path.
+  const value = "request" in response
+    ? await bounded(directoryV4ControlsResponseJSON(response), 15_000, "Original native browser body observation deadline exceeded")
+    : await readV4ObservedObject(() => response.body());
+  invariant(value && typeof value === "object" && !Array.isArray(value), "Real response must be an object");
   v4Phase("body-complete");
-  return value;
+  return value as Record<string, unknown>;
 }
 export async function taskResponse(response: Response | APIResponse, actor: Actor, domainId: string, operation: "sync" | "cancel" | "read", taskUUID?: string) {
   const value = await actualJSON(response, actor.actorId);
@@ -138,9 +146,22 @@ export async function terminal(context: BrowserContext, actor: Actor, original: 
   }, { timeout: 60_000, intervals: [100, 250, 500], message: "Original real task must reach required terminal state" }).toBe(state);
   return result!;
 }
+let recoveryMarkers = 0;
+function recoveryPhase(phase: "start" | "main-frame-navigated" | "dom-content-loaded" | "load" | "reload-returned" | "receipt-response" | "receipt-not-observed") {
+  if (recoveryMarkers++ < 64) console.log("[v4-recovery] " + phase);
+}
 export async function recover(page: Page, actor: Actor, original: Original) {
   const receipt = page.waitForResponse(r => new URL(r.url()).pathname === V4 + "receipt" && r.request().method() === "GET");
-  await page.reload();
+  void receipt.catch(() => undefined);
+  void receipt.then(() => recoveryPhase("receipt-response"), () => recoveryPhase("receipt-not-observed"));
+  const commit = (frame: import("@playwright/test").Frame) => { if (frame === page.mainFrame()) recoveryPhase("main-frame-navigated"); };
+  const dom = () => recoveryPhase("dom-content-loaded"), load = () => recoveryPhase("load");
+  page.on("framenavigated", commit); page.on("domcontentloaded", dom); page.on("load", load);
+  try {
+    recoveryPhase("start");
+    await page.reload(); // Preserve existing load readiness and 15-second bound.
+    recoveryPhase("reload-returned");
+  } finally { page.off("framenavigated", commit); page.off("domcontentloaded", dom); page.off("load", load); }
   const response = await receipt, query = new URL(response.url()).searchParams;
   invariant(query.get("domainId") === original.domainId && query.get("idempotencyKey") === original.idempotencyKey, "Recovery did not query exact original receipt");
   await taskResponse(response, actor, original.domainId, "read", original.taskUUID);
@@ -203,6 +224,7 @@ export async function committedLoss(page: Page, actor: Actor, domainId: string, 
 }
 export async function pinnedResults(page: Page, actor: Actor, original: Original) {
   const pending = page.waitForResponse(r => new URL(r.url()).pathname === V4 + "observation");
+  void pending.catch(() => undefined);
   await page.getByRole("button", { name: "查看本任务的原始组成员结果", exact: true }).click();
   const response = await pending, params = new URL(response.url()).searchParams;
   invariant(params.get("observationId") === original.taskUUID && params.get("domainId") === original.domainId && params.get("kind") === "group", "Original result read lost original pins");
@@ -211,6 +233,7 @@ export async function pinnedResults(page: Page, actor: Actor, original: Original
   const semantics = { absent: false, empty: false, values: false };
   for (const row of value.list) {
     const next = page.waitForResponse(r => new URL(r.url()).pathname === "/api/group-assets/v4/members");
+    void next.catch(() => undefined);
     await page.getByRole("region", { name: "本任务的原始组成员结果", exact: true }).getByRole("button", { name: directoryV4DisplayMember(row.samAccountName ?? row.distinguishedName), exact: true }).click();
     const detailResponse = await next, q = new URL(detailResponse.url()).searchParams;
     invariant(q.get("observationId") === original.taskUUID && q.get("domainId") === original.domainId && q.get("expectedRevision") === original.expectedRevision && q.get("expectedCredentialRevision") === original.expectedCredentialGeneration && q.get("objectGUID") === row.objectGUID, "Raw detail lost original five pins");
@@ -224,12 +247,14 @@ export async function pinnedResults(page: Page, actor: Actor, original: Original
   invariant(Object.values(semantics).every(Boolean), "Real fixture did not cover absent/empty/value raw semantics");
   for (const size of [50, 25]) {
     const next = page.waitForResponse(r => new URL(r.url()).pathname === V4 + "observation");
+    void next.catch(() => undefined);
     await page.getByRole("region", { name: "本任务的原始组成员结果", exact: true }).getByLabel("每页组数", { exact: true }).selectOption(String(size));
     const resized = await next, q = new URL(resized.url()).searchParams;
     invariant(q.get("observationId") === original.taskUUID && q.get("domainId") === original.domainId && q.get("kind") === "group", "Page-size change fell back from original pins");
     parseGroupMembersV4Page(await actualJSON(resized, actor.actorId), { domainId: original.domainId, observationId: original.taskUUID, pageIdx: 1, pageSize: size });
   }
   const refreshed = page.waitForResponse(r => new URL(r.url()).pathname === V4 + "observation");
+  void refreshed.catch(() => undefined);
   await page.getByRole("button", { name: "刷新原始结果", exact: true }).click();
   const reread = await refreshed;
   invariant(new URL(reread.url()).searchParams.get("observationId") === original.taskUUID, "Refresh fell back from original observation");

@@ -4,13 +4,15 @@ import type {
   Request as BrowserRequest,
   Response,
 } from "@playwright/test";
+import { parseDirectoryV4UniqueJSON } from "../src/directory-v4-controls-json";
 
 // Chromium can discard the inspector copy of a no-store Fetch body consumed
 // through getReader(), even after the application receives every byte and EOF:
 // https://github.com/microsoft/playwright/issues/42742
 // Observe those exact application reads. Do not clone/tee, make another request,
 // intercept delivery, change cache policy, or replace the production parser.
-export function installDirectoryV2ResponseObserver() {
+export function installDirectoryV2ResponseObserver(mode: "legacy" | "v4-controls" = "legacy") {
+  if (mode !== "legacy" && mode !== "v4-controls") throw new Error("Invalid directory observer mode");
   if (window !== window.top) return;
   const key = "__adtrDirectoryV2ResponseObserver";
   const epoch = crypto.randomUUID();
@@ -56,7 +58,10 @@ export function installDirectoryV2ResponseObserver() {
     Record,
     { refresh: () => void; clear: () => void; fail: (reason: string) => void }
   >();
-  const paths = new Set([
+  const paths = new Set(mode === "v4-controls" ? [
+    "/api/directory/v4/sync", "/api/directory/v4/cancel", "/api/directory/v4/receipt",
+    "/api/directory/v4/task", "/api/directory/v4/observation", "/api/group-assets/v4/members",
+  ] : [
     "/api/user-assets/v2",
     "/api/user-assets/v2/detail",
     "/api/user-assets/v3",
@@ -114,11 +119,15 @@ export function installDirectoryV2ResponseObserver() {
       }
       if (url.origin !== location.origin || !paths.has(url.pathname))
         return pending;
+      const method = (init?.method ?? request?.method ?? "GET").toUpperCase();
+      // Exact v4 pairs only; legacy allowlist/method behavior is unchanged.
+      const v4Post = ["/api/directory/v4/sync", "/api/directory/v4/cancel"].includes(url.pathname);
+      const v4Get = ["/api/directory/v4/receipt", "/api/directory/v4/task", "/api/directory/v4/observation", "/api/group-assets/v4/members"].includes(url.pathname);
+      if ((v4Post && method !== "POST") || (v4Get && method !== "GET")) return pending;
       if (recordCount >= 2048) {
         capacityFailed = true;
         return pending;
       }
-      const method = (init?.method ?? request?.method ?? "GET").toUpperCase();
       const id = `${method} ${url.href}`;
       const list = records.get(id) ?? [];
       const record: Record = {
@@ -460,14 +469,18 @@ export function installDirectoryV2ResponseObserver() {
 
 const identities = new WeakMap<
   BrowserRequest,
-  { epoch: string; ordinal: number }
+  { epoch: string; ordinal: number; mode: "legacy" | "v4-controls" }
 >();
-const installed = new WeakSet<BrowserContext>();
+const installed = new WeakMap<BrowserContext, "legacy" | "v4-controls">();
 const documents = new WeakMap<
   Page,
   { epoch: string; counts: Map<string, number> }
 >();
-const directoryPath = (url: URL) =>
+const v4Request = (url: URL, method: string) =>
+  (method === "POST" && ["/api/directory/v4/sync", "/api/directory/v4/cancel"].includes(url.pathname)) ||
+  (method === "GET" && ["/api/directory/v4/receipt", "/api/directory/v4/task", "/api/directory/v4/observation", "/api/group-assets/v4/members"].includes(url.pathname));
+const directoryPath = (url: URL, method: string, mode: "legacy" | "v4-controls" = "legacy") =>
+  mode === "v4-controls" ? v4Request(url, method) :
   [
     "/api/user-assets/v2",
     "/api/user-assets/v2/detail",
@@ -495,9 +508,14 @@ const directoryPath = (url: URL) =>
     url.pathname,
   );
 
-export async function observeDirectoryV2Responses(context: BrowserContext) {
-  if (installed.has(context)) return;
-  installed.add(context);
+export async function observeDirectoryV2Responses(context: BrowserContext, mode: "legacy" | "v4-controls" = "legacy") {
+  if (mode !== "legacy" && mode !== "v4-controls") throw new Error("Invalid directory observer mode");
+  const previous = installed.get(context);
+  if (previous !== undefined) {
+    if (previous !== mode) throw new Error("Conflicting directory observer mode");
+    return;
+  }
+  installed.set(context, mode);
   await context.exposeBinding(
     "__adtrDirectoryV2Document",
     ({ page, frame }, epoch: string) => {
@@ -506,7 +524,7 @@ export async function observeDirectoryV2Responses(context: BrowserContext) {
     },
   );
   context.on("request", (request) => {
-    if (!directoryPath(new URL(request.url()))) return;
+    if (!directoryPath(new URL(request.url()), request.method(), mode)) return;
     const frame = request.frame();
     const page = frame.page();
     if (
@@ -519,10 +537,11 @@ export async function observeDirectoryV2Responses(context: BrowserContext) {
     if (!document) return;
     const id = `${request.method()} ${request.url()}`;
     const ordinal = document.counts.get(id) ?? 0;
-    identities.set(request, { epoch: document.epoch, ordinal });
+    identities.set(request, { epoch: document.epoch, ordinal, mode });
     document.counts.set(id, ordinal + 1);
   });
-  await context.addInitScript(installDirectoryV2ResponseObserver);
+  if (mode === "legacy") await context.addInitScript(installDirectoryV2ResponseObserver);
+  else await context.addInitScript(installDirectoryV2ResponseObserver, mode);
 }
 
 // Read-only failure diagnostics for an exact browser Request. Never return
@@ -639,7 +658,7 @@ export function directoryV2RequestIdentity(
   if (!captured) throw new Error("Directory response was not observed");
   if (documents.get(request.frame().page())?.epoch !== captured.epoch)
     throw new Error("Directory response document changed");
-  return { ...captured, method: request.method(), url: request.url() };
+  return { epoch: captured.epoch, ordinal: captured.ordinal, method: request.method(), url: request.url() };
 }
 
 // Both APIs share one atomic historical body take. Ordinary JSON can retain a
@@ -662,7 +681,12 @@ function initialObservation(response: Response) {
   return observation;
 }
 export function directoryV2ResponseJSON(response: Response): Promise<any> {
-  if (!directoryPath(new URL(response.url()))) return response.json();
+  // Preserve legacy fallback exactly, including callers with a separate v4
+  // observer. Only the dedicated v4-controls API opts into the new scope.
+  if (!directoryPath(new URL(response.url()), "GET")) return response.json();
+  return observedJSON(response);
+}
+function observedJSON(response: Response): Promise<any> {
   let body = bodies.get(response);
   if (!body) {
     body = initialObservation(response).then(
@@ -672,10 +696,21 @@ export function directoryV2ResponseJSON(response: Response): Promise<any> {
   }
   return body;
 }
+// Closed opt-in entry point: never fall back to the inspector response copy or
+// accept another endpoint/method when the required native observation is absent.
+export function directoryV4ControlsResponseJSON(response: Response): Promise<unknown> {
+  const request = response.request();
+  if (identities.get(request)?.mode !== "v4-controls" || !v4Request(new URL(response.url()), request.method()))
+    return Promise.reject(new Error("V4 controls response was not observed"));
+  return observedJSON(response);
+}
 export async function directoryV2ResponseWitness(
   response: Response,
 ): Promise<DirectoryV2ResponseWitness> {
-  if (!directoryPath(new URL(response.url())))
+  const url = new URL(response.url());
+  if (!directoryPath(url, "GET") && !v4Request(url, "GET") && !v4Request(url, "POST"))
+    throw new Error("Directory response was not observed");
+  if (!directoryPath(url, response.request().method(), identities.get(response.request())?.mode))
     throw new Error("Directory response was not observed");
   const observation = await initialObservation(response);
   const current = await finalRecord(response, false);
@@ -905,7 +940,11 @@ async function readObservedBody(response: Response): Promise<ObservedBody> {
   const record = final.record;
   let value: unknown;
   try {
-    value = JSON.parse(record.text);
+    // Validate exact original raw text before disposal; parsing first and then
+    // stringifying would irreversibly erase escaped duplicate property names.
+    value = v4Request(new URL(final.identity.url), final.identity.method)
+      ? parseDirectoryV4UniqueJSON(record.text)
+      : JSON.parse(record.text);
   } catch {
     throw observationError(
       "Directory browser body observation failed",

@@ -26,7 +26,11 @@ describe("original-only v4 result presentation", () => {
     fireEvent.click(screen.getByRole("button", { name: "下一页组" })); await waitFor(() => expect(h.pageRead).toHaveBeenCalledWith(2, 25, expect.any(AbortSignal)));
     await screen.findByRole("button", { name: "synthetic-group" }); fireEvent.click(screen.getByRole("button", { name: "刷新原始结果" }));
     await waitFor(() => expect(h.pageRead).toHaveBeenCalledTimes(3)); await screen.findByRole("button", { name: "synthetic-group" });
-    fireEvent.change(screen.getByLabelText("每页组数"), { target: { value: "50" } }); await waitFor(() => expect(h.pageRead).toHaveBeenLastCalledWith(1, 50, expect.any(AbortSignal)));
+    const pageSize = screen.getByLabelText("每页组数", { exact: true });
+    expect(pageSize).toHaveAttribute("aria-label", "每页组数");
+    expect(pageSize).toHaveAccessibleName("每页组数");
+    expect(pageSize).toBe(screen.getByRole("combobox", { name: "每页组数" }));
+    fireEvent.change(pageSize, { target: { value: "50" } }); await waitFor(() => expect(h.pageRead).toHaveBeenLastCalledWith(1, 50, expect.any(AbortSignal)));
     expect(screen.getByText(/固定原始观测：original-task/)).toBeVisible(); expect(h.detailRead).not.toHaveBeenCalled();
   });
   it("renders original raw order reversibly, with no DN links or derived total", async () => {
