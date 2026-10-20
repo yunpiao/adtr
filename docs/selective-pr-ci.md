@@ -89,3 +89,40 @@ missing diff, plan tampering and all selected/unselected job outcomes. CI also r
 the real TypeScript parser fixtures and exact current-repository selection probes
 for messages, bulk messages, user export, computer assets and task pages. Local
 mocked tests do not substitute for those real CI executions.
+
+## Recorded rollout evidence and reading a run
+
+The first infrastructure rollout is PR #184. Its final commit
+`68084bfbaac58d695caba8b379979080300430b4` selected the complete suite because it
+changed the workflow and selector. Run
+[39356052487](https://github.com/yunpiao/adtr/actions/runs/39356052487) completed
+successfully on attempt 2, with all 72 latest checks successful. The plan included
+51 browser suites, seven fixed-engine variants and eight auth shards. The real
+parser's seven fixtures and current-repository dependency probes passed. The final
+verifier rebuilt the plan from all four immutable revisions; the retry's complete
+plan was identical to the first attempt's plan.
+
+Keep both earlier failures in the rollout record. The initial implementation
+missed the reviewed workflow projection at two old empty-asset contract entry
+points; a test-only correction retained their original hash and assertions and
+added a regression scan. On the corrected commit, the first directory execution
+lost one HTTP connection while reading credential-use state. The verifier
+correctly rejected that browser failure even though plan equality passed. A single
+failed-jobs retry passed without changing code or acceptance criteria. Safe
+cleanup diagnostics showed normal API/worker exits, but the connection loss's
+underlying cause remains unknown.
+
+When reviewing an ordinary PR, inspect the `plan` result and the final `verify`
+summary together. Confirm the immutable head and tested revision, reasons for each
+changed path, selected matrices, and the exact selected-success/unselected-skipped
+result. A skipped browser suite has not exercised that PR. A shared dependency or
+an uncertain consumer can legitimately expand a small textual edit to the full
+suite; line count alone does not determine coverage.
+
+A documentation-only follow-up records this rollout without changing the selector
+or workflow. Its purpose is also to obtain the first real narrow-plan execution:
+mandatory selection/parser/current-map and requirements checks should run while
+business acceptance jobs remain skipped. Its outcome and observed duration must be
+recorded from that follow-up's own run. At the time of this entry, that runtime
+result and the merged rollout's fresh main-push result are still pending. Any
+measured documentation-only saving must not be generalized to all code changes.
