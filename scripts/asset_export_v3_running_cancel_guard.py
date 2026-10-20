@@ -166,6 +166,9 @@ LOCK_TYPE_CATEGORIES = frozenset({'relation', 'extend', 'frozenid', 'page',
 BLOCKER_CHECKS = frozenset({'outside_owned_sample', 'cyclic_owned_graph', 'strict_barrier_chain'})
 STRICT_CANDIDATE_VALUES = MappingProxyType({key: TRANSACTION_FAILURE_VALUES[key]
     for key in ('queryCategory', 'stateCategory', 'waitTypeCategory')})
+TUPLE_FAILURE_VALUES = MappingProxyType({key: frozenset({'matched', 'rejected'})
+    for key in ('tupleQueryCheck', 'tupleRelationCheck', 'tupleModeCheck',
+                'tupleBarrierCheck', 'tupleWaitCheck')})
 OBSERVATION_FAILURE_VALUES = MappingProxyType({
     'observationCheck': frozenset({'sessions', 'barrier_pid', 'session_fields',
         'pid', 'transaction', 'state_type', 'state_value', 'query', 'wait_type',
@@ -279,6 +282,12 @@ def failure_event(stage, error):
             and type(detail['locksPresent']) is bool and all(type(detail[key]) is str
                 and detail[key] in values for key, values in TRANSACTION_FAILURE_VALUES.items())):
         event.update(detail)
+    detail = getattr(error, 'tuple_diagnostic', None) if (
+        reason == 'unsafe_tuple_lock' and stage == 'candidate_strict') else None
+    if (type(detail) is dict and set(detail) == set(TUPLE_FAILURE_VALUES)
+            and all(type(detail[key]) is str and detail[key] in values
+                    for key, values in TUPLE_FAILURE_VALUES.items())):
+        event.update({key: detail[key] for key in TUPLE_FAILURE_VALUES})
     detail = getattr(error, 'observation_diagnostic', None) if reason == 'invalid_session_observation' else None
     if (type(detail) is dict and set(detail) == set(OBSERVATION_FAILURE_VALUES)
             and all(type(detail[key]) is str and detail[key] in values
@@ -483,9 +492,23 @@ def validate_sessions(sessions, lock_pid):
                         (kind == 'activity' and mode == 'ShareLock' and not lock['granted'] and
                          session['pid'] in reachable), 'unsafe transaction lock')
             elif typ == 'tuple':
-                require(kind == 'activity' and lock['relation'] == 'adtr.system_worker_activity'
-                        and mode in ('ExclusiveLock', 'AccessExclusiveLock') and
-                        session['pid'] in reachable, 'unsafe tuple lock')
+                try:
+                    require(kind == 'activity' and lock['relation'] == 'adtr.system_worker_activity'
+                            and mode in ('ExclusiveLock', 'AccessExclusiveLock') and
+                            session['pid'] in reachable, 'unsafe tuple lock')
+                except RuntimeError as error:
+                    # Classify only the exact rejected lock and original sample.
+                    # Preserve the predicate, exception and fail-closed path.
+                    try:
+                        checks = (kind == 'activity',
+                            lock['relation'] == 'adtr.system_worker_activity',
+                            mode in ('ExclusiveLock', 'AccessExclusiveLock'),
+                            session['pid'] in reachable, session['waitType'] == 'Lock')
+                        error.tuple_diagnostic = {key: 'matched' if value else 'rejected'
+                            for key, value in zip(TUPLE_FAILURE_VALUES, checks)}
+                    except Exception:
+                        pass  # Diagnostic failure cannot replace strict rejection.
+                    raise
             else:
                 raise RuntimeError('unrecognized owned lock')
         if session['blockers']:

@@ -45,6 +45,34 @@ the existing codec meaning. No inferred name, application, groupMold/scope/type,
 sensitivity, membership, relationship or export fields. Canonical facts may be
 shown inline; no separate detail or membership endpoint is introduced.
 
+## UI-0447 page-local row numbers
+
+Issue #30 records `UI-0447｜el-table-column｜序号｜未声明直接绑定｜{"type": "index"}`.
+That source establishes an index-column clue, not a verified cross-page numbering
+rule. This slice explicitly adopts the local display contract **本页序号**:
+the accepted current page is numbered 1..N in returned order, resetting to 1 on
+every page. With 23 groups at page size 10, pages show 1..10, 1..10 and 1..3.
+Changing page size, applied search/sort or refreshing recomputes positions from
+the newly accepted rows. Unapplied drafts retain current row numbers while the
+existing pagination/facts pause remains in force.
+
+The column helps locate a row within the visible page. Its required local
+`position` component prop is derived from the array index plus one; it is not a
+query parameter or stored field. Removing the display removes only that locator.
+It has no effect on object identity, ordering, observation pinning or export.
+GUID remains the React key and facts target; expanded facts span all six columns
+without receiving a number. Empty/loading/error/revoked states create no rows.
+Late responses remain subject to the existing generation, abort and authority
+checks. No API, storage, filters, sorting, permissions, cancellation, export or
+recovery contract changes. The extra column increases table width, so existing
+horizontal scrolling and desktop/mobile geometry checks remain required.
+
+Focused synthetic DOM coverage is in `GroupAssetsV3RowNumbers.test.tsx`; real
+ordinal assertions augment `group-assets-v3.spec.ts` without replacing its
+Worker/TLS LDAP/PostgreSQL/API, facts, pinning, invalidation or screenshot checks.
+Local synthetic tests and real browser evidence must be reported separately;
+source parity, real AD/Windows and product acceptance remain unverified.
+
 ## Authority and failure handling
 
 Current session/actor/tenant, domains.read AND directory_assets.read, current

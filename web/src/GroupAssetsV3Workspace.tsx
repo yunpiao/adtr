@@ -603,6 +603,7 @@ function Assets({
               <table aria-label="组资产列表">
                 <thead>
                   <tr>
+                    <th scope="col">本页序号</th>
                     <th>账户名（SAM）</th>
                     <th>安全标识（SID）</th>
                     <th>创建时间（UTC）</th>
@@ -611,10 +612,11 @@ function Assets({
                   </tr>
                 </thead>
                 <tbody>
-                  {list.list.map((row) => (
+                  {list.list.map((row, index) => (
                     <GroupRow
                       key={row.objectGUID}
                       row={row}
+                      position={index + 1}
                       expanded={expanded === row.objectGUID && !dirty}
                       disabled={dirty || busy}
                       toggle={() =>
@@ -677,11 +679,13 @@ function Assets({
 }
 function GroupRow({
   row,
+  position,
   expanded,
   disabled,
   toggle,
 }: {
   row: GroupAssetV3Object;
+  position: number;
   expanded: boolean;
   disabled: boolean;
   toggle: () => void;
@@ -689,6 +693,7 @@ function GroupRow({
   return (
     <>
       <tr>
+        <td>{position}</td>
         <td>{nullable(row.samAccountName)}</td>
         <td>{nullable(row.objectSid)}</td>
         <td>{nullable(row.whenCreated)}</td>
@@ -707,7 +712,7 @@ function GroupRow({
       </tr>
       {expanded && (
         <tr id={`group-facts-${row.objectGUID}`}>
-          <td colSpan={5}>
+          <td colSpan={6}>
             <Facts object={row} />
           </td>
         </tr>

@@ -723,6 +723,12 @@ class ContractTests(unittest.TestCase):
         wrapped = '                        validate_candidate_strict(target, lock.pid)'
         self.assertEqual(source.count(wrapped), 1)
         source = source.replace(wrapped, '                        validate_sessions([target], lock.pid)', 1)
+        # Remove only the exact diagnostic-only wrapper; retain the original
+        # strict-body hash and verify the full wrapper before normalization.
+        tuple_wrapper = "                try:\n                    require(kind == 'activity' and lock['relation'] == 'adtr.system_worker_activity'\n                            and mode in ('ExclusiveLock', 'AccessExclusiveLock') and\n                            session['pid'] in reachable, 'unsafe tuple lock')\n                except RuntimeError as error:\n                    # Classify only the exact rejected lock and original sample.\n                    # Preserve the predicate, exception and fail-closed path.\n                    try:\n                        checks = (kind == 'activity',\n                            lock['relation'] == 'adtr.system_worker_activity',\n                            mode in ('ExclusiveLock', 'AccessExclusiveLock'),\n                            session['pid'] in reachable, session['waitType'] == 'Lock')\n                        error.tuple_diagnostic = {key: 'matched' if value else 'rejected'\n                            for key, value in zip(TUPLE_FAILURE_VALUES, checks)}\n                    except Exception:\n                        pass  # Diagnostic failure cannot replace strict rejection.\n                    raise"
+        tuple_original = "                require(kind == 'activity' and lock['relation'] == 'adtr.system_worker_activity'\n                        and mode in ('ExclusiveLock', 'AccessExclusiveLock') and\n                        session['pid'] in reachable, 'unsafe tuple lock')"
+        self.assertEqual(source.count(tuple_wrapper), 1)
+        source = source.replace(tuple_wrapper, tuple_original, 1)
         expected = {
             'validate_sessions': '4efb9b60ec57914d43c55c695e0916b07d71fbcd3f3cdac8c3cd06b630bbd092',
             'validate_checkpoint': '83ff1b7a711627ec7ee4e28761dde75f5e18ae3e81abb39927b8057022a06e74',
