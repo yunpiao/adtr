@@ -931,7 +931,7 @@ describe("specialized dictionary and asset export task controls", () => {
       expect(guidance).toHaveTextContent(/仅(?:以只读方式)?查看已保存结果/);
       expect(guidance).toHaveTextContent("当前没有采集或取消控件");
       expect(guidance).toHaveTextContent(/采集、回执和取消仍需对应专用\s*API/);
-    } else if (href === "#user-assets-v3" || href === "#computer-assets-v3") {
+    } else if (href === "#user-assets-v3" || href === "#computer-assets-v3" || href === "#group-assets-v3") {
       expect(guidance).toHaveTextContent("查看原导出结果");
       expect(guidance).toHaveTextContent("重新核验专用权限");
       expect(guidance).toHaveTextContent("未知提交恢复仍在");
