@@ -317,6 +317,51 @@ test("group assets real Worker TLS LDAP PG API browser pinned facts", async ({
     }));
     expect(clearGeometry.scroll).toBeLessThanOrEqual(clearGeometry.width + 1);
   }
+  // FLD-0464: real Chromium keyboard/clipboard, not OS IME or native drop proof.
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    const beforeLimit = keywordRequests;
+    const previous = "a".repeat(20);
+    await keyword.fill(previous);
+    await keyword.evaluate((node: HTMLInputElement) => {
+      node.focus();
+      node.setSelectionRange(8, 8);
+    });
+    await keyword.press("Z");
+    await expect(keyword).toHaveValue(previous);
+    await expect(keyword).toBeFocused();
+    expect(await keyword.evaluate((node: HTMLInputElement) => [node.selectionStart, node.selectionEnd])).toEqual([8, 8]);
+    await expect(page.getByText(/已拒绝整次变更/)).toBeVisible();
+    await expect(page.getByRole("button", { name: "应用组筛选", exact: true })).toBeDisabled();
+    await expect(page.getByLabel("组每页条数", { exact: true })).toBeDisabled();
+    await page.screenshot({ path: info.outputPath(`group-assets-v3-keyword-limit-${width}.png`), fullPage: true });
+    const limitGeometry = await page.evaluate(() => ({ width: innerWidth, scroll: document.documentElement.scrollWidth }));
+    expect(limitGeometry.scroll).toBeLessThanOrEqual(limitGeometry.width + 1);
+    await keyword.evaluate((node: HTMLInputElement) => node.setSelectionRange(8, 10, "backward"));
+    await page.evaluate(() => navigator.clipboard.writeText("XYZ"));
+    await keyword.press("Control+V");
+    await expect(keyword).toHaveValue(previous);
+    expect(await keyword.evaluate((node: HTMLInputElement) => [node.selectionStart, node.selectionEnd, node.selectionDirection])).toEqual([8, 10, "backward"]);
+    await page.evaluate(() => navigator.clipboard.writeText("😀"));
+    await keyword.press("Control+V");
+    await expect(keyword).toHaveValue("a".repeat(8) + "😀" + "a".repeat(10));
+    await expect(page.getByText(/已拒绝整次变更/)).toHaveCount(0);
+    await keyword.press("Control+A");
+    await page.evaluate(() => navigator.clipboard.writeText("😀".repeat(10)));
+    await keyword.press("Control+V");
+    await expect(keyword).toHaveValue("😀".repeat(10));
+    await keyword.press("End");
+    await page.evaluate(() => navigator.clipboard.writeText("😀"));
+    await keyword.press("Control+V");
+    await expect(keyword).toHaveValue("😀".repeat(10));
+    await expect(page.getByText(/已拒绝整次变更/)).toBeVisible();
+    expect(keywordRequests).toBe(beforeLimit);
+    await page.getByRole("button", { name: "清除组关键词", exact: true }).click();
+    await expect(keyword).toHaveValue("");
+    await expect(keyword).toBeFocused();
+    await expect(page.getByText(/已拒绝整次变更/)).toHaveCount(0);
+    expect(keywordRequests).toBe(beforeLimit);
+  }
   page.off("request", countKeywordRequests);
   await page.setViewportSize({ width: 1440, height: 960 });
   await groupResponse(page, () =>
@@ -400,6 +445,14 @@ test("group assets real Worker TLS LDAP PG API browser pinned facts", async ({
         observationId: f.taskUUID,
         newObservationId: newer.task.taskUUID,
         storedDigest: evidence.sha256,
+        keywordLimit: {
+          contract: "20 UTF-16 whole-edit rollback; raw value; no truncation or implicit request",
+          keyboardClipboard: "native Chromium; replacement selection and emoji",
+          imeDrop: "synthetic DOM only, not native OS IME/drop acceptance",
+          screenshotSHA256: Object.fromEntries(await Promise.all([1440, 390].map(async (width) => [
+            String(width), createHash("sha256").update(await readFile(info.outputPath(`group-assets-v3-keyword-limit-${width}.png`))).digest("hex"),
+          ]))),
+        },
         keywordClear: {
           contract:
             "draft-only; explicit Apply; retained sort/source/pin/page size",

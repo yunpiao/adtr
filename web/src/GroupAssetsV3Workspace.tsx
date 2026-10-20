@@ -358,6 +358,16 @@ function Assets({
   const [query, setQuery] = useState(initial),
     queryRef = useRef(initial);
   const searchInput = useRef<HTMLInputElement>(null);
+  const acceptedKeyword = useRef("");
+  const composingKeyword = useRef(false);
+  const [keywordComposition, setKeywordComposition] = useState(false);
+  const keywordSelection = useRef({
+    start: 0,
+    end: 0,
+    direction: "none" as "none" | "forward" | "backward",
+  });
+  const rejectedComposition = useRef<{ value: string; restored: string } | null>(null);
+
   const [draft, setDraft] = useState(""),
     [filters, setFilters] = useState(emptyFilters);
   const [list, setList] = useState<GroupAssetsV3List | null>(null),
@@ -447,6 +457,7 @@ function Assets({
   }, []);
   const transferError = Object.values(transfers).join(" ");
   const dirty =
+    keywordComposition ||
     !!transferError ||
     draft !== query.search ||
     (Object.keys(emptyFilters) as (keyof typeof emptyFilters)[]).some(
@@ -471,8 +482,11 @@ function Assets({
     };
   };
   const edit = (key: RawFilterKey, value: string) => {
-    if (key === "search") setDraft(value);
-    else setFilters((x) => ({ ...x, [key]: value }));
+    if (key === "search") {
+      acceptedKeyword.current = value;
+      rejectedComposition.current = null;
+      setDraft(value);
+    } else setFilters((x) => ({ ...x, [key]: value }));
     setTransfers((x) => {
       const n = { ...x };
       delete n[key];
@@ -481,9 +495,65 @@ function Assets({
     setInputError("");
     setExpanded(null);
   };
+  const rememberKeywordSelection = () => {
+    const input = searchInput.current;
+    if (
+      !input || composingKeyword.current || input.value !== acceptedKeyword.current
+    ) return;
+    keywordSelection.current = {
+      start: input.selectionStart ?? 0,
+      end: input.selectionEnd ?? 0,
+      direction: input.selectionDirection ?? "none",
+    };
+  };
+  const rejectKeywordLength = () => {
+    const previous = acceptedKeyword.current;
+    setDraft(previous);
+    setTransfers((x) => ({
+      ...x,
+      search: "关键词最多 20 个 UTF-16 单元，已拒绝整次变更并保留此前内容；请重新编辑或清除关键词。",
+    }));
+    setInputError("");
+    setExpanded(null);
+    const input = searchInput.current;
+    if (input) {
+      // Restore the whole value, never truncate an insertion or a surrogate pair.
+      input.value = previous;
+      const { start, end, direction } = keywordSelection.current;
+      input.setSelectionRange(start, end, direction);
+    }
+  };
+  const changeKeyword = (value: string) => {
+    if (composingKeyword.current) {
+      setDraft(value);
+      setExpanded(null);
+      return;
+    }
+    // Engines may emit an input after compositionend, including the restored value.
+    const rejected = rejectedComposition.current;
+    if (rejected && (value === rejected.value || value === rejected.restored)) {
+      rejectKeywordLength();
+      return;
+    }
+    if (value.length > 20) {
+      rejectKeywordLength();
+      return;
+    }
+    edit("search", value);
+  };
+  const finishKeywordComposition = (value: string) => {
+    if (!composingKeyword.current) return;
+    composingKeyword.current = false;
+    setKeywordComposition(false);
+    if (value.length > 20) {
+      rejectedComposition.current = { value, restored: acceptedKeyword.current };
+      rejectKeywordLength();
+    } else edit("search", value);
+  };
+  const keywordGuard = guard("search");
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    if (stale || transferError || (busy && !dirty)) return;
+    if (composingKeyword.current || stale || transferError || (busy && !dirty)) return;
     const applied: Pick<UserAssetsV2Filters, "creatTm"> = {
       creatTm: filters.creatTm || undefined,
     };
@@ -508,6 +578,7 @@ function Assets({
           type="button"
           className="secondary asset-refresh"
           aria-label="刷新组资产观测"
+          disabled={keywordComposition}
           onClick={() => {
             const { observationId: _pin, ...next } = queryRef.current;
             load({ ...next, pageIdx: 1 });
@@ -522,14 +593,52 @@ function Assets({
             ref={searchInput}
             aria-label="组资产关键词"
             value={draft}
-            onChange={(e) => edit("search", e.target.value)}
-            {...guard("search")}
+            onChange={(e) => changeKeyword(e.target.value)}
+            {...keywordGuard}
+            onSelect={rememberKeywordSelection}
+            onKeyDown={rememberKeywordSelection}
+            onBeforeInput={rememberKeywordSelection}
+            onCompositionStart={() => {
+              rememberKeywordSelection();
+              composingKeyword.current = true;
+              setKeywordComposition(true);
+              setExpanded(null);
+            }}
+            onCompositionEnd={(e) => finishKeywordComposition(e.currentTarget.value)}
+            onBlur={(e) => {
+              if (composingKeyword.current) finishKeywordComposition(e.currentTarget.value);
+            }}
+            onPaste={(e) => {
+              rememberKeywordSelection();
+              keywordGuard.onPaste(e);
+              if (e.defaultPrevented || composingKeyword.current) return;
+              const input = e.currentTarget;
+              const inserted = e.clipboardData.getData("text/plain");
+              const start = input.selectionStart ?? 0;
+              const end = input.selectionEnd ?? start;
+              if (input.value.length - (end - start) + inserted.length > 20) {
+                e.preventDefault();
+                rejectKeywordLength();
+              }
+            }}
+            onDrop={(e) => {
+              rememberKeywordSelection();
+              keywordGuard.onDrop(e);
+              if (e.defaultPrevented || composingKeyword.current) return;
+              // The drop caret need not match selection; validate the actual change.
+              // A payload over the entire bound cannot fit at any external drop point.
+              if (e.dataTransfer.getData("text/plain").length > 20) {
+                e.preventDefault();
+                rejectKeywordLength();
+              }
+            }}
             placeholder="搜索 SAM、SID 或 DN"
           />
         </Field>
         <button
           type="button"
           className="secondary"
+          disabled={keywordComposition}
           onClick={() => {
             edit("search", "");
             searchInput.current?.focus();
@@ -559,14 +668,16 @@ function Assets({
             </Field>
           </div>
         </details>
-        <button disabled={stale || !!transferError || (busy && !dirty)}>
+        <button disabled={keywordComposition || stale || !!transferError || (busy && !dirty)}>
           应用组筛选
         </button>
         <button
           type="button"
           className="secondary"
-          disabled={stale}
+          disabled={keywordComposition || stale}
           onClick={() => {
+            acceptedKeyword.current = "";
+            rejectedComposition.current = null;
             setDraft("");
             setFilters(emptyFilters);
             setTransfers({});
