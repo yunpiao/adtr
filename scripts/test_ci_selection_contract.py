@@ -1,3 +1,4 @@
+import ast
 import copy
 import hashlib
 import itertools
@@ -196,6 +197,29 @@ class SelectionContract(unittest.TestCase):
             self.assertEqual(len(p['browser']),51)
             self.assertEqual(p['auth'],list(range(1,9)))
             self.assertEqual(p['fixed'],self.inventory['fixed'])
+
+    def test_legacy_workflow_restore_never_consumes_a_raw_workflow_read(self):
+        def raw_restore_calls(source):
+            return [node for node in ast.walk(ast.parse(source))
+                    if isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Name)
+                    and node.func.id == 'restore_workflow'
+                    and any(isinstance(child, ast.Call)
+                            and isinstance(child.func, ast.Attribute)
+                            and child.func.attr == 'read_text'
+                            for child in ast.walk(node))]
+
+        # Both ROOT-based and cwd-based raw reads must be caught. Actual-workflow
+        # assertions that do not enter a legacy restore chain remain untouched.
+        for source in (
+            "restore_workflow((ROOT / '.github/workflows/ci.yml').read_text())",
+            "restore_workflow(Path('.github/workflows/ci.yml').read_text())",
+        ):
+            self.assertEqual(len(raw_restore_calls(source)), 1)
+        self.assertEqual(raw_restore_calls('restore_workflow(reviewed_workflow())'), [])
+        for path in Path('scripts').glob('test_*contract.py'):
+            with self.subTest(path=str(path)):
+                self.assertEqual(raw_restore_calls(path.read_text()), [])
 
     def test_workflow_exact_delta_and_all_original_steps_preserved(self):
         text=Path('.github/workflows/ci.yml').read_text()
