@@ -357,6 +357,7 @@ function Assets({
   };
   const [query, setQuery] = useState(initial),
     queryRef = useRef(initial);
+  const searchInput = useRef<HTMLInputElement>(null);
   const [draft, setDraft] = useState(""),
     [filters, setFilters] = useState(emptyFilters);
   const [list, setList] = useState<GroupAssetsV3List | null>(null),
@@ -518,6 +519,7 @@ function Assets({
       <form className="asset-filter-form" onSubmit={submit}>
         <Field label="组资产关键词">
           <input
+            ref={searchInput}
             aria-label="组资产关键词"
             value={draft}
             onChange={(e) => edit("search", e.target.value)}
@@ -525,6 +527,16 @@ function Assets({
             placeholder="搜索 SAM、SID 或 DN"
           />
         </Field>
+        <button
+          type="button"
+          className="secondary"
+          onClick={() => {
+            edit("search", "");
+            searchInput.current?.focus();
+          }}
+        >
+          清除组关键词
+        </button>
         <details>
           <summary>创建时间排序</summary>
           <div className="form-grid">
