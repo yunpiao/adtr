@@ -16,6 +16,28 @@ import {
   expectedGroups,
   groupEvidenceProvenance,
 } from "./group-assets-v3-helpers";
+// Positions are local to accepted asset rows; facts are a separate spanning row.
+async function expectGroupPositions(
+  page: Page,
+  expected: ReturnType<typeof expectedGroups>,
+) {
+  const table = page.getByRole("table", { name: "组资产列表", exact: true });
+  await expect(
+    table.getByRole("columnheader", { name: "本页序号", exact: true }),
+  ).toHaveAttribute("scope", "col");
+  const rows = table.locator("tbody > tr:not([id])");
+  await expect(rows).toHaveCount(expected.length);
+  for (let i = 0; i < expected.length; i++) {
+    const cells = rows.nth(i).getByRole("cell");
+    await expect(cells).toHaveCount(6);
+    await expect(cells.nth(0)).toHaveText(String(i + 1));
+    await expect(rows.nth(i).getByRole("button")).toHaveAttribute(
+      "aria-controls",
+      `group-facts-${expected[i].objectGUID}`,
+    );
+  }
+}
+
 test("group assets real Worker TLS LDAP PG API browser pinned facts", async ({
   page,
   context,
@@ -98,6 +120,7 @@ test("group assets real Worker TLS LDAP PG API browser pinned facts", async ({
   ).toHaveLength(23);
   const ui = await groupResponse(page, () => openGroupList(page));
   expect(ui.value.list).toEqual(expected.slice(0, 10));
+  await expectGroupPositions(page, expected.slice(0, 10));
   await page
     .getByRole("button", { name: "展开事实", exact: true })
     .first()
@@ -108,6 +131,10 @@ test("group assets real Worker TLS LDAP PG API browser pinned facts", async ({
   await expect(
     page.getByText("host/a\\u0000\\u000a😀<script>", { exact: true }),
   ).toBeVisible();
+  await expectGroupPositions(page, expected.slice(0, 10));
+  await expect(
+    page.locator(`[id="group-facts-${expected[0].objectGUID}"] > td`),
+  ).toHaveAttribute("colspan", "6");
   await context.grantPermissions(["clipboard-read", "clipboard-write"], {
     origin: new URL(page.url()).origin,
   });
@@ -136,16 +163,34 @@ test("group assets real Worker TLS LDAP PG API browser pinned facts", async ({
   );
   expect(next.url.searchParams.get("observationId")).toBe(f.taskUUID);
   expect(next.value.list).toEqual(expected.slice(10, 20));
+  await expectGroupPositions(page, expected.slice(10, 20));
   await expect(
     page.getByText("主组 RID（primaryGroupID）", { exact: true }),
   ).toHaveCount(0);
+  const lastPage = await groupResponse(page, () =>
+    page.getByRole("button", { name: "下一页", exact: true }).click(),
+  );
+  expect(lastPage.url.searchParams.get("observationId")).toBe(f.taskUUID);
+  expect(lastPage.value.list).toEqual(expected.slice(20));
+  await expectGroupPositions(page, expected.slice(20));
+  const backToSecond = await groupResponse(page, () =>
+    page.getByRole("button", { name: "上一页", exact: true }).click(),
+  );
+  expect(backToSecond.value.list).toEqual(expected.slice(10, 20));
+  await expectGroupPositions(page, expected.slice(10, 20));
   await page.getByLabel("组资产关键词", { exact: true }).fill("group-22");
+  await expectGroupPositions(page, expected.slice(10, 20));
+  await expect(
+    page.getByRole("button", { name: "下一页", exact: true }),
+  ).toBeDisabled();
   const found = await groupResponse(page, () =>
     page.getByRole("button", { name: "应用组筛选", exact: true }).click(),
   );
   expect(found.value.list).toEqual([expected[21]]);
   expect(found.url.searchParams.get("observationId")).toBe(f.taskUUID);
+  await expectGroupPositions(page, [expected[21]]);
   await page.setViewportSize({ width: 390, height: 844 });
+  await expectGroupPositions(page, [expected[21]]);
   await page.screenshot({
     path: info.outputPath("group-assets-v3-mobile.png"),
     fullPage: true,
@@ -177,8 +222,13 @@ test("group assets real Worker TLS LDAP PG API browser pinned facts", async ({
   await expect
     .poll(() => mobileScroller.evaluate((node) => node.scrollLeft))
     .toBe(0);
+  await expectGroupPositions(page, [expected[21]]);
   const mobileFacts = page.locator(
     `[id="group-facts-${expected[21].objectGUID}"]`,
+  );
+  await expect(mobileFacts.locator(":scope > td")).toHaveAttribute(
+    "colspan",
+    "6",
   );
   await expect(
     mobileFacts.getByText(expected[21].objectGUID, { exact: true }),
@@ -226,11 +276,13 @@ test("group assets real Worker TLS LDAP PG API browser pinned facts", async ({
     page.getByRole("button", { name: "下一页", exact: true }).click(),
   );
   expect(pinned.value.observationId).toBe(f.taskUUID);
+  await expectGroupPositions(page, expected.slice(10, 20));
   const refreshed = await groupResponse(page, () =>
     page.getByRole("button", { name: "刷新组资产观测", exact: true }).click(),
   );
   expect(refreshed.url.searchParams.has("observationId")).toBe(false);
   expect(refreshed.value.observationId).toBe(newer.task.taskUUID);
+  await expectGroupPositions(page, expected.slice(0, 10));
   await captureAssetEmptyRefresh(
     page,
     info,
