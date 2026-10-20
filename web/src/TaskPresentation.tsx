@@ -100,6 +100,13 @@ export function TaskDedicatedGuidance({ taskName }: { taskName: string }) {
         创建、取消及未知提交恢复仍在「<a href="#computer-assets-v3">计算机资产</a>」专用面板处理。
       </p>
     );
+  if (taskName === "group_assets.v3.export")
+    return (
+      <p>
+        可用下方“查看原导出结果”按此任务 ID 只读核对原请求与文件，并重新核验专用权限。
+        创建、取消及未知提交恢复仍在「<a href="#group-assets-v3">组资产</a>」专用面板处理。
+      </p>
+    );
   if (Object.hasOwn(assetExportDestinations, taskName)) {
     const destination = assetExportDestinations[taskName];
     return (

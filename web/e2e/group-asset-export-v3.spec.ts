@@ -1,3 +1,4 @@
+import { navigateTo } from "./navigation";
 import { test, expect } from "@playwright/test";
 import { expectSpecializedTaskReadOnly } from "./specialized-task-controls";
 import { readFile, writeFile } from "node:fs/promises";
@@ -95,7 +96,61 @@ test("group asset export real source, owner MFA, Worker persistence and XLSX dow
     await expect(panel.getByText(`任务 ID：${created.taskID}`, { exact: true })).toBeInViewport({ ratio: 1 });
     await expect(panel.getByRole("button", { name: "下载组 XLSX", exact: true })).toBeInViewport({ ratio: 1 });
     const screenshot = `${name}-ready.png`;
-    await page.screenshot({ path: info.outputPath(screenshot), fullPage: false });
+    // Remove the persisted submission locator. A new same-session tab has no
+    // in-memory recovery intent and must use only the original task ID.
+    await page.evaluate(() => sessionStorage.removeItem("adtr.group-assets-v3.export-recovery"));
+    const originalTab = await context.newPage();
+    const originalRequests: { method: string; path: string }[] = [];
+    originalTab.on("request", (request) => {
+      const url = new URL(request.url());
+      if (url.pathname.startsWith(exportPrefix)) originalRequests.push({ method: request.method(), path: url.pathname });
+    });
+    try {
+      await originalTab.setViewportSize({ width: 1440, height: 900 });
+      const [me] = await Promise.all([
+        originalTab.waitForResponse((r) => new URL(r.url()).pathname === "/api/auth/me"),
+        originalTab.goto("/"),
+      ]);
+      expect((await me.json()).ID).toBe(actorId);
+      await originalTab.evaluate(() => sessionStorage.removeItem("adtr.group-assets-v3.export-recovery"));
+      await navigateTo(originalTab, "后台任务");
+      await originalTab.locator(".task-filter-panel > summary").click();
+      await originalTab.getByLabel("任务种类筛选", { exact: true }).fill("group_assets.v3.export");
+      await originalTab.getByRole("button", { name: "筛选任务", exact: true }).click();
+      await originalTab.getByRole("button", { name: `详情 ${created.taskID}`, exact: true }).click();
+      const [originalResponse] = await Promise.all([
+        originalTab.waitForResponse((r) => new URL(r.url()).pathname === `${exportPrefix}/detail`),
+        originalTab.getByRole("button", { name: "查看原导出结果", exact: true }).click(),
+      ]);
+      const original = await responseValue(originalResponse, actorId);
+      expect(original.taskID).toBe(created.taskID);
+      expect(original.request).toEqual(created.request);
+      expect(original.request).not.toHaveProperty("startTm");
+      expect(original.request).not.toHaveProperty("endTm");
+      expect(original.artifact).toEqual(detail.artifact);
+      const originalPanel = originalTab.getByRole("region", { name: "原导出只读详情", exact: true });
+      await expect(originalPanel.getByLabel("原导出规范请求", { exact: true })).toHaveText(JSON.stringify(created.request, null, 2));
+      const [originalDownload] = await Promise.all([
+        originalTab.waitForEvent("download"),
+        originalPanel.getByRole("button", { name: "下载原组 XLSX", exact: true }).click(),
+      ]);
+      expect(originalDownload.suggestedFilename()).toBe(filename);
+      const originalPath = info.outputPath(`task-result-${filename}`);
+      await originalDownload.saveAs(originalPath);
+      expect(await readFile(originalPath)).toEqual(bytes);
+      expect(originalRequests).toEqual([
+        { method: "GET", path: `${exportPrefix}/detail` },
+        { method: "GET", path: `${exportPrefix}/detail` },
+        { method: "GET", path: `${exportPrefix}/download` },
+        { method: "GET", path: `${exportPrefix}/detail` },
+      ]);
+      expect(await originalTab.evaluate(() => sessionStorage.getItem("adtr.group-assets-v3.export-recovery"))).toBeNull();
+      await expect(originalPanel.locator('input[type="password"]')).toHaveCount(0);
+      fixture.safe(await originalTab.locator("body").innerText());
+      await originalPanel.scrollIntoViewIfNeeded();
+      expect(await originalTab.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+      await originalTab.screenshot({ path: info.outputPath(screenshot), fullPage: false });
+    } finally { await originalTab.close(); }
     cases.push({ name, request: created.request, create: created, receipt, detail, download: { filename, headers: Object.fromEntries(downloadHeaderNames.map((key) => [key, downloadResponse.headers()[key]])) }, database: await storedExport(created.taskID), pageSize: list.page.pageSize, firstPageCount: list.list.length, screenshot: { filename: screenshot, sha256: hash(await readFile(info.outputPath(screenshot))) } });
     await info.attach(filename, { path: info.outputPath(filename), contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
     await info.attach(screenshot, { path: info.outputPath(screenshot), contentType: "image/png" });
