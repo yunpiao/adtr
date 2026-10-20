@@ -1,3 +1,4 @@
+from ci_workflow_contract import reviewed_workflow
 """Offline generation and static wiring checks; no browser/runtime acceptance."""
 import contextlib
 import hashlib
@@ -71,7 +72,7 @@ class DirectoryCredentialsContract(unittest.TestCase):
         self.assertIn('test.use({ trace: "off", screenshot: "off", video: "off" })', code)
         self.assertIn("safe(consoles)", code)
         self.assertIn("command: python3 scripts/test_auth_e2e.py --suite group-members-v4\n",
-                      Path(".github/workflows/ci.yml").read_text())
+                      reviewed_workflow())
 
     def test_mock_proof_inputs_and_replay_coverage(self):
         code = Path("web/src/Tasks.test.tsx").read_text()
@@ -150,7 +151,7 @@ class DirectoryCredentialsContract(unittest.TestCase):
         runner = Path("scripts/test_auth_e2e.py").read_text()
         setup = runner.index("configure_directory_credentials(env, args.suite)")
         self.assertLess(setup, runner.index("subprocess.run(command, env=env"))
-        workflow = Path(".github/workflows/ci.yml").read_text()
+        workflow = reviewed_workflow()
         self.assertIn("command: python3 scripts/test_auth_e2e.py --suite directory-v3", workflow)
         self.assertIn("make check", workflow)
         self.assertIn("python3 -m unittest discover -s scripts -p '*_contract.py'",

@@ -1,0 +1,419 @@
+{
+  "browser": [
+    {
+      "name": "group-asset-export-v3-running-cancel",
+      "command": "python3 scripts/test_auth_e2e.py --suite group-asset-export-v3-running-cancel",
+      "specs": [
+        "web/e2e/group-asset-export-v3-running-cancel.spec.ts"
+      ]
+    },
+    {
+      "name": "computer-asset-export-v3-running-cancel",
+      "command": "python3 scripts/test_auth_e2e.py --suite computer-asset-export-v3-running-cancel",
+      "specs": [
+        "web/e2e/computer-asset-export-v3-running-cancel.spec.ts"
+      ]
+    },
+    {
+      "name": "user-asset-export-v3-running-cancel",
+      "command": "python3 scripts/test_auth_e2e.py --suite user-asset-export-v3-running-cancel",
+      "specs": [
+        "web/e2e/user-asset-export-v3-running-cancel.spec.ts"
+      ]
+    },
+    {
+      "name": "account-references",
+      "command": "python3 scripts/test_auth_e2e.py --suite account-references",
+      "specs": [
+        "web/e2e/account-references.spec.ts"
+      ]
+    },
+    {
+      "name": "messages",
+      "command": "python3 scripts/test_auth_e2e.py --suite messages",
+      "specs": [
+        "web/e2e/messages.spec.ts",
+        "web/e2e/messages-bulk.spec.ts"
+      ]
+    },
+    {
+      "name": "user-assets-v2",
+      "command": "python3 scripts/test_auth_e2e.py --suite user-assets-v2",
+      "specs": [
+        "web/e2e/user-assets-v2.spec.ts"
+      ]
+    },
+    {
+      "name": "user-assets-v2-readers",
+      "command": "python3 scripts/test_auth_e2e.py --suite user-assets-v2-readers",
+      "specs": [
+        "web/e2e/user-assets-v2-readers.spec.ts"
+      ]
+    },
+    {
+      "name": "computer-asset-export-v3",
+      "command": "python3 scripts/test_auth_e2e.py --suite computer-asset-export-v3",
+      "specs": [
+        "web/e2e/computer-asset-export-v3.spec.ts"
+      ]
+    },
+    {
+      "name": "computer-asset-export-v3-failure",
+      "command": "python3 scripts/test_auth_e2e.py --suite computer-asset-export-v3-failure",
+      "specs": [
+        "web/e2e/computer-asset-export-v3-failure.spec.ts"
+      ]
+    },
+    {
+      "name": "computer-asset-export-v3-cancel",
+      "command": "python3 scripts/test_auth_e2e.py --suite computer-asset-export-v3-cancel",
+      "specs": [
+        "web/e2e/computer-asset-export-v3-cancel.spec.ts"
+      ]
+    },
+    {
+      "name": "group-asset-export-v3",
+      "command": "python3 scripts/test_auth_e2e.py --suite group-asset-export-v3",
+      "specs": [
+        "web/e2e/group-asset-export-v3.spec.ts"
+      ]
+    },
+    {
+      "name": "group-asset-export-v3-failure",
+      "command": "python3 scripts/test_auth_e2e.py --suite group-asset-export-v3-failure",
+      "specs": [
+        "web/e2e/group-asset-export-v3-failure.spec.ts"
+      ]
+    },
+    {
+      "name": "group-asset-export-v3-cancel",
+      "command": "python3 scripts/test_auth_e2e.py --suite group-asset-export-v3-cancel",
+      "specs": [
+        "web/e2e/group-asset-export-v3-cancel.spec.ts"
+      ]
+    },
+    {
+      "name": "user-asset-export-v3-failure",
+      "command": "python3 scripts/test_auth_e2e.py --suite user-asset-export-v3-failure",
+      "specs": [
+        "web/e2e/user-asset-export-v3-failure.spec.ts"
+      ]
+    },
+    {
+      "name": "user-asset-export-v3-cancel",
+      "command": "python3 scripts/test_auth_e2e.py --suite user-asset-export-v3-cancel",
+      "specs": [
+        "web/e2e/user-asset-export-v3-cancel.spec.ts"
+      ]
+    },
+    {
+      "name": "user-asset-export-v3",
+      "command": "python3 scripts/test_auth_e2e.py --suite user-asset-export-v3",
+      "specs": [
+        "web/e2e/user-asset-export-v3.spec.ts"
+      ]
+    },
+    {
+      "name": "user-assets-v3",
+      "command": "python3 scripts/test_auth_e2e.py --suite user-assets-v3",
+      "specs": [
+        "web/e2e/user-assets-v3.spec.ts"
+      ]
+    },
+    {
+      "name": "computer-assets-v3",
+      "command": "python3 scripts/test_auth_e2e.py --suite computer-assets-v3",
+      "specs": [
+        "web/e2e/computer-assets-v3.spec.ts"
+      ]
+    },
+    {
+      "name": "computer-assets-v3-readers",
+      "command": "python3 scripts/test_auth_e2e.py --suite computer-assets-v3-readers",
+      "specs": [
+        "web/e2e/computer-assets-v3-readers.spec.ts"
+      ]
+    },
+    {
+      "name": "group-assets-v3",
+      "command": "python3 scripts/test_auth_e2e.py --suite group-assets-v3",
+      "specs": [
+        "web/e2e/group-assets-v3.spec.ts"
+      ]
+    },
+    {
+      "name": "group-assets-v3-readers",
+      "command": "python3 scripts/test_auth_e2e.py --suite group-assets-v3-readers",
+      "specs": [
+        "web/e2e/group-assets-v3-readers.spec.ts"
+      ]
+    },
+    {
+      "name": "group-members-v4-pagination",
+      "command": "python3 scripts/test_auth_e2e.py --suite group-members-v4-pagination",
+      "specs": [
+        "web/e2e/group-members-v4-pagination.spec.ts"
+      ]
+    },
+    {
+      "name": "group-members-v4-refresh",
+      "command": "python3 scripts/test_auth_e2e.py --suite group-members-v4-refresh",
+      "specs": [
+        "web/e2e/group-members-v4-refresh.spec.ts"
+      ]
+    },
+    {
+      "name": "group-members-v4-empty",
+      "command": "python3 scripts/test_auth_e2e.py --suite group-members-v4-empty",
+      "specs": [
+        "web/e2e/group-members-v4-empty.spec.ts"
+      ]
+    },
+    {
+      "name": "group-members-v4",
+      "command": "python3 scripts/test_auth_e2e.py --suite group-members-v4",
+      "specs": [
+        "web/e2e/group-members-v4.spec.ts"
+      ]
+    },
+    {
+      "name": "directory-v4-backend",
+      "command": "python3 scripts/test_auth_e2e.py --suite directory-v4-backend",
+      "specs": [
+        "web/e2e/directory-v4-backend.spec.ts"
+      ]
+    },
+    {
+      "name": "directory-v3-backend",
+      "command": "python3 scripts/test_auth_e2e.py --suite directory-v3-backend",
+      "specs": [
+        "web/e2e/directory-v3-backend.spec.ts"
+      ]
+    },
+    {
+      "name": "directory-v3",
+      "command": "python3 scripts/test_auth_e2e.py --suite directory-v3",
+      "specs": [
+        "web/e2e/directory-v3.spec.ts"
+      ]
+    },
+    {
+      "name": "directory-v3-controls",
+      "command": "python3 scripts/test_auth_e2e.py --suite directory-v3-controls",
+      "specs": [
+        "web/e2e/directory-v3-controls.spec.ts"
+      ]
+    },
+    {
+      "name": "directory-v3-readers",
+      "command": "python3 scripts/test_auth_e2e.py --suite directory-v3-readers",
+      "specs": [
+        "web/e2e/directory-v3-readers.spec.ts"
+      ]
+    },
+    {
+      "name": "directory-v2",
+      "command": "python3 scripts/test_auth_e2e.py --suite directory-v2",
+      "specs": [
+        "web/e2e/directory-v2.spec.ts"
+      ]
+    },
+    {
+      "name": "directory-v2-controls",
+      "command": "python3 scripts/test_auth_e2e.py --suite directory-v2-controls",
+      "specs": [
+        "web/e2e/directory-v2-controls.spec.ts"
+      ]
+    },
+    {
+      "name": "directory-v2-readers",
+      "command": "python3 scripts/test_auth_e2e.py --suite directory-v2-readers",
+      "specs": [
+        "web/e2e/directory-v2-readers.spec.ts"
+      ]
+    },
+    {
+      "name": "directory-readers",
+      "command": "python3 scripts/test_auth_e2e.py --suite directory-readers",
+      "specs": [
+        "web/e2e/directory-readers.spec.ts"
+      ]
+    },
+    {
+      "name": "authentication",
+      "command": "python3 scripts/test_auth_e2e.py",
+      "specs": [
+        "web/e2e/auth.spec.ts"
+      ]
+    },
+    {
+      "name": "expired-password",
+      "command": "python3 scripts/test_auth_e2e.py --expired",
+      "specs": [
+        "web/e2e/auth.spec.ts"
+      ]
+    },
+    {
+      "name": "access",
+      "command": "python3 scripts/test_auth_e2e.py --suite access",
+      "specs": [
+        "web/e2e/access.spec.ts"
+      ]
+    },
+    {
+      "name": "resources",
+      "command": "python3 scripts/test_auth_e2e.py --suite resource",
+      "specs": [
+        "web/e2e/resource.spec.ts"
+      ]
+    },
+    {
+      "name": "tasks",
+      "command": "python3 scripts/test_auth_e2e.py --suite tasks",
+      "specs": [
+        "web/e2e/tasks.spec.ts"
+      ]
+    },
+    {
+      "name": "audit",
+      "command": "python3 scripts/test_auth_e2e.py --suite audit",
+      "specs": [
+        "web/e2e/audit.spec.ts"
+      ]
+    },
+    {
+      "name": "system",
+      "command": "python3 scripts/test_auth_e2e.py --suite system",
+      "specs": [
+        "web/e2e/system.spec.ts"
+      ]
+    },
+    {
+      "name": "maintenance",
+      "command": "python3 scripts/test_auth_e2e.py --suite maintenance",
+      "specs": [
+        "web/e2e/maintenance.spec.ts"
+      ]
+    },
+    {
+      "name": "domains",
+      "command": "python3 scripts/test_auth_e2e.py --suite domains",
+      "specs": [
+        "web/e2e/domains.spec.ts"
+      ]
+    },
+    {
+      "name": "operations",
+      "command": "python3 scripts/test_auth_e2e.py --suite operations",
+      "specs": [
+        "web/e2e/operations.spec.ts"
+      ]
+    },
+    {
+      "name": "profile",
+      "command": "python3 scripts/test_auth_e2e.py --suite profile",
+      "specs": [
+        "web/e2e/profile.spec.ts"
+      ]
+    },
+    {
+      "name": "credential-use",
+      "command": "python3 scripts/test_auth_e2e.py --suite credential-use",
+      "specs": [
+        "web/e2e/credential-use.spec.ts"
+      ]
+    },
+    {
+      "name": "operational-logs",
+      "command": "python3 scripts/test_auth_e2e.py --suite operational-logs",
+      "specs": [
+        "web/e2e/operational-logs.spec.ts"
+      ]
+    },
+    {
+      "name": "session-invalidation",
+      "command": "python3 scripts/test_auth_e2e.py --suite session-invalidation",
+      "specs": [
+        "web/e2e/session-invalidation.spec.ts"
+      ]
+    },
+    {
+      "name": "account-reference-barrier",
+      "command": "python3 scripts/test_auth_e2e.py --suite account-reference-barrier",
+      "specs": [
+        "web/e2e/account-reference-barrier.spec.ts"
+      ]
+    },
+    {
+      "name": "directory",
+      "command": "python3 scripts/test_auth_e2e.py --suite directory",
+      "specs": [
+        "web/e2e/directory.spec.ts"
+      ]
+    },
+    {
+      "name": "directory-controls",
+      "command": "python3 scripts/test_auth_e2e.py --suite directory-controls",
+      "specs": [
+        "web/e2e/directory-controls.spec.ts"
+      ]
+    }
+  ],
+  "fixed": [
+    "user-assets-v2",
+    "user-assets-v2-readers",
+    "user-assets-v3",
+    "computer-assets-v3",
+    "computer-assets-v3-readers",
+    "group-assets-v3",
+    "group-assets-v3-readers"
+  ],
+  "frontend_roots": {
+    "web/src/MessagesWorkspace.tsx": [
+      "messages"
+    ],
+    "web/src/TaskWorkspace.tsx": [
+      "tasks",
+      "messages",
+      "maintenance",
+      "user-assets-v2",
+      "directory-v3",
+      "group-members-v4",
+      "user-asset-export-v3",
+      "user-asset-export-v3-failure",
+      "user-asset-export-v3-cancel",
+      "computer-asset-export-v3",
+      "computer-asset-export-v3-failure",
+      "computer-asset-export-v3-cancel",
+      "group-asset-export-v3",
+      "group-asset-export-v3-failure",
+      "group-asset-export-v3-cancel"
+    ],
+    "web/src/UserAssetsV3Workspace.tsx": [
+      "user-assets-v3",
+      "directory-v3-controls",
+      "user-asset-export-v3",
+      "user-asset-export-v3-failure",
+      "user-asset-export-v3-cancel",
+      "user-asset-export-v3-running-cancel"
+    ],
+    "web/src/ComputerAssetsV3Workspace.tsx": [
+      "computer-assets-v3",
+      "directory-v3-controls",
+      "computer-asset-export-v3",
+      "computer-asset-export-v3-failure",
+      "computer-asset-export-v3-cancel",
+      "computer-asset-export-v3-running-cancel",
+      "computer-assets-v3-readers"
+    ],
+    "web/src/GroupAssetsV3Workspace.tsx": [
+      "group-assets-v3",
+      "directory-v3-controls",
+      "group-asset-export-v3",
+      "group-asset-export-v3-failure",
+      "group-asset-export-v3-cancel",
+      "group-asset-export-v3-running-cancel",
+      "group-assets-v3-readers"
+    ]
+  }
+}

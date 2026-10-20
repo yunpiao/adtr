@@ -1,3 +1,4 @@
+from ci_workflow_contract import reviewed_workflow, reviewed_source
 """Frozen additive delta: removal restores every byte of the prior 68-job runner/workflow."""
 import hashlib
 from pathlib import Path
@@ -132,10 +133,10 @@ def restore_workflow(text):
 class RunningCancelRunnerContract(unittest.TestCase):
     def test_exact_prior_runner_and_workflow(self):
         for name, (digest, _) in CHANGES.items():
-            self.assertEqual(hashlib.sha256(restore(Path(name).read_text(), name).encode()).hexdigest(), digest)
+            self.assertEqual(hashlib.sha256(restore(reviewed_source(name), name).encode()).hexdigest(), digest)
 
     def test_69_jobs_with_one_new_slice(self):
-        source = restore_kind_running_cancel(Path('.github/workflows/ci.yml').read_text(), '.github/workflows/ci.yml')
+        source = restore_kind_running_cancel(reviewed_workflow(), '.github/workflows/ci.yml')
         names = re.findall(r'^          - name: ([a-z0-9-]+)$', source, re.M)
         self.assertEqual(len(names), 49)
         self.assertEqual(len(names) + 8 + 7 + 5, 69)
@@ -145,7 +146,7 @@ class RunningCancelRunnerContract(unittest.TestCase):
 
     def test_mutations_and_duplicates_fail(self):
         for name, (_, changes) in CHANGES.items():
-            source = restore_kind_running_cancel(Path(name).read_text(), name)
+            source = restore_kind_running_cancel(reviewed_source(name), name)
             for _, new, _ in changes:
                 with self.assertRaises(ValueError):
                     restore_user_only(source + new, name)

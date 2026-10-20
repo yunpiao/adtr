@@ -1,3 +1,4 @@
+from ci_workflow_contract import reviewed_workflow
 """One independent pagination dictionary4 suite; preserve all 57 prior jobs byte-for-byte.
 
 Static/unit checks establish the intended 58-job shape, not executed browser CI.
@@ -74,7 +75,7 @@ def restore_runner(text):
 
 class PaginationGroupMembersRunnerContract(unittest.TestCase):
     def test_original_57_jobs_and_runner_are_byte_exact(self):
-        workflow = Path('.github/workflows/ci.yml').read_text()
+        workflow = reviewed_workflow()
         source = Path('scripts/test_auth_e2e.py').read_text()
         self.assertEqual(hashlib.sha256(restore_workflow(workflow).encode()).hexdigest(), BASE_WORKFLOW_SHA256)
         self.assertEqual(hashlib.sha256(restore_runner(source).encode()).hexdigest(), BASE_RUNNER_SHA256)
@@ -82,7 +83,7 @@ class PaginationGroupMembersRunnerContract(unittest.TestCase):
         self.assertNotIn('include-hidden-files', WORKFLOW_BLOCK)
 
     def test_intended_59_jobs_and_existing_parallelism(self):
-        workflow = restore_export_workflow(Path('.github/workflows/ci.yml').read_text())
+        workflow = restore_export_workflow(reviewed_workflow())
         jobs = workflow.split('jobs:\n', 1)[1]
         blocks = dict(re.findall(r'^  ([a-z][a-z-]*):\n(.*?)(?=^  [a-z][a-z-]*:|\Z)', jobs, re.M | re.S))
         self.assertEqual(set(blocks), {'prepare-postgres', 'contracts', 'auth-integration',
@@ -103,7 +104,7 @@ class PaginationGroupMembersRunnerContract(unittest.TestCase):
         self.assertEqual(len(re.findall(r'^            web/test-results/.*\.png$', WORKFLOW_BLOCK, re.M)), 14)
 
     def test_mutated_additions_fail_closed(self):
-        workflow = Path('.github/workflows/ci.yml').read_text()
+        workflow = reviewed_workflow()
         for old, new in [('success() && matrix.name', 'always() && matrix.name'),
                          ('always() && matrix.name', 'success() && matrix.name'),
                          ('retention-days: 14', 'retention-days: 2'),

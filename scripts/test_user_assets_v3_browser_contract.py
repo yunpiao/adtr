@@ -1,3 +1,4 @@
+from ci_workflow_contract import reviewed_workflow
 """Guard dictionary3's additive real browser gate; never substitute for CI."""
 import ast
 from pathlib import Path
@@ -26,7 +27,7 @@ class UserAssetsV3BrowserContract(unittest.TestCase):
         self.assertIn('env["ADTR_E2E_DB_CONTAINER"] = name', runner)
 
     def test_original_and_fixed_engines_remain_required(self):
-        workflow = Path('.github/workflows/ci.yml').read_text()
+        workflow = reviewed_workflow()
         self.assertEqual(workflow.count('command: python3 scripts/test_auth_e2e.py --suite user-assets-v3\n'), 1)
         self.assertIn("matrix.name == 'user-assets-v3' || matrix.name == 'computer-assets-v3' || matrix.name == 'computer-assets-v3-readers' || matrix.name == 'group-assets-v3' || matrix.name == 'group-assets-v3-readers') && 'stable-body'", workflow)
         self.assertIn('suite: [user-assets-v2, user-assets-v2-readers, user-assets-v3, computer-assets-v3, computer-assets-v3-readers, group-assets-v3, group-assets-v3-readers]', workflow)

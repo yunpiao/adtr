@@ -1,3 +1,4 @@
+from ci_workflow_contract import reviewed_workflow
 """Guard complete integration coverage and fail-closed test discovery."""
 import contextlib
 import io
@@ -62,7 +63,7 @@ class IntegrationRunnerContract(unittest.TestCase):
                     self.assertCountEqual(shards[index] + shards[index + 4], old)
 
     def test_workflow_matrix_matches_every_runner_shard_exactly_once(self):
-        workflow = Path('.github/workflows/ci.yml').read_text()
+        workflow = reviewed_workflow()
         auth = workflow.split('  auth-integration:\n', 1)[1].split('  browser:\n', 1)[0]
         matrices = re.findall(r'^        shard: \[([0-9, ]+)\]$', auth, re.M)
         self.assertEqual(len(matrices), 1)
@@ -141,7 +142,7 @@ class IntegrationRunnerContract(unittest.TestCase):
         self.assertNotIn("-skip", commands[0])
         self.assertTrue(all(command.count("-race") == 1 and command.count("-count=1") == 1
                             and command.count("-timeout=10m") == 1 for command in commands))
-        workflow = Path('.github/workflows/ci.yml').read_text()
+        workflow = reviewed_workflow()
         contracts = re.split(r'\n  [A-Za-z][A-Za-z0-9_-]*:', workflow.split('  contracts:\n', 1)[1], maxsplit=1)[0]
         self.assertIn('timeout-minutes: 20', contracts)
 

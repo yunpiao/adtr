@@ -1,6 +1,7 @@
 name: engineering-ci
 on:
   pull_request:
+  workflow_dispatch:
   merge_group:
     types: [checks_requested]
   push:
@@ -15,7 +16,47 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 jobs:
+  plan:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      plan: ${{ steps.selection.outputs.plan }}
+      prepare_postgres: ${{ steps.selection.outputs.prepare_postgres }}
+      contracts: ${{ steps.selection.outputs.contracts }}
+      auth_integration: ${{ steps.selection.outputs.auth_integration }}
+      browser: ${{ steps.selection.outputs.browser }}
+      native_no_store: ${{ steps.selection.outputs.native_no_store }}
+      native_no_store_fixed: ${{ steps.selection.outputs.native_no_store_fixed }}
+      user_assets_fixed: ${{ steps.selection.outputs.user_assets_fixed }}
+      browser_matrix: ${{ steps.selection.outputs.browser_matrix }}
+      fixed_matrix: ${{ steps.selection.outputs.fixed_matrix }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24.19.0'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Install locked dependency parser
+        run: npm ci --prefix web --cache /tmp/adtr-npm-cache
+      - name: Verify selection and dependency parser contracts
+        run: |
+          python3 -m unittest discover -s scripts -p 'test_ci_selection_contract.py'
+          node --test scripts/test_ci_dependencies.mjs
+          python3 scripts/ci_selection.py --check-current
+          python3 scripts/verify_requirements.py
+      - name: Select immutable revision dependencies
+        id: selection
+        run: python3 scripts/ci_selection.py
+
   prepare-postgres:
+    if: ${{ needs.plan.outputs.prepare_postgres == 'true' }}
+    needs: [plan]
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
@@ -43,7 +84,8 @@ jobs:
           retention-days: 1
 
   contracts:
-    needs: [prepare-postgres]
+    if: ${{ needs.plan.outputs.contracts == 'true' }}
+    needs: [plan, prepare-postgres]
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
@@ -119,7 +161,8 @@ jobs:
         run: python3 scripts/test_lifecycle.py
 
   auth-integration:
-    needs: [prepare-postgres]
+    if: ${{ needs.plan.outputs.auth_integration == 'true' }}
+    needs: [plan, prepare-postgres]
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
@@ -169,7 +212,8 @@ jobs:
         run: python3 scripts/test_integration.py --suite auth --shard ${{ matrix.shard }}
 
   browser:
-    needs: [prepare-postgres]
+    if: ${{ needs.plan.outputs.browser == 'true' }}
+    needs: [plan, prepare-postgres]
     env:
       ADTR_E2E_NATIVE_STREAM_MODE: ${{ (matrix.name == 'group-asset-export-v3-running-cancel' || matrix.name == 'computer-asset-export-v3-running-cancel' || matrix.name == 'user-asset-export-v3-running-cancel' || matrix.name == 'computer-asset-export-v3' || matrix.name == 'computer-asset-export-v3-failure' || matrix.name == 'computer-asset-export-v3-cancel' || matrix.name == 'group-asset-export-v3' || matrix.name == 'group-asset-export-v3-failure' || matrix.name == 'group-asset-export-v3-cancel' || matrix.name == 'user-asset-export-v3-failure' || matrix.name == 'user-asset-export-v3-cancel' || matrix.name == 'user-asset-export-v3' || matrix.name == 'user-assets-v2' || matrix.name == 'user-assets-v2-readers' || matrix.name == 'user-assets-v3' || matrix.name == 'computer-assets-v3' || matrix.name == 'computer-assets-v3-readers' || matrix.name == 'group-assets-v3' || matrix.name == 'group-assets-v3-readers') && 'stable-body' || 'native-finish' }}
     runs-on: ubuntu-24.04
@@ -179,110 +223,7 @@ jobs:
     strategy:
       fail-fast: false
       max-parallel: 8
-      matrix:
-        include:
-          - name: group-asset-export-v3-running-cancel
-            command: python3 scripts/test_auth_e2e.py --suite group-asset-export-v3-running-cancel
-          - name: computer-asset-export-v3-running-cancel
-            command: python3 scripts/test_auth_e2e.py --suite computer-asset-export-v3-running-cancel
-          - name: user-asset-export-v3-running-cancel
-            command: python3 scripts/test_auth_e2e.py --suite user-asset-export-v3-running-cancel
-          - name: account-references
-            command: python3 scripts/test_auth_e2e.py --suite account-references
-          - name: messages
-            command: python3 scripts/test_auth_e2e.py --suite messages
-          - name: user-assets-v2
-            command: python3 scripts/test_auth_e2e.py --suite user-assets-v2
-          - name: user-assets-v2-readers
-            command: python3 scripts/test_auth_e2e.py --suite user-assets-v2-readers
-          - name: computer-asset-export-v3
-            command: python3 scripts/test_auth_e2e.py --suite computer-asset-export-v3
-          - name: computer-asset-export-v3-failure
-            command: python3 scripts/test_auth_e2e.py --suite computer-asset-export-v3-failure
-          - name: computer-asset-export-v3-cancel
-            command: python3 scripts/test_auth_e2e.py --suite computer-asset-export-v3-cancel
-          - name: group-asset-export-v3
-            command: python3 scripts/test_auth_e2e.py --suite group-asset-export-v3
-          - name: group-asset-export-v3-failure
-            command: python3 scripts/test_auth_e2e.py --suite group-asset-export-v3-failure
-          - name: group-asset-export-v3-cancel
-            command: python3 scripts/test_auth_e2e.py --suite group-asset-export-v3-cancel
-          - name: user-asset-export-v3-failure
-            command: python3 scripts/test_auth_e2e.py --suite user-asset-export-v3-failure
-          - name: user-asset-export-v3-cancel
-            command: python3 scripts/test_auth_e2e.py --suite user-asset-export-v3-cancel
-          - name: user-asset-export-v3
-            command: python3 scripts/test_auth_e2e.py --suite user-asset-export-v3
-          - name: user-assets-v3
-            command: python3 scripts/test_auth_e2e.py --suite user-assets-v3
-          - name: computer-assets-v3
-            command: python3 scripts/test_auth_e2e.py --suite computer-assets-v3
-          - name: computer-assets-v3-readers
-            command: python3 scripts/test_auth_e2e.py --suite computer-assets-v3-readers
-          - name: group-assets-v3
-            command: python3 scripts/test_auth_e2e.py --suite group-assets-v3
-          - name: group-assets-v3-readers
-            command: python3 scripts/test_auth_e2e.py --suite group-assets-v3-readers
-          - name: group-members-v4-pagination
-            command: python3 scripts/test_auth_e2e.py --suite group-members-v4-pagination
-          - name: group-members-v4-refresh
-            command: python3 scripts/test_auth_e2e.py --suite group-members-v4-refresh
-          - name: group-members-v4-empty
-            command: python3 scripts/test_auth_e2e.py --suite group-members-v4-empty
-          - name: group-members-v4
-            command: python3 scripts/test_auth_e2e.py --suite group-members-v4
-          - name: directory-v4-backend
-            command: python3 scripts/test_auth_e2e.py --suite directory-v4-backend
-          - name: directory-v3-backend
-            command: python3 scripts/test_auth_e2e.py --suite directory-v3-backend
-          - name: directory-v3
-            command: python3 scripts/test_auth_e2e.py --suite directory-v3
-          - name: directory-v3-controls
-            command: python3 scripts/test_auth_e2e.py --suite directory-v3-controls
-          - name: directory-v3-readers
-            command: python3 scripts/test_auth_e2e.py --suite directory-v3-readers
-          - name: directory-v2
-            command: python3 scripts/test_auth_e2e.py --suite directory-v2
-          - name: directory-v2-controls
-            command: python3 scripts/test_auth_e2e.py --suite directory-v2-controls
-          - name: directory-v2-readers
-            command: python3 scripts/test_auth_e2e.py --suite directory-v2-readers
-          - name: directory-readers
-            command: python3 scripts/test_auth_e2e.py --suite directory-readers
-          - name: authentication
-            command: python3 scripts/test_auth_e2e.py
-          - name: expired-password
-            command: python3 scripts/test_auth_e2e.py --expired
-          - name: access
-            command: python3 scripts/test_auth_e2e.py --suite access
-          - name: resources
-            command: python3 scripts/test_auth_e2e.py --suite resource
-          - name: tasks
-            command: python3 scripts/test_auth_e2e.py --suite tasks
-          - name: audit
-            command: python3 scripts/test_auth_e2e.py --suite audit
-          - name: system
-            command: python3 scripts/test_auth_e2e.py --suite system
-          - name: maintenance
-            command: python3 scripts/test_auth_e2e.py --suite maintenance
-          - name: domains
-            command: python3 scripts/test_auth_e2e.py --suite domains
-          - name: operations
-            command: python3 scripts/test_auth_e2e.py --suite operations
-          - name: profile
-            command: python3 scripts/test_auth_e2e.py --suite profile
-          - name: credential-use
-            command: python3 scripts/test_auth_e2e.py --suite credential-use
-          - name: operational-logs
-            command: python3 scripts/test_auth_e2e.py --suite operational-logs
-          - name: session-invalidation
-            command: python3 scripts/test_auth_e2e.py --suite session-invalidation
-          - name: account-reference-barrier
-            command: python3 scripts/test_auth_e2e.py --suite account-reference-barrier
-          - name: directory
-            command: python3 scripts/test_auth_e2e.py --suite directory
-          - name: directory-controls
-            command: python3 scripts/test_auth_e2e.py --suite directory-controls
+      matrix: ${{ fromJSON(needs.plan.outputs.browser_matrix) }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
@@ -787,6 +728,8 @@ jobs:
           if-no-files-found: error
           retention-days: 7
   native-no-store:
+    if: ${{ needs.plan.outputs.native_no_store == 'true' }}
+    needs: [plan]
     env:
       ADTR_E2E_NATIVE_STREAM_MODE: stable-body
     runs-on: ubuntu-24.04
@@ -818,6 +761,8 @@ jobs:
           retention-days: 7
 
   native-no-store-fixed:
+    if: ${{ needs.plan.outputs.native_no_store_fixed == 'true' }}
+    needs: [plan]
     env:
       ADTR_E2E_NATIVE_STREAM_MODE: native-finish
     # Isolated upstream-fix diagnostic; the pinned baseline and matrix stay intact.
@@ -875,7 +820,8 @@ jobs:
           retention-days: 7
 
   user-assets-fixed:
-    needs: [prepare-postgres]
+    if: ${{ needs.plan.outputs.user_assets_fixed == 'true' }}
+    needs: [plan, prepare-postgres]
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
@@ -885,8 +831,7 @@ jobs:
     strategy:
       fail-fast: false
       max-parallel: 2
-      matrix:
-        suite: [user-assets-v2, user-assets-v2-readers, user-assets-v3, computer-assets-v3, computer-assets-v3-readers, group-assets-v3, group-assets-v3-readers]
+      matrix: ${{ fromJSON(needs.plan.outputs.fixed_matrix) }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
@@ -984,17 +929,25 @@ jobs:
 
   verify:
     if: ${{ always() }}
-    needs: [prepare-postgres, contracts, auth-integration, browser, native-no-store, native-no-store-fixed, user-assets-fixed]
+    needs: [plan, prepare-postgres, contracts, auth-integration, browser, native-no-store, native-no-store-fixed, user-assets-fixed]
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    permissions:
+      contents: read
     steps:
-      - name: Require every contract and browser suite
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24.19.0'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Install the same locked dependency parser for independent verification
+        run: npm ci --prefix web --cache /tmp/adtr-npm-cache
+      - name: Recompute immutable dependencies and require every selected check
         env:
-          POSTGRES_RESULT: ${{ needs.prepare-postgres.result }}
-          CONTRACT_RESULT: ${{ needs.contracts.result }}
-          AUTH_INTEGRATION_RESULT: ${{ needs.auth-integration.result }}
-          BROWSER_RESULT: ${{ needs.browser.result }}
-          NATIVE_STREAM_RESULT: ${{ needs.native-no-store.result }}
-          NATIVE_STREAM_FIXED_RESULT: ${{ needs.native-no-store-fixed.result }}
-          USER_ASSETS_FIXED_RESULT: ${{ needs.user-assets-fixed.result }}
-        run: test "$POSTGRES_RESULT" = success && test "$CONTRACT_RESULT" = success && test "$AUTH_INTEGRATION_RESULT" = success && test "$BROWSER_RESULT" = success && test "$NATIVE_STREAM_RESULT" = success && test "$NATIVE_STREAM_FIXED_RESULT" = success && test "$USER_ASSETS_FIXED_RESULT" = success
+          SELECTION_PLAN: ${{ needs.plan.outputs.plan }}
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: python3 scripts/ci_selection_summary.py

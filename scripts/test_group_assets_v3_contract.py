@@ -1,3 +1,4 @@
+from ci_workflow_contract import reviewed_workflow
 """Group fixture/harness invariants; not real database/browser acceptance."""
 import unittest
 import subprocess
@@ -26,7 +27,7 @@ class GroupAssetsV3Contract(unittest.TestCase):
   self.assertEqual(GROUP_ASSETS_V3_SUITES,{"group-assets-v3","group-assets-v3-readers"})
   self.assertTrue(GROUP_ASSETS_V3_SUITES<=DIRECTORY_V3_SUITES)
   self.assertIn("group-assets-v3-readers",REAL_TAB_LIFECYCLE_SUITES)
-  workflow=Path('.github/workflows/ci.yml').read_text()
+  workflow=reviewed_workflow()
   for suite in GROUP_ASSETS_V3_SUITES:
    self.assertIn(f'--suite {suite}',workflow)
    self.assertIn(suite,workflow.split('suite: [',1)[1].split(']',1)[0])

@@ -1,3 +1,4 @@
+from ci_workflow_contract import reviewed_workflow, reviewed_source
 """Exact terminal-suite delta; stripping only its frozen additions restores all 60 jobs."""
 import hashlib
 from pathlib import Path
@@ -177,11 +178,11 @@ class TerminalRunnerContract(unittest.TestCase):
     def test_prior_60_jobs_and_runner_byte_exact(self):
         for name, changes, sha in [('scripts/test_auth_e2e.py', RUNNER_CHANGES, BASE_RUNNER_SHA256),
                                    ('.github/workflows/ci.yml', WORKFLOW_CHANGES, BASE_WORKFLOW_SHA256)]:
-            self.assertEqual(hashlib.sha256(restore((restore_group_runner if name.endswith(".py") else restore_group_workflow)(Path(name).read_text()), changes).encode()).hexdigest(), sha)
+            self.assertEqual(hashlib.sha256(restore((restore_group_runner if name.endswith(".py") else restore_group_workflow)(reviewed_source(name)), changes).encode()).hexdigest(), sha)
 
     def test_mutated_additions_rejected(self):
         for name, changes in [('scripts/test_auth_e2e.py', RUNNER_CHANGES), ('.github/workflows/ci.yml', WORKFLOW_CHANGES)]:
-            source = (restore_group_runner if name.endswith(".py") else restore_group_workflow)(Path(name).read_text())
+            source = (restore_group_runner if name.endswith(".py") else restore_group_workflow)(reviewed_source(name))
             for old, new in changes:
                 with self.assertRaises(ValueError):
                     restore(source + new, changes)
@@ -189,7 +190,7 @@ class TerminalRunnerContract(unittest.TestCase):
                     restore(source.replace(new, '!' + new[1:]), changes)
 
     def test_62_jobs_preserve_limits_and_failure_uploads(self):
-        source = restore_group_workflow(Path('.github/workflows/ci.yml').read_text())
+        source = restore_group_workflow(reviewed_workflow())
         names = re.findall(r'^          - name: ([a-z0-9-]+)$', source, re.M)
         self.assertEqual(len(names), 42)
         self.assertEqual(len(names) + 8 + 7 + 5, 62)

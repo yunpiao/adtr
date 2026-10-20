@@ -1,3 +1,4 @@
+from ci_workflow_contract import reviewed_workflow
 """Dictionary4 must remain an additional fixed backend gate, not replace old jobs."""
 from pathlib import Path
 import unittest
@@ -7,7 +8,7 @@ import ldap_e2e_fixture
 
 class DirectoryV4Contract(unittest.TestCase):
     def test_real_backend_suite_and_evidence_are_mandatory(self):
-        workflow = Path('.github/workflows/ci.yml').read_text()
+        workflow = reviewed_workflow()
         self.assertEqual(workflow.count('command: python3 scripts/test_auth_e2e.py --suite directory-v4-backend\n'), 1)
         self.assertEqual(workflow.count('command: python3 scripts/test_auth_e2e.py --suite directory-v3-backend\n'), 1)
         self.assertIn("if: ${{ success() && matrix.name == 'directory-v4-backend' }}", workflow)
