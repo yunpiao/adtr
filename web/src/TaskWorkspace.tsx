@@ -1,3 +1,4 @@
+import ComputerAssetExportTaskResult from "./ComputerAssetExportTaskResult";
 import { isDomainConnectionTask } from "./task-api";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ApiError, type Profile } from "./api";
@@ -1041,6 +1042,13 @@ function TaskDetails({
           )}
           {task.taskName === "user_assets.v3.export" && !read.busy && !read.error && (
             <UserAssetExportTaskResult
+              profile={context.profile}
+              task={task}
+              sessionChanged={context.sessionChanged}
+            />
+          )}
+          {task.taskName === "computer_assets.v3.export" && !read.busy && !read.error && (
+            <ComputerAssetExportTaskResult
               profile={context.profile}
               task={task}
               sessionChanged={context.sessionChanged}

@@ -202,6 +202,12 @@ export const computerAssetExportAPI = {
     if (!validDomainID(domainId) || !validExportID(idempotencyKey)) throw new ApiError("invalid_input");
     return parseExportReceipt(await json(await fetchExport(`/receipt?${new URLSearchParams({ domainId, idempotencyKey })}`, actor, signal), signal), domainId, expected);
   },
+  // Initial task read has no recovery locator; strict receipt parsing binds the
+  // original canonical request to this exact task, domain, kind and actor.
+  async detailByTask(taskID: string, domainId: string, actor: number, signal: AbortSignal): Promise<ExportDetail> {
+    if (!validExportID(taskID) || !validDomainID(domainId)) throw new ApiError("invalid_input");
+    return parseExportReceipt(await json(await fetchExport(`/detail?${new URLSearchParams({ taskID })}`, actor, signal), signal), domainId, undefined, "detail", taskID) as ExportDetail;
+  },
   async detail(taskID: string, request: ExportRequest, actor: number, signal: AbortSignal): Promise<ExportDetail> {
     if (!validExportID(taskID) || !validExportRequest(request)) throw new ApiError("invalid_input");
     return parseExportReceipt(await json(await fetchExport(`/detail?${new URLSearchParams({ taskID })}`, actor, signal), signal), request.domainId, request, "detail", taskID) as ExportDetail;
