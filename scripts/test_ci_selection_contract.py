@@ -50,7 +50,7 @@ class SelectionContract(unittest.TestCase):
         self.assertEqual(self.names(plan),{'messages'})
 
     def test_base_and_tested_merge_new_consumers_are_included(self):
-        path='web/src/shared.ts';old=dict(self.sources,**{path:''})
+        path='web/src/shared.ts';old=dict(self.sources,**{path:''});self.graph[path]=set()
         self.graph['web/src/MessagesWorkspace.tsx']={path}
         newer=dict(old,**{'web/src/NewBasePage.tsx':''})
         self.graph['web/src/NewBasePage.tsx']={path}
@@ -74,6 +74,66 @@ class SelectionContract(unittest.TestCase):
         src=dict(self.sources,**{dep:'',other:''})
         self.graph['web/src/MessagesWorkspace.tsx']={dep};self.graph[other]={dep}
         self.assertEqual(len(self.choose([dep],src)['browser']),51)
+
+    def helper_graph(self):
+        api='web/src/messages-api.ts'; helper='web/src/sample-data.ts'
+        test='web/src/Feature.test.tsx'; bridge='web/src/test-data-bridge.ts'
+        src=dict(self.sources, **{api:'',helper:'',test:'',bridge:''})
+        self.graph.update({api:set(),test:{bridge},bridge:{helper},helper:{api},
+                           'web/src/MessagesWorkspace.tsx':{api}})
+        return src, api, helper, test, bridge
+
+    def test_proved_test_only_helpers_do_not_widen_production_api(self):
+        src,api,helper,test,bridge=self.helper_graph()
+        proved=selection.test_only_dependencies(self.graph,set(),self.inventory)
+        self.assertTrue({test,bridge,helper} <= proved)
+        self.assertNotIn(api,proved)
+        self.assertEqual(self.names(self.choose([api],src)),{'messages'})
+        plan=self.choose([helper],src)
+        self.assertTrue(plan['groups']['contracts'])
+        self.assertFalse(plan['groups']['browser'])
+        self.assertFalse(plan['groups']['native-no-store'])
+
+    def test_helpers_with_unproved_runtime_importers_remain_conservative(self):
+        for consumer in ('web/src/UnmappedPage.tsx', 'web/e2e/messages.spec.ts'):
+            src,api,helper,test,bridge=self.helper_graph()
+            src[consumer]='';self.graph[consumer]={helper}
+            with self.subTest(consumer=consumer):
+                self.assertNotIn(helper,selection.test_only_dependencies(self.graph,set(),self.inventory))
+                self.assertEqual(len(self.choose([api],src)['browser']),51)
+            self.graph.pop(consumer)
+
+    def test_unknown_edges_or_cycles_or_orphans_never_prove_helpers(self):
+        src,api,helper,test,bridge=self.helper_graph()
+        self.assertEqual(self.names(self.choose([api],src,uncertain={test})),{'messages'})
+        for unknown in (helper, 'web/src/MessagesWorkspace.tsx', 'web/e2e/messages.spec.ts'):
+            with self.subTest(unknown=unknown):
+                self.assertEqual(len(self.choose([api],src,uncertain={unknown})['browser']),51)
+        self.graph[helper].add(bridge)
+        self.assertEqual(len(self.choose([api],src)['browser']),51)
+        self.graph[helper].remove(bridge)
+        self.graph[test]=set()
+        self.assertEqual(len(self.choose([api],src)['browser']),51)
+
+    def test_uncertain_test_imported_by_runtime_is_not_a_test_only_seed(self):
+        for consumer in ('web/src/MessagesWorkspace.tsx', 'web/e2e/messages.spec.ts'):
+            src,api,helper,test,bridge=self.helper_graph()
+            self.graph[consumer]={test,api}
+            with self.subTest(consumer=consumer):
+                self.assertEqual(selection.test_only_dependencies(self.graph,{test},self.inventory),set())
+                self.assertEqual(len(self.choose([api],src,uncertain={test})['browser']),51)
+            self.graph[consumer]=set()
+
+    def test_old_or_base_runtime_consumer_cannot_be_erased_by_new_test_only_graph(self):
+        src,api,helper,test,bridge=self.helper_graph()
+        old=dict(src, **{'web/src/OldPage.tsx':''})
+        new_graph={p:self.graph.get(p,set()) for p in src}
+        old_graph=dict(new_graph, **{'web/src/OldPage.tsx':{helper}})
+        for position in range(4):
+            snapshots=[src]*4;graphs=[(new_graph,set())]*4
+            snapshots[position]=old;graphs[position]=(old_graph,set())
+            with self.subTest(position=position),patch.object(selection,'dependency_graph',side_effect=graphs):
+                self.assertEqual(len(selection.select([api],self.inventory,snapshots)['browser']),51)
 
     def test_unit_test_only_and_production_import_of_test(self):
         path='web/src/Example.test.tsx';src=dict(self.sources,**{path:''})

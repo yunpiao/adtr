@@ -98,6 +98,36 @@ def closure(graph, roots):
     return seen
 
 
+def test_only_dependencies(graph, uncertain, inventory):
+    """Prove helpers are used exclusively by unit tests, without naming helpers.
+
+    Unknown runtime edges can hide another importer. Unknown outgoing edges of
+    an isolated unit-test root only add test consumers. Cycles and orphan non-test
+    modules deliberately stay unproved.
+    """
+    importers = {path: set() for path in graph}
+    for importer, dependencies in graph.items():
+        for dependency in dependencies:
+            importers[dependency].add(importer)
+    runtime_roots = set(inventory['frontend_roots']) | {
+        'web/src/App.tsx', 'web/src/main.tsx',
+    } | {path for path in graph if path.startswith('web/e2e/')}
+    runtime = closure(graph, runtime_roots)
+    proved = {path for path in graph
+              if re.search(r'\.test\.tsx?$', path)
+              and path.startswith('web/src/')
+              and not importers[path] and path not in runtime}
+    if uncertain - proved:
+        return set()
+    while True:
+        added = {path for path in graph
+                 if path.startswith('web/src/') and path not in runtime | proved
+                 and importers[path] and importers[path] <= proved}
+        if not added:
+            return proved
+        proved.update(added)
+
+
 def inventory_checked(inventory):
     if type(inventory) is not dict or set(inventory) != {'browser', 'fixed', 'frontend_roots'}:
         raise ValueError('invalid inventory')
@@ -156,6 +186,7 @@ def select(paths, inventory, snapshots, full=False):
                     if path not in sources:
                         continue
                     seen = True
+                    test_only = test_only_dependencies(graph, uncertain, inventory)
                     if any(p.startswith('web/src/') and not re.search(r'\.test\.tsx?$', p) for p in uncertain):
                         unknown = True
                     local_hits = set()
@@ -185,7 +216,7 @@ def select(paths, inventory, snapshots, full=False):
                     # A module imported by an unclassified production page has
                     # consumers beyond the reviewed page-to-suite inventory.
                     for consumer in graph:
-                        if consumer.startswith('web/src/') and not re.search(r'\.test\.tsx?$', consumer) and consumer not in covered | composition:
+                        if consumer.startswith('web/src/') and not re.search(r'\.test\.tsx?$', consumer) and consumer not in covered | composition | test_only:
                             if path in closure(graph, [consumer]):
                                 unknown = True
                     is_test = bool(re.search(r'\.test\.tsx?$', path))
@@ -193,7 +224,7 @@ def select(paths, inventory, snapshots, full=False):
                         consumers = [p for p in graph if p != path and not re.search(r'\.test\.tsx?$', p) and path in closure(graph, [p])]
                         if consumers:
                             unknown = True
-                    elif not local_hits and not native_hit:
+                    elif not local_hits and not native_hit and path not in test_only:
                         unknown = True
                     hits.update(local_hits)
                 if not seen or unknown:
@@ -250,16 +281,26 @@ def main():
     if args.check_current:
         revision = git('rev-parse', 'HEAD').decode().strip()
         sources = web_sources(revision)
+        actual_graph, uncertain = dependency_graph(sources)
+        if 'web/src/computer-asset-export-v3-fixtures.ts' not in test_only_dependencies(actual_graph, uncertain, inventory):
+            raise ValueError('current test-helper proof drift')
         cases = {
             'web/src/MessagesWorkspace.tsx': {'messages'},
             'web/e2e/messages-bulk.spec.ts': {'messages'},
             'web/src/ComputerAssetsV3Workspace.tsx': set(inventory['frontend_roots']['web/src/ComputerAssetsV3Workspace.tsx']),
             'web/src/UserAssetExportV3.tsx': set(inventory['frontend_roots']['web/src/UserAssetsV3Workspace.tsx']),
             'web/src/TaskWorkspace.tsx': set(inventory['frontend_roots']['web/src/TaskWorkspace.tsx']),
+            'web/src/computer-asset-export-v3-api.ts': (
+                set(inventory['frontend_roots']['web/src/ComputerAssetsV3Workspace.tsx'])
+                | (set(inventory['frontend_roots']['web/src/TaskWorkspace.tsx'])
+                   if 'web/src/computer-asset-export-v3-api.ts' in closure(actual_graph, ['web/src/TaskWorkspace.tsx']) else set())
+            ),
         }
         for path, expected in cases.items():
             actual = select([path], inventory, [sources, sources])
-            if {e['name'] for e in actual['browser']} != expected:
+            if ({e['name'] for e in actual['browser']} != expected
+                    or actual['fixed'] != [name for name in inventory['fixed'] if name in expected]
+                    or actual['groups']['native-no-store'] or actual['groups']['native-no-store-fixed']):
                 raise ValueError('current dependency selection drift: ' + path)
         print('Actual TypeScript dependency graph: reviewed common modules selected precisely')
         return
