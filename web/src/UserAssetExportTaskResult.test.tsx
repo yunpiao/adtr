@@ -10,7 +10,7 @@ import { exportRecoveryStorage } from "./user-asset-export-v3-recovery";
 import { defaultTaskQuery, writeTaskNavigation } from "./task-view-state";
 let results: boolean[], status: number, value: unknown;
 let response: () => Promise<Response>;
-let changed: ReturnType<typeof vi.fn>;
+let changed: ReturnType<typeof vi.fn<() => void>>;
 const click = (name: string) => fireEvent.click(screen.getByRole("button", { name }));
 const requests = () => vi.mocked(fetch).mock.calls.filter(([url]) => String(url).startsWith(exportPrefix));
 function view(props = {}) {
