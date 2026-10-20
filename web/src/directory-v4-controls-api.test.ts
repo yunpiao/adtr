@@ -547,3 +547,39 @@ describe("proof-clear compensation identity boundary", () => {
     expect(h.api.recoveryDurability()).toBe("memory_only"); expect(h.mutations()).toHaveLength(1);
   });
 });
+
+describe("source selection wire query contract", () => {
+  it.each(["", "unverified", "testing", "verified", "error"] as const)(
+    "omits empty observationState and preserves the exact nonempty enum: %s",
+    async observationState => {
+      const h = setup();
+      h.setSpecial(path => {
+        if (!path.startsWith("/api/domain-selection?")) return;
+        const query = new URL(path, "https://synthetic.invalid").searchParams;
+        // Match ParseSelectionFilter: absence means no filter; a PRESENT empty
+        // value is invalid. Do not return success for the formerly broken URL.
+        const state = query.get("observationState");
+        if (state !== null && !["unverified", "testing", "verified", "error"].includes(state))
+          return response({ error: "invalid_input" }, 400);
+        return response({ page: { pageIdx: 1, pageSize: 20, total: 0, totalPage: 0 }, List: [], exhausted: true });
+      });
+      await expect(h.api.listSources({ pageIdx: 1, pageSize: 20, keyword: "", observationState }, signal()))
+        .resolves.toMatchObject({ List: [], exhausted: true });
+      const requests = h.calls.filter(call => call.path.startsWith("/api/domain-selection?"));
+      expect(requests).toHaveLength(1);
+      const query = new URL(requests[0].path, "https://synthetic.invalid").searchParams;
+      expect(Object.fromEntries(query)).toEqual({ pageIdx: "1", pageSize: "20", keyword: "",
+        ...(observationState ? { observationState } : {}) });
+      expect(query.has("observationState")).toBe(observationState !== "");
+      expect(query.getAll("observationState")).toEqual(observationState ? [observationState] : []);
+      expect(h.mutations()).toHaveLength(0);
+    },
+  );
+  it("still rejects unknown nonempty observationState before transport", async () => {
+    const h = setup();
+    await expect(h.api.listSources({ pageIdx: 1, pageSize: 20, keyword: "",
+      observationState: "unexpected" as SourceChoice["connectionState"] }, signal()))
+      .rejects.toMatchObject({ code: "invalid_input" });
+    expect(h.calls).toHaveLength(0);
+  });
+});

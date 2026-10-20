@@ -388,7 +388,7 @@ export function createDirectoryV4Controls(
         !validSourceKeyword(q.keyword) || (q.observationState !== "" && !connectionStates.includes(q.observationState))) throw new ApiError("invalid_input");
       q = { ...q };
       await authorize("source", signal);
-      const value = parseSourcePage(await json(`/api/domain-selection?${new URLSearchParams({ pageIdx: String(q.pageIdx), pageSize: String(q.pageSize), keyword: q.keyword, observationState: q.observationState })}`, signal, identity.ID), q);
+      const value = parseSourcePage(await json(`/api/domain-selection?${new URLSearchParams({ pageIdx: String(q.pageIdx), pageSize: String(q.pageSize), keyword: q.keyword, ...(q.observationState ? { observationState: q.observationState } : {}) })}`, signal, identity.ID), q);
       await authorize("source", signal);
       check(signal);
       return value;
