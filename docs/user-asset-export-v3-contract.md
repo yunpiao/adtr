@@ -394,3 +394,45 @@ failed attempts and full artifact hashes remain in [delivery](delivery.md).
 These results cover user cancellation after snapshot capture only. New group/computer
 candidates require their own71-job exact-head CI and artifact review; chunk-stage
 cancellation, fencing races and product acceptance remain open.
+
+## AD-F-152 / AD-F-151：从后台任务只读查看原用户导出
+
+仅精确 `user_assets.v3.export` 的 TaskDetails 增加“查看原导出结果”。专用入口
+单独检查 domains/directory_assets/user_asset_exports/tasks readable 与两个既有
+GET detail/download路径；不需要创建、取消或receipt权限。专用未获准只禁该入口，
+不会缩减原通用任务查看。权限检查复用 `/api/access/check` 的只读POST协议；
+导出业务请求只发GET，不提交创建/取消/恢复写入，也不生成幂等键。
+
+首次 `detailByTask(taskID, domainId, actor, signal)` 对原taskID调用现有detail：
+参数ID/domain用于绑定通用任务，actor核对响应身份头，signal中止过期请求，缺少
+这些绑定不得接受结果。原传输层继续核对身份/no-store/nosniff、大小与严格JSON；
+原parser核验taskID、精确kind、domain、canonical request、状态及文件元数据。
+后端继续按当前会话/actor/tenant、域权限、授权版本及来源规则检查；前端没有
+新增或伪造epoch响应字段。取到原request后固定于该任务面板，手动刷新/重开只用
+相同request的detail读取；不能用最新revision/observation替换，source_changed
+只显示原来源失效并禁止下载。
+
+面板展示原请求（含筛选/排序/列顺序）、原域/版本/观测、任务/下载状态及文件
+元数据。failed/cancelled/source_changed等非ready均不允许下载。下载逐字复用
+原API的前置detail、完整字节上限/长度/SHA256校验、后置detail与元数据复核；
+最终仍属于当前task/domain/account/session代次时才创建浏览器Blob下载。
+
+关闭/停止读取、身份/会话/任务/域变更、通用详情刷新或读取失败会卸载或清空
+私有结果并中止旧请求，迟到metadata/bytes不能回填或触发下载。专用403/epoch
+失效清空专用结果，401交会话复核；没有自动重试/轮询新面板。通用任务已有
+状态轮询保持。原sessionStorage导出恢复记录和unknown intent完全不读写；
+创建、取消、未知提交仍由资产页原面板处理，computer/group入口说明保持。
+删除此入口只失去按原taskID取结果的便利，不影响原导出操作；可见副作用是
+任务详情增加权限核对和只读面板，刷新通用详情后需重新打开原结果。
+
+新具名UserAssetExportTaskResult DOM及API契约覆盖专用授权、原来源固定、无业务
+POST、状态/metadata拒绝、身份/域切换、撤权epoch、迟到与完整下载；原严格下载、
+未知恢复和各资产任务控制测试保留。合成DOM/API不替代真实链路。
+
+既有user-asset-export-v3真实两案例（12行及空结果）保留创建/MFA、Worker、PG、
+原下载与XLSX精确验证，再清除持久恢复记录，在无内存intent的新标签从后台任务
+打开同一taskID并重下，逐字节等于原已验证XLSX；观察到的导出请求必须仅为
+detail/detail/download/detail四GET。两张既有1440×900案例图改为展示新只读
+原结果面板，保持原案例响应、文件和严格证据validator；不以同名文件替代来源
+及字节检查。窄屏未实测。当前切片的运行/截图结论以精确head CI与独立验图为准；
+#26、完整EXP006/AD-F-151/152及产品验收继续开放，不代表真实AD/容量验收。
