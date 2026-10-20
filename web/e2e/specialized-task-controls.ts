@@ -157,7 +157,10 @@ async function expectReadOnlyDetail(
     await expect(detail).toContainText("只读");
     await expect(detail).toContainText("API");
   }
-  if (checkpoint.taskName.endsWith(".export"))
+  if (checkpoint.taskName === "user_assets.v3.export") {
+    await expect(detail).toContainText("查看原导出结果");
+    await expect(detail).toContainText("重新核验专用权限");
+  } else if (checkpoint.taskName.endsWith(".export"))
     await expect(detail).toContainText("不会按此任务 ID 自动恢复");
 }
 

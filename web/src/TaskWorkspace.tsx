@@ -51,6 +51,7 @@ import {
   taskKindLabel,
 } from "./TaskPresentation";
 import "./soc-tasks.css";
+import UserAssetExportTaskResult from "./UserAssetExportTaskResult";
 
 interface Intent {
   action: "submit" | "recover";
@@ -1037,6 +1038,13 @@ function TaskDetails({
                 </pre>
               </details>
             </>
+          )}
+          {task.taskName === "user_assets.v3.export" && !read.busy && !read.error && (
+            <UserAssetExportTaskResult
+              profile={context.profile}
+              task={task}
+              sessionChanged={context.sessionChanged}
+            />
           )}
           <div className="actions compact">
             {!action &&

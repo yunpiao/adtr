@@ -86,6 +86,13 @@ export function TaskDedicatedGuidance({ taskName }: { taskName: string }) {
         API 核验权限。本页保留任务状态与事件。
       </p>
     );
+  if (taskName === "user_assets.v3.export")
+    return (
+      <p>
+        可用下方“查看原导出结果”按此任务 ID 只读核对原请求与文件，并重新核验专用权限。
+        创建、取消及未知提交恢复仍在「<a href="#user-assets-v3">用户资产</a>」专用面板处理。
+      </p>
+    );
   if (Object.hasOwn(assetExportDestinations, taskName)) {
     const destination = assetExportDestinations[taskName];
     return (
