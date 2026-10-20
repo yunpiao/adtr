@@ -33,3 +33,22 @@ test('Vite glob module loading is explicitly uncertain', () => {
   for (const method of ['glob', 'globEager'])
     assert.deepEqual(dependencyGraph({'a.ts':`import.meta.${method}('./*.ts')`}).uncertain,['a.ts']);
 });
+
+test('test helper imports remain real edges alongside production consumers', () => {
+  const sources = {
+    'web/src/Feature.test.tsx': `import {sample} from './sample-data';`,
+    'web/src/sample-data.ts': `export {value as sample} from './feature-api';`,
+    'web/src/Feature.tsx': `import {value} from './feature-api';`,
+    'web/src/feature-api.ts': `export const value = 1;`,
+  };
+  assert.deepEqual(dependencyGraph(sources), {graph: {
+    'web/src/Feature.test.tsx': ['web/src/sample-data.ts'],
+    'web/src/sample-data.ts': ['web/src/feature-api.ts'],
+    'web/src/Feature.tsx': ['web/src/feature-api.ts'],
+    'web/src/feature-api.ts': [],
+  }, uncertain: []});
+  sources['web/e2e/feature.spec.ts'] = `import '../src/sample-data';`;
+  assert.deepEqual(dependencyGraph(sources).graph['web/e2e/feature.spec.ts'], ['web/src/sample-data.ts']);
+  sources['web/src/UnknownPage.tsx'] = `import(target);`;
+  assert.deepEqual(dependencyGraph(sources).uncertain, ['web/src/UnknownPage.tsx']);
+});
