@@ -148,6 +148,8 @@ describe("SOC workspace navigation", () => {
   it.each([
     { label: "字典 3 目录采集", page: "directory-v3", role: "platform_admin" },
     { label: "字典 3 目录采集", page: "directory-v3", role: "viewer" },
+    { label: "字典 4 目录采集", page: "directory-v4", role: "platform_admin" },
+    { label: "字典 4 目录采集", page: "directory-v4", role: "viewer" },
     {
       label: "字典 3 目录凭据授权",
       page: "directory-credential-use-v3",

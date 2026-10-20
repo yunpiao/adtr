@@ -1,0 +1,133 @@
+{
+  "schemaVersion": 1,
+  "sourceRoots": [
+    ".github/workflows/",
+    "cmd/",
+    "internal/",
+    "scripts/",
+    "web/"
+  ],
+  "sourceFiles": [
+    "Makefile",
+    "go.mod",
+    "go.sum",
+    "web/index.html",
+    "web/package-lock.json",
+    "web/package.json",
+    "web/playwright.config.ts",
+    "web/tsconfig.json",
+    "web/vite.config.ts"
+  ],
+  "suites": {
+    "controls": {
+      "checks": {
+        "actualUiSyncPosts": 4,
+        "actualServerAdmissions": 3,
+        "beforeDispatchAborts": 1,
+        "actualUiCancelPosts": 0,
+        "committedLossReceiptFound": true,
+        "committedLossFurtherPosts": 0,
+        "genuineReceipt404": true,
+        "explicitSameKeySamePinsRetry": true,
+        "retryFreshCurrentProof": true,
+        "independentTabIntents": true,
+        "originalPinnedAfterNewer": true,
+        "rawAbsent": true,
+        "rawEmpty": true,
+        "rawValuesOriginalOrder": true,
+        "proofEmptyScreenshots": true
+      },
+      "screenshots": {
+        "original-raw-members-1440.png": [
+          1440,
+          900
+        ],
+        "original-raw-members-390.png": [
+          390,
+          844
+        ],
+        "recovered-original-1440.png": [
+          1440,
+          900
+        ],
+        "recovered-original-390.png": [
+          390,
+          844
+        ]
+      }
+    },
+    "cancel": {
+      "checks": {
+        "actualUiSyncPosts": 2,
+        "actualUiCancelPosts": 2,
+        "workerLaunchCount": 1,
+        "queuedCommittedLoss": true,
+        "queuedReloadFurtherPosts": 0,
+        "queuedAttempt": 0,
+        "queuedNeverOpened": true,
+        "queuedDependencies": 0,
+        "queuedObservations": 0,
+        "queuedRecheckedAfterRunning": true,
+        "queuedRecheckedBeforeCleanup": true,
+        "runningLateAdmission": true,
+        "stableHeartbeatDuringProof": true,
+        "proofPreserved": true,
+        "runningCurrentNextCounter": true,
+        "realCancelRequested": true,
+        "runningCommittedLoss": true,
+        "runningReloadFurtherPosts": 0,
+        "runningAttempt": 1,
+        "originalExecutorReturned": true,
+        "originalOpenerTupleUnchanged": true,
+        "runningDependencies": 0,
+        "runningObservations": 0,
+        "connectionBindingPreserved": true,
+        "terminal409Accepted": false
+      },
+      "screenshots": {}
+    },
+    "readers": {
+      "checks": {
+        "producerUiSyncPosts": 1,
+        "readerUiBusinessPosts": 0,
+        "harnessDeniedSyncPosts": 1,
+        "harnessDeniedCancelPosts": 1,
+        "actualReaderIdentity": true,
+        "actualReaderOnlyReadMenu": true,
+        "standaloneReaderWithoutTasks": true,
+        "nativeHiddenUnfocused": true,
+        "trustedNativeFocusVisibility": true,
+        "notificationUnavailableFallback": true,
+        "proofClearedOnBlur": true,
+        "proofClearedOnHistory": true,
+        "oldActorIntentNotRestored": true,
+        "genuineOldSuccessHeld": true,
+        "lateReadAfterSessionChangeCleared": true,
+        "staleDelivery": [
+          "delivered",
+          "aborted"
+        ],
+        "harnessDenials403": true,
+        "proofEmptyScreenshots": true
+      },
+      "screenshots": {
+        "producer-proof-cleared-1440.png": [
+          1440,
+          900
+        ],
+        "producer-proof-cleared-390.png": [
+          390,
+          844
+        ],
+        "readonly-members-1440.png": [
+          1440,
+          900
+        ],
+        "readonly-members-390.png": [
+          390,
+          844
+        ]
+      }
+    }
+  }
+}

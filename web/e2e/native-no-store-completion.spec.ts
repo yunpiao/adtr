@@ -8,12 +8,15 @@ import { readFile, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { build } from "vite";
 import { nativeStreamMode, proveNativeStream } from "./native-stream-proof";
+import { directoryV4EvidenceProvenance } from "./directory-v4-controls-evidence";
 
 const payload = { marker: "synthetic-stream", value: "😀", count: 7 };
 const bytes = Buffer.from(JSON.stringify(payload));
-const parserPath = fileURLToPath(
-  new URL("../src/directory-v2-json.ts", import.meta.url),
-);
+type ProductionReader = "directory-v2" | "directory-v4-controls";
+const productionReaders = [
+  { name: "directory-v2", path: fileURLToPath(new URL("../src/directory-v2-json.ts", import.meta.url)) },
+  { name: "directory-v4-controls", path: fileURLToPath(new URL("../src/directory-v4-controls-json.ts", import.meta.url)) },
+] as const;
 const limit = 8 * 1024 * 1024;
 const sha256 = (value: Uint8Array | string) =>
   createHash("sha256").update(value).digest("hex");
@@ -63,13 +66,18 @@ async function bounded<T>(
   }
 }
 
+for (const productionReader of productionReaders) {
+test.describe(productionReader.name, () => {
+const parserPath = productionReader.path;
 let bundle = "";
 let parserSHA = "";
+let provenance: Awaited<ReturnType<typeof directoryV4EvidenceProvenance>> | null;
 test.use({ headless: false, trace: "off", screenshot: "off", video: "off" });
 test.beforeAll(async () => {
   // Compile the actual imported production source and its ApiError dependency.
   // Vite is already a declared locked dependency; nothing is written to disk.
   parserSHA = sha256(await readFile(parserPath));
+  provenance = process.env.GITHUB_ACTIONS === "true" ? await directoryV4EvidenceProvenance() : null;
   const built = await build({
     configFile: false,
     logLevel: "silent",
@@ -206,6 +214,8 @@ for (const kind of [
         pwTerminalCount,
         nativeTerminalCount,
         browser: browser.version(),
+        productionReader: productionReader.name,
+        provenance,
         parserSHA256: parserSHA,
         parserBundleSHA256: sha256(bundle),
         requestCount,
@@ -221,7 +231,7 @@ for (const kind of [
         playwright: pwResult ?? null,
         native: nativeResult ?? null,
       };
-      console.log(`Native no-store completion: ${JSON.stringify(evidence)}`);
+      console.log(`Native no-store completion: ${JSON.stringify({ ...evidence, provenance: undefined })}`);
       const evidencePath = testInfo.outputPath(
         "native-no-store-completion.json",
       );
@@ -341,7 +351,7 @@ for (const kind of [
       await page.goto(origin);
       stage = "parser-settlement";
       consumed = await bounded(
-        page.evaluate(consume, { kind, firstBytes: first.length }),
+        page.evaluate(consume, { kind, firstBytes: first.length, reader: productionReader.name }),
         "Production parser did not settle",
       );
       stage = "transport-settlement";
@@ -475,6 +485,9 @@ for (const kind of [
   });
 }
 
+});
+}
+
 // Serialized into the owned loopback page. Every wrapper forwards the original
 // native reader, read promise and cancel/release methods unchanged. It neither
 // pulls extra bytes nor delays an application read. The binding ACK is joined
@@ -482,17 +495,25 @@ for (const kind of [
 async function consume({
   kind,
   firstBytes,
+  reader,
 }: {
   kind: Kind;
   firstBytes: number;
+  reader: ProductionReader;
 }) {
   const parser = (window as any).ADTRBoundedReader as {
     directoryV2BodyLimit: number;
+    directoryV4ControlsBodyLimit: number;
+    readDirectoryV4ControlsJSON(response: Response, signal: AbortSignal): Promise<unknown>;
     readDirectoryV2JSON(
       response: Response,
       signal: AbortSignal,
     ): Promise<unknown>;
   };
+  // Select the direct export from the compiled production entry, never a
+  // substitute reader. The legacy five cases and every assertion remain shared.
+  const bodyLimit = reader === "directory-v2" ? parser.directoryV2BodyLimit : parser.directoryV4ControlsBodyLimit;
+  const readJSON = reader === "directory-v2" ? parser.readDirectoryV2JSON : parser.readDirectoryV4ControlsJSON;
   const controller = new AbortController();
   const response = await fetch("/stream", {
     cache: "no-store",
@@ -520,7 +541,7 @@ async function consume({
     parserState,
     aborted: controller.signal.aborted,
     locked: body.locked,
-    limit: parser.directoryV2BodyLimit,
+    limit: bodyLimit,
     status: response.status,
     cache: response.headers.get("Cache-Control"),
   });
@@ -577,7 +598,7 @@ async function consume({
             return;
           }
           metrics.observedBytes += part.value.byteLength;
-          if (metrics.observedBytes <= parser.directoryV2BodyLimit) {
+          if (metrics.observedBytes <= bodyLimit) {
             chunks.push(part.value);
             metrics.retainedBytes += part.value.byteLength;
           }
@@ -601,7 +622,7 @@ async function consume({
     error: string | null = null,
     fulfilled = false;
   try {
-    value = await parser.readDirectoryV2JSON(response, controller.signal);
+    value = await readJSON(response, controller.signal);
     fulfilled = true;
     parserState = "fulfilled";
   } catch (reason) {
@@ -630,7 +651,7 @@ async function consume({
     ...metrics,
     aborted: controller.signal.aborted,
     locked: body.locked,
-    limit: parser.directoryV2BodyLimit,
+    limit: bodyLimit,
     status: response.status,
     cache: response.headers.get("Cache-Control"),
     sha256: Array.from(new Uint8Array(digest), (byte) =>

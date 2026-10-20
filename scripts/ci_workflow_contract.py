@@ -9,7 +9,20 @@ import json
 from pathlib import Path
 
 
+def restore_directory_v4(text):
+    """Reverse only the separately reviewed additive dictionary4 evidence steps."""
+    delta = json.loads(Path('scripts/fixtures/directory_v4_ci_delta.json').read_text())
+    for change in reversed(delta['replacements']):
+        if text.count(change['new']) != 1:
+            raise ValueError('dictionary4 workflow block differs from reviewed delta')
+        text = text.replace(change['new'], change['old'], 1)
+    if hashlib.sha256(text.encode()).hexdigest() != delta['baselineSHA256']:
+        raise ValueError('non-dictionary4 workflow bytes changed')
+    return text
+
+
 def restore_selection(text):
+    text = restore_directory_v4(text)
     delta = json.loads(Path('scripts/ci_workflow_selection_delta.json').read_text())
     for change in reversed(delta['replacements']):
         if text.count(change['new']) != 1:

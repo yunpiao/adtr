@@ -1,0 +1,8 @@
+.directory-v4-workspace { min-width: 0; max-width: 78rem; margin-inline: auto; padding: 1rem; overflow-wrap: anywhere; }
+.directory-v4-workspace section { border: 1px solid var(--border-color, #8b949e); border-radius: .5rem; margin-block: 1rem; padding: 1rem; min-width: 0; }
+.directory-v4-workspace form, .directory-v4-workspace nav { display: flex; flex-wrap: wrap; align-items: end; gap: .75rem; margin-block: .75rem; }
+.directory-v4-workspace label { display: flex; flex-direction: column; gap: .35rem; max-width: 100%; }
+.directory-v4-workspace input, .directory-v4-workspace select { min-width: 0; max-width: 100%; }
+.directory-v4-workspace button { white-space: normal; margin: .25rem; min-height: 2.75rem; }
+.directory-v4-workspace li { margin-block: .4rem; white-space: pre-wrap; }
+@media (max-width: 480px) { .directory-v4-workspace { padding: .5rem; } .directory-v4-workspace section { padding: .65rem; } .directory-v4-workspace form { align-items: stretch; flex-direction: column; } }

@@ -20,9 +20,23 @@ MEMBERSHIP_PASSWORD_NAMES = (
     "ADTR_E2E_MEMBERSHIP_PRODUCER_INITIAL_PASSWORD",
     "ADTR_E2E_MEMBERSHIP_PRODUCER_PASSWORD",
 )
+V4_PASSWORD_NAMES = (
+    "ADTR_E2E_V4_CONTROLS_PASSWORD",
+    "ADTR_E2E_V4_CONTROLS_PRODUCER_INITIAL_PASSWORD",
+    "ADTR_E2E_V4_CONTROLS_PRODUCER_PASSWORD",
+    "ADTR_E2E_V4_CONTROLS_DRAFT_PASSWORD",
+)
+V4_READER_PASSWORD_NAMES = V4_PASSWORD_NAMES + (
+    "ADTR_E2E_V4_CONTROLS_READER_INITIAL_PASSWORD",
+    "ADTR_E2E_V4_CONTROLS_READER_PASSWORD",
+)
+V4_DRAFT_CODE_NAME = "ADTR_E2E_V4_CONTROLS_DRAFT_CODE"
 SUITE_PASSWORD_NAMES = {
     "directory-v3": PASSWORD_NAMES,
     "group-members-v4": MEMBERSHIP_PASSWORD_NAMES,
+    "directory-v4-controls": V4_PASSWORD_NAMES,
+    "directory-v4-cancel": V4_PASSWORD_NAMES,
+    "directory-v4-readers": V4_READER_PASSWORD_NAMES,
 }
 
 
@@ -37,3 +51,5 @@ def configure_directory_credentials(env, suite):
     # A never-submitted draft input, not a valid authenticator or bypass code.
     if suite == "directory-v3":
         env[DRAFT_CODE_NAME] = f"{secrets.randbelow(1_000_000):06d}"
+    if suite in {"directory-v4-controls", "directory-v4-cancel", "directory-v4-readers"}:
+        env[V4_DRAFT_CODE_NAME] = f"{secrets.randbelow(1_000_000):06d}"

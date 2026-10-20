@@ -177,6 +177,27 @@
       ]
     },
     {
+      "name": "directory-v4-controls",
+      "command": "python3 scripts/test_auth_e2e.py --suite directory-v4-controls",
+      "specs": [
+        "web/e2e/directory-v4-controls.spec.ts"
+      ]
+    },
+    {
+      "name": "directory-v4-cancel",
+      "command": "python3 scripts/test_auth_e2e.py --suite directory-v4-cancel",
+      "specs": [
+        "web/e2e/directory-v4-cancel.spec.ts"
+      ]
+    },
+    {
+      "name": "directory-v4-readers",
+      "command": "python3 scripts/test_auth_e2e.py --suite directory-v4-readers",
+      "specs": [
+        "web/e2e/directory-v4-readers.spec.ts"
+      ]
+    },
+    {
       "name": "directory-v4-backend",
       "command": "python3 scripts/test_auth_e2e.py --suite directory-v4-backend",
       "specs": [

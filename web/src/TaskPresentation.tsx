@@ -81,9 +81,9 @@ export function TaskDedicatedGuidance({ taskName }: { taskName: string }) {
   if (taskName === "domain.directory_read.v4")
     return (
       <p>
-        字典 4 的「<a href="#group-members-v4">组成员</a>
-        」页面仅以只读方式查看已保存结果，当前没有采集或取消控件；采集、回执和取消仍需对应专用
-        API 核验权限。本页保留任务状态与事件。
+        打开「<a href="#directory-v4">字典 4 目录采集</a>」通用工作区，
+        不会重新打开当前选中的历史任务。只有本标签页同一身份保存的原操作记录
+        才能通过回执恢复，并重新核验当前权限；组原始成员页面仍保持只读。
       </p>
     );
   if (taskName === "user_assets.v3.export")

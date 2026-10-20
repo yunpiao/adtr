@@ -32,6 +32,7 @@ from test_integration import IMAGE
 from ldap_e2e_fixture import LDAPFixture
 from account_barrier_e2e_fixture import AccountBarrierFixture
 from directory_e2e_credentials import configure_directory_credentials
+from directory_v4_worker_control import DelayedOwnedWorker, URL_ENV, TOKEN_ENV
 from e2e_owned_container import OWNER_LABEL, remove_owned_container
 from e2e_runtime_diagnostics import http_handler_panicked, RuntimeDiagnostics
 from e2e_container_startup_diagnostics import report_container_startup_failure
@@ -51,6 +52,144 @@ DIRECTORY_V4_SUITES = {"directory-v4-backend", "group-members-v4", "group-member
 DIRECTORY_SUITES = DIRECTORY_V4_SUITES | DIRECTORY_V3_SUITES | {"directory", "directory-controls", "directory-readers"} | DIRECTORY_V2_SUITES
 EMPTY_DIRECTORY_SUITES = {"directory-controls", "directory-readers", "directory-v2-controls", "directory-v2-readers", "directory-v3-controls", "directory-v3-readers"}
 SLOW_DIRECTORY_SUITES = {"directory-controls", "directory-v2-controls", "directory-v3-controls"}
+
+V4_CONTROLS_BUDGETS = {
+    "directory-v4-controls": 660,
+    "directory-v4-cancel": 930,
+    "directory-v4-readers": 660,
+}
+DIRECTORY_V4_SUITES |= V4_CONTROLS_BUDGETS.keys()
+DIRECTORY_SUITES |= V4_CONTROLS_BUDGETS.keys()
+SLOW_DIRECTORY_SUITES.add("directory-v4-cancel")
+REAL_TAB_LIFECYCLE_SUITES.add("directory-v4-readers")
+
+
+def v4_delayed_worker(launch, ready_url):
+    """Capture the runner's fixed spawn and bounded cooperative readiness."""
+    def ready(process, cancelled, deadline):
+        for _ in range(100):
+            remaining = deadline - time.monotonic()
+            if cancelled.is_set() or remaining <= 0 or process.poll() is not None:
+                return False
+            healthy = False
+            try:
+                with urllib.request.urlopen(ready_url, timeout=min(1, remaining)) as response:
+                    healthy = response.status == 200
+            except (OSError, urllib.error.URLError):
+                pass
+            if cancelled.is_set() or time.monotonic() >= deadline or process.poll() is not None:
+                return False
+            if healthy:
+                return True
+            if cancelled.wait(min(.1, max(0, deadline - time.monotonic()))):
+                return False
+        return False
+    return DelayedOwnedWorker(launch, ready)
+
+
+def cleanup_v4_process(process, record):
+    """Called only by runner finally; never used by the delayed controller."""
+    if process is None:
+        return True, None, False, ()
+    failures = []
+    forced = False
+    reaped = False
+    code = None
+    try:
+        if process.poll() is None:
+            process.terminate()
+        code = process.wait(timeout=30)
+        reaped = True
+    except Exception:
+        failures.append("process_graceful_cleanup")
+        # Even failed terminate/wait must not skip a bounded owned kill/reap.
+        try:
+            if process.poll() is None:
+                forced = True
+                process.kill()
+        except Exception:
+            failures.append("process_kill")
+        try:
+            code = process.wait(timeout=10)
+            reaped = True
+        except Exception:
+            failures.append("process_reap")
+    record["forced_kill"] = forced
+    record["after_cleanup"] = code
+    if reaped and code != 0:
+        failures.append("process_nonzero_exit")
+    return reaped, code, forced, tuple(failures)
+
+
+def cleanup_v4_run(controller, worker, server, diagnostics, logs, ldap_fixture,
+                   message_fixture, creation_attempted, name, owner):
+    """Finally's single owner: transfer before snapshot, then all resources."""
+    failures = []
+    transferred = controller is None
+    if controller is not None:
+        try:
+            transfer = controller.seal_and_take()
+            worker = transfer.process
+            transferred = True
+            failures.extend(transfer.failures)
+        except Exception:
+            # The helper promises ordinary close/join failures as a transfer,
+            # not an exception. A violated contract still cannot skip API/LDAP/DB.
+            failures.append("controller_transfer")
+    try:
+        diagnostics.snapshot(server, worker)
+    except Exception:
+        failures.append("snapshot")
+        diagnostics.report["collection_errors"].append("snapshot")
+    reaped, code, forced, process_failures = cleanup_v4_process(
+        worker, diagnostics.report["processes"]["worker"])
+    failures.extend(process_failures)
+    if controller is not None:
+        try:
+            if not controller.finish_after_wait(reaped=reaped and transferred, returncode=code, forced_kill=forced):
+                failures.append("controller_cleanup")
+        except Exception:
+            failures.append("controller_cleanup")
+    _, _, _, process_failures = cleanup_v4_process(
+        server, diagnostics.report["processes"]["api"])
+    failures.extend(process_failures)
+    if ldap_fixture is not None:
+        try:
+            ldap_fixture.close()
+        except Exception:
+            failures.append("ldap_cleanup")
+    try:
+        panicked = http_handler_panicked(logs)
+        diagnostics.report["http_panic"] = panicked
+        if panicked:
+            failures.append("http_panic")
+    except Exception:
+        failures.append("runtime_diagnostics")
+    try:
+        logs.close()
+    except Exception:
+        failures.append("log_cleanup")
+    if message_fixture is not None:
+        try:
+            message_fixture.cleanup()
+        except Exception:
+            failures.append("message_cleanup")
+    if creation_attempted:
+        try:
+            remove_owned_container(name, owner)
+        except Exception:
+            failures.append("container_cleanup")
+    # Existing runtime.json has a closed schema. Keep additional safe cleanup
+    # categories separate rather than silently changing its evidence contract.
+    allowed = {"listener_close_failed", "listener_join_failed", "readiness_join_failed",
+               "snapshot", "process_graceful_cleanup", "process_reap", "process_kill",
+               "process_nonzero_exit", "controller_cleanup", "controller_transfer", "ldap_cleanup",
+               "http_panic", "runtime_diagnostics", "log_cleanup",
+               "message_cleanup", "container_cleanup"}
+    for failure in failures:
+        print("Directory v4 cleanup: " + (failure if failure in allowed else "cleanup_failed"),
+              file=sys.stderr)
+    return failures
 
 
 def browser_command(suite):
@@ -83,7 +222,7 @@ def validate_asset_refresh_evidence(suite):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--suite", choices=["group-asset-export-v3-running-cancel", "computer-asset-export-v3-running-cancel", "user-asset-export-v3-running-cancel", "computer-asset-export-v3", "computer-asset-export-v3-failure", "computer-asset-export-v3-cancel", "group-asset-export-v3", "group-asset-export-v3-failure", "group-asset-export-v3-cancel", "user-asset-export-v3-failure", "user-asset-export-v3-cancel", "user-asset-export-v3", "auth", "access", "resource", "tasks", "messages", "messages-bulk", "audit", "system", "maintenance", "domains", "operations", "profile", "credential-use", "account-references", "operational-logs", "session-invalidation", "account-reference-barrier", "directory", "directory-controls", "directory-readers", "directory-v2", "directory-v2-controls", "directory-v2-readers", "directory-v3-backend", "directory-v4-backend", "group-members-v4", "group-members-v4-empty", "group-members-v4-pagination", "group-members-v4-refresh", "user-assets-v3", "computer-assets-v3", "computer-assets-v3-readers", "group-assets-v3", "group-assets-v3-readers", "directory-v3", "directory-v3-controls", "directory-v3-readers", "user-assets-v2", "user-assets-v2-readers"], default="auth")
+    parser.add_argument("--suite", choices=[*V4_CONTROLS_BUDGETS, "group-asset-export-v3-running-cancel", "computer-asset-export-v3-running-cancel", "user-asset-export-v3-running-cancel", "computer-asset-export-v3", "computer-asset-export-v3-failure", "computer-asset-export-v3-cancel", "group-asset-export-v3", "group-asset-export-v3-failure", "group-asset-export-v3-cancel", "user-asset-export-v3-failure", "user-asset-export-v3-cancel", "user-asset-export-v3", "auth", "access", "resource", "tasks", "messages", "messages-bulk", "audit", "system", "maintenance", "domains", "operations", "profile", "credential-use", "account-references", "operational-logs", "session-invalidation", "account-reference-barrier", "directory", "directory-controls", "directory-readers", "directory-v2", "directory-v2-controls", "directory-v2-readers", "directory-v3-backend", "directory-v4-backend", "group-members-v4", "group-members-v4-empty", "group-members-v4-pagination", "group-members-v4-refresh", "user-assets-v3", "computer-assets-v3", "computer-assets-v3-readers", "group-assets-v3", "group-assets-v3-readers", "directory-v3", "directory-v3-controls", "directory-v3-readers", "user-assets-v2", "user-assets-v2-readers"], default="auth")
     parser.add_argument("--expired", action="store_true")
     args = parser.parse_args()
     # Only the three explicit running-cancel suites install the CI controller.
@@ -95,10 +234,16 @@ def main():
     name = "adtr-auth-e2e-" + uuid.uuid4().hex[:12]
     password = secrets.token_hex(24)
     env = dict(os.environ, POSTGRES_PASSWORD=password)
+    # Ignore inherited controller handles and exact-suite selectors.
+    for key in (URL_ENV, TOKEN_ENV, "ADTR_E2E_V4_CONTROLS_SUITE"):
+        env.pop(key, None)
+    if args.suite in V4_CONTROLS_BUDGETS:
+        env["ADTR_E2E_V4_CONTROLS_SUITE"] = args.suite
     creation_attempted = False
     owner = uuid.uuid4().hex
     server = None
     worker = None
+    v4_worker_controller = None
     owned_ci_worker = None
     export_worker_guard = None
     running_cancel_guard = None
@@ -274,42 +419,51 @@ def main():
             # Execution authorization needs persisted actors, not browser secrets.
             for key in ["ADTR_AUTH_KEY", "ADTR_ORIGIN", "ADTR_WEB_DIR"]:
                 worker_env.pop(key, None)
-            diagnostics.phase("worker-start")
-            if args.suite in {RUNNING_CANCEL_SUITE} | KIND_RUNNING_CANCEL_SUITES:
-                owned_ci_worker = OwnedCIWorker.spawn(["./bin/adtr", "-mode", "worker"],
-                    env=worker_env, stdout=logs, stderr=logs, binary=Path("bin/adtr").resolve())
-                worker = owned_ci_worker.process
+            if args.suite == "directory-v4-cancel":
+                # Freeze actual binary, private env, logs and URL before admission.
+                binary = str(Path("bin/adtr").resolve(strict=True))
+                launch = lambda binary=binary, worker_env=dict(worker_env), logs=logs: subprocess.Popen(
+                    [binary, "-mode", "worker"], env=worker_env, stdout=logs, stderr=logs)
+                v4_worker_controller = v4_delayed_worker(
+                    launch, f"http://127.0.0.1:{worker_port}/readyz")
+                env.update(v4_worker_controller.open())
             else:
-                worker = subprocess.Popen(["./bin/adtr", "-mode", "worker"], env=worker_env, stdout=logs, stderr=logs)
-            if args.suite in {RUNNING_CANCEL_SUITE, "user-asset-export-v3-cancel", "group-asset-export-v3-cancel", "computer-asset-export-v3-cancel"} | KIND_RUNNING_CANCEL_SUITES:
-                export_worker_guard = OwnedExportWorkerGuard(worker, export_worker_nonce, Path("bin/adtr").resolve())
-                export_worker_guard.start()
-                env.update(ADTR_E2E_WORKER_PID=str(worker.pid), ADTR_E2E_HARNESS_PID=str(os.getpid()),
-                           ADTR_E2E_EXPORT_WORKER_STARTTIME=export_worker_guard.starttime,
-                           ADTR_E2E_EXPORT_WORKER_NONCE=export_worker_nonce,
-                           ADTR_E2E_EXPORT_WORKER_BINARY=str(Path("bin/adtr").resolve()),
-                           ADTR_E2E_EXPORT_WORKER_APPLICATION_NAME=export_worker_app,
-                           ADTR_E2E_EXPORT_WORKER_READY_URL=f"http://127.0.0.1:{worker_port}/readyz")
+                diagnostics.phase("worker-start")
                 if args.suite in {RUNNING_CANCEL_SUITE} | KIND_RUNNING_CANCEL_SUITES:
-                    asset_kind = {GROUP_RUNNING_CANCEL_SUITE: "group", COMPUTER_RUNNING_CANCEL_SUITE: "computer"}.get(args.suite, "user")
-                    running_cancel_guard = RunningExportCancelGuard(worker, export_worker_nonce, Path("bin/adtr").resolve(), name, export_worker_app, env["ADTR_DATABASE_URL"], asset_kind=asset_kind, controller=owned_ci_worker.controller)
-                    export_worker_guard.resume_delegate = running_cancel_guard._resume_capture_owned
-                    running_cancel_guard.start()
-                    env.update(ADTR_E2E_RUNNING_CANCEL_GUARD_URL=running_cancel_guard.url,
-                               ADTR_E2E_RUNNING_CANCEL_GUARD_TOKEN=running_cancel_guard.token)
-            for _ in range(100):
-                if worker.poll() is not None:
-                    raise RuntimeError("task worker exited during startup")
-                try:
-                    with urllib.request.urlopen(f"http://127.0.0.1:{worker_port}/readyz", timeout=1) as response:
-                        if response.status == 200:
-                            break
-                except (OSError, urllib.error.URLError):
-                    pass
-                time.sleep(0.1)
-            else:
-                raise RuntimeError("task worker failed readiness")
-            diagnostics.phase("worker-ready")
+                    owned_ci_worker = OwnedCIWorker.spawn(["./bin/adtr", "-mode", "worker"],
+                        env=worker_env, stdout=logs, stderr=logs, binary=Path("bin/adtr").resolve())
+                    worker = owned_ci_worker.process
+                else:
+                    worker = subprocess.Popen(["./bin/adtr", "-mode", "worker"], env=worker_env, stdout=logs, stderr=logs)
+                if args.suite in {RUNNING_CANCEL_SUITE, "user-asset-export-v3-cancel", "group-asset-export-v3-cancel", "computer-asset-export-v3-cancel"} | KIND_RUNNING_CANCEL_SUITES:
+                    export_worker_guard = OwnedExportWorkerGuard(worker, export_worker_nonce, Path("bin/adtr").resolve())
+                    export_worker_guard.start()
+                    env.update(ADTR_E2E_WORKER_PID=str(worker.pid), ADTR_E2E_HARNESS_PID=str(os.getpid()),
+                               ADTR_E2E_EXPORT_WORKER_STARTTIME=export_worker_guard.starttime,
+                               ADTR_E2E_EXPORT_WORKER_NONCE=export_worker_nonce,
+                               ADTR_E2E_EXPORT_WORKER_BINARY=str(Path("bin/adtr").resolve()),
+                               ADTR_E2E_EXPORT_WORKER_APPLICATION_NAME=export_worker_app,
+                               ADTR_E2E_EXPORT_WORKER_READY_URL=f"http://127.0.0.1:{worker_port}/readyz")
+                    if args.suite in {RUNNING_CANCEL_SUITE} | KIND_RUNNING_CANCEL_SUITES:
+                        asset_kind = {GROUP_RUNNING_CANCEL_SUITE: "group", COMPUTER_RUNNING_CANCEL_SUITE: "computer"}.get(args.suite, "user")
+                        running_cancel_guard = RunningExportCancelGuard(worker, export_worker_nonce, Path("bin/adtr").resolve(), name, export_worker_app, env["ADTR_DATABASE_URL"], asset_kind=asset_kind, controller=owned_ci_worker.controller)
+                        export_worker_guard.resume_delegate = running_cancel_guard._resume_capture_owned
+                        running_cancel_guard.start()
+                        env.update(ADTR_E2E_RUNNING_CANCEL_GUARD_URL=running_cancel_guard.url,
+                                   ADTR_E2E_RUNNING_CANCEL_GUARD_TOKEN=running_cancel_guard.token)
+                for _ in range(100):
+                    if worker.poll() is not None:
+                        raise RuntimeError("task worker exited during startup")
+                    try:
+                        with urllib.request.urlopen(f"http://127.0.0.1:{worker_port}/readyz", timeout=1) as response:
+                            if response.status == 200:
+                                break
+                    except (OSError, urllib.error.URLError):
+                        pass
+                    time.sleep(0.1)
+                else:
+                    raise RuntimeError("task worker failed readiness")
+                diagnostics.phase("worker-ready")
         if args.suite in {"system", "operational-logs", "messages-bulk"}:
             env["ADTR_E2E_WORKER_PID"] = str(worker.pid)
             if args.suite == "messages-bulk":
@@ -319,7 +473,7 @@ def main():
         # enter an error-context prompt; explicit safe screenshots remain intact.
         env["PLAYWRIGHT_NO_COPY_PROMPT"] = "1"
         diagnostics.phase("browser-start")
-        subprocess.run(command, env=env, check=True, timeout=930 if args.suite in KIND_RUNNING_CANCEL_SUITES else 930 if args.suite == RUNNING_CANCEL_SUITE else 930 if args.suite in COMPUTER_EXPORT_SUITES else 930 if args.suite in GROUP_EXPORT_SUITES else 930 if args.suite in EXPORT_TERMINAL_SUITES else 930 if args.suite == "user-asset-export-v3" else 660 if args.suite == "account-references" else 930 if args.suite in EMPTY_DIRECTORY_SUITES | USER_ASSETS_V2_SUITES | {"user-assets-v3"} | COMPUTER_ASSETS_V3_SUITES | GROUP_ASSETS_V3_SUITES else 660 if args.suite in {"directory", "directory-v2", "directory-v3-backend", "directory-v4-backend", "group-members-v4", "group-members-v4-empty", "group-members-v4-pagination", "group-members-v4-refresh", "directory-v3"} else 600 if args.suite == "audit" else 540 if args.suite in {"maintenance", "domains", "operations", "credential-use", "account-references", "operational-logs", "account-reference-barrier"} else 480 if args.suite == "system" else 420)
+        subprocess.run(command, env=env, check=True, timeout=V4_CONTROLS_BUDGETS[args.suite] if args.suite in V4_CONTROLS_BUDGETS else 930 if args.suite in KIND_RUNNING_CANCEL_SUITES else 930 if args.suite == RUNNING_CANCEL_SUITE else 930 if args.suite in COMPUTER_EXPORT_SUITES else 930 if args.suite in GROUP_EXPORT_SUITES else 930 if args.suite in EXPORT_TERMINAL_SUITES else 930 if args.suite == "user-asset-export-v3" else 660 if args.suite == "account-references" else 930 if args.suite in EMPTY_DIRECTORY_SUITES | USER_ASSETS_V2_SUITES | {"user-assets-v3"} | COMPUTER_ASSETS_V3_SUITES | GROUP_ASSETS_V3_SUITES else 660 if args.suite in {"directory", "directory-v2", "directory-v3-backend", "directory-v4-backend", "group-members-v4", "group-members-v4-empty", "group-members-v4-pagination", "group-members-v4-refresh", "directory-v3"} else 600 if args.suite == "audit" else 540 if args.suite in {"maintenance", "domains", "operations", "credential-use", "account-references", "operational-logs", "account-reference-barrier"} else 480 if args.suite == "system" else 420)
         if args.suite == "user-asset-export-v3":
             validate_user_export()
         if export_worker_guard is not None:
@@ -355,132 +509,155 @@ def main():
         if args.suite == "group-members-v4-refresh":
             subprocess.run([sys.executable, "scripts/validate_group_members_v4_refresh_evidence.py",
                             "--source-root", "."], check=True, timeout=30)
+        if v4_worker_controller is not None:
+            state = v4_worker_controller.state()
+            if state != {"state": "ready", "launchCount": 1, "failure": None}:
+                raise RuntimeError("directory v4 worker did not reach single-launch readiness")
         diagnostics.phase("browser-pass")
-        chain = "real browser -> API -> worker/PostgreSQL" if worker is not None else "real browser -> API -> PostgreSQL"
+        chain = "real browser -> API -> worker/PostgreSQL" if worker is not None or v4_worker_controller is not None else "real browser -> API -> PostgreSQL"
     finally:
-        if sys.exc_info()[0] is not None and owned_ci_worker is not None:
-            owned_ci_worker.report_failure_diagnostic()
-        try:
-            diagnostics.snapshot(server, worker)
-        except Exception:
-            # Optional evidence must never prevent owned cleanup or mask the
-            # original browser failure. Never print diagnostic exception text.
-            diagnostics.report["collection_errors"].append("snapshot")
-        try:
-            shutdown_error = None
-            if running_cancel_guard is not None:
-                try:
-                    running_cancel_guard.close()
-                except (OSError, RuntimeError):
-                    shutdown_error = RuntimeError("running export worker cleanup failed")
-            if export_worker_guard is not None:
-                try:
-                    export_worker_guard.close()
-                except (OSError, RuntimeError):
-                    shutdown_error = RuntimeError("owned export worker cleanup failed")
-            if account_barrier is not None:
-                try:
-                    account_barrier.close()
-                except Exception as error:
-                    shutdown_error = error
-            if owned_ci_worker is not None and worker.poll() is None:
-                try:
-                    owned_ci_worker.controller.resume_and_release(abort=True)
-                except (OSError, RuntimeError):
-                    shutdown_error = RuntimeError("owned CI rescue cleanup failed")
-            worker_cancel_acknowledged = False
-            worker_shutdown_deadline = time.monotonic() + 30 if owned_ci_worker is not None else None
-            if (owned_ci_worker is not None and running_cancel_guard is not None
-                    and shutdown_error is None and worker.poll() is None):
-                try:
-                    owned_ci_worker.prepare_final_shutdown(worker_shutdown_deadline)
-                    running_cancel_guard.verify_final_quiescence(worker_shutdown_deadline)
-                    owned_ci_worker.cancel_final_shutdown(worker_shutdown_deadline)
-                    worker_cancel_acknowledged = True
-                except Exception:
-                    shutdown_error = RuntimeError("owned CI final quiescence failed")
-                    try:
-                        owned_ci_worker.abort_final_shutdown()
-                    except Exception:
-                        pass  # Preserve failure and continue bounded TERM/KILL recovery.
-            if (running_cancel_guard is not None and shutdown_error is None
-                    and not worker_cancel_acknowledged):
-                shutdown_error = RuntimeError("owned CI final cancellation acknowledgement missing")
-            for label, process in [("worker", worker), ("API", server)]:
-                if process is None:
-                    continue
-                if args.suite == "messages-bulk" and label == "worker" and process.poll() is None:
-                    # A failed browser may leave our own child stopped. Resume before shutdown.
-                    process.send_signal(signal.SIGCONT)
-                process_record = diagnostics.report["processes"]["api" if label == "API" else "worker"]
-                if label != "worker" or not worker_cancel_acknowledged:
-                    process.terminate()
-                try:
-                    wait_budget = (max(0, worker_shutdown_deadline - time.monotonic())
-                                   if label == "worker" and worker_shutdown_deadline is not None else 30)
-                    code = process.wait(timeout=wait_budget)
-                    process_record["after_cleanup"] = code
-                    if code != 0:
-                        shutdown_error = RuntimeError(f"{label} did not exit successfully")
-                except subprocess.TimeoutExpired:
-                    process_record["forced_kill"] = True
-                    process.kill()
-                    process_record["after_cleanup"] = process.wait(timeout=10)
-                    shutdown_error = RuntimeError(f"{label} did not stop gracefully")
-            if owned_ci_worker is not None:
-                try:
-                    owned_ci_worker.close_after_wait()
-                except (OSError, RuntimeError, subprocess.TimeoutExpired):
-                    shutdown_error = RuntimeError("owned CI final witness or cleanup failed")
-                owned_ci_worker.report_first_invalidation_after_wait(logs)
-            if running_cancel_guard is not None and worker is not None and worker.returncode is not None:
-                try:
-                    running_cancel_guard.cleanup_activity_fixture_after_wait(worker.returncode)
-                except Exception:
-                    shutdown_error = RuntimeError("owned CI activity fixture cleanup failed")
-            if running_cancel_guard is not None and shutdown_error is None:
-                try:
-                    running_cancel_guard.verify_recovery_cleanup_after_wait(worker.returncode, owned_ci_worker.recovery_cleanup_after_wait(logs))
-                except Exception:
-                    shutdown_error = RuntimeError("owned CI recovery cleanup proof failed")
-            if running_cancel_guard is not None and shutdown_error is None:
-                try:
-                    # The worker's successful Wait includes journal.Close/drain.
-                    # Query its final report while the isolated database is alive.
-                    running_cancel_guard.verify_journal_after_wait(worker.returncode, owned_ci_worker.final_journal_after_wait(logs))
-                except Exception:
-                    shutdown_error = RuntimeError("owned CI final journal proof failed")
-            if ldap_fixture is not None:
-                try:
-                    ldap_fixture.close()
-                except Exception as error:
-                    shutdown_error = error
+        if args.suite in V4_CONTROLS_BUDGETS:
+            primary_error = sys.exc_info()[0] is not None
             try:
-                panicked = http_handler_panicked(logs)
-                diagnostics.report["http_panic"] = panicked
-            except (OSError, UnicodeError, ValueError):
-                shutdown_error = RuntimeError(
-                    "browser acceptance runtime diagnostics could not be checked"
-                )
-            else:
-                if panicked:
-                    shutdown_error = RuntimeError(
-                        "browser acceptance runtime observed an HTTP handler panic; raw diagnostics withheld"
-                    )
-            finally:
-                logs.close()
-            if message_fixture is not None:
-                message_fixture.cleanup()
-            if creation_attempted:
-                remove_owned_container(name, owner)
-            if shutdown_error is not None:
-                raise shutdown_error
-        finally:
-            try:
-                diagnostics.phase("after-cleanup")
-                diagnostics.write(diagnostic_dir / "runtime.json")
+                failures = cleanup_v4_run(v4_worker_controller, worker, server,
+                    diagnostics, logs, ldap_fixture, message_fixture,
+                    creation_attempted, name, owner)
+                if failures and not primary_error:
+                    raise RuntimeError("directory v4 owned cleanup failed")
             except Exception:
-                print("Safe runtime diagnostics could not be retained", file=sys.stderr)
+                if not primary_error:
+                    raise
+                print("Directory v4 cleanup: cleanup_failed", file=sys.stderr)
+            finally:
+                try:
+                    diagnostics.phase("after-cleanup")
+                    diagnostics.write(diagnostic_dir / "runtime.json")
+                except Exception:
+                    print("Safe runtime diagnostics could not be retained", file=sys.stderr)
+        else:
+            if sys.exc_info()[0] is not None and owned_ci_worker is not None:
+                owned_ci_worker.report_failure_diagnostic()
+            try:
+                diagnostics.snapshot(server, worker)
+            except Exception:
+                # Optional evidence must never prevent owned cleanup or mask the
+                # original browser failure. Never print diagnostic exception text.
+                diagnostics.report["collection_errors"].append("snapshot")
+            try:
+                shutdown_error = None
+                if running_cancel_guard is not None:
+                    try:
+                        running_cancel_guard.close()
+                    except (OSError, RuntimeError):
+                        shutdown_error = RuntimeError("running export worker cleanup failed")
+                if export_worker_guard is not None:
+                    try:
+                        export_worker_guard.close()
+                    except (OSError, RuntimeError):
+                        shutdown_error = RuntimeError("owned export worker cleanup failed")
+                if account_barrier is not None:
+                    try:
+                        account_barrier.close()
+                    except Exception as error:
+                        shutdown_error = error
+                if owned_ci_worker is not None and worker.poll() is None:
+                    try:
+                        owned_ci_worker.controller.resume_and_release(abort=True)
+                    except (OSError, RuntimeError):
+                        shutdown_error = RuntimeError("owned CI rescue cleanup failed")
+                worker_cancel_acknowledged = False
+                worker_shutdown_deadline = time.monotonic() + 30 if owned_ci_worker is not None else None
+                if (owned_ci_worker is not None and running_cancel_guard is not None
+                        and shutdown_error is None and worker.poll() is None):
+                    try:
+                        owned_ci_worker.prepare_final_shutdown(worker_shutdown_deadline)
+                        running_cancel_guard.verify_final_quiescence(worker_shutdown_deadline)
+                        owned_ci_worker.cancel_final_shutdown(worker_shutdown_deadline)
+                        worker_cancel_acknowledged = True
+                    except Exception:
+                        shutdown_error = RuntimeError("owned CI final quiescence failed")
+                        try:
+                            owned_ci_worker.abort_final_shutdown()
+                        except Exception:
+                            pass  # Preserve failure and continue bounded TERM/KILL recovery.
+                if (running_cancel_guard is not None and shutdown_error is None
+                        and not worker_cancel_acknowledged):
+                    shutdown_error = RuntimeError("owned CI final cancellation acknowledgement missing")
+                for label, process in [("worker", worker), ("API", server)]:
+                    if process is None:
+                        continue
+                    if args.suite == "messages-bulk" and label == "worker" and process.poll() is None:
+                        # A failed browser may leave our own child stopped. Resume before shutdown.
+                        process.send_signal(signal.SIGCONT)
+                    process_record = diagnostics.report["processes"]["api" if label == "API" else "worker"]
+                    if label != "worker" or not worker_cancel_acknowledged:
+                        process.terminate()
+                    try:
+                        wait_budget = (max(0, worker_shutdown_deadline - time.monotonic())
+                                       if label == "worker" and worker_shutdown_deadline is not None else 30)
+                        code = process.wait(timeout=wait_budget)
+                        process_record["after_cleanup"] = code
+                        if code != 0:
+                            shutdown_error = RuntimeError(f"{label} did not exit successfully")
+                    except subprocess.TimeoutExpired:
+                        process_record["forced_kill"] = True
+                        process.kill()
+                        process_record["after_cleanup"] = process.wait(timeout=10)
+                        shutdown_error = RuntimeError(f"{label} did not stop gracefully")
+                if owned_ci_worker is not None:
+                    try:
+                        owned_ci_worker.close_after_wait()
+                    except (OSError, RuntimeError, subprocess.TimeoutExpired):
+                        shutdown_error = RuntimeError("owned CI final witness or cleanup failed")
+                    owned_ci_worker.report_first_invalidation_after_wait(logs)
+                if running_cancel_guard is not None and worker is not None and worker.returncode is not None:
+                    try:
+                        running_cancel_guard.cleanup_activity_fixture_after_wait(worker.returncode)
+                    except Exception:
+                        shutdown_error = RuntimeError("owned CI activity fixture cleanup failed")
+                if running_cancel_guard is not None and shutdown_error is None:
+                    try:
+                        running_cancel_guard.verify_recovery_cleanup_after_wait(worker.returncode, owned_ci_worker.recovery_cleanup_after_wait(logs))
+                    except Exception:
+                        shutdown_error = RuntimeError("owned CI recovery cleanup proof failed")
+                if running_cancel_guard is not None and shutdown_error is None:
+                    try:
+                        # The worker's successful Wait includes journal.Close/drain.
+                        # Query its final report while the isolated database is alive.
+                        running_cancel_guard.verify_journal_after_wait(worker.returncode, owned_ci_worker.final_journal_after_wait(logs))
+                    except Exception:
+                        shutdown_error = RuntimeError("owned CI final journal proof failed")
+                if ldap_fixture is not None:
+                    try:
+                        ldap_fixture.close()
+                    except Exception as error:
+                        shutdown_error = error
+                try:
+                    panicked = http_handler_panicked(logs)
+                    diagnostics.report["http_panic"] = panicked
+                except (OSError, UnicodeError, ValueError):
+                    shutdown_error = RuntimeError(
+                        "browser acceptance runtime diagnostics could not be checked"
+                    )
+                else:
+                    if panicked:
+                        shutdown_error = RuntimeError(
+                            "browser acceptance runtime observed an HTTP handler panic; raw diagnostics withheld"
+                        )
+                finally:
+                    logs.close()
+                if message_fixture is not None:
+                    message_fixture.cleanup()
+                if creation_attempted:
+                    remove_owned_container(name, owner)
+                if shutdown_error is not None:
+                    raise shutdown_error
+            finally:
+                try:
+                    diagnostics.phase("after-cleanup")
+                    diagnostics.write(diagnostic_dir / "runtime.json")
+                except Exception:
+                    print("Safe runtime diagnostics could not be retained", file=sys.stderr)
     if args.suite == "messages":
         # Additive sequential acceptance, fresh owned database; never recurse from bulk.
         subprocess.run([sys.executable, __file__, "--suite", "messages-bulk"], check=True)

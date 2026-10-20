@@ -940,7 +940,7 @@ describe("dedicated dictionary task guards", () => {
 describe("specialized dictionary and asset export task controls", () => {
   const specialKinds = [
     { taskName: "domain.directory_read.v3", href: "#directory-v3" },
-    { taskName: "domain.directory_read.v4", href: "#group-members-v4" },
+    { taskName: "domain.directory_read.v4", href: "#directory-v4" },
     { taskName: "user_assets.v3.export", href: "#user-assets-v3" },
     { taskName: "group_assets.v3.export", href: "#group-assets-v3" },
     { taskName: "computer_assets.v3.export", href: "#computer-assets-v3" },
@@ -1026,10 +1026,11 @@ describe("specialized dictionary and asset export task controls", () => {
     expect(links[0].getAttribute("href")).not.toContain(firstID);
     expect(links[0].getAttribute("href")).not.toContain(recoveryKey);
     const guidance = links[0].closest("p");
-    if (href === "#group-members-v4") {
-      expect(guidance).toHaveTextContent(/仅(?:以只读方式)?查看已保存结果/);
-      expect(guidance).toHaveTextContent("当前没有采集或取消控件");
-      expect(guidance).toHaveTextContent(/采集、回执和取消仍需对应专用\s*API/);
+    if (href === "#directory-v4") {
+      expect(guidance).toHaveTextContent("通用工作区");
+      expect(guidance).toHaveTextContent("不会重新打开当前选中的历史任务");
+      expect(guidance).toHaveTextContent("本标签页同一身份保存的原操作记录");
+      expect(guidance).toHaveTextContent("组原始成员页面仍保持只读");
     } else if (href === "#user-assets-v3" || href === "#computer-assets-v3" || href === "#group-assets-v3") {
       expect(guidance).toHaveTextContent("查看原导出结果");
       expect(guidance).toHaveTextContent("重新核验专用权限");
@@ -1497,7 +1498,7 @@ describe("specialized dictionary and asset export task controls", () => {
           expect.stringContaining(`/api/tasks/detail?taskUUID=${firstID}`),
         ]),
       );
-      expectDedicatedLink("#group-members-v4");
+      expectDedicatedLink("#directory-v4");
       expectNoGenericAction();
     },
   );

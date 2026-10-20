@@ -228,9 +228,9 @@ def select(paths, inventory, snapshots, full=False):
                         unknown = True
                     hits.update(local_hits)
                 if not seen or unknown:
-                    selected.update(all_names)
-                    native = True
-                    reasons.append('unproved frontend dependency: ' + path)
+                    # Without a proved consumer boundary, do not exclude auth
+                    # shards merely because the changed path is frontend source.
+                    all_checks('unproved frontend dependency: ' + path)
                 else:
                     selected.update(hits)
                     reasons.append('frontend dependency closure: ' + path)
@@ -302,6 +302,16 @@ def main():
                     or actual['fixed'] != [name for name in inventory['fixed'] if name in expected]
                     or actual['groups']['native-no-store'] or actual['groups']['native-no-store-fixed']):
                 raise ValueError('current dependency selection drift: ' + path)
+        for path in ('web/src/DirectoryV4Workspace.tsx', 'web/src/DirectoryV4TaskResult.tsx',
+                     'web/src/directory-v4-controls-api.ts', 'web/src/directory-v4-controls-json.ts',
+                     'web/src/GroupMembersV4Workspace.tsx', 'web/src/group-members-v4-api.ts'):
+            if path not in sources:
+                raise ValueError('missing dictionary4 source: ' + path)
+            actual = select([path], inventory, [sources, sources])
+            if (actual['browser'] != inventory['browser'] or actual['fixed'] != inventory['fixed']
+                    or not all(actual['groups'].values())):
+                raise ValueError('unclassified dictionary4 consumer must retain full coverage: ' + path)
+        print('Actual dictionary4 graph: new controls and existing member readers retain full fallback')
         print('Actual TypeScript dependency graph: reviewed common modules selected precisely')
         return
     plan = make_plan(os.environ['GITHUB_EVENT_NAME'], os.environ['ADTR_EVENT_BASE_SHA'],
