@@ -374,6 +374,7 @@
     ],
     "web/src/TaskWorkspace.tsx": [
       "tasks",
+      "audit",
       "messages",
       "maintenance",
       "user-assets-v2",

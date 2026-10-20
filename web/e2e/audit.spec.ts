@@ -5,6 +5,7 @@ import {
   type BrowserContext,
   type Locator,
   type Page,
+  type Request,
   type TestInfo,
 } from "@playwright/test";
 import { createHash, createHmac, randomUUID } from "node:crypto";
@@ -539,6 +540,206 @@ async function reopenExportHistory(page: Page, actorID: number) {
   return history;
 }
 
+async function verifyTaskOriginalExport(
+  page: Page,
+  context: BrowserContext,
+  testInfo: TestInfo,
+  taskUUID: string,
+  actorID: number,
+  expectedRows: number,
+  originalBytes: Buffer,
+  visuals: AuditVisual[],
+) {
+  const mutations: string[] = [];
+  let downloads = 0;
+  const recordRequest = (request: Request) => {
+    const path = new URL(request.url()).pathname;
+    if (
+      request.method() === "POST" &&
+      path.startsWith("/api/") &&
+      path !== "/api/access/check"
+    )
+      mutations.push(path);
+  };
+  const recordDownload = () => {
+    downloads++;
+  };
+  page.on("request", recordRequest);
+  page.on("download", recordDownload);
+  const name = expectedRows === 0 ? "zero-row" : "nonempty";
+  const fileName = `audit-${taskUUID}.xlsx`;
+  const taskURL = new RegExp(`#tasks/detail/${taskUUID}$`);
+  const auditURL = new RegExp(`#audit/detail/${taskUUID}$`);
+  const link = page.getByRole("link", { name: "查看原审计导出", exact: true });
+  const identity = page.getByTestId("task-detail-identity");
+  const applied = {
+    pageIdx: 1,
+    pageSize: 10,
+    domainId: "",
+    state: "succeeded",
+    taskName: "audit.export",
+    visibility: "",
+  };
+  try {
+    await navigateTo(page, "后台任务");
+    await expect(page.getByRole("table", { name: "任务列表" })).toBeVisible();
+    const filters = page.locator(".task-filter-panel");
+    if (!(await filters.evaluate((node) => (node as HTMLDetailsElement).open)))
+      await filters.locator("summary").click();
+    await page.getByLabel("任务种类筛选").fill(applied.taskName);
+    await page.getByLabel("域 ID 筛选").fill(applied.domainId);
+    await page.getByLabel("任务状态筛选").selectOption(applied.state);
+    await page.getByLabel("任务可见性筛选").selectOption(applied.visibility);
+    await page.getByLabel("每页任务数").selectOption(String(applied.pageSize));
+    const [listResponse] = await Promise.all([
+      page.waitForResponse((response) => {
+        const url = new URL(response.url());
+        return (
+          url.pathname === "/api/tasks" &&
+          response.request().method() === "GET" &&
+          url.searchParams.get("taskName") === applied.taskName &&
+          url.searchParams.get("state") === applied.state &&
+          url.searchParams.get("pageSize") === String(applied.pageSize)
+        );
+      }),
+      page.getByRole("button", { name: "筛选任务", exact: true }).click(),
+    ]);
+    expect(listResponse.status()).toBe(200);
+    expect((await listResponse.json()).tasks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ taskUUID, taskName: "audit.export" }),
+      ]),
+    );
+    const selection = page.getByRole("button", {
+      name: `详情 ${taskUUID}`,
+      exact: true,
+    });
+    await selection.click();
+    await expect(page).toHaveURL(taskURL);
+    await expect(identity).toHaveText(taskUUID);
+    await expect(link).toHaveAttribute("href", `#audit/detail/${taskUUID}`);
+    const saved = await page.evaluate(
+      () => window.history.state["adtr.task-navigation"],
+    );
+    expect(saved.query).toEqual(applied);
+    expect(saved.listReturn.focusTaskId).toBe(taskUUID);
+    for (const viewport of [
+      { width: 1440, height: 900 },
+      { width: 390, height: 844 },
+    ]) {
+      await page.setViewportSize(viewport);
+      await link.scrollIntoViewIfNeeded();
+      await captureAuditView(
+        page,
+        testInfo,
+        `audit-soc-task-link-${name}-entry-${viewport.width}.png`,
+        visuals,
+      );
+    }
+    await link.click();
+    await expect(page).toHaveURL(auditURL);
+    const downloadPath = await assertExportCompleted(
+      page,
+      context,
+      taskUUID,
+      expectedRows,
+      actorID,
+    );
+    for (const viewport of [
+      { width: 1440, height: 900 },
+      { width: 390, height: 844 },
+    ]) {
+      await page.setViewportSize(viewport);
+      await captureAuditView(
+        page,
+        testInfo,
+        `audit-soc-task-link-${name}-result-${viewport.width}.png`,
+        visuals,
+      );
+    }
+    await page.goBack();
+    await expect(page).toHaveURL(taskURL);
+    await expect(identity).toHaveText(taskUUID);
+    expect(
+      await page.evaluate(() => window.history.state["adtr.task-navigation"]),
+    ).toEqual(saved);
+    await page.goForward();
+    await expect(page).toHaveURL(auditURL);
+    await expect(
+      page.getByRole("button", { name: "下载 XLSX", exact: true }),
+    ).toBeVisible();
+    await page.reload();
+    await expect(page).toHaveURL(auditURL);
+    expect(
+      await assertExportCompleted(
+        page,
+        context,
+        taskUUID,
+        expectedRows,
+        actorID,
+      ),
+    ).toBe(downloadPath);
+    await page.goBack();
+    await expect(identity).toHaveText(taskUUID);
+    await page.getByRole("button", { name: "返回任务列表", exact: true }).click();
+    await expect(selection).toBeFocused();
+    expect(
+      await page.evaluate(
+        () => window.history.state["adtr.task-navigation"].query,
+      ),
+    ).toEqual(applied);
+    await selection.click();
+    await expect(link).toBeVisible();
+    await link.click();
+    await expect(page).toHaveURL(auditURL);
+    await expect(
+      page.getByRole("button", { name: "下载 XLSX", exact: true }),
+    ).toBeVisible();
+    expect(downloads).toBe(0);
+    expect(mutations).toEqual([]);
+    const [download] = await Promise.all([
+      page.waitForEvent("download"),
+      page.getByRole("button", { name: "下载 XLSX", exact: true }).click(),
+    ]);
+    expect(await download.failure()).toBeNull();
+    expect(download.suggestedFilename()).toBe(fileName);
+    const savedPath = testInfo.outputPath(`audit-soc-task-link-${name}.xlsx`);
+    await download.saveAs(savedPath);
+    const bytes = readFileSync(savedPath);
+    expect(bytes).toEqual(originalBytes);
+    const digest = createHash("sha256").update(bytes).digest("hex");
+    expect(digest).toBe(
+      createHash("sha256").update(originalBytes).digest("hex"),
+    );
+    const rows = workbookRows(bytes);
+    expect(rows).toHaveLength(expectedRows + 1);
+    expect(downloads).toBe(1);
+    expect(mutations).toEqual([]);
+    return {
+      taskUUID,
+      taskName: "audit.export",
+      fileName,
+      rowCount: expectedRows,
+      bytes: bytes.length,
+      sha256: digest,
+      originalSHA256: createHash("sha256").update(originalBytes).digest("hex"),
+      taskRoute: `#tasks/detail/${taskUUID}`,
+      originalRoute: `#audit/detail/${taskUUID}`,
+      downloadPath,
+      query: applied,
+      selectedTask: saved.listReturn.focusTaskId,
+      businessPOSTs: mutations,
+      automaticDownloads: 0,
+      explicitDownloads: downloads,
+      backForwardReload: true,
+    };
+  } finally {
+    page.off("request", recordRequest);
+    page.off("download", recordDownload);
+    await page.setViewportSize({ width: 1440, height: 900 });
+  }
+}
+
 // Fresh disposable bootstrap account, API, real Worker and real PostgreSQL are
 // mandatory. No route interception, forged permission state, fake clock, direct
 // SQL success fixture or fabricated artifact participates in this acceptance.
@@ -567,6 +768,10 @@ test("real browser audit history, visibility, XLSX worker export and persisted r
   let loginEvent: AuditRow;
   let exportDownloadPath = "";
   const exportIDs: string[] = [];
+  const taskLinkVisuals: AuditVisual[] = [];
+  const taskLinkResults: Awaited<
+    ReturnType<typeof verifyTaskOriginalExport>
+  >[] = [];
   const stableQuery = new URLSearchParams({
     keyword: username,
     filterEvent: "login",
@@ -1266,6 +1471,21 @@ test("real browser audit history, visibility, XLSX worker export and persisted r
           selected.map(({ prop }) => String(row[prop] ?? "")),
         ),
       ]);
+      if (selected.length === exportColumns.length) {
+        expect(expectedData.length).toBeGreaterThan(0);
+        taskLinkResults.push(
+          await verifyTaskOriginalExport(
+            page,
+            context,
+            testInfo,
+            created.taskUUID,
+            me.ID,
+            expectedData.length,
+            browserBytes,
+            taskLinkVisuals,
+          ),
+        );
+      }
       await page
         .getByRole("button", { name: "返回导出历史", exact: true })
         .click();
@@ -1458,6 +1678,96 @@ test("real browser audit history, visibility, XLSX worker export and persisted r
     expect(response.status()).toBe(200);
     expectExportReadHeaders(response.headers(), me.ID);
     expect(workbookRows(await response.body())).toEqual([["事件"]]);
+    taskLinkResults.push(
+      await verifyTaskOriginalExport(
+        page,
+        context,
+        testInfo,
+        emptyExport.taskUUID,
+        me.ID,
+        0,
+        await response.body(),
+        taskLinkVisuals,
+      ),
+    );
+    expect(taskLinkResults).toHaveLength(2);
+    expect(taskLinkVisuals).toHaveLength(8);
+    const root = execFileSync("git", ["rev-parse", "--show-toplevel"], {
+      encoding: "utf8",
+    }).trim();
+    const hashFile = (file: string) =>
+      createHash("sha256")
+        .update(readFileSync(resolve(root, file)))
+        .digest("hex");
+    const assets = readdirSync(resolve(root, "web/dist/assets"), {
+      withFileTypes: true,
+    });
+    expect(assets.length).toBeGreaterThan(0);
+    expect(assets.every((entry) => entry.isFile())).toBe(true);
+    const manifestPath = testInfo.outputPath("audit-soc-task-link-evidence.json");
+    writeFileSync(
+      manifestPath,
+      JSON.stringify(
+        {
+          formatVersion: 1,
+          suite: "audit",
+          chain: "task detail → original audit detail → authorized original XLSX",
+          recordedAt: new Date().toISOString(),
+          checkoutCommit: execFileSync("git", ["rev-parse", "HEAD"], {
+            encoding: "utf8",
+          }).trim(),
+          dirty:
+            execFileSync("git", ["status", "--porcelain"], {
+              encoding: "utf8",
+            }).trim() !== "",
+          workflowCommit: process.env.GITHUB_SHA ?? null,
+          workflowRun: process.env.GITHUB_RUN_ID ?? null,
+          workflowAttempt: process.env.GITHUB_RUN_ATTEMPT ?? null,
+          runtime: {
+            node: process.version,
+            browserVersion: context.browser()!.version(),
+            nativeStreamMode: process.env.ADTR_E2E_NATIVE_STREAM_MODE ?? null,
+          },
+          sourceSHA256: Object.fromEntries(
+            [
+              "web/e2e/audit.spec.ts",
+              "web/src/TaskWorkspace.tsx",
+              "web/src/task-api.ts",
+              "web/src/task-common.tsx",
+              "web/src/task-view-state.ts",
+              "web/src/soc-tasks.css",
+              "web/src/App.tsx",
+              "web/src/AuditWorkspace.tsx",
+              "web/src/AuditExports.tsx",
+              "web/src/audit-api.ts",
+              "web/src/audit-common.tsx",
+              "web/src/audit-history.ts",
+              "web/src/audit-soc.css",
+              "web/package-lock.json",
+              ".github/workflows/ci.yml",
+            ].map((file) => [file, hashFile(file)]),
+          ),
+          artifactsSHA256: {
+            apiWorker: hashFile("bin/adtr"),
+            frontendEntry: hashFile("web/dist/index.html"),
+          },
+          frontendAssetsSHA256: Object.fromEntries(
+            assets.map((entry) => {
+              const file = `web/dist/assets/${entry.name}`;
+              return [file, hashFile(file)];
+            }),
+          ),
+          results: taskLinkResults,
+          screenshots: taskLinkVisuals,
+        },
+        null,
+        2,
+      ) + "\n",
+    );
+    await testInfo.attach("audit-soc-task-link-evidence", {
+      path: manifestPath,
+      contentType: "application/json",
+    });
     await page
       .getByRole("button", { name: "返回审计列表", exact: true })
       .click();

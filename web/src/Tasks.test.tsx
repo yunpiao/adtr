@@ -619,6 +619,105 @@ describe("expanded permission catalogue", () => {
 });
 
 describe("audit export tasks use their dedicated creation route", () => {
+  it.each(taskStates)(
+    "links a loaded exact audit.export task in %s to its original detail without creating or downloading",
+    async (state) => {
+      override = (url) =>
+        url.startsWith("/api/tasks/detail")
+          ? response({
+              task: { ...task(state), taskName: "audit.export" },
+              events: [],
+            })
+          : undefined;
+      await detail();
+      expect(
+        screen.getByRole("link", { name: "查看原审计导出" }),
+      ).toHaveAttribute("href", `#audit/detail/${task().taskUUID}`);
+      expect(
+        screen.getByText(/能否下载以原页面的当前授权和文件校验为准/),
+      ).toBeVisible();
+      expect(
+        screen.getByText(/失败后通过该页面重新创建导出，生成新的受保护控制记录/),
+      ).toBeVisible();
+      expect(
+        screen.queryByRole("button", { name: "下载 XLSX" }),
+      ).not.toBeInTheDocument();
+      expect(
+        fetcher.mock.calls.filter(
+          ([url, init]) =>
+            (init.method === "POST" && url !== "/api/access/check") ||
+            url.startsWith("/api/audit/"),
+        ),
+      ).toHaveLength(0);
+    },
+  );
+
+  it.each(["infrastructure.health", "audit.export.other", "Audit.export"])(
+    "does not link a non-audit kind %s",
+    async (taskName) => {
+      override = (url) =>
+        url.startsWith("/api/tasks/detail")
+          ? response({ task: { ...task("succeeded"), taskName }, events: [] })
+          : undefined;
+      await detail();
+      expect(
+        screen.queryByRole("link", { name: "查看原审计导出" }),
+      ).not.toBeInTheDocument();
+    },
+  );
+
+  it.each([
+    "not-a-uuid",
+    "../audit/export",
+    "00000000-0000-4000-8000-000000000001?download=1",
+    "00000000-0000-4000-8000-000000000002",
+  ])("does not link a malformed or mismatched detail ID %s", async (id) => {
+    override = (url) =>
+      url.startsWith("/api/tasks/detail")
+        ? response({
+            task: { ...task("succeeded", id), taskName: "audit.export" },
+            events: [],
+          })
+        : undefined;
+    await start();
+    click(`详情 ${task().taskUUID}`);
+    await screen.findByRole("alert");
+    expect(
+      screen.queryByRole("link", { name: "查看原审计导出" }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByTestId("task-detail-identity")).toBeNull();
+  });
+
+  it("removes the original link while refreshing and after a denied detail read", async () => {
+    override = (url) =>
+      url.startsWith("/api/tasks/detail")
+        ? response({
+            task: { ...task("succeeded"), taskName: "audit.export" },
+            events: [],
+          })
+        : undefined;
+    await detail();
+    expect(screen.getByRole("link", { name: "查看原审计导出" })).toBeVisible();
+    let release!: (value: Response) => void;
+    const held = new Promise<Response>((resolve) => {
+      release = resolve;
+    });
+    override = (url) =>
+      url.startsWith("/api/tasks/detail") ? held : undefined;
+    click("刷新任务详情");
+    await screen.findByText("正在读取任务详情…");
+    expect(
+      screen.queryByRole("link", { name: "查看原审计导出" }),
+    ).not.toBeInTheDocument();
+    await act(async () =>
+      release(await response({ error: "forbidden" }, 403)),
+    );
+    await screen.findByRole("alert");
+    expect(
+      screen.queryByRole("link", { name: "查看原审计导出" }),
+    ).not.toBeInTheDocument();
+  });
+
   it("does not expose generic recovery for a failed audit export", async () => {
     override = (url) =>
       url.startsWith("/api/tasks/detail")

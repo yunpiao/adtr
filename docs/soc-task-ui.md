@@ -75,3 +75,59 @@ These are engineering gates. This slice does not close F48 #12 or design #87; pr
 Initial head `747703a` passed the real tasks suite and its eight-image independent review, but CI 38072753448's unchanged maintenance suite exposed a real presentation regression: after a successful restore receipt, `默认可见` existed only inside the collapsed metadata disclosure. The native visibility assertion failed at maintenance.spec.ts:427; this was not an infrastructure failure. The repair places current visibility beside the fixed task identity/state and removes the duplicate collapsed field. The maintenance assertion and its timeout remain unchanged; two DOM cases cover active/archived visibility with metadata closed, and the tasks native suite now also requires the visible current status while metadata is closed. Fresh exact-head full CI and screenshots are required for this changed UI; the earlier artifact does not establish the repaired head.
 
 The repaired candidate passed a fresh complete `make check`: 60 Python contracts, Go race/vet/build, 36 frontend files / 1,300 tests, TypeScript/build and zero audit vulnerabilities. Formatting and all 31 Playwright test discovery checks also passed; independent repair review passed 54 focused task-navigation/maintenance tests. These local results do not replace the fresh native matrix.
+
+## Audit task to original export detail (bounded candidate)
+
+Issue #26 AD-F-151/152 supports viewing an export task's status and downloading an
+already generated, currently authorized file. This small usability integration
+does not claim that the legacy requirements explicitly mandated this link or that
+audit export was previously absent.
+
+After a successful current task-detail read identifies exactly `audit.export`,
+the task center offers the accessible `查看原审计导出` anchor. Its target is the
+existing `#audit/detail/{taskUUID}` route, using the existing `validExportID`
+validator and an exact match with the requested task ID. Pending/failed reads,
+invalid/mismatched identities and other task kinds cannot expose this entry.
+Every task state can lead to the original status page; the link itself does not
+mean a file is downloadable. Failed-task guidance still explicitly requires a
+new export from the original audit page.
+
+This is navigation only. It creates no export/recovery intent or idempotency key,
+does not submit/cancel/retry/recover a task, and does not auto-download. The existing
+App hash/history session check, AuditWorkspace, AuditExportDetail and audit API are
+reused, rather than copying a fourth result panel. Existing asset-export result
+components are unchanged. The original endpoint still enforces current
+`audit.readable` plus `audit_exports.readable`, actor/tenant/grant/domain/metadata
+boundaries and download eligibility. No new independent frontend detail gate,
+backend API, DTO, producer, format or permission is introduced.
+
+Added test source extends Tasks, TaskNavigation and the existing real audit suite:
+exact kind/ID and all task states, malformed/mismatched responses, pending/error/
+session guards, original endpoint denial, zero business POST/automatic download,
+Back/Forward/reload, and original task query/selected-row return. The real suite
+reopens both its actual nonempty and zero-row exports through this link, explicitly
+downloads their original XLSX, and compares filename, bytes and SHA-256 with the
+same original task's artifact. Existing security/visibility/revocation assertions
+remain in place.
+
+New safe captures use `audit-soc-task-link-{nonempty,zero-row}-{entry,result}-{1440,390}.png`
+and a separate `audit-soc-task-link-evidence.json`. They retain source/build/runtime/
+commit and screenshot digests and are discovered by the existing `audit-soc-*`
+artifact upload. The earlier four audit screenshots and their manifest are not
+replaced.
+
+The selective-CI inventory explicitly adds audit to TaskWorkspace's existing
+15 browser consumers (16 total). Browser navigation is not an import dependency,
+so a regression in the already-discovered selector contract checks a
+TaskWorkspace-only change still selects audit and all previous consumers, without
+relying on this PR's audit-spec edit or selecting every suite. This inventory
+change itself retains full shared-CI validation; jobs, commands and artifact
+discovery stay unchanged.
+
+At preparation time, local tests, formatting, typecheck/build, Playwright discovery,
+runtime launches and screenshots were not run because local execution is on hold.
+The exact published head must receive authorized CI and independent source/pixel
+review before any merge claim. New-tab/copy-link task-list restoration and expired/
+archived audit artifacts are not newly accepted by this slice; existing route and
+server contracts still apply. Real AD/Windows, full legacy equivalence and product
+acceptance remain open.
