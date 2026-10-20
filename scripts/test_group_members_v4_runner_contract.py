@@ -1,3 +1,4 @@
+from ci_workflow_contract import reviewed_workflow
 """Add one real primary membership suite; preserve all 55 prior job bytes.
 
 These are static/unit contracts. Intended 56 jobs is not an executed CI result.
@@ -20,7 +21,7 @@ VALIDATE = '''        if args.suite == "group-members-v4":
 
 class GroupMembersRunnerContract(unittest.TestCase):
     def test_original_55_jobs_are_byte_exact_outside_addition(self):
-        text = restore_workflow(Path('.github/workflows/ci.yml').read_text())
+        text = restore_workflow(reviewed_workflow())
         self.assertEqual(text.count(ENTRY), 1)
         start = text.index('      - name: Validate group membership dictionary4 browser evidence\n')
         end = text.index('      - name: Validate dictionary4 backend evidence\n', start)

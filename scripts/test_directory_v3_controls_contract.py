@@ -1,3 +1,4 @@
+from ci_workflow_contract import reviewed_workflow
 """Dictionary3 controls are additive; static checks do not prove browser acceptance."""
 from pathlib import Path
 import ast
@@ -40,7 +41,7 @@ class DirectoryV3ControlsContract(unittest.TestCase):
             self.assertIn('--headed', browser_command('directory-v3-readers'))
 
     def test_all_new_gates_and_provenance(self):
-        workflow = Path('.github/workflows/ci.yml').read_text()
+        workflow = reviewed_workflow()
         for suite in ['directory-v3','directory-v3-controls','directory-v3-readers']:
             self.assertEqual(workflow.count(f'command: python3 scripts/test_auth_e2e.py --suite {suite}\n'),1)
         self.assertIn('path: web/test-results/**/directory-v3-*',workflow)

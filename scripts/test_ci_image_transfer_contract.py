@@ -1,3 +1,4 @@
+from ci_workflow_contract import reviewed_workflow
 """Offline tests of the transfer trust boundaries, not Docker roundtrip proof."""
 from contextlib import ExitStack
 import copy
@@ -327,7 +328,7 @@ class RealDatabaseProbeContract(unittest.TestCase):
 
 class WorkflowImageGateContract(unittest.TestCase):
     def test_probe_is_two_jobs_on_an_explicit_diagnostic_branch_only(self):
-        normal = Path('.github/workflows/ci.yml').read_text()
+        normal = reviewed_workflow()
         text = Path('.github/workflows/ci-image-probe.yml').read_text()
         events = text.split('permissions: {}', 1)[0]
         self.assertIn("branches: ['ci/image-transfer-probe/**']", events)
@@ -342,7 +343,7 @@ class WorkflowImageGateContract(unittest.TestCase):
         self.assertNotIn('ci/image-transfer-probe/', normal)
 
     def test_immutable_output_preflight_rejects_missing_multiple_or_invalid_ids(self):
-        text = Path('.github/workflows/ci.yml').read_text()
+        text = reviewed_workflow()
         block = text.split('      - name: Require explicit immutable producer outputs', 1)[1].split('      - name:', 1)[0]
         command = block.split('        run: |', 1)[1]
         valid = {'ARTIFACT_ID': '123', 'ARCHIVE_SHA': 'a' * 64, 'PRODUCER_ATTEMPT': '1'}
@@ -354,7 +355,7 @@ class WorkflowImageGateContract(unittest.TestCase):
 
     def test_all_59_jobs_preserve_their_gates_and_bounded_parallelism(self):
         from test_user_asset_export_v3_runner_contract import restore_workflow
-        text = restore_workflow(Path('.github/workflows/ci.yml').read_text())
+        text = restore_workflow(reviewed_workflow())
         matches = list(re.finditer(r'^  ([a-z][a-z-]*):\n', text.split('jobs:\n', 1)[1], re.MULTILINE))
         jobs_text = text.split('jobs:\n', 1)[1]
         jobs = {match[1]: jobs_text[match.start():matches[i + 1].start() if i + 1 < len(matches) else len(jobs_text)]
@@ -399,7 +400,7 @@ class WorkflowImageGateContract(unittest.TestCase):
         self.assertIn('retries: 0,', playwright)
 
     def test_prepare_and_every_original_gate_fail_closed_on_failure_cancel_or_skip(self):
-        text = Path('.github/workflows/ci.yml').read_text().split('  verify:\n', 1)[1]
+        text = reviewed_workflow().split('  verify:\n', 1)[1]
         self.assertIn('if: ${{ always() }}', text)
         expected = ['POSTGRES_RESULT', 'CONTRACT_RESULT', 'AUTH_INTEGRATION_RESULT', 'BROWSER_RESULT',
                     'NATIVE_STREAM_RESULT', 'NATIVE_STREAM_FIXED_RESULT', 'USER_ASSETS_FIXED_RESULT']

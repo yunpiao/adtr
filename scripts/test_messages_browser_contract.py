@@ -1,3 +1,4 @@
+from ci_workflow_contract import reviewed_workflow
 """Keep the real message browser gate additive and bound to its owned runtime."""
 import ast
 from pathlib import Path
@@ -10,7 +11,7 @@ class MessagesBrowserContract(unittest.TestCase):
         from test_user_asset_export_v3_runner_contract import restore_workflow
         # Preserve the original message suite's 59-job contract after validating
         # and peeling only the exact new export-suite delta.
-        workflow = restore_workflow(Path('.github/workflows/ci.yml').read_text())
+        workflow = restore_workflow(reviewed_workflow())
         browser = workflow.split('  browser:\n', 1)[1].split('  native-no-store:\n', 1)[0]
         names = re.findall(r'^          - name: (.+)$', browser, re.M)
         self.assertEqual(len(names), 39)

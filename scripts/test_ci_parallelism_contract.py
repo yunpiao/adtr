@@ -1,3 +1,4 @@
+from ci_workflow_contract import reviewed_workflow
 """Freeze the reviewed #139 canary scope, not future legitimate CI evolution.
 
 New suites, uploads or other intended workflow edits require explicit review and
@@ -38,10 +39,10 @@ def preserves_reviewed_workflow(text):
 
 class CIParallelismContract(unittest.TestCase):
     def test_only_browser_budget_differs_from_explicit_56_job_baseline(self):
-        self.assertTrue(preserves_reviewed_workflow(Path('.github/workflows/ci.yml').read_text()))
+        self.assertTrue(preserves_reviewed_workflow(reviewed_workflow()))
 
     def test_other_budget_and_safety_changes_fail_closed(self):
-        text = Path('.github/workflows/ci.yml').read_text()
+        text = reviewed_workflow()
         mutations = [
             ('max-parallel: 8', 'max-parallel: 4'),
             ('max-parallel: 8', 'max-parallel: 9'),

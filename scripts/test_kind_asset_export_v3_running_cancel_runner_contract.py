@@ -1,3 +1,4 @@
+from ci_workflow_contract import reviewed_workflow, reviewed_source
 """Frozen additive delta restores the exact prior 69-job runner and workflow."""
 import ast
 import hashlib
@@ -238,10 +239,10 @@ def restore(text, name):
 class KindRunningCancelRunnerContract(unittest.TestCase):
     def test_preserve_exact_prior_69_job_bytes(self):
         for name, (digest, _) in CHANGES.items():
-            self.assertEqual(hashlib.sha256(restore(Path(name).read_text(), name).encode()).hexdigest(), digest)
+            self.assertEqual(hashlib.sha256(restore(reviewed_source(name), name).encode()).hexdigest(), digest)
 
     def test_71_jobs_and_unchanged_limits(self):
-        source = Path('.github/workflows/ci.yml').read_text()
+        source = reviewed_workflow()
         names = re.findall(r'^          - name: ([a-z0-9-]+)$', source, re.M)
         self.assertEqual(len(names), 51)
         self.assertEqual(len(names) + 8 + 7 + 5, 71)
@@ -252,7 +253,7 @@ class KindRunningCancelRunnerContract(unittest.TestCase):
 
     def test_mutations_and_duplicates_fail(self):
         for name, (_, changes) in CHANGES.items():
-            source = Path(name).read_text()
+            source = reviewed_source(name)
             if name == 'scripts/test_auth_e2e.py':
                 source = restore_owned_runner(source)
             for _, new, _ in changes:

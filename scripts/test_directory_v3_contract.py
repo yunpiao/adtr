@@ -1,3 +1,4 @@
+from ci_workflow_contract import reviewed_workflow
 """Keep the real dictionary3 gate bounded, synthetic, and independent of v2."""
 from pathlib import Path
 import unittest
@@ -16,7 +17,7 @@ class DirectoryV3Contract(unittest.TestCase):
         self.assertFalse(f.directory_v2)
         f.close()
     def test_real_chain_and_evidence_gate(self):
-        workflow=Path('.github/workflows/ci.yml').read_text()
+        workflow=reviewed_workflow()
         self.assertIn('command: python3 scripts/test_auth_e2e.py --suite directory-v3-backend',workflow)
         self.assertIn('web/test-results/**/directory-v3-backend-evidence.json',workflow)
         code=Path('web/e2e/directory-v3-backend.spec.ts').read_text()

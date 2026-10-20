@@ -1,3 +1,4 @@
+from ci_workflow_contract import reviewed_workflow
 """Accept only the reviewed three-suite permutation, then retain all old hashes.
 
 Matrix order is a scheduling experiment, not an execution-priority guarantee.
@@ -48,7 +49,7 @@ def restore_critical_priority(text):
 
 class CICriticalPriorityContract(unittest.TestCase):
     def setUp(self):
-        self.text = Path('.github/workflows/ci.yml').read_text()
+        self.text = reviewed_workflow()
         self.prefix, self.entries, self.suffix = split_matrix(self.text)
 
     def assert_rejected(self, text):

@@ -1,3 +1,4 @@
+from ci_workflow_contract import reviewed_workflow, reviewed_source
 """Exact new group-export delta. Removing only frozen additions restores all 62 existing jobs."""
 import hashlib
 from pathlib import Path
@@ -337,9 +338,9 @@ def restore_workflow(text):
 class GroupExportRunnerContract(unittest.TestCase):
     def test_preserve_all_62_jobs_and_runner_bytes(self):
         for name, (digest, _) in CHANGES.items():
-            self.assertEqual(hashlib.sha256(restore(Path(name).read_text(), name).encode()).hexdigest(), digest)
+            self.assertEqual(hashlib.sha256(restore(reviewed_source(name), name).encode()).hexdigest(), digest)
     def test_65_jobs_and_limits(self):
-        source = restore_computer(Path('.github/workflows/ci.yml').read_text(), '.github/workflows/ci.yml')
+        source = restore_computer(reviewed_workflow(), '.github/workflows/ci.yml')
         names = re.findall(r'^          - name: ([a-z0-9-]+)$', source, re.M)
         self.assertEqual(len(names), 45)
         self.assertEqual(len(names) + 8 + 7 + 5, 65)
@@ -349,7 +350,7 @@ class GroupExportRunnerContract(unittest.TestCase):
             self.assertEqual(names.count('group-asset-export-v3' + suffix), 1)
     def test_modified_or_duplicate_delta_fails(self):
         for name, (_, changes) in CHANGES.items():
-            source = restore_computer(Path(name).read_text(), name)
+            source = restore_computer(reviewed_source(name), name)
             for _, new in changes:
                 with self.assertRaises(ValueError): restore_group_only(source + new, name)
                 with self.assertRaises(ValueError): restore_group_only(source.replace(new, '!' + new[1:]), name)

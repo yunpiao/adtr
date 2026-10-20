@@ -1,3 +1,4 @@
+from ci_workflow_contract import reviewed_workflow
 """Offline executable failure-path tests; do not claim Docker runtime proof."""
 import copy
 import json
@@ -189,7 +190,7 @@ class ImagePreparationContract(unittest.TestCase):
             self.assertEqual(docker.pulls, [])
 
     def test_npm_cache_is_aligned_before_setup_node_without_skipping_install(self):
-        workflow = Path('.github/workflows/ci.yml').read_text()
+        workflow = reviewed_workflow()
         makefile = Path('Makefile').read_text()
         self.assertIn('env:\n  npm_config_cache: /tmp/adtr-npm-cache\n', workflow.split('jobs:', 1)[0])
         self.assertIn('npm ci --prefix web --cache /tmp/adtr-npm-cache', makefile)

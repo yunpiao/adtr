@@ -1,3 +1,4 @@
+from ci_workflow_contract import reviewed_workflow
 """Offline synthetic identity checks; never proof of a real registry pull."""
 import copy
 import json
@@ -59,7 +60,7 @@ class GoBuildImageContract(unittest.TestCase):
         self.assertEqual(dockerfile.splitlines()[0], "FROM " + image.REFERENCE + " AS build")
 
     def test_workflow_verifies_before_expensive_gates_and_retains_failures(self):
-        workflow = Path('.github/workflows/ci.yml').read_text()
+        workflow = reviewed_workflow()
         contracts = workflow.split('  contracts:\n', 1)[1].split('  auth-integration:\n', 1)[0]
         verify = contracts.index('      - name: Verify fixed official Go build image identity\n')
         retain = contracts.index('      - name: Retain Go build image verification evidence\n')

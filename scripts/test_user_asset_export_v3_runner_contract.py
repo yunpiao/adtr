@@ -1,3 +1,4 @@
+from ci_workflow_contract import reviewed_workflow, reviewed_source
 """Export suite delta pins all 59 original jobs; static checks are not browser evidence."""
 import ast
 import hashlib
@@ -105,12 +106,12 @@ def restore_runner(text):
 
 class ExportRunnerContract(unittest.TestCase):
     def test_prior_59_jobs_byte_exact(self):
-        self.assertEqual(hashlib.sha256(restore_workflow(Path('.github/workflows/ci.yml').read_text()).encode()).hexdigest(), BASE_WORKFLOW_SHA256)
+        self.assertEqual(hashlib.sha256(restore_workflow(reviewed_workflow()).encode()).hexdigest(), BASE_WORKFLOW_SHA256)
         self.assertEqual(hashlib.sha256(restore_runner(Path('scripts/test_auth_e2e.py').read_text()).encode()).hexdigest(), BASE_RUNNER_SHA256)
 
     def test_mutated_additions_rejected(self):
         for filename, changes in [('.github/workflows/ci.yml', WORKFLOW_CHANGES), ('scripts/test_auth_e2e.py', RUNNER_CHANGES)]:
-            source = (restore_terminal_workflow if filename.endswith("ci.yml") else restore_terminal_runner)(Path(filename).read_text())
+            source = (restore_terminal_workflow if filename.endswith("ci.yml") else restore_terminal_runner)(reviewed_source(filename))
             for old, new in changes:
                 with self.assertRaises(ValueError):
                     restore(source + new, changes)
@@ -118,7 +119,7 @@ class ExportRunnerContract(unittest.TestCase):
                     restore(source.replace(new, '!' + new[1:]), changes)
 
     def test_suite_60_preserves_concurrency_limits(self):
-        workflow = restore_terminal_workflow(Path('.github/workflows/ci.yml').read_text())
+        workflow = restore_terminal_workflow(reviewed_workflow())
         names = re.findall(r'^          - name: ([a-z0-9-]+)$', workflow, re.M)
         self.assertEqual(len(names), 40)
         self.assertEqual(names.count('user-asset-export-v3'), 1)

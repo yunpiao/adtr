@@ -1,3 +1,4 @@
+from ci_workflow_contract import reviewed_workflow
 """Guard duplicate-free draft/stacked PR and merge validation event coverage."""
 import pathlib
 import unittest
@@ -6,7 +7,7 @@ from test_user_asset_export_v3_terminal_runner_contract import restore_workflow 
 
 class CIEventContract(unittest.TestCase):
     def test_expected_events_and_all_verification_stages(self):
-        text = restore_terminal_workflow(pathlib.Path('.github/workflows/ci.yml').read_text())
+        text = restore_terminal_workflow(reviewed_workflow())
         self.assertIn('  pull_request:\n', text)
         self.assertIn('  merge_group:\n    types: [checks_requested]\n', text)
         self.assertIn('  push:\n    branches: [main]\n', text)
@@ -87,7 +88,7 @@ class CIEventContract(unittest.TestCase):
 
     def test_native_reader_json_is_durable_and_matches_existing_upload_globs(self):
         reader = pathlib.Path('web/e2e/user-assets-v2-readers.spec.ts').read_text()
-        workflow = restore_terminal_workflow(pathlib.Path('.github/workflows/ci.yml').read_text())
+        workflow = restore_terminal_workflow(reviewed_workflow())
         self.assertIn('import { writeFile } from "node:fs/promises";', reader)
         for name, variable in [
             ('user-assets-v2-native-transport-outcomes', 'nativeTransportEvidencePath'),

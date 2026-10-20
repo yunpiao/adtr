@@ -1,3 +1,4 @@
+from ci_workflow_contract import reviewed_workflow
 """Additive bulk acceptance preserves the original HTTP-health gate and artifacts."""
 import ast
 from pathlib import Path
@@ -20,7 +21,7 @@ class BulkBrowserContract(unittest.TestCase):
         self.assertIn('process.poll() is None', runner)
         self.assertIn('ADTR_E2E_HARNESS_PID', runner)
         self.assertIn('code != 0', runner)
-        workflow = Path('.github/workflows/ci.yml').read_text()
+        workflow = reviewed_workflow()
         self.assertNotIn('name: messages-bulk', workflow)
         self.assertIn('command: python3 scripts/test_auth_e2e.py --suite messages', workflow)
         self.assertIn('workers: 1', Path('web/playwright.config.ts').read_text())
