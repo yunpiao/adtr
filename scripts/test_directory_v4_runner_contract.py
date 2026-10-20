@@ -62,7 +62,24 @@ class V4RunnerContracts(unittest.TestCase):
             self.assertNotIn(suite, scope["EMPTY_DIRECTORY_SUITES"])
             self.assertEqual(suite in scope["SLOW_DIRECTORY_SUITES"], suite == "directory-v4-cancel")
             self.assertEqual(suite in scope["REAL_TAB_LIFECYCLE_SUITES"], suite == "directory-v4-readers")
-        self.assertIn("choices=[*V4_CONTROLS_BUDGETS,", source)
+        # Existing discovery contracts deliberately literal_eval this exact CLI
+        # list. A valid Python starred list is not a literal and breaks them.
+        choices = [kw.value for node in ast.walk(tree) if isinstance(node, ast.Call)
+                   and isinstance(node.func, ast.Attribute) and node.func.attr == "add_argument"
+                   and node.args and isinstance(node.args[0], ast.Constant)
+                   and node.args[0].value == "--suite"
+                   for kw in node.keywords if kw.arg == "choices"]
+        self.assertEqual(len(choices), 1)
+        registered = ast.literal_eval(choices[0])
+        old_tree = ast.parse(restore_v4_runner(source))
+        old_choices = [kw.value for node in ast.walk(old_tree) if isinstance(node, ast.Call)
+                       and isinstance(node.func, ast.Attribute) and node.func.attr == "add_argument"
+                       and node.args and isinstance(node.args[0], ast.Constant)
+                       and node.args[0].value == "--suite"
+                       for kw in node.keywords if kw.arg == "choices"]
+        self.assertEqual(len(old_choices), 1)
+        self.assertEqual(registered, list(scope["V4_CONTROLS_BUDGETS"]) + ast.literal_eval(old_choices[0]))
+        self.assertEqual(len(registered), len(set(registered)))
         self.assertIn("timeout=V4_CONTROLS_BUDGETS[args.suite]", source)
 
     def test_fixed_launch_is_only_exact_cancel_and_not_rescue(self):

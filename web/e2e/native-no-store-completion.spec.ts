@@ -66,13 +66,15 @@ async function bounded<T>(
   }
 }
 
+// Worker-scoped options must be registered once at file scope, before groups.
+test.use({ headless: false, trace: "off", screenshot: "off", video: "off" });
+
 for (const productionReader of productionReaders) {
 test.describe(productionReader.name, () => {
 const parserPath = productionReader.path;
 let bundle = "";
 let parserSHA = "";
 let provenance: Awaited<ReturnType<typeof directoryV4EvidenceProvenance>> | null;
-test.use({ headless: false, trace: "off", screenshot: "off", video: "off" });
 test.beforeAll(async () => {
   // Compile the actual imported production source and its ApiError dependency.
   // Vite is already a declared locked dependency; nothing is written to disk.

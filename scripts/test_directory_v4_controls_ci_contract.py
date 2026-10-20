@@ -75,6 +75,11 @@ class DirectoryV4ControlsCI(unittest.TestCase):
         for entry in ['../src/directory-v2-json.ts', '../src/directory-v4-controls-json.ts', 'parser.readDirectoryV2JSON', 'parser.readDirectoryV4ControlsJSON', 'parser.directoryV2BodyLimit', 'parser.directoryV4ControlsBodyLimit']:
             self.assertIn(entry, source)
         self.assertIn('for (const productionReader of productionReaders)', source)
+        # Playwright rejects worker-scoped options inside per-reader groups
+        # before it can discover or execute either reader's five cases.
+        worker_options = 'test.use({ headless: false, trace: "off", screenshot: "off", video: "off" });'
+        self.assertEqual(source.count(worker_options), 1)
+        self.assertLess(source.index(worker_options), source.index('for (const productionReader of productionReaders)'))
         self.assertIn('for (const kind of [', source)
         for kind in evidence.NATIVE_KINDS:
             self.assertIn('"' + kind + '"', source)
