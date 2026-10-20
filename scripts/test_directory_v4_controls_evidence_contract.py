@@ -211,6 +211,44 @@ class DictionaryV4Evidence(unittest.TestCase):
             with self.subTest(mutate=mutate), self.assertRaises(ValueError):
                 v.validate(bad, self.expected, self.rules, 'controls', files.__getitem__)
 
+    def test_exact_original_result_scenes_and_retained_reader_inventory(self):
+        self.assertEqual(self.rules['suites']['controls']['screenshots'], {
+            'original-raw-members-1440.png': [1440, 900],
+            'original-raw-members-390.png': [390, 844],
+            'recovered-original-1440.png': [1440, 900],
+            'recovered-original-390.png': [390, 844],
+            'original-result-values-1440.png': [1440, 900],
+            'original-result-values-390.png': [390, 844],
+        })
+        self.assertEqual(self.rules['suites']['cancel']['screenshots'], {})
+        self.assertEqual(self.rules['suites']['readers']['screenshots'], {
+            'producer-proof-cleared-1440.png': [1440, 900],
+            'producer-proof-cleared-390.png': [390, 844],
+            'readonly-members-1440.png': [1440, 900],
+            'readonly-members-390.png': [390, 844],
+        })
+
+    def test_each_original_values_image_is_required_and_byte_bound(self):
+        data, images = self.scenario('controls')
+        for name in ['original-result-values-1440.png', 'original-result-values-390.png']:
+            for mutate in ['missing', 'renamed', 'digest', 'bytes', 'actual_dimensions']:
+                bad = copy.deepcopy(data); files = dict(images)
+                if mutate == 'missing':
+                    del bad['screenshots'][name]
+                elif mutate == 'renamed':
+                    bad['screenshots']['unreviewed-detail.png'] = bad['screenshots'].pop(name)
+                elif mutate == 'digest':
+                    bad['screenshots'][name]['sha256'] = sha('wrong-detail')
+                elif mutate == 'bytes':
+                    bad['screenshots'][name]['bytes'] += 1
+                else:
+                    width, height = self.rules['suites']['controls']['screenshots'][name]
+                    files[name] = png(width - 1, height)
+                    bad['screenshots'][name]['sha256'] = hashlib.sha256(files[name]).hexdigest()
+                    bad['screenshots'][name]['bytes'] = len(files[name])
+                with self.subTest(name=name, mutate=mutate), self.assertRaises(ValueError):
+                    v.validate(bad, self.expected, self.rules, 'controls', files.__getitem__)
+
     def test_cleanup_requires_real_completed_phase_and_graceful_owned_exits(self):
         for suite in self.rules['suites']:
             phases = ['setup', 'api-start', 'api-ready'] + ([] if suite == 'cancel' else ['worker-start', 'worker-ready']) + ['browser-start', 'browser-pass', 'before-cleanup', 'after-cleanup']

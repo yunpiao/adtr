@@ -7,6 +7,8 @@ import { readDirectoryV4ReaderCounts } from "./directory-v4-ledger-observer";
 import { navigateTo } from "./navigation";
 import { useNativeTabLifecycle, requireSameNativeWindow } from "./native-tab-lifecycle";
 import { parseGroupMembersV4Page } from "../src/group-members-v4-read";
+import { directoryV4DisplayMember } from "../src/directory-v4-facts";
+import { frameV4Screenshot } from "./directory-v4-runtime";
 
 process.env.PLAYWRIGHT_NO_COPY_PROMPT = "1";
 test.use({ trace: "off", screenshot: "off", video: "off" });
@@ -135,7 +137,18 @@ test("actual reader authority, native lifecycle and stale original reads never r
     const query = new URL(read.url()).searchParams;
     const parsed = parseGroupMembersV4Page(await actualJSON(read, reader.actorId), { domainId: fixture.domainId, pageIdx: Number(query.get("pageIdx")), pageSize: Number(query.get("pageSize")) });
     invariant(parsed.available && parsed.observationId === original.taskUUID && parsed.list.length > 0, "Standalone actual reader did not read genuine v4 observation");
-    await safeScreenshots(page, info, "readonly-members", fixture.secrets);
+    await safeScreenshots(page, info, "readonly-members", fixture.secrets, async () => {
+      const workspace = page.getByRole("region", { name: "组成员原始观测 · 字典 4", exact: true });
+      const pin = workspace.locator("dd").filter({ hasText: original.taskUUID });
+      await expect(pin).toHaveText(directoryV4DisplayMember(original.taskUUID));
+      const rows = workspace.getByRole("list", { name: "本次观测的组", exact: true }).locator(":scope > li");
+      await expect(rows).toHaveCount(parsed.list.length);
+      for (let index = 0; index < parsed.list.length; index++) {
+        await expect(rows.nth(index).locator("span").nth(0)).toHaveText(directoryV4DisplayMember(parsed.list[index].samAccountName ?? parsed.list[index].distinguishedName));
+        await expect(rows.nth(index).locator("span").nth(1)).toHaveText(parsed.list[index].objectGUID);
+      }
+      await frameV4Screenshot(pin, [pin, rows.first()]);
+    });
     invariant(readerUiBusinessPosts === 0, "Read-only browser emitted a business mutation");
 
     // Harness probes are deliberately separate from the browser write counter.

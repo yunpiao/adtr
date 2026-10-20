@@ -1049,10 +1049,18 @@ describe("host directory response identity", () => {
   });
   it("does not copy original sync proof or CSRF headers into response records", async () => {
     const { latest } = await harness({ mode: "v4-controls" });
+    const key = `POST ${origin}/api/directory/v4/sync`;
     const native = await window.fetch("/api/directory/v4/sync", { method: "POST", headers: { "X-CSRF-Token": "private-csrf" }, body: JSON.stringify({ actorPassword: "private-password", totpCode: "private-code" }) });
     await readDirectoryV2JSON(native, signal());
+    // Native EOF/release precede the asynchronous raw-byte digest. Match
+    // consume() before entering the host harness's single-check wait mock.
+    await settle(key, 0);
+    expect(observer().peek(key, 0)).toMatchObject({ state: "complete", released: 1 });
+    // Inspect the retained record before the host's atomic take clears text.
+    expect(JSON.stringify(observer().peek(key, 0))).not.toContain("private-");
     await expect(directoryV4ControlsResponseJSON(latest())).resolves.toEqual({ sequence: 1 });
-    expect(JSON.stringify(observer().peek(`POST ${origin}/api/directory/v4/sync`, 0))).not.toContain("private-");
+    await expect(directoryV2ResponseWitness(latest())).resolves.toMatchObject({ state: "complete", uncanceledEOF: true, released: 1 });
+    expect(JSON.stringify(observer().peek(key, 0))).not.toContain("private-");
   });
   it.each(['{"key":1,"key":2}', '{"key":1,"\\u006bey":2}'])("rejects duplicate v4 keys before discarding original text", async body => {
     const { consume } = await harness({ mode: "v4-controls", path: "/api/directory/v4/task", body });

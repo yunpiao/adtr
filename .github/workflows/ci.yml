@@ -645,6 +645,8 @@ jobs:
             web/playwright-report/directory-v4-controls-validated/original-raw-members-390.png
             web/playwright-report/directory-v4-controls-validated/recovered-original-1440.png
             web/playwright-report/directory-v4-controls-validated/recovered-original-390.png
+            web/playwright-report/directory-v4-controls-validated/original-result-values-1440.png
+            web/playwright-report/directory-v4-controls-validated/original-result-values-390.png
           # Only closed, post-cleanup validated data and explicit proof-empty PNGs.
           if-no-files-found: error
           retention-days: 7

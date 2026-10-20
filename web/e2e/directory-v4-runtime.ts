@@ -1,4 +1,4 @@
-import { expect, type Page, type BrowserContext, type APIResponse, type Response, type TestInfo } from "@playwright/test";
+import { expect, type Page, type Locator, type BrowserContext, type APIResponse, type Response, type TestInfo } from "@playwright/test";
 import { request as nodeRequest } from "node:http";
 import { createHash } from "node:crypto";
 import { writeV4ScenarioEvidence } from "./directory-v4-controls-evidence";
@@ -181,10 +181,41 @@ export async function proofEmpty(page: Page) {
   const fields = page.locator('.directory-v4-workspace input[type="password"], .directory-v4-workspace input[inputmode="numeric"]');
   invariant(await fields.evaluateAll(nodes => nodes.every(node => (node as HTMLInputElement).value === "")), "Proof not empty at safe boundary");
 }
-export async function safeScreenshots(page: Page, info: TestInfo, stem: string, secrets: readonly string[]) {
+// Real layout/scroll only: never alter document content or CSS for evidence.
+export function v4ScreenshotTargetVisible(node: Element): boolean {
+  const header = document.querySelector(".soc-topbar");
+  if (!header) return false;
+  const box = node.getBoundingClientRect(), bottom = Math.max(0, header.getBoundingClientRect().bottom);
+  const style = getComputedStyle(node);
+  if (style.visibility !== "visible" || style.display === "none" || style.opacity === "0" || box.width <= 0 || box.height <= 0 || box.top < bottom + 4 || box.left < 0 || box.right > innerWidth || box.bottom > innerHeight) return false;
+  const insetX = Math.min(2, box.width / 4), insetY = Math.min(2, box.height / 4);
+  return [[box.left + insetX, box.top + insetY], [box.right - insetX, box.top + insetY],
+    [box.left + insetX, box.bottom - insetY], [box.right - insetX, box.bottom - insetY],
+    [box.left + box.width / 2, box.top + box.height / 2]].every(([x, y]) => {
+    const hit = document.elementFromPoint(x, y);
+    return hit !== null && (hit === node || node.contains(hit));
+  });
+}
+export async function frameV4Screenshot(anchor: Locator, required: Locator[]) {
+  await bounded(anchor.evaluate(node => {
+    node.scrollIntoView({ block: "start", behavior: "instant" });
+    const header = document.querySelector(".soc-topbar");
+    if (!header) throw new Error("Screenshot shell header unavailable");
+    const top = node.getBoundingClientRect().top - Math.max(0, header.getBoundingClientRect().bottom) - 8;
+    let scroller = node.parentElement;
+    while (scroller && !(scroller.scrollHeight > scroller.clientHeight && /^(auto|scroll|overlay)$/u.test(getComputedStyle(scroller).overflowY))) scroller = scroller.parentElement;
+    if (scroller) scroller.scrollBy({ top, behavior: "instant" });
+    else window.scrollBy({ top, behavior: "instant" });
+  }), 5000, "Screenshot target positioning deadline exceeded");
+  for (const target of required) {
+    await expect.poll(() => target.evaluate(v4ScreenshotTargetVisible), { timeout: 5000, message: "Screenshot target is clipped or occluded" }).toBe(true);
+  }
+}
+export async function safeScreenshots(page: Page, info: TestInfo, stem: string, secrets: readonly string[], prepareView?: () => Promise<void>) {
   invariant(/^[a-z0-9-]+$/u.test(stem), "Unsafe screenshot name");
   for (const width of [1440, 390]) {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    await prepareView?.();
     await proofEmpty(page);
     invariant(await page.locator('input[type="password"], input[autocomplete="one-time-code"], input[inputmode="numeric"]').evaluateAll(nodes => nodes.every(node => (node as HTMLInputElement).value === "")), "Unsafe screenshot proof field");
     const safety = await page.evaluate(known => {
@@ -222,7 +253,7 @@ export async function committedLoss(page: Page, actor: Actor, domainId: string, 
   void boundedCompletion.catch(() => undefined);
   return { completed: boundedCompletion };
 }
-export async function pinnedResults(page: Page, actor: Actor, original: Original) {
+export async function pinnedResults(page: Page, actor: Actor, original: Original, capture?: { info: TestInfo; secrets: readonly string[] }) {
   const pending = page.waitForResponse(r => new URL(r.url()).pathname === V4 + "observation");
   void pending.catch(() => undefined);
   await page.getByRole("button", { name: "查看本任务的原始组成员结果", exact: true }).click();
@@ -231,6 +262,7 @@ export async function pinnedResults(page: Page, actor: Actor, original: Original
   const value = parseGroupMembersV4Page(await actualJSON(response, actor.actorId), { domainId: original.domainId, observationId: original.taskUUID, pageIdx: 1, pageSize: 25 });
   invariant(value.available && value.observationId === original.taskUUID && value.list.length > 0, "Expected real nonempty v4 group observation");
   const semantics = { absent: false, empty: false, values: false };
+  let detailCaptured = false;
   for (const row of value.list) {
     const next = page.waitForResponse(r => new URL(r.url()).pathname === "/api/group-assets/v4/members");
     void next.catch(() => undefined);
@@ -242,7 +274,19 @@ export async function pinnedResults(page: Page, actor: Actor, original: Original
     const region = page.getByRole("region", { name: "组原始成员详情", exact: true });
     if (row.rawMember === null) { semantics.absent = true; await expect(region).toContainText("无法区分属性不存在与 ACL 隐藏"); }
     else if (!row.rawMember.length) { semantics.empty = true; await expect(region).toContainText("不证明该组为空"); }
-    else { semantics.values = true; await waitForV4RawMembers(() => region.locator("ol > li").allTextContents(), row.rawMember.map(directoryV4DisplayMember)); }
+    else {
+      semantics.values = true;
+      const expected = row.rawMember.map(directoryV4DisplayMember);
+      await waitForV4RawMembers(() => region.locator("ol > li").allTextContents(), expected);
+      if (capture && !detailCaptured) {
+        await safeScreenshots(page, capture.info, "original-result-values", capture.secrets, async () => {
+          await expect(region.getByRole("heading", { name: directoryV4DisplayMember(row.distinguishedName), exact: true })).toBeVisible();
+          await waitForV4RawMembers(() => region.locator("ol > li").allTextContents(), expected);
+          await frameV4Screenshot(region, [region.getByRole("heading"), ...await region.locator("ol > li").all()]);
+        });
+        detailCaptured = true;
+      }
+    }
   }
   invariant(Object.values(semantics).every(Boolean), "Real fixture did not cover absent/empty/value raw semantics");
   for (const size of [50, 25]) {
@@ -260,6 +304,17 @@ export async function pinnedResults(page: Page, actor: Actor, original: Original
   invariant(new URL(reread.url()).searchParams.get("observationId") === original.taskUUID, "Refresh fell back from original observation");
   parseGroupMembersV4Page(await actualJSON(reread, actor.actorId), { domainId: original.domainId, observationId: original.taskUUID, pageIdx: 1, pageSize: 25 });
   await expect(page.getByRole("region", { name: "本任务的原始组成员结果", exact: true }).getByText(/本观测共有/u)).toBeVisible();
+  if (capture) {
+    invariant(detailCaptured, "Original raw detail capture was not established");
+    const region = page.getByRole("region", { name: "本任务的原始组成员结果", exact: true });
+    await safeScreenshots(page, capture.info, "original-raw-members", capture.secrets, async () => {
+      const pin = region.getByText(`固定原始观测：${directoryV4DisplayMember(original.taskUUID)}。不会读取最新观测；不是 AD 全域原子快照。`, { exact: true });
+      await expect(pin).toBeVisible();
+      await expect(region.locator("ul > li")).toHaveCount(value.list.length);
+      await frameV4Screenshot(region, [pin, ...value.list.slice(0, 2).map(row =>
+        region.getByRole("button", { name: directoryV4DisplayMember(row.samAccountName ?? row.distinguishedName), exact: true }))]);
+    });
+  }
   return { ...semantics, observationSHA256: evidenceDigest([value.observationId]), detailedGroups: value.list.length };
 }
 

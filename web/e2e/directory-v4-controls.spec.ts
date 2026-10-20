@@ -26,8 +26,7 @@ test("real UI admissions, original pinned results and two distinct response-loss
     await terminal(context, actor, first, "succeeded"); await refreshOriginal(page);
     const firstPersisted = await readDirectoryV4KeyCounts({ ...first, actorId: actor.actorId });
     assertPersistedOriginal(firstPersisted, first.taskUUID);
-    const firstSemantics = await pinnedResults(page, actor, first);
-    await safeScreenshots(page, info, "original-raw-members", fixture.secrets);
+    const firstSemantics = await pinnedResults(page, actor, first, { info, secrets: fixture.secrets });
 
     // A new tab starts with no operation hint. Its key originates in its own UI
     // submit; no copied/injected storage, invented task link or historical key.

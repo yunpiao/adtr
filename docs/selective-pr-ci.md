@@ -98,6 +98,18 @@ selection conditions, dependencies, matrices and verification to ensure changes
 cannot be erased by that projection. Future intentional workflow edits must
 update this boundary under review.
 
+Dictionary4 evidence has a closed screenshot inventory: six controls images,
+four readers images and no cancellation images. Controls retain the original
+result-list and recovered-operation pairs, and require
+`original-result-values-1440.png` and `original-result-values-390.png` from the
+first original task's opened nonempty member detail. Captures must follow the
+actual pinned response, complete ordered DOM assertions and per-viewport
+readiness/proof-empty checks. The validator binds exact filenames, dimensions,
+bytes, digests and source/run identity before the explicit upload allowlist runs.
+Those structural checks do not establish visible content: independent inspection
+of the actual pixels is still required. Unit-only synthetic PNGs exercise
+rejection and are never runtime acceptance evidence.
+
 ## Validation
 
 Offline Python tests cover rename/copy/delete, multi-path order independence,
