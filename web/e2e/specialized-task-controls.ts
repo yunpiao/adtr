@@ -3,6 +3,7 @@ import {
   type BrowserContext,
   type Page,
   type Request,
+  type Response,
 } from "@playwright/test";
 import type { TaskDetail } from "../src/task-api";
 import { navigateTo } from "./navigation";
@@ -171,10 +172,17 @@ async function expectReadOnlyDetail(
 // selection and protected receipt stay untouched. Every task ID is from the
 // owning suite's real persisted task. No routes, responses, state or clocks are
 // replaced, and no task is submitted or cancelled by this helper.
+export function assertV4WorkspacePermissionResults(paths: unknown, value: unknown): void {
+  if (!Array.isArray(paths) || paths.length === 0 || !paths.every(path => typeof path === "string") || !paths.includes("POST /api/directory/v4/sync") ||
+    !value || typeof value !== "object" || Array.isArray(value) || Object.keys(value).join(",") !== "results") throw new Error("Invalid original workspace permission response");
+  const results = (value as { results: unknown }).results;
+  if (!Array.isArray(results) || results.length !== paths.length || !results.every(result => result === true)) throw new Error("Original workspace permission checks were not all true");
+}
 export async function expectSpecializedTaskReadOnly(
   context: BrowserContext,
   checkpoint: Checkpoint,
   safe: (value: unknown) => void,
+  readOriginalResponse?: (response: Response) => Promise<unknown>,
 ) {
   const page = await context.newPage();
   const genericWrites: string[] = [];
@@ -304,9 +312,10 @@ export async function expectSpecializedTaskReadOnly(
       expect(v4Permissions).not.toBeNull();
       expect(v4Permissions!.status()).toBe(200);
       const v4Paths: string[] = v4Permissions!.request().postDataJSON().paths;
-      const v4Checks = await v4Permissions!.json();
+      const v4Checks = readOriginalResponse ? await readOriginalResponse(v4Permissions!) : await v4Permissions!.json();
+      assertV4WorkspacePermissionResults(v4Paths, v4Checks);
       for (const [index] of v4Paths.entries())
-        expect(v4Checks.results[index], "actual workspace sync preflight").toBe(true);
+        expect((v4Checks as { results: boolean[] }).results[index], "actual workspace sync preflight").toBe(true);
       await expect(
         page.getByRole("region", { name: "字典 4 已保存来源", exact: true }),
       ).toBeVisible();

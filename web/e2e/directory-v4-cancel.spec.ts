@@ -6,6 +6,25 @@ import { V4, invariant, guardLeaks, originalEvidence, mutationEvidence, observeM
 import { readDirectoryV4Use, assertQueuedReserved, assertQueuedQuiesced, assertRunningOpened, assertExecutorReturned, type DirectoryV4LedgerSnapshot } from "./directory-v4-ledger-observer";
 
 process.env.PLAYWRIGHT_NO_COPY_PROMPT = "1";
+// Test-only, bounded scalar diagnostics. No raw task fields enter the buffer.
+function cancelHeartbeatDiagnostics(startedAt: number) {
+  const samples: string[] = [];
+  let ordinal = 0;
+  const bounded = (value: number) => Number.isFinite(value) ? Math.max(0, Math.min(900_000, Math.floor(value))) : 0;
+  return {
+    record(previous: Awaited<ReturnType<typeof taskResponse>>, current: Awaited<ReturnType<typeof taskResponse>>, now: number) {
+      const before = Date.parse(previous.updatedAt), after = Date.parse(current.updatedAt);
+      samples.push(JSON.stringify({
+        sample: bounded(++ordinal), elapsedMs: bounded(now - startedAt),
+        sameVersion: current.resultVersion === previous.resultVersion,
+        updatedAt: !Number.isFinite(before) || !Number.isFinite(after) ? "invalid" : after > before ? "advanced" : after === before ? "unchanged" : "regressed",
+        runningProgress: current.state === "running" && current.progress === 41 ? "running-41" : "outside-window",
+      }));
+      if (samples.length > 16) samples.shift();
+    },
+    report() { console.log("[v4-cancel-heartbeat] " + JSON.stringify(samples.map(sample => JSON.parse(sample)))); },
+  };
+}
 test.use({ trace: "off", screenshot: "off", video: "off" });
 test.beforeAll(() => requireFixture("cancel"));
 async function queryUI(page: import("@playwright/test").Page, actor: Actor, original: Original) {
@@ -67,14 +86,19 @@ test("queued never-opened cancellation and exact original executor return during
     const first = await queryUI(page, actor, running);
     invariant(first.state === "running" && first.progress === 41, "Proof interval missed actual page-two I/O");
     let heartbeat = first, previous = first, heartbeatFirst = first;
-    await expect.poll(async () => {
+    const heartbeatDiagnostics = cancelHeartbeatDiagnostics(performance.now());
+    try { await expect.poll(async () => {
       heartbeat = await queryUI(page, actor, running);
+      heartbeatDiagnostics.record(previous, heartbeat, performance.now());
       invariant(heartbeat.state === "running" && heartbeat.progress === 41, "Missed genuine stable-page heartbeat window");
       const matched = heartbeat.resultVersion === previous.resultVersion && Date.parse(heartbeat.updatedAt) > Date.parse(previous.updatedAt);
       if (matched) heartbeatFirst = previous;
       previous = heartbeat;
       return matched;
     }, { timeout: 3_000, intervals: [100] }).toBe(true);
+    } catch (error) {
+      try { heartbeatDiagnostics.report(); } finally { throw error; }
+    }
     invariant(Date.now() > proofAt, "No real heartbeat interval observed");
     // Only booleans enter reporters; no secret-valued expect.toHaveValue.
     invariant(await form(page, "cancel").getByLabel("当前用户密码", { exact: true }).inputValue() === actor.password && await form(page, "cancel").getByLabel("当前六位验证码", { exact: true }).inputValue() === draft, "Proof draft did not survive genuine heartbeat");

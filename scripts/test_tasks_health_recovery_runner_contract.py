@@ -5,6 +5,7 @@ fixture object is real browser evidence or permission to skip the CI scenario.
 """
 import ast
 import hashlib
+import io
 import json
 import os
 from pathlib import Path
@@ -311,6 +312,72 @@ class HealthActualRunner(unittest.TestCase):
             else:
                 with self.assertRaisesRegex(RuntimeError, '^health_owned_cleanup_failed$'):
                     exec(code, scope)
+
+    def test_closed_cleanup_summary_requires_actual_facts_and_keeps_unknowns_safe(self):
+        summarize = function('health_cleanup_summary')
+        completed = dict(operations=OPERATIONS, failures=[], ownershipTransferred=True,
+            workerReaped=True, apiReaped=True, ownedContainerRemoved=True, controllerFinalState='closed')
+        expected = dict(event='health_cleanup', **{name: 'completed' for name in OPERATIONS}, overall='completed')
+        self.assertEqual(summarize(completed), expected)
+        for field in ('ownershipTransferred', 'workerReaped', 'apiReaped', 'ownedContainerRemoved'):
+            for value in (False, 1, 'true', None):
+                self.assertEqual(summarize(dict(completed, **{field: value}))['overall'], 'unknown')
+        for result in (None, True, 1, [], {}, dict(completed, operations=True),
+                       dict(completed, failures=False), dict(completed, failures=['private-sentinel']),
+                       dict(completed, operations=['private-sentinel']),
+                       dict(completed, operations=list(reversed(OPERATIONS))),
+                       dict(completed, operations=OPERATIONS + [OPERATIONS[0]])):
+            summary = summarize(result)
+            self.assertEqual(summary['overall'], 'unknown')
+            self.assertNotIn('private-sentinel', json.dumps(summary))
+            self.assertEqual(set(summary), {'event', 'overall', *OPERATIONS})
+            self.assertTrue(all(summary[name] in {'completed', 'failed', 'unknown'} for name in [*OPERATIONS, 'overall']))
+        for operation, failure in zip(OPERATIONS, ['controller_seal_failed', 'worker_reap_failed',
+                'controller_finish_failed', 'api_reap_failed', 'owned_container_remove_failed']):
+            summary = summarize(dict(completed, failures=[failure]))
+            self.assertEqual(summary[operation], 'failed')
+            self.assertEqual(summary['overall'], 'failed')
+        for failure in ('fixture_close_failed', 'log_close_failed'):
+            self.assertEqual(summarize(dict(completed, failures=[failure]))['overall'], 'failed')
+
+    def test_failure_finally_emits_closed_summary_without_replacing_primary(self):
+        tree = ast.parse(SOURCE.read_text())
+        main = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == 'main')
+        branch = next(n for n in main.body if isinstance(n, ast.Try)).finalbody[0]
+        code = compile(ast.Module(body=[branch], type_ignores=[]), '<health-summary-finally>', 'exec')
+        for mode in ('returned-failure', 'raised-cleanup', 'reporter-failed'):
+            output = io.StringIO()
+            cleanup = Mock(return_value=dict(operations=OPERATIONS, failures=['worker_reap_failed'],
+                ownershipTransferred=True, workerReaped=True, apiReaped=True,
+                ownedContainerRemoved=True, controllerFinalState='closed'))
+            summarize = function('health_cleanup_summary')
+            if mode == 'raised-cleanup':
+                cleanup.side_effect = OSError('private-sentinel')
+            if mode == 'reporter-failed':
+                summarize = Mock(side_effect=OSError('private-sentinel'))
+            scope = dict(args=Mock(suite='tasks-health-recovery'), sys=sys, json=json,
+                health_cleanup_summary=summarize, health_cleanup=None, cleanup_health_run=cleanup,
+                v4_worker_controller=None, worker=None, server=None, diagnostics=Mock(),
+                logs=None, creation_attempted=False, name='not-emitted', owner='not-emitted', diagnostic_dir=Path('/unused'))
+            original = AssertionError('original')
+            with patch('sys.stderr', output):
+                try:
+                    try:
+                        raise original
+                    finally:
+                        exec(code, scope)
+                except AssertionError as observed:
+                    self.assertIs(observed, original)
+            self.assertNotIn('private-sentinel', output.getvalue())
+            self.assertNotIn('not-emitted', output.getvalue())
+            lines = [line for line in output.getvalue().splitlines() if line.startswith('{')]
+            if mode == 'reporter-failed':
+                self.assertEqual(lines, [])
+            else:
+                self.assertEqual(len(lines), 1)
+                summary = json.loads(lines[0])
+                self.assertEqual(summary['overall'], 'failed' if mode == 'returned-failure' else 'unknown')
+            scope['diagnostics'].write.assert_called_once()
 
     def test_receipt_then_independent_validation_then_exact_copy_then_validation(self):
         cleanup = dict(launchCount=1, ownershipTransferred=True, workerReaped=True, apiReaped=True,

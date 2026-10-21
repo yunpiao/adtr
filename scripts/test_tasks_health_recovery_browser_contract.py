@@ -14,6 +14,36 @@ ROOT = Path(__file__).resolve().parents[1]
 SPEC = ROOT / 'web/e2e/tasks-health-recovery.spec.ts'
 SQL_IDENTIFIER = r'(?:[a-z_][a-z0-9_$]*|"(?:[^"]|"")+")'
 SQL_RELATION = rf'{SQL_IDENTIFIER}(?:\s*\.\s*{SQL_IDENTIFIER})?'
+UI_STAGES = (
+    'browser_proof_or_observation', 'recovery_intent_open', 'recovery_warning_count',
+    'recovery_warning_text', 'recovery_cancelled_key', 'recovery_intent_cancel',
+    'recovery_intent_closed', 'recovery_intent_reopen', 'recovery_submitted_key',
+)
+
+
+def recovery_dialog_violations(source):
+    failures = []
+    match = re.search(r'const UI_STAGES = \[(.*?)\] as const;', source, re.S)
+    if not match or tuple(re.findall(r'"([^"]+)"', match.group(1))) != UI_STAGES:
+        failures.append('unsafe_ui_stage_set')
+    for guard in ('type UIStage = typeof UI_STAGES[number];',
+                  'stage: UIStage = "browser_proof_or_observation"',
+                  'fact(UI_STAGES.includes(stage), "ui_stage_invalid");',
+                  'await safe(stage, work)'):
+        if guard not in source:
+            failures.append('unsafe_ui_stage_boundary')
+    for stage in UI_STAGES[1:]:
+        if f', "{stage}");' not in source:
+            failures.append('missing_recovery_stage')
+    if 'page.locator(".task-action .warning")' in source:
+        failures.append('ambiguous_recovery_warning')
+    for assertion in (
+        'expect(page.locator(".task-action > .warning")).toHaveCount(1)',
+        'expect(page.locator(".task-action > .warning")).toContainText("不修改原任务或重置其历史")',
+    ):
+        if assertion not in source:
+            failures.append('missing_recovery_warning_assertion')
+    return failures
 
 
 def mask_literals(source):
@@ -83,6 +113,24 @@ class PrivacyMutationContract(unittest.TestCase):
 
     def test_safe_origin_boundaries(self):
         self.assertEqual(privacy_violations(self.source), [])
+
+    def test_recovery_warning_and_fixed_stage_boundaries(self):
+        self.assertEqual(recovery_dialog_violations(self.source), [])
+
+    def test_recovery_warning_must_not_match_nested_proof_warning(self):
+        changed = self.source.replace('.task-action > .warning', '.task-action .warning')
+        self.assertIn('ambiguous_recovery_warning', recovery_dialog_violations(changed))
+        changed = self.source.replace('expect(page.locator(".task-action > .warning")).toHaveCount(1)',
+                                      'expect(page.locator(".task-action > .warning")).toHaveCount(0)')
+        self.assertIn('missing_recovery_warning_assertion', recovery_dialog_violations(changed))
+
+    def test_recovery_stage_set_cannot_accept_arbitrary_diagnostics(self):
+        for changed in (
+            self.source.replace('"recovery_cancelled_key",', '"untrusted_diagnostic",', 1),
+            self.source.replace('fact(UI_STAGES.includes(stage), "ui_stage_invalid");', ''),
+            self.source.replace('stage: UIStage =', 'stage: string ='),
+        ):
+            self.assertTrue(recovery_dialog_violations(changed))
 
     def test_new_bare_actions_are_not_hidden_by_existing_wrappers(self):
         for extra in (

@@ -18,6 +18,7 @@ import type {
 import { userAssetsV2API } from "./user-assets-v2-api";
 import { ApiError } from "./api";
 import { directoryV2BodyLimit, readDirectoryV2JSON } from "./directory-v2-json";
+import { assertV4WorkspacePermissionResults } from "../e2e/specialized-task-controls";
 
 const origin = "https://adtr.test";
 const path = "/api/directory/v4/observation?domainId=synthetic";
@@ -380,10 +381,10 @@ describe("v4-only host path allowlist", () => {
 describe("v4 native host binding", () => {
   async function harness(
     route = path,
-    options: { status?: number; body?: BodyInit } = {},
+    options: { status?: number; body?: BodyInit; method?: string } = {},
   ) {
     const path = route,
-      identity = `GET ${origin}${route}`;
+      identity = `${options.method ?? "GET"} ${origin}${route}`;
     const context = new EventEmitter() as EventEmitter & {
       exposeBinding: ReturnType<typeof vi.fn>;
       addInitScript: ReturnType<typeof vi.fn>;
@@ -434,7 +435,7 @@ describe("v4 native host binding", () => {
       ).href;
       const request = {
         url: () => requestURL,
-        method: () => "GET",
+        method: () => (init?.method ?? (input instanceof Request ? input.method : "GET")).toUpperCase(),
         frame: () => frame,
         resourceType: () => "fetch",
       };
@@ -451,13 +452,14 @@ describe("v4 native host binding", () => {
         request: () => request,
         status: () => options.status ?? 200,
         headers: () => ({ "cache-control": "no-store", "x-adtr-user-id": "1" }),
+        json: vi.fn(async () => { throw new Error("Inspector body must not be read"); }),
       } as unknown as BrowserResponse;
       return Promise.resolve(native);
     });
     const consume = async (controller = new AbortController()) => {
       const ordinal = observer().count(identity);
       await readDirectoryV2JSON(
-        await window.fetch(path, { signal: controller.signal }),
+        await window.fetch(path, { method: options.method ?? "GET", signal: controller.signal }),
         controller.signal,
       );
       await settle(identity, ordinal);
@@ -486,6 +488,66 @@ describe("v4 native host binding", () => {
       },
     };
   }
+
+  it("binds each original access-check POST ordinal to strict native bytes without a second fetch or inspector fallback", async () => {
+    const h = await harness("/api/access/check", { method: "POST", body: '{"results":[true,true]}' });
+    const first = await h.consume(), second = await h.consume();
+    for (const [response, ordinal] of [[second, 1], [first, 0]] as const) {
+      const witness = await groupMembersV4ResponseWitness(response);
+      expect(witness).toMatchObject({ value: { results: [true, true] }, state: "complete", eof: true, uncanceledEOF: true, released: 1, cancelCalls: 0, identity: { method: "POST", url: origin + "/api/access/check", ordinal } });
+      expect(witness.sha256).toBe(createHash("sha256").update('{"results":[true,true]}').digest("hex"));
+      expect(response.json).not.toHaveBeenCalled();
+    }
+    expect(h.fetch).toHaveBeenCalledTimes(2);
+  });
+  it.each([
+    ["GET", "/api/access/check"], ["POST", "/api/access/check/"],
+    ["POST", "/api/access/check?extra=1"], ["POST", "/api/access/check/other"],
+    ["POST", "https://other.test/api/access/check"],
+  ])("does not admit access route %s %s outside its exact same-origin POST scope", async (method, route) => {
+    const h = await harness(route, { method });
+    await readDirectoryV2JSON(await window.fetch(route, { method }), signal());
+    expect(observer().count(`${method} ${new URL(route, origin).href}`)).toBe(0);
+    await expect(groupMembersV4ResponseWitness(h.latest())).rejects.toThrow();
+    expect(h.latest().json).not.toHaveBeenCalled();
+  });
+  it("rejects an old document, unmatched response and live abort for original access bytes", async () => {
+    const h = await harness("/api/access/check", { method: "POST" });
+    const controller = new AbortController(), response = await h.consume(controller);
+    await expect(groupMembersV4ResponseWitness({ ...response, request: () => ({ ...response.request() }) } as BrowserResponse)).rejects.toThrow("not observed");
+    controller.abort();
+    await expect(groupMembersV4ResponseWitness(response)).rejects.toThrow();
+    const next = await h.consume(); h.newDocument();
+    await expect(groupMembersV4ResponseWitness(next)).rejects.toThrow();
+    expect(response.json).not.toHaveBeenCalled();
+  });
+  it("does not substitute another same-URL POST response or copy request proof/CSRF into observer records", async () => {
+    const h = await harness("/api/access/check", { method: "POST" });
+    const first = await h.consume(), second = await h.consume();
+    expect((await groupMembersV4ResponseWitness(second)).value).toEqual({ sequence: 2 });
+    expect((await groupMembersV4ResponseWitness(first)).value).toEqual({ sequence: 1 });
+    const native = await window.fetch("/api/access/check", { method: "POST", headers: { "X-CSRF-Token": "private-csrf" }, body: '{"paths":["POST /api/directory/v4/sync"],"proof":"private-proof"}' });
+    await readDirectoryV2JSON(native, signal());
+    await settle(`POST ${origin}/api/access/check`, 2);
+    expect(JSON.stringify(observer().peek(`POST ${origin}/api/access/check`, 2))).not.toContain("private-");
+    expect((await groupMembersV4ResponseWitness(h.latest())).value).toEqual({ sequence: 3 });
+    expect(h.fetch).toHaveBeenCalledTimes(3);
+  });
+  it("rejects access-check reads without actual EOF and release", async () => {
+    const h = await harness("/api/access/check", { method: "POST" });
+    const native = await window.fetch("/api/access/check", { method: "POST" });
+    const reader = native.body!.getReader(); await reader.read(); reader.releaseLock();
+    await expect(groupMembersV4ResponseWitness(h.latest())).rejects.toThrow();
+    expect(h.latest().json).not.toHaveBeenCalled();
+  });
+  it.each(["actor", "hash", "count"])("rejects wrong access-check %s binding without fallback", async mode => {
+    const h = await harness("/api/access/check", { method: "POST" }), response = await h.consume();
+    if (mode === "actor") response.headers = () => ({ "cache-control": "no-store", "x-adtr-user-id": "2" });
+    if (mode === "hash") { const take = observer().take; observer().take = (id, ordinal) => ({ ...take(id, ordinal), sha256: "0".repeat(64) }); }
+    if (mode === "count") { const count = observer().count; observer().count = id => count(id) + 1; }
+    await expect(groupMembersV4ResponseWitness(response)).rejects.toThrow();
+    expect(response.json).not.toHaveBeenCalled();
+  });
 
   it.each(["/api/directory/v4/observation", "/api/group-assets/v4/members"])(
     "binds exact native bytes for %s and installs once",
@@ -519,4 +581,17 @@ describe("v4 native host binding", () => {
       expect(h.fetch).toHaveBeenCalledTimes(1);
     },
   );
+});
+
+describe("original v4 workspace permission result contract", () => {
+  const paths = ["POST /api/directory/v4/sync", "GET /api/directory/v4/observation"];
+  it("accepts only one true result for every original requested path", () => {
+    expect(() => assertV4WorkspacePermissionResults(paths, { results: [true, true] })).not.toThrow();
+  });
+  it.each([null, [], {}, { results: [true] }, { results: [true, true, true] }, { results: [true, false] }, { results: [true, 1] }, { results: [true, "true"] }, { results: [true, true], extra: true }])("rejects malformed or denied original results %#", value => {
+    expect(() => assertV4WorkspacePermissionResults(paths, value)).toThrow();
+  });
+  it.each([null, [], ["GET /api/tasks"], ["POST /api/directory/v4/sync", 1]])("rejects a request not bound to the sync preflight %#", paths => {
+    expect(() => assertV4WorkspacePermissionResults(paths, { results: [true, true] })).toThrow();
+  });
 });

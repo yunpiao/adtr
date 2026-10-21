@@ -594,6 +594,82 @@ class SelectionContract(unittest.TestCase):
             finally:
                 os.chdir(original)
 
+    def test_health_matrix_order_preserves_critical_prefix_and_complete_entries(self):
+        entries = self.inventory['browser']
+        before = copy.deepcopy(entries)
+        critical = ['group-asset-export-v3-running-cancel',
+                    'computer-asset-export-v3-running-cancel',
+                    'user-asset-export-v3-running-cancel']
+        self.assertEqual([entry['name'] for entry in entries[:3]], critical)
+        health = next(entry for entry in entries if entry['name'] == 'tasks-health-recovery')
+        ordinary = [entry for entry in entries if entry['name'] != health['name']]
+        expected = ordinary[:3] + [health] + ordinary[3:]
+        projected = [{k: v for k, v in entry.items() if k != 'specs'} for entry in expected]
+        actual = selection.browser_matrix_entries(entries)
+        self.assertEqual(actual, projected)
+        self.assertEqual(len(actual), 56)
+        self.assertEqual(sorted((entry['name'], entry['command']) for entry in actual),
+                         sorted((entry['name'], entry['command']) for entry in entries))
+        self.assertEqual([entry for entry in actual if entry['name'] != health['name']],
+                         [{k: v for k, v in entry.items() if k != 'specs'} for entry in ordinary])
+        positions = {entry['name']: index for index, entry in enumerate(actual)}
+        for left, right in itertools.combinations(ordinary, 2):
+            self.assertLess(positions[left['name']], positions[right['name']])
+        self.assertEqual(entries, before)
+
+    def test_health_matrix_subset_does_not_add_unselected_guards_or_reorder_others(self):
+        by_name = {entry['name']: entry for entry in self.inventory['browser']}
+        critical = ['group-asset-export-v3-running-cancel',
+                    'computer-asset-export-v3-running-cancel',
+                    'user-asset-export-v3-running-cancel']
+        for included in itertools.product((False, True), repeat=3):
+            guards = [name for name, yes in zip(critical, included) if yes]
+            for with_health in (False, True):
+                names = guards + ['messages', 'audit']
+                if with_health:
+                    names.append('tasks-health-recovery')
+                entries = [by_name[name] for name in names]
+                before = copy.deepcopy(entries)
+                expected = guards + (['tasks-health-recovery'] if with_health else []) + ['messages', 'audit']
+                with self.subTest(guards=guards, with_health=with_health):
+                    actual = selection.browser_matrix_entries(entries)
+                    self.assertEqual([entry['name'] for entry in actual], expected)
+                    self.assertEqual(sorted((entry['name'], entry['command']) for entry in actual),
+                                     sorted((entry['name'], entry['command']) for entry in entries))
+                    if not with_health:
+                        original = [{k: v for k, v in entry.items() if k != 'specs'} for entry in entries]
+                        self.assertEqual(json.dumps({'include': actual}), json.dumps({'include': original}))
+                    self.assertEqual(entries, before)
+        self.assertEqual(selection.browser_matrix_entries([]), [])
+        health = by_name['tasks-health-recovery']
+        self.assertEqual(selection.browser_matrix_entries([health]),
+                         [{k: v for k, v in health.items() if k != 'specs'}])
+
+    def test_actual_matrix_output_reorders_only_scheduling_not_verified_plan(self):
+        plan, _ = self.plan_for_summary(paths=['scripts/ci_selection.py'])
+        before = copy.deepcopy(plan)
+        by_name = {entry['name']: entry for entry in plan['browser']}
+        ordinary = [entry for entry in plan['browser'] if entry['name'] != 'tasks-health-recovery']
+        expected = ordinary[:3] + [by_name['tasks-health-recovery']] + ordinary[3:]
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / 'output'
+            step_summary = Path(directory) / 'summary'
+            env = {'GITHUB_EVENT_NAME': 'pull_request', 'ADTR_EVENT_BASE_SHA': 'a'*40,
+                   'ADTR_EVENT_HEAD_SHA': 'b'*40, 'GITHUB_SHA': 'd'*40,
+                   'GITHUB_OUTPUT': str(output), 'GITHUB_STEP_SUMMARY': str(step_summary)}
+            with patch.dict(os.environ, env), patch.object(sys, 'argv', ['ci_selection.py']), \
+                    patch.object(selection, 'make_plan', return_value=plan):
+                selection.main()
+            values = dict(line.split('=', 1) for line in output.read_text().splitlines())
+            self.assertEqual(json.loads(values['plan']), before)
+            self.assertEqual(json.loads(values['browser_matrix']), {'include': [
+                {k: v for k, v in entry.items() if k != 'specs'} for entry in expected]})
+            self.assertEqual(json.loads(values['fixed_matrix']), {'suite': before['fixed']})
+            for group, enabled in before['groups'].items():
+                self.assertEqual(values[group.replace('-', '_')], str(enabled).lower())
+            self.assertIn(', '.join(entry['name'] for entry in before['browser']), step_summary.read_text())
+        self.assertEqual(plan, before)
+
     def test_health_inventory_is_exact_addition_and_dependencies_stay_conservative(self):
         name = 'tasks-health-recovery'
         entry = {'name': name, 'command': 'python3 scripts/test_auth_e2e.py --suite ' + name,

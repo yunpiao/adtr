@@ -10,6 +10,10 @@ import { navigateTo } from "./navigation";
 // independent post-finally receipt plus source/file-byte validation.
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const SHA = /^[0-9a-f]{40}$/;
+const UI_STAGES = ["browser_proof_or_observation", "recovery_intent_open", "recovery_warning_count",
+  "recovery_warning_text", "recovery_cancelled_key", "recovery_intent_cancel", "recovery_intent_closed",
+  "recovery_intent_reopen", "recovery_submitted_key"] as const;
+type UIStage = typeof UI_STAGES[number];
 const digest = (b: Buffer | string) => createHash("sha256").update(b).digest("hex");
 // JSONB object key order is not semantic. Arrays retain their original order,
 // while object comparison uses the full recursive key set without raw diffs.
@@ -86,9 +90,10 @@ test("real health epoch rejection, explicit child recovery and original-key repl
     const value = Math.min(started + 600000, phaseDeadline) - Date.now();
     fact(value > 0, "aggregate_phase_deadline"); return Math.max(1, value);
   }
-  async function ui<T>(work: () => Promise<T>): Promise<T> {
+  async function ui<T>(work: () => Promise<T>, stage: UIStage = "browser_proof_or_observation"): Promise<T> {
+    fact(UI_STAGES.includes(stage), "ui_stage_invalid");
     remaining(); page.setDefaultTimeout(Math.min(10000, remaining()));
-    const value = await safe("browser_proof_or_observation", work); remaining(); return value;
+    const value = await safe(stage, work); remaining(); return value;
   }
   async function phase<T>(name: string, budget: number, work: () => Promise<T>): Promise<T> {
     const begin = Date.now(), waits = counterWaitMs; phaseDeadline = begin + budget;
@@ -365,20 +370,23 @@ test("real health epoch rejection, explicit child recovery and original-key repl
   });
   let child: any, recoverReceipt: any, parentAfterChild: any, cancelledBefore: any;
   await phase("recoveryChild", 30000, async () => {
+    await ui(() => page.getByRole("button", { name: "创建恢复任务", exact: true }).click(), "recovery_intent_open");
+    // ProofFields has its own nested warning. Match only TaskAction's warning
+    // rather than allowing a two-element locator or choosing an arbitrary first.
+    await ui(() => expect(page.locator(".task-action > .warning")).toHaveCount(1), "recovery_warning_count");
+    await ui(() => expect(page.locator(".task-action > .warning")).toContainText("不修改原任务或重置其历史"), "recovery_warning_text");
     await ui(async () => {
-      await page.getByRole("button", { name: "创建恢复任务", exact: true }).click();
-      await expect(page.locator(".task-action .warning")).toContainText("不修改原任务或重置其历史");
       cancelledKey = await page.getByLabel("恢复幂等键", { exact: true }).inputValue();
       fact(UUID.test(cancelledKey), "cancelled_key_shape");
-      await page.locator(".task-action").getByRole("button", { name: "取消", exact: true }).click();
-      await expect(page.getByLabel("恢复幂等键", { exact: true })).toHaveCount(0);
-    });
+    }, "recovery_cancelled_key");
+    await ui(() => page.locator(".task-action").getByRole("button", { name: "取消", exact: true }).click(), "recovery_intent_cancel");
+    await ui(() => expect(page.getByLabel("恢复幂等键", { exact: true })).toHaveCount(0), "recovery_intent_closed");
     fact(recoveryPosts === 0, "cancel_sent_recovery"); cancelledBefore = zero(cancelledKey);
+    await ui(() => page.getByRole("button", { name: "创建恢复任务", exact: true }).click(), "recovery_intent_reopen");
     await ui(async () => {
-      await page.getByRole("button", { name: "创建恢复任务", exact: true }).click();
       submittedKey = await page.getByLabel("恢复幂等键", { exact: true }).inputValue();
       fact(UUID.test(submittedKey) && submittedKey !== cancelledKey && submittedKey !== submissionKey, "reopened_key_invalid");
-    });
+    }, "recovery_submitted_key");
     const code = await freshCode();
     const response = await mutation("recover", "/api/tasks/recover", async () => {
       // Reread actual key immediately before confirming the reopened intent.

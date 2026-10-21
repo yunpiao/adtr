@@ -76,13 +76,14 @@ export function installGroupMembersV4ResponseObserver() {
       } catch {
         return pending;
       }
-      if (url.origin !== location.origin || !paths.has(url.pathname))
+      const method = (init?.method ?? request?.method ?? "GET").toUpperCase();
+      const accessCheck = method === "POST" && url.pathname === "/api/access/check" && !url.search && !url.hash;
+      if (url.origin !== location.origin || !(paths.has(url.pathname) || accessCheck))
         return pending;
       if (recordCount >= 2048) {
         capacityFailed = true;
         return pending;
       }
-      const method = (init?.method ?? request?.method ?? "GET").toUpperCase();
       const id = `${method} ${url.href}`;
       const list = records.get(id) ?? [];
       const record: Record = {
@@ -436,6 +437,12 @@ export const groupMembersV4ObservedPath = (url: URL) =>
     url.pathname,
   );
 const directoryPath = groupMembersV4ObservedPath;
+const observedRequest = (url: URL, method: string) => directoryPath(url) ||
+  (method === "POST" && url.pathname === "/api/access/check" && !url.search && !url.hash);
+const observedResponse = (response: Response) => {
+  const url = new URL(response.url());
+  return directoryPath(url) || (url.pathname === "/api/access/check" && observedRequest(url, response.request().method()));
+};
 
 export async function observeGroupMembersV4Responses(context: BrowserContext) {
   if (installed.has(context)) return;
@@ -448,7 +455,7 @@ export async function observeGroupMembersV4Responses(context: BrowserContext) {
     },
   );
   context.on("request", (request) => {
-    if (!directoryPath(new URL(request.url()))) return;
+    if (!observedRequest(new URL(request.url()), request.method())) return;
     const frame = request.frame();
     const page = frame.page();
     if (
@@ -604,7 +611,7 @@ function initialObservation(response: Response) {
   return observation;
 }
 export function groupMembersV4ResponseJSON(response: Response): Promise<any> {
-  if (!directoryPath(new URL(response.url()))) return response.json();
+  if (!observedResponse(response)) return response.json();
   let body = bodies.get(response);
   if (!body) {
     body = initialObservation(response).then(
@@ -617,7 +624,7 @@ export function groupMembersV4ResponseJSON(response: Response): Promise<any> {
 export async function groupMembersV4ResponseWitness(
   response: Response,
 ): Promise<GroupMembersV4ResponseWitness> {
-  if (!directoryPath(new URL(response.url())))
+  if (!observedResponse(response))
     throw new Error("Directory response was not observed");
   const observation = await initialObservation(response);
   const current = await finalRecord(response, false);

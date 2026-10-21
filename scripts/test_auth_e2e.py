@@ -441,6 +441,39 @@ def cleanup_health_run(controller, worker, server, diagnostics, logs,
         ownedContainerRemoved=removed, operations=operations, failures=failures)
 
 
+def health_cleanup_summary(outcome):
+    """Closed diagnostics only; never substitute this log for a cleanup receipt."""
+    statuses = {name: "unknown" for name in
+                ("seal_and_take", "worker_reap", "finish_after_wait", "api_reap", "owned_container_remove")}
+    summary = dict(event="health_cleanup", **statuses, overall="unknown")
+    if type(outcome) is not dict:
+        return summary
+    operations, failures = outcome.get("operations"), outcome.get("failures")
+    allowed_failures = {"controller_seal_failed", "worker_reap_failed", "controller_finish_failed",
+                        "api_reap_failed", "owned_container_remove_failed", "fixture_close_failed", "log_close_failed"}
+    if (type(operations) is not list or type(failures) is not list
+            or any(type(value) is not str or value not in statuses for value in operations)
+            or any(type(value) is not str or value not in allowed_failures for value in failures)
+            or operations != [name for name in statuses if name in operations]):
+        return summary
+    bindings = (("seal_and_take", "controller_seal_failed", "ownershipTransferred", True),
+                ("worker_reap", "worker_reap_failed", "workerReaped", True),
+                ("finish_after_wait", "controller_finish_failed", "controllerFinalState", "closed"),
+                ("api_reap", "api_reap_failed", "apiReaped", True),
+                ("owned_container_remove", "owned_container_remove_failed", "ownedContainerRemoved", True))
+    for operation, failure, field, expected in bindings:
+        value = outcome.get(field)
+        if failure in failures:
+            summary[operation] = "failed"
+        elif operation in operations and type(value) is type(expected) and value == expected:
+            summary[operation] = "completed"
+    if failures:
+        summary["overall"] = "failed"
+    elif all(summary[name] == "completed" for name in statuses):
+        summary["overall"] = "completed"
+    return summary
+
+
 def close_health_evidence(cleanup, build, env, deadline):
     """Called only after finally; no success receipt for a skipped cleanup branch."""
     health_timeout(1, deadline, reserve=0)
@@ -1278,6 +1311,12 @@ def main():
                     raise
                 print("health_owned_cleanup_failed", file=sys.stderr)
             finally:
+                # Fixed keys/enums only. Reporting must never replace the primary
+                # exception, and this diagnostic cannot authorize publication.
+                try:
+                    print(json.dumps(health_cleanup_summary(health_cleanup), sort_keys=True), file=sys.stderr)
+                except Exception:
+                    pass
                 try:
                     diagnostics.phase("after-cleanup")
                     diagnostics.write(diagnostic_dir / "runtime.json")

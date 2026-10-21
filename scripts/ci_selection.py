@@ -272,6 +272,28 @@ def make_plan(event, base, head, inventory, loader=web_sources, tested=None):
     return plan
 
 
+def browser_matrix_entries(entries):
+    """Move selected health after selected critical guards, without new coverage.
+
+    Only the emitted matrix is permuted. The immutable selection plan and its
+    independent verification retain inventory order. GitHub scheduling is not
+    guaranteed by matrix order; no concurrency, timeout or dependency changes.
+    """
+    critical = {'group-asset-export-v3-running-cancel',
+                'computer-asset-export-v3-running-cancel',
+                'user-asset-export-v3-running-cancel'}
+    ordered = list(entries)
+    health_index = next((i for i, entry in enumerate(ordered)
+                         if entry['name'] == 'tasks-health-recovery'), None)
+    if health_index is not None:
+        health = ordered.pop(health_index)
+        after_critical = max((i for i, entry in enumerate(ordered)
+                              if entry['name'] in critical), default=-1) + 1
+        ordered.insert(after_critical, health)
+    return [{key: value for key, value in entry.items() if key != 'specs'}
+            for entry in ordered]
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--check-current', action='store_true')
@@ -327,7 +349,7 @@ def main():
             out.write(name.replace('-', '_') + '=' + str(enabled).lower() + '\n')
         # Job-level if is evaluated before matrix expansion. Empty arrays are
         # retained as empty, never padded with a fake successful test.
-        out.write('browser_matrix=' + json.dumps({'include': [{k:v for k,v in e.items() if k != 'specs'} for e in plan['browser']]}) + '\n')
+        out.write('browser_matrix=' + json.dumps({'include': browser_matrix_entries(plan['browser'])}) + '\n')
         out.write('fixed_matrix=' + json.dumps({'suite': plan['fixed']}) + '\n')
     with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as out:
         out.write('## CI selection\n')
