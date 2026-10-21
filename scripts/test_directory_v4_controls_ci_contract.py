@@ -6,7 +6,8 @@ from pathlib import Path
 import re
 import unittest
 
-from ci_workflow_contract import restore_directory_v4, restore_selection
+from ci_workflow_contract import (restore_directory_v4, restore_selection,
+                                  restore_health_recovery, restore_directory_v4_predecessor)
 import validate_directory_v4_controls_evidence as evidence
 
 
@@ -16,14 +17,14 @@ class DirectoryV4ControlsCI(unittest.TestCase):
         expected = ['directory-v4-controls', 'directory-v4-cancel', 'directory-v4-readers']
         additions = [entry for entry in inventory['browser'] if entry['name'] in expected]
         self.assertEqual(additions, [{'name': suite, 'command': 'python3 scripts/test_auth_e2e.py --suite ' + suite, 'specs': ['web/e2e/' + suite + '.spec.ts']} for suite in expected])
-        self.assertEqual(len(inventory['browser']), 55)
+        self.assertEqual(len(inventory['browser']), 56)
         self.assertEqual(len(inventory['fixed']), 7)
-        self.assertEqual(len(inventory['frontend_roots']['web/src/TaskWorkspace.tsx']), 17)
+        self.assertEqual(len(inventory['frontend_roots']['web/src/TaskWorkspace.tsx']), 18)
         self.assertIn('audit', inventory['frontend_roots']['web/src/TaskWorkspace.tsx'])
         legacy = restore_selection(Path('.github/workflows/ci.yml').read_text())
         matrix = legacy.split('  browser:\n', 1)[1].split('    steps:\n', 1)[0]
-        self.assertEqual([(entry['name'], entry['command']) for entry in inventory['browser'] if entry['name'] not in expected + ['messages-isolation']], re.findall(r'          - name: ([^\n]+)\n            command: ([^\n]+)', matrix))
-        self.assertEqual(55 + 7 + 8 + 6, 76)  # plan, prepare, contracts, two native, verify.
+        self.assertEqual([(entry['name'], entry['command']) for entry in inventory['browser'] if entry['name'] not in expected + ['messages-isolation', 'tasks-health-recovery']], re.findall(r'          - name: ([^\n]+)\n            command: ([^\n]+)', matrix))
+        self.assertEqual(56 + 7 + 8 + 6, 77)  # plan, prepare, contracts, two native, verify.
 
     def test_runtime_commands_budgets_and_real_discovery(self):
         runner = Path('scripts/test_auth_e2e.py').read_text()
@@ -63,12 +64,14 @@ class DirectoryV4ControlsCI(unittest.TestCase):
             self.assertIn('if-no-files-found: error', block)
         delta = json.loads(Path('scripts/fixtures/directory_v4_ci_delta.json').read_text())
         self.assertEqual(hashlib.sha256(restore_directory_v4(text).encode()).hexdigest(), delta['baselineSHA256'])
+        predecessor = restore_health_recovery(text)
+        self.assertEqual(restore_directory_v4_predecessor(predecessor), restore_directory_v4(text))
         for change in delta['replacements']:
             with self.assertRaises(ValueError):
-                restore_directory_v4(text.replace(change['new'], change['old'], 1))
+                restore_directory_v4_predecessor(predecessor.replace(change['new'], change['old'], 1))
         for before, after in [('contents: read', 'contents: write'), ('run: make check', 'run: true'), ('max-parallel: 8', 'max-parallel: 9')]:
             with self.assertRaises(ValueError):
-                restore_directory_v4(text.replace(before, after, 1))
+                restore_directory_v4_predecessor(predecessor.replace(before, after, 1))
 
     def test_both_native_families_direct_exports_and_all_legacy_assertions(self):
         source = Path('web/e2e/native-no-store-completion.spec.ts').read_text()

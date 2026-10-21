@@ -17,7 +17,9 @@ from unittest.mock import patch
 
 import ci_selection as selection
 import ci_selection_summary as summary
-from ci_workflow_contract import restore_selection, restore_messages_isolation
+from ci_workflow_contract import (restore_selection, restore_messages_isolation,
+                                  restore_messages_isolation_predecessor, restore_health_recovery,
+                                  restore_selection_predecessor)
 
 
 class SelectionContract(unittest.TestCase):
@@ -39,7 +41,7 @@ class SelectionContract(unittest.TestCase):
 
     def test_spec_aliases_bulk_and_fixed_consumers(self):
         cases={'auth':{'authentication','expired-password'},'resource':{'resources'},
-               'messages-isolation':{'messages-isolation'},'messages-bulk':{'messages'},'messages':{'messages'},'user-assets-v3':{'user-assets-v3'}}
+               'tasks-health-recovery':{'tasks-health-recovery'},'messages-isolation':{'messages-isolation'},'messages-bulk':{'messages'},'messages':{'messages'},'user-assets-v3':{'user-assets-v3'}}
         for spec, expected in cases.items():
             with self.subTest(spec=spec):
                 plan=self.choose(['web/e2e/'+spec+'.spec.ts'])
@@ -84,6 +86,7 @@ class SelectionContract(unittest.TestCase):
         root='web/src/TaskWorkspace.tsx'
         expected={
             'tasks', 'audit', 'messages', 'messages-isolation', 'maintenance', 'user-assets-v2',
+            'tasks-health-recovery',
             'directory-v3', 'group-members-v4',
             'user-asset-export-v3', 'user-asset-export-v3-failure',
             'user-asset-export-v3-cancel', 'computer-asset-export-v3',
@@ -107,7 +110,7 @@ class SelectionContract(unittest.TestCase):
         dep='web/src/shared.ts';other='web/src/UnmappedPage.tsx'
         src=dict(self.sources,**{dep:'',other:''})
         self.graph['web/src/MessagesWorkspace.tsx']={dep};self.graph[other]={dep}
-        self.assertEqual(len(self.choose([dep],src)['browser']),55)
+        self.assertEqual(len(self.choose([dep],src)['browser']),56)
 
     def helper_graph(self):
         api='web/src/messages-api.ts'; helper='web/src/sample-data.ts'
@@ -134,7 +137,7 @@ class SelectionContract(unittest.TestCase):
             src[consumer]='';self.graph[consumer]={helper}
             with self.subTest(consumer=consumer):
                 self.assertNotIn(helper,selection.test_only_dependencies(self.graph,set(),self.inventory))
-                self.assertEqual(len(self.choose([api],src)['browser']),55)
+                self.assertEqual(len(self.choose([api],src)['browser']),56)
             self.graph.pop(consumer)
 
     def test_unknown_edges_or_cycles_or_orphans_never_prove_helpers(self):
@@ -142,12 +145,12 @@ class SelectionContract(unittest.TestCase):
         self.assertEqual(self.names(self.choose([api],src,uncertain={test})),{'messages','messages-isolation'})
         for unknown in (helper, 'web/src/MessagesWorkspace.tsx', 'web/e2e/messages.spec.ts'):
             with self.subTest(unknown=unknown):
-                self.assertEqual(len(self.choose([api],src,uncertain={unknown})['browser']),55)
+                self.assertEqual(len(self.choose([api],src,uncertain={unknown})['browser']),56)
         self.graph[helper].add(bridge)
-        self.assertEqual(len(self.choose([api],src)['browser']),55)
+        self.assertEqual(len(self.choose([api],src)['browser']),56)
         self.graph[helper].remove(bridge)
         self.graph[test]=set()
-        self.assertEqual(len(self.choose([api],src)['browser']),55)
+        self.assertEqual(len(self.choose([api],src)['browser']),56)
 
     def test_uncertain_test_imported_by_runtime_is_not_a_test_only_seed(self):
         for consumer in ('web/src/MessagesWorkspace.tsx', 'web/e2e/messages.spec.ts'):
@@ -155,7 +158,7 @@ class SelectionContract(unittest.TestCase):
             self.graph[consumer]={test,api}
             with self.subTest(consumer=consumer):
                 self.assertEqual(selection.test_only_dependencies(self.graph,{test},self.inventory),set())
-                self.assertEqual(len(self.choose([api],src,uncertain={test})['browser']),55)
+                self.assertEqual(len(self.choose([api],src,uncertain={test})['browser']),56)
             self.graph[consumer]=set()
 
     def test_old_or_base_runtime_consumer_cannot_be_erased_by_new_test_only_graph(self):
@@ -177,7 +180,7 @@ class SelectionContract(unittest.TestCase):
         path='web/src/Example.test.tsx';src=dict(self.sources,**{path:''})
         self.assertFalse(self.choose([path],src)['groups']['browser'])
         self.graph['web/src/MessagesWorkspace.tsx']={path}
-        self.assertEqual(len(self.choose([path],src)['browser']),55)
+        self.assertEqual(len(self.choose([path],src)['browser']),56)
 
     def test_native_both_engines_and_order_independence(self):
         native='web/e2e/native-no-store-completion.spec.ts';unknown='web/src/NewPage.tsx'
@@ -185,7 +188,7 @@ class SelectionContract(unittest.TestCase):
         plans=[self.choose(list(paths),src) for paths in itertools.permutations([native,unknown])]
         self.assertEqual(plans[0]['groups'],plans[1]['groups'])
         self.assertEqual(plans[0]['browser'],plans[1]['browser'])
-        self.assertEqual(len(plans[0]['browser']),55)
+        self.assertEqual(len(plans[0]['browser']),56)
         native_plan=self.choose([native])
         self.assertTrue(native_plan['groups']['native-no-store'])
         self.assertTrue(native_plan['groups']['native-no-store-fixed'])
@@ -195,11 +198,11 @@ class SelectionContract(unittest.TestCase):
         dep='web/src/messages-api.ts';root='web/src/MessagesWorkspace.tsx'
         other='web/src/UnknownPage.tsx';src=dict(self.sources,**{dep:'',other:''})
         self.graph[root]={dep}
-        self.assertEqual(len(self.choose([dep],src,uncertain={other})['browser']),55)
+        self.assertEqual(len(self.choose([dep],src,uncertain={other})['browser']),56)
 
     def test_uncertain_graph_fails_safe(self):
         p='web/e2e/messages.spec.ts'
-        self.assertEqual(len(self.choose([p],uncertain={p})['browser']),55)
+        self.assertEqual(len(self.choose([p],uncertain={p})['browser']),56)
 
     def test_docs_only_is_explicit_without_fake_test(self):
         p=self.choose(['docs/design.md','README.md'])
@@ -286,12 +289,12 @@ class SelectionContract(unittest.TestCase):
         expected={str(p) for p in Path('web/e2e').glob('*.spec.ts')}
         actual={p for e in self.inventory['browser'] for p in e['specs']}|{'web/e2e/native-no-store-completion.spec.ts'}
         self.assertEqual(actual,expected)
-        self.assertEqual(len(self.inventory['browser']),55)
+        self.assertEqual(len(self.inventory['browser']),56)
         self.assertEqual(len(self.inventory['fixed']),7)
         self.assertEqual(summary.INVENTORY,self.inventory)
         old=restore_selection(Path('.github/workflows/ci.yml').read_text())
         matrix=old.split('  browser:\n',1)[1].split('    steps:\n',1)[0]
-        self.assertEqual([(e['name'],e['command']) for e in self.inventory['browser'] if e['name'] not in {'messages-isolation', 'directory-v4-controls', 'directory-v4-cancel', 'directory-v4-readers'}], re.findall(r'          - name: ([^\n]+)\n            command: ([^\n]+)',matrix))
+        self.assertEqual([(e['name'],e['command']) for e in self.inventory['browser'] if e['name'] not in {'tasks-health-recovery', 'messages-isolation', 'directory-v4-controls', 'directory-v4-cancel', 'directory-v4-readers'}], re.findall(r'          - name: ([^\n]+)\n            command: ([^\n]+)',matrix))
         for command in ('true','python3 scripts/test_auth_e2e.py; true','python3 scripts/test_auth_e2e.py --suite messages || true'):
             bad=copy.deepcopy(self.inventory);bad['browser'][0]['command']=command
             with self.assertRaises(ValueError):selection.inventory_checked(bad)
@@ -342,7 +345,7 @@ class SelectionContract(unittest.TestCase):
             p=selection.make_plan(event,'a'*40,'b'*40,self.inventory,loader=lambda _:self.fail('no PR snapshots'))
             n={g:{'result':'success'} for g in selection.GROUPS};n['plan']={'result':'success'}
             summary.verify(p,n,event,'a'*40,'b'*40,p)
-            self.assertEqual(len(p['browser']),55)
+            self.assertEqual(len(p['browser']),56)
             self.assertEqual(p['auth'],list(range(1,9)))
             self.assertEqual(p['fixed'],self.inventory['fixed'])
 
@@ -591,12 +594,236 @@ class SelectionContract(unittest.TestCase):
             finally:
                 os.chdir(original)
 
-    def test_isolation_workflow_delta_is_exact_and_cannot_mask_other_changes(self):
+    def test_health_matrix_order_preserves_critical_prefix_and_complete_entries(self):
+        entries = self.inventory['browser']
+        before = copy.deepcopy(entries)
+        critical = ['group-asset-export-v3-running-cancel',
+                    'computer-asset-export-v3-running-cancel',
+                    'user-asset-export-v3-running-cancel']
+        self.assertEqual([entry['name'] for entry in entries[:3]], critical)
+        health = next(entry for entry in entries if entry['name'] == 'tasks-health-recovery')
+        group = next(entry for entry in entries if entry['name'] == 'group-members-v4')
+        ordinary = [entry for entry in entries if entry['name'] not in {health['name'], group['name']}]
+        expected = ordinary[:3] + [health, group] + ordinary[3:]
+        projected = [{k: v for k, v in entry.items() if k != 'specs'} for entry in expected]
+        actual = selection.browser_matrix_entries(entries)
+        self.assertEqual(actual, projected)
+        self.assertEqual(len(actual), 56)
+        self.assertEqual(sorted((entry['name'], entry['command']) for entry in actual),
+                         sorted((entry['name'], entry['command']) for entry in entries))
+        self.assertEqual([entry for entry in actual if entry['name'] not in {health['name'], group['name']}],
+                         [{k: v for k, v in entry.items() if k != 'specs'} for entry in ordinary])
+        positions = {entry['name']: index for index, entry in enumerate(actual)}
+        for left, right in itertools.combinations(ordinary, 2):
+            self.assertLess(positions[left['name']], positions[right['name']])
+        self.assertEqual(entries, before)
+
+    def test_health_matrix_subset_does_not_add_unselected_guards_or_reorder_others(self):
+        by_name = {entry['name']: entry for entry in self.inventory['browser']}
+        critical = ['group-asset-export-v3-running-cancel',
+                    'computer-asset-export-v3-running-cancel',
+                    'user-asset-export-v3-running-cancel']
+        for included in itertools.product((False, True), repeat=3):
+            guards = [name for name, yes in zip(critical, included) if yes]
+            for with_health in (False, True):
+                names = guards + ['messages', 'audit']
+                if with_health:
+                    names.append('tasks-health-recovery')
+                entries = [by_name[name] for name in names]
+                before = copy.deepcopy(entries)
+                expected = guards + (['tasks-health-recovery'] if with_health else []) + ['messages', 'audit']
+                with self.subTest(guards=guards, with_health=with_health):
+                    actual = selection.browser_matrix_entries(entries)
+                    self.assertEqual([entry['name'] for entry in actual], expected)
+                    self.assertEqual(sorted((entry['name'], entry['command']) for entry in actual),
+                                     sorted((entry['name'], entry['command']) for entry in entries))
+                    if not with_health:
+                        original = [{k: v for k, v in entry.items() if k != 'specs'} for entry in entries]
+                        self.assertEqual(json.dumps({'include': actual}), json.dumps({'include': original}))
+                    self.assertEqual(entries, before)
+        self.assertEqual(selection.browser_matrix_entries([]), [])
+        health = by_name['tasks-health-recovery']
+        self.assertEqual(selection.browser_matrix_entries([health]),
+                         [{k: v for k, v in health.items() if k != 'specs'}])
+
+    def test_group_matrix_subset_preserves_all_other_pairs_and_never_adds_coverage(self):
+        by_name = {entry['name']: entry for entry in self.inventory['browser']}
+        critical = ['group-asset-export-v3-running-cancel',
+                    'computer-asset-export-v3-running-cancel',
+                    'user-asset-export-v3-running-cancel']
+        for included in itertools.product((False, True), repeat=3):
+            guards = [name for name, yes in zip(critical, included) if yes]
+            for with_health, with_group in itertools.product((False, True), repeat=2):
+                names = guards + ['messages', 'audit']
+                if with_group:
+                    names.append('group-members-v4')
+                if with_health:
+                    names.append('tasks-health-recovery')
+                entries = [by_name[name] for name in names]
+                before = copy.deepcopy(entries)
+                expected = guards + (['tasks-health-recovery'] if with_health else [])
+                expected += (['group-members-v4'] if with_group else []) + ['messages', 'audit']
+                with self.subTest(guards=guards, health=with_health, group=with_group):
+                    actual = selection.browser_matrix_entries(entries)
+                    self.assertEqual([entry['name'] for entry in actual], expected)
+                    self.assertEqual(sorted((entry['name'], entry['command']) for entry in actual),
+                                     sorted((entry['name'], entry['command']) for entry in entries))
+                    others = [name for name in names if name not in {'tasks-health-recovery', 'group-members-v4'}]
+                    positions = {entry['name']: i for i, entry in enumerate(actual)}
+                    for left, right in itertools.combinations(others, 2):
+                        self.assertLess(positions[left], positions[right])
+                    if not with_group:
+                        legacy_health = [entry for entry in entries if entry['name'] != 'tasks-health-recovery']
+                        if with_health:
+                            legacy_health.insert(len(guards), by_name['tasks-health-recovery'])
+                        original = [{k: v for k, v in entry.items() if k != 'specs'} for entry in legacy_health]
+                        self.assertEqual(json.dumps({'include': actual}), json.dumps({'include': original}))
+                    self.assertEqual(entries, before)
+        group = by_name['group-members-v4']
+        self.assertEqual(selection.browser_matrix_entries([group]),
+                         [{k: v for k, v in group.items() if k != 'specs'}])
+        self.assertEqual(selection.browser_matrix_entries([]), [])
+
+    def test_actual_matrix_output_reorders_only_scheduling_not_verified_plan(self):
+        plan, _ = self.plan_for_summary(paths=['scripts/ci_selection.py'])
+        before = copy.deepcopy(plan)
+        by_name = {entry['name']: entry for entry in plan['browser']}
+        ordinary = [entry for entry in plan['browser'] if entry['name'] not in {'tasks-health-recovery', 'group-members-v4'}]
+        expected = ordinary[:3] + [by_name['tasks-health-recovery'], by_name['group-members-v4']] + ordinary[3:]
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / 'output'
+            step_summary = Path(directory) / 'summary'
+            env = {'GITHUB_EVENT_NAME': 'pull_request', 'ADTR_EVENT_BASE_SHA': 'a'*40,
+                   'ADTR_EVENT_HEAD_SHA': 'b'*40, 'GITHUB_SHA': 'd'*40,
+                   'GITHUB_OUTPUT': str(output), 'GITHUB_STEP_SUMMARY': str(step_summary)}
+            with patch.dict(os.environ, env), patch.object(sys, 'argv', ['ci_selection.py']), \
+                    patch.object(selection, 'make_plan', return_value=plan):
+                selection.main()
+            values = dict(line.split('=', 1) for line in output.read_text().splitlines())
+            self.assertEqual(json.loads(values['plan']), before)
+            self.assertEqual(json.loads(values['browser_matrix']), {'include': [
+                {k: v for k, v in entry.items() if k != 'specs'} for entry in expected]})
+            self.assertEqual(json.loads(values['fixed_matrix']), {'suite': before['fixed']})
+            for group, enabled in before['groups'].items():
+                self.assertEqual(values[group.replace('-', '_')], str(enabled).lower())
+            self.assertIn(', '.join(entry['name'] for entry in before['browser']), step_summary.read_text())
+        self.assertEqual(plan, before)
+
+    def test_health_inventory_is_exact_addition_and_dependencies_stay_conservative(self):
+        name = 'tasks-health-recovery'
+        entry = {'name': name, 'command': 'python3 scripts/test_auth_e2e.py --suite ' + name,
+                 'specs': ['web/e2e/' + name + '.spec.ts']}
+        self.assertEqual([e for e in self.inventory['browser'] if e['name'] == name], [entry])
+        self.assertNotIn(name, self.inventory['fixed'])
+        self.assertIn(name, self.inventory['frontend_roots']['web/src/TaskWorkspace.tsx'])
+        predecessor = copy.deepcopy(self.inventory)
+        predecessor['browser'].remove(entry)
+        predecessor['frontend_roots']['web/src/TaskWorkspace.tsx'].remove(name)
+        self.assertEqual(hashlib.sha256((json.dumps(predecessor, indent=2) + '\n').encode()).hexdigest(),
+                         '20df16aa0b9168369ddafe611bdf4bd316106b5cc0923233a84dcc811457afb4')
+        self.assertEqual(self.names(self.choose(entry['specs'])), {name})
+        self.assertIn(name, self.names(self.choose(['web/src/TaskWorkspace.tsx'])))
+        for path in ['scripts/test_auth_e2e.py', 'scripts/ci_inventory.json',
+                     'scripts/ci_selection.py', '.github/workflows/ci.yml',
+                     'scripts/directory_v4_worker_control.py',
+                     'scripts/validate_tasks_health_recovery_evidence.py',
+                     'scripts/fixtures/tasks_health_recovery_evidence.json',
+                     'scripts/fixtures/tasks_health_recovery_ci_delta.json',
+                     'scripts/fixtures/tasks_health_recovery_runner_delta.json',
+                     'internal/auth/access_http.go', 'internal/tasks/worker.go',
+                     'cmd/adtr/main.go', 'web/playwright.config.ts', 'web/package-lock.json']:
+            plan = self.choose([path])
+            self.assertEqual(plan['browser'], self.inventory['browser'], path)
+            self.assertTrue(all(plan['groups'].values()), path)
+        for path in ['scripts/test_tasks_health_recovery_browser_contract.py',
+                     'scripts/test_tasks_health_recovery_evidence_contract.py',
+                     'scripts/test_tasks_health_recovery_runner_contract.py']:
+            self.assertTrue(self.choose([path])['groups']['contracts'], path)
+        helper = 'web/test-helpers/health-shared.ts'
+        src = dict(self.sources, **{helper: ''})
+        self.graph[entry['specs'][0]] = {helper}
+        self.assertIn(name, self.names(self.choose([helper], src)))
+
+    def test_actual_health_workflow_build_identity_deadline_and_six_file_upload(self):
         text = Path('.github/workflows/ci.yml').read_text()
+        block = text.split('  browser:\n', 1)[1].split('\n  native-no-store:', 1)[0]
+        self.assertIn("timeout-minutes: ${{ matrix.name == 'tasks-health-recovery' && 30 || 20 }}", block)
+        self.assertIn('matrix: ${{ fromJSON(needs.plan.outputs.browser_matrix) }}', block)
+        self.assertIn('max-parallel: 8', block)
+        self.assertIn('contents: read', block)
+        build = block.split('      - name: Build real API and frontend\n', 1)[1].split('      - name:', 1)[0]
+        self.assertIn("if: ${{ matrix.name != 'tasks-health-recovery' }}", build)
+        self.assertIn('run: go mod verify && make build web-build', build)
+        locked = block.split('      - name: Install locked health recovery dependencies', 1)[1].split('      - name:', 1)[0]
+        self.assertIn("if: ${{ matrix.name == 'tasks-health-recovery' }}", locked)
+        self.assertIn('run: go mod verify && npm ci --prefix web', locked)
+        self.assertNotIn('npm run build', locked)
+        deadline = block.split('      - name: Bound health recovery job', 1)[1].split('      - name:', 1)[0]
+        self.assertIn("if: ${{ matrix.name == 'tasks-health-recovery' }}", deadline)
+        self.assertIn('ADTR_E2E_HEALTH_JOB_DEADLINE=', deadline)
+        self.assertIn('int(time.time()) + 1620', deadline)
+        self.assertIn('GITHUB_ENV', deadline)
+        self.assertLess(block.index('Bound health recovery job'), block.index('uses: actions/checkout@'))
+        # The nonce is generated in the owned runner, never a public VITE input or workflow literal.
+        self.assertNotIn('ADTR_E2E_HEALTH_RUN_NONCE', block)
+        validator = 'python3 scripts/validate_tasks_health_recovery_evidence.py --evidence-dir web/playwright-report/tasks-health-recovery-validated --source-root .'
+        self.assertLess(block.index('run: ${{ matrix.command }}'), block.index(validator))
+        start = block.index('      - name: Validate joint health recovery source')
+        end = block.index('      - name: Validate safe failure diagnostics', start)
+        evidence = block[start:end]
+        self.assertIn("if: ${{ success() && matrix.name == 'tasks-health-recovery' }}", evidence)
+        self.assertIn("success() && matrix.name == 'tasks-health-recovery' && steps.health-recovery-evidence.outcome == 'success'", evidence)
+        self.assertIn('actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02', evidence)
+        files = ['manifest.json', 'cleanup-receipt.json', 'parent-failed-desktop.png',
+                 'parent-failed-mobile.png', 'child-succeeded-desktop.png', 'child-succeeded-mobile.png']
+        self.assertEqual(json.loads(Path('scripts/fixtures/tasks_health_recovery_evidence.json').read_text())['files'], files)
+        self.assertEqual(re.findall(r'^            (web/[^\n]+)$', evidence, re.M),
+                         ['web/playwright-report/tasks-health-recovery-validated/' + f for f in files])
+        self.assertNotIn('*', evidence)
+        self.assertNotIn('always()', evidence)
+        self.assertIn('if-no-files-found: error', evidence)
+        self.assertIn('retention-days: 7', evidence)
+        self.assertEqual(evidence.count('timeout-minutes: 1'), 2)
+        diagnostics = block[end:].split('      - name: Validate real empty', 1)[0]
+        self.assertIn("failure() && matrix.name != 'tasks-health-recovery'", diagnostics)
+        self.assertIn("failure() && matrix.name != 'tasks-health-recovery' && steps.safe-diagnostics.outcome == 'success'", diagnostics)
+
+    def test_health_outer_projection_preserves_complete_predecessor_and_rejects_mutations(self):
+        text = Path('.github/workflows/ci.yml').read_text()
+        delta = json.loads(Path('scripts/fixtures/tasks_health_recovery_ci_delta.json').read_text())
+        self.assertEqual(delta['baselineSHA256'], 'f4e8111f36a7441951012027b1371059ca8f86c5a21663f1546ff78b64b89c13')
+        self.assertEqual(len(delta['replacements']), 5)
+        predecessor = restore_health_recovery(text)
+        self.assertEqual(hashlib.sha256(predecessor.encode()).hexdigest(), delta['baselineSHA256'])
+        self.assertEqual(restore_selection(text), restore_selection_predecessor(predecessor))
+        variants = [predecessor]
+        for change in delta['replacements']:
+            self.assertEqual(text.count(change['new']), 1)
+            variants.extend([text.replace(change['new'], '', 1),
+                             text.replace(change['new'], change['new'] * 2, 1),
+                             text.replace(change['new'], change['old'], 1),
+                             text.replace(change['new'], change['new'] + ' tampered\n', 1)])
+        for old, new in [('contents: read', 'contents: write'), ('run: make check', 'run: true'),
+                         ('max-parallel: 8', 'max-parallel: 9'),
+                         ('ADTR_E2E_HEALTH_JOB_DEADLINE=', 'VITE_HEALTH_JOB_DEADLINE='),
+                         ('if-no-files-found: error', 'if-no-files-found: warn'),
+                         ('web/playwright-report/tasks-health-recovery-validated/manifest.json', 'web/test-results/**'),
+                         ('cache: true', 'cache: false'), ('retention-days: 7', 'retention-days: 8')]:
+            self.assertIn(old, text)
+            variants.append(text.replace(old, new, 1))
+        for variant in variants:
+            with self.subTest(sha256=hashlib.sha256(variant.encode()).hexdigest()):
+                with self.assertRaises(ValueError):
+                    restore_health_recovery(variant)
+                with self.assertRaises(ValueError):
+                    restore_selection(variant)
+
+    def test_isolation_workflow_delta_is_exact_and_cannot_mask_other_changes(self):
+        text = restore_health_recovery(Path('.github/workflows/ci.yml').read_text())
         delta = json.loads(Path('scripts/fixtures/messages_isolation_ci_delta.json').read_text())
         self.assertEqual(delta['baselineSHA256'], 'c6ecd0591b3b8eff1b9d653aa19c6bcb14232616a9f1ff12930705825fd4f03a')
         self.assertEqual(len(delta['replacements']), 2)
-        restored = restore_messages_isolation(text)
+        restored = restore_messages_isolation_predecessor(text)
         self.assertEqual(hashlib.sha256(restored.encode()).hexdigest(), delta['baselineSHA256'])
         # Missing, duplicate, partially reversed and tampered reviewed blocks
         # must fail, as must any unrelated command, permission or budget change.
@@ -616,9 +843,9 @@ class SelectionContract(unittest.TestCase):
         for variant in variants:
             with self.subTest(variantSHA256=hashlib.sha256(variant.encode()).hexdigest()):
                 with self.assertRaises(ValueError):
-                    restore_messages_isolation(variant)
+                    restore_messages_isolation_predecessor(variant)
                 with self.assertRaises(ValueError):
-                    restore_selection(variant)
+                    restore_selection_predecessor(variant)
         block = text.split('      - name: Retain synthetic message workspace evidence\n', 1)[1].split('      - name:', 1)[0]
         self.assertIn("success() && (matrix.name == 'messages' || matrix.name == 'messages-isolation')", block)
         self.assertIn('name: ${{ matrix.name }}-soc-evidence-${{ github.run_id }}-${{ github.run_attempt }}', block)
@@ -627,13 +854,15 @@ class SelectionContract(unittest.TestCase):
         self.assertIn('retention-days: 7', block)
 
     def test_workflow_exact_delta_and_all_original_steps_preserved(self):
-        text=Path('.github/workflows/ci.yml').read_text()
-        original=restore_selection(text)
+        actual=Path('.github/workflows/ci.yml').read_text()
+        text=restore_health_recovery(actual)
+        original=restore_selection_predecessor(text)
+        self.assertEqual(original, restore_selection(actual))
         self.assertIn('run: make check',original)
         self.assertIn('shard: [1, 2, 3, 4, 5, 6, 7, 8]',original)
         for old,new in [('needs.plan.outputs.browser == \'true\'', 'false'),('needs: [plan, prepare-postgres]','needs: [plan]'),('fromJSON(needs.plan.outputs.browser_matrix)','fromJSON(\'{}\')'),('if: ${{ always() }}','if: ${{ success() }}'),('run: make check','run: true'),('contents: read','contents: write')]:
             self.assertIn(old,text)
-            with self.assertRaises(ValueError):restore_selection(text.replace(old,new,1))
+            with self.assertRaises(ValueError):restore_selection_predecessor(text.replace(old,new,1))
         self.assertIn('run: python3 scripts/ci_selection_summary.py',text)
         self.assertIn("expected = make_plan(",Path('scripts/ci_selection_summary.py').read_text())
         self.assertIn("node --test scripts/test_ci_dependencies.mjs",text)

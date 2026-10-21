@@ -1,4 +1,6 @@
 from ci_workflow_contract import reviewed_workflow
+# Historical AST checks use the exact health predecessor; actual health has its own contracts.
+from test_directory_v4_runner_contract import restore_health_runner
 """One independent pagination dictionary4 suite; preserve all 57 prior jobs byte-for-byte.
 
 Static/unit checks establish the intended 58-job shape, not executed browser CI.
@@ -180,7 +182,7 @@ class PaginationGroupMembersRunnerContract(unittest.TestCase):
                 run.assert_not_called()
 
     def test_browser_660_seconds_then_strict_validation_before_cleanup(self):
-        source = Path('scripts/test_auth_e2e.py').read_text()
+        source = restore_health_runner(Path('scripts/test_auth_e2e.py').read_text())
         body = next(n for n in ast.walk(ast.parse(source)) if isinstance(n, ast.FunctionDef) and n.name == 'main')
         owned = next(n for n in body.body if isinstance(n, ast.Try))
         browser = next(i for i, n in enumerate(owned.body) if isinstance(n, ast.Expr) and 'subprocess.run(command,' in ast.get_source_segment(source, n))
