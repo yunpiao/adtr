@@ -487,19 +487,38 @@ test("real health epoch rejection, explicit child recovery and original-key repl
           "screenshot_required_content_outside_viewport");
       }
     });
-    await capture("unobscured", async () => {
-      for (const target of targets) {
-        const clear = await target.evaluate(element => {
-          const box = element.getBoundingClientRect();
-          return [[box.left + 1, box.top + 1], [box.right - 1, box.top + 1],
-            [box.left + 1, box.bottom - 1], [box.right - 1, box.bottom - 1],
-            [(box.left + box.right) / 2, (box.top + box.bottom) / 2]].every(([x, y]) => {
+    for (const [index, target] of targets.entries()) {
+      // Rounded element corners can be transparent. Test every actual text
+      // fragment instead; parent hits still fail, never count as unobscured.
+      const proof = await capture("unobscured", () => target.evaluate(element => {
+        const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+        let fragments = 0, contained = true, unobscured = true;
+        for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+          if (!node.textContent?.trim()) continue;
+          const range = document.createRange(); range.selectNodeContents(node);
+          for (const rect of range.getClientRects()) {
+            if (rect.width <= 0 || rect.height <= 0) continue;
+            fragments++;
+            contained = contained && rect.left >= 0 && rect.top >= 0 &&
+              rect.right <= window.innerWidth && rect.bottom <= window.innerHeight;
+            const dx = Math.min(1, rect.width / 4), dy = Math.min(1, rect.height / 4);
+            const points = [[rect.left + dx, rect.top + dy], [rect.right - dx, rect.top + dy],
+              [rect.left + dx, rect.bottom - dy], [rect.right - dx, rect.bottom - dy],
+              [(rect.left + rect.right) / 2, (rect.top + rect.bottom) / 2]];
+            unobscured = unobscured && points.every(([x, y]) => {
               const hit = document.elementFromPoint(x, y); return hit !== null && (hit === element || element.contains(hit));
             });
-        });
-        fact(clear, "screenshot_target_obscured");
-      }
-    });
+          }
+        }
+        // Only booleans leave the page, never text, rectangles or DOM identity.
+        return { present: fragments > 0, contained, unobscured };
+      }));
+      const targetSlot = index === 0 ? "first" : "second";
+      fact(index === 0 || index === 1, "screenshot_target_index_invalid");
+      fact(proof.present, `screenshot_${slot}_${targetSlot}_text_missing`);
+      fact(proof.contained, `screenshot_${slot}_${targetSlot}_text_outside`);
+      fact(proof.unobscured, `screenshot_${slot}_${targetSlot}_text_obscured`);
+    }
     const name = `${state === "failed" ? "parent-failed" : "child-succeeded"}-${width === 1440 ? "desktop" : "mobile"}.png`;
     await capture("png", async () => {
       const bytes = await page.screenshot({ path: testInfo.outputPath(name), fullPage: false, animations: "disabled" });

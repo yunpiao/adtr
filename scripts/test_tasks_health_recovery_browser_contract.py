@@ -86,7 +86,16 @@ def screenshot_violations(source):
         'box.x >= 0 && box.y >= 0 && box.x + box.width <= width && box.y + box.height <= height',
         'document.elementFromPoint(x, y)',
         'hit === element || element.contains(hit)',
-        'fact(clear, "screenshot_target_obscured");',
+        'document.createTreeWalker(element, NodeFilter.SHOW_TEXT)',
+        'range.selectNodeContents(node);',
+        'for (const rect of range.getClientRects())',
+        'rect.right <= window.innerWidth && rect.bottom <= window.innerHeight',
+        'return { present: fragments > 0, contained, unobscured };',
+        'const targetSlot = index === 0 ? "first" : "second";',
+        'fact(index === 0 || index === 1, "screenshot_target_index_invalid");',
+        'fact(proof.present, `screenshot_${slot}_${targetSlot}_text_missing`);',
+        'fact(proof.contained, `screenshot_${slot}_${targetSlot}_text_outside`);',
+        'fact(proof.unobscured, `screenshot_${slot}_${targetSlot}_text_obscured`);',
         'fullPage: false, animations: "disabled"',
         'fact(empty, "proof_not_empty");',
     )
@@ -126,7 +135,7 @@ def call_regions(masked, names):
 
 
 def privacy_violations(source):
-    result = screenshot_violations(source)
+    result = []
     forbidden = {
         'raw_error': r'catch\s*\(|\bcause\s*:|\b(?:error|err|exception)\.(?:message|stack)',
         'logging': r'\bconsole\.|\.on\(\s*["\'](?:console|response|requestfailed|pageerror)["\']',
@@ -208,7 +217,11 @@ class PrivacyMutationContract(unittest.TestCase):
             ('"parent_desktop"', 'id'),
             ('bounds.right - bounds.left <= width && bounds.bottom - bounds.top <= height', 'true'),
             ('box.x >= 0 && box.y >= 0 && box.x + box.width <= width && box.y + box.height <= height', 'true'),
-            ('fact(clear, "screenshot_target_obscured");', ''),
+            ('fact(proof.unobscured, `screenshot_${slot}_${targetSlot}_text_obscured`);', ''),
+            ('fact(proof.contained, `screenshot_${slot}_${targetSlot}_text_outside`);', ''),
+            ('fact(proof.present, `screenshot_${slot}_${targetSlot}_text_missing`);', ''),
+            ('for (const rect of range.getClientRects())', 'for (const rect of [])'),
+            ('hit === element || element.contains(hit)', 'hit !== null'),
             ('fullPage: false', 'fullPage: true'),
             ('fact(empty, "proof_not_empty");', ''),
         ):
