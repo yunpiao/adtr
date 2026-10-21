@@ -3,8 +3,11 @@ import {
   test,
   expect,
   type BrowserContext,
+  type Frame,
   type Locator,
   type Page,
+  type Request,
+  type Response,
   type TestInfo,
 } from "@playwright/test";
 import { execFileSync } from "node:child_process";
@@ -117,6 +120,119 @@ async function readJSON(context: BrowserContext, path: string) {
   const response = await context.request.get(path);
   expect(response.status(), `GET ${path}`).toBe(200);
   return response.json();
+}
+
+type RouteReadPhase =
+  | "resources-entry"
+  | "resources-reload"
+  | "health-click"
+  | "resources-back"
+  | "health-forward"
+  | "editor-fallback"
+  | "resources-return"
+  | "saved-editor-reload"
+  | "saved-storage-reload";
+
+// Observe native navigation and one newly emitted GET through requestfinished.
+// Never fetch/replay, consume a body, or retain headers/proofs. An old polling
+// response cannot match: its Request was not admitted after this navigation.
+async function observeRouteRead(
+  page: Page,
+  phase: RouteReadPhase,
+  hash: string,
+  path: string,
+  mode: "history" | "reload",
+  action: () => Promise<unknown>,
+) {
+  const origin = new URL(page.url()).origin;
+  const documentPath = new URL(page.url()).pathname;
+  let documentStarted = false,
+    navigated = false,
+    request: Request | undefined,
+    status: number | undefined,
+    settled = false;
+  let finish!: (ok: boolean) => void;
+  const completed = new Promise<boolean>((resolve) => {
+    finish = (ok) => {
+      if (!settled) {
+        settled = true;
+        resolve(ok);
+      }
+    };
+  });
+  const onNavigation = (frame: Frame) => {
+    if (frame !== page.mainFrame()) return;
+    const url = new URL(frame.url());
+    if (
+      url.origin !== origin ||
+      url.hash !== hash ||
+      (mode === "reload" && !documentStarted)
+    ) {
+      finish(false);
+      return;
+    }
+    navigated = true;
+  };
+  const onRequest = (candidate: Request) => {
+    const url = new URL(candidate.url());
+    if (url.origin !== origin || candidate.method() !== "GET") return;
+    if (candidate.isNavigationRequest()) {
+      if (
+        candidate.frame() === page.mainFrame() &&
+        url.pathname === documentPath
+      )
+        documentStarted = true;
+      return;
+    }
+    if (
+      !settled &&
+      navigated &&
+      !request &&
+      url.pathname === path &&
+      candidate.frame() === page.mainFrame()
+    )
+      request = candidate;
+  };
+  const onResponse = (response: Response) => {
+    if (response.request() === request) status = response.status();
+  };
+  const onFinished = (candidate: Request) => {
+    if (candidate === request) finish(status === 200);
+  };
+  const onFailed = (candidate: Request) => {
+    if (candidate === request) finish(false);
+  };
+  page.on("framenavigated", onNavigation);
+  page.on("request", onRequest);
+  page.on("response", onResponse);
+  page.on("requestfinished", onFinished);
+  page.on("requestfailed", onFailed);
+  const timer = setTimeout(() => finish(false), 15_000);
+  try {
+    await action();
+    if (!(await completed) || new URL(page.url()).hash !== hash)
+      throw new Error("Route observation incomplete");
+  } catch {
+    // A transport/action failure must not serialize a browser call log.
+    throw new Error(`System route read witness failed: ${phase}`);
+  } finally {
+    clearTimeout(timer);
+    page.off("framenavigated", onNavigation);
+    page.off("request", onRequest);
+    page.off("response", onResponse);
+    page.off("requestfinished", onFinished);
+    page.off("requestfailed", onFailed);
+    finish(false);
+    await completed;
+  }
+}
+
+async function assertSystemTab(page: Page, label: string) {
+  await expect(
+    page
+      .getByRole("navigation", { name: "系统健康分类", exact: true })
+      .getByRole("button", { name: label, exact: true }),
+  ).toHaveAttribute("aria-current", "page");
 }
 
 async function submitMutation(page: Page, path: string, button: string) {
@@ -461,7 +577,120 @@ test("real browser → Linux sampler → PostgreSQL history/settings and actual 
       BigInt(observedRoot.freeBytes!) +
       BigInt(observedRoot.reservedBytes!),
   ).toBe(BigInt(observedRoot.totalBytes!));
-  await page.getByRole("button", { name: "资源与历史", exact: true }).click();
+  // Read-only route probes precede graph selection, writes and Worker pause.
+  // Back/Forward destinations have disjoint read endpoint sets, so an old
+  // departing-tab poll cannot stand in for the destination's new request.
+  let navigationWrites = 0;
+  const navigationOrigin = new URL(page.url()).origin;
+  const countNavigationWrites = (request: Request) => {
+    const url = new URL(request.url());
+    if (
+      url.origin === navigationOrigin &&
+      url.pathname === "/api/system/storage/settings" &&
+      request.method() === "POST"
+    )
+      navigationWrites++;
+  };
+  page.on("request", countNavigationWrites);
+  try {
+    await observeRouteRead(
+      page,
+      "resources-entry",
+      "#system/resources",
+      "/api/system/resources/current",
+      "history",
+      () =>
+        page.goto("/#system/resources", {
+          waitUntil: "domcontentloaded",
+          timeout: 15_000,
+        }),
+    );
+    await assertSystemTab(page, "资源与历史");
+    await expect(page.getByRole("img", { name: /实际样本/ })).toBeVisible();
+    await observeRouteRead(
+      page,
+      "resources-reload",
+      "#system/resources",
+      "/api/system/resources/current",
+      "reload",
+      () => page.reload({ waitUntil: "domcontentloaded", timeout: 15_000 }),
+    );
+    await assertSystemTab(page, "资源与历史");
+    await expect(page.getByRole("img", { name: /实际样本/ })).toBeVisible();
+    await observeRouteRead(
+      page,
+      "health-click",
+      "#system/health",
+      "/api/system/health",
+      "history",
+      () =>
+        page
+          .getByRole("button", { name: "平台依赖健康", exact: true })
+          .click({ timeout: 15_000 }),
+    );
+    await assertSystemTab(page, "平台依赖健康");
+    await expect(
+      page.getByRole("region", { name: "依赖诊断工作台", exact: true }),
+    ).toBeVisible();
+    await observeRouteRead(
+      page,
+      "resources-back",
+      "#system/resources",
+      "/api/system/resources/current",
+      "history",
+      () => page.goBack({ waitUntil: "domcontentloaded", timeout: 15_000 }),
+    );
+    await assertSystemTab(page, "资源与历史");
+    await expect(page.getByRole("img", { name: /实际样本/ })).toBeVisible();
+    await observeRouteRead(
+      page,
+      "health-forward",
+      "#system/health",
+      "/api/system/health",
+      "history",
+      () => page.goForward({ waitUntil: "domcontentloaded", timeout: 15_000 }),
+    );
+    await assertSystemTab(page, "平台依赖健康");
+    await expect(
+      page.getByRole("region", { name: "依赖诊断工作台", exact: true }),
+    ).toBeVisible();
+    await observeRouteRead(
+      page,
+      "editor-fallback",
+      "#system/storage/settings/runtime-root",
+      "/api/system/info",
+      "history",
+      () =>
+        page.goto("/#system/storage/settings/runtime-root", {
+          waitUntil: "domcontentloaded",
+          timeout: 15_000,
+        }),
+    );
+    await assertSystemTab(page, "系统信息");
+    await expect(page.getByRole("table", { name: "已登记节点" })).toBeVisible();
+    await expect(page.locator('input[type="password"]')).toHaveCount(0);
+    await expect(
+      page.getByLabel("未使用的认证器验证码", { exact: true }),
+    ).toHaveCount(0);
+    await expect(
+      page.getByRole("button", { name: "保存告警阈值", exact: true }),
+    ).toHaveCount(0);
+    await observeRouteRead(
+      page,
+      "resources-return",
+      "#system/resources",
+      "/api/system/resources/current",
+      "history",
+      () =>
+        page
+          .getByRole("button", { name: "资源与历史", exact: true })
+          .click({ timeout: 15_000 }),
+    );
+    await assertSystemTab(page, "资源与历史");
+    expect(navigationWrites, "read-only navigation writes").toBe(0);
+  } finally {
+    page.off("request", countNavigationWrites);
+  }
   await expect(page.getByRole("img", { name: /实际样本/ })).toBeVisible();
   for (const [graph, range] of [
     ["cpu_basic", "900"],
@@ -691,11 +920,47 @@ test("real browser → Linux sampler → PostgreSQL history/settings and actual 
   });
   await expect(rootStorage.getByText("版本 1", { exact: true })).toBeVisible();
   await expect(savedThreshold).toBeVisible();
-  await page.reload();
-  await navigateTo(page, "系统健康");
-  await page.getByRole("button", { name: "存储管理", exact: true }).click();
-  await expect(rootStorage.getByText("版本 1", { exact: true })).toBeVisible();
-  await expect(savedThreshold).toBeVisible();
+  page.on("request", countNavigationWrites);
+  try {
+    // Saving does not rewrite the editor URL. Its reload must still fall back
+    // to overview without restoring proofs; only a canonical read-only URL
+    // gains restoration in this slice.
+    expect(new URL(page.url()).hash).toBe(
+      "#system/storage/settings/runtime-root",
+    );
+    await observeRouteRead(
+      page,
+      "saved-editor-reload",
+      "#system/storage/settings/runtime-root",
+      "/api/system/info",
+      "reload",
+      () => page.reload({ waitUntil: "domcontentloaded", timeout: 15_000 }),
+    );
+    await assertSystemTab(page, "系统信息");
+    await expect(page.getByRole("table", { name: "已登记节点" })).toBeVisible();
+    await expect(page.locator('input[type="password"]')).toHaveCount(0);
+    await expect(
+      page.getByLabel("未使用的认证器验证码", { exact: true }),
+    ).toHaveCount(0);
+    await navigateTo(page, "系统健康");
+    await page.getByRole("button", { name: "存储管理", exact: true }).click();
+    await expect(rootStorage.getByText("版本 1", { exact: true })).toBeVisible();
+    await expect(savedThreshold).toBeVisible();
+    await observeRouteRead(
+      page,
+      "saved-storage-reload",
+      "#system/storage",
+      "/api/system/storage",
+      "reload",
+      () => page.reload({ waitUntil: "domcontentloaded", timeout: 15_000 }),
+    );
+    await assertSystemTab(page, "存储管理");
+    await expect(rootStorage.getByText("版本 1", { exact: true })).toBeVisible();
+    await expect(savedThreshold).toBeVisible();
+    expect(navigationWrites, "read-only reload writes").toBe(0);
+  } finally {
+    page.off("request", countNavigationWrites);
+  }
   const persisted: StorageView = await readJSON(
     context,
     "/api/system/storage?instance=local-api&page=1&pageSize=20",
