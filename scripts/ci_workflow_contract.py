@@ -9,8 +9,23 @@ import json
 from pathlib import Path
 
 
+def restore_archive_target_observation(text):
+    """Reverse only the exact maintenance three-file validation/upload wiring."""
+    delta = json.loads(Path('scripts/fixtures/archive_target_observation_ci_delta.json').read_text())
+    if set(delta) != {'baselineSHA256', 'replacements'} or len(delta['replacements']) != 1:
+        raise ValueError('archive observation workflow delta is invalid')
+    for change in reversed(delta['replacements']):
+        if set(change) != {'old', 'new'} or not change['old'] or not change['new'] or text.count(change['new']) != 1:
+            raise ValueError('archive observation workflow block differs from reviewed delta')
+        text = text.replace(change['new'], change['old'], 1)
+    if hashlib.sha256(text.encode()).hexdigest() != delta['baselineSHA256']:
+        raise ValueError('non-archive-observation workflow bytes changed')
+    return text
+
+
 def restore_health_recovery(text):
     """Reverse exactly the reviewed health-only build and six-file evidence wiring."""
+    text = restore_archive_target_observation(text)
     delta = json.loads(Path('scripts/fixtures/tasks_health_recovery_ci_delta.json').read_text())
     for change in reversed(delta['replacements']):
         if text.count(change['new']) != 1:
