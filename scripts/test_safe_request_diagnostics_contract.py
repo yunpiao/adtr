@@ -135,10 +135,11 @@ class SafeRequestContract(unittest.TestCase):
             validate_step = section.index("- name: Validate safe failure diagnostics")
             upload_step = section.index("- name: Retain validated safe failure diagnostics")
             self.assertLess(validate_step, upload_step)
-            self.assertIn("id: safe-diagnostics\n        if: ${{ failure() }}", section[validate_step:upload_step])
+            health_exclusion = " && matrix.name != 'tasks-health-recovery'" if job == "browser:" else ""
+            self.assertIn("id: safe-diagnostics\n        if: ${{ failure()" + health_exclusion + " }}", section[validate_step:upload_step])
             self.assertIn("python3 scripts/e2e_runtime_diagnostics.py .e2e-diagnostics .e2e-validated", section[validate_step:upload_step])
             upload = section[upload_step:].split("\n      - name:", 1)[0]
-            self.assertIn("if: ${{ failure() && steps.safe-diagnostics.outcome == 'success' }}", upload)
+            self.assertIn("if: ${{ failure()" + health_exclusion + " && steps.safe-diagnostics.outcome == 'success' }}", upload)
             self.assertIn("path: .e2e-validated/diagnostics.json\n", upload)
             self.assertIn("include-hidden-files: true", upload)
             self.assertIn(name + "-${{ github.run_id }}-${{ github.run_attempt }}", upload)

@@ -12,6 +12,8 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 SPEC = ROOT / 'web/e2e/tasks-health-recovery.spec.ts'
+SQL_IDENTIFIER = r'(?:[a-z_][a-z0-9_$]*|"(?:[^"]|"")+")'
+SQL_RELATION = rf'{SQL_IDENTIFIER}(?:\s*\.\s*{SQL_IDENTIFIER})?'
 
 
 def mask_literals(source):
@@ -49,7 +51,11 @@ def privacy_violations(source):
         'network_mock': r'\.(?:route|routeFromHAR|fulfill)\s*\(',
         'state_seed': r'\b(?:localStorage|sessionStorage)\b|\.clock\.',
         'scope_escape': r'\b(?:SIGSTOP|pkill|killall)\b',
-        'db_mutation': r'\b(?:INSERT\s+INTO|UPDATE\s+adtr|DELETE\s+FROM|TRUNCATE|ALTER\s+TABLE)\b',
+        # Match a complete UPDATE target and SET, not an "adtr" prefix whose
+        # trailing word boundary misses adtr_users. Include schema-qualified,
+        # quoted and unqualified targets. Keep the old UPDATE branch as well,
+        # so this is additive and no previously detected write is permitted.
+        'db_mutation': rf'\b(?:INSERT\s+INTO|UPDATE\s+adtr|UPDATE\s+(?:ONLY\s+)?{SQL_RELATION}(?:\s+(?:AS\s+)?{SQL_IDENTIFIER})?\s+SET|DELETE\s+FROM|TRUNCATE|ALTER\s+TABLE)\b',
         'private_row': r'\b(?:session_hash|token_hash|password_hash)\b|SELECT\s+\*',
         'skip': r'\btest\.(?:skip|fixme)\s*\(',
         'extra_artifact': r'\.(?:attach|attachments)\b|\bcopyFile(?:Sync)?\s*\(',
@@ -109,6 +115,40 @@ class PrivacyMutationContract(unittest.TestCase):
     def test_masker_does_not_treat_comments_as_actions(self):
         self.assertEqual(privacy_violations('// await page.goto("secret");'), [])
         self.assertEqual(privacy_violations('safe("fixed", async () => { await page.goto("/"); });'), [])
+
+    def test_update_target_variants_are_rejected(self):
+        for statement in (
+            'UPDATE adtr_users SET authorization_version=4;',
+            'UPDATE adtr.users SET authorization_version=4;',
+            'UPDATE adtr.users /* original guard remains */ SET authorization_version=4;',
+            'UPDATE "adtr"."users" SET authorization_version=4;',
+            'UPDATE users SET authorization_version=4;',
+            'UPDATE ONLY adtr.users AS u SET authorization_version=4;',
+            'update\n adtr.users u\n set authorization_version=4;',
+        ):
+            with self.subTest(statement=statement):
+                # Check SQL itself and its realistic embedding in a TS string.
+                self.assertIn('db_mutation', privacy_violations(statement))
+                self.assertIn('db_mutation', privacy_violations(self.source + '\nsql(`' + statement + '`);'))
+
+    def test_readonly_sql_and_update_identifiers_are_not_writes(self):
+        for statement in (
+            'SELECT authorization_version FROM adtr.users;',
+            'SELECT updated_at AS "updatedAt" FROM adtr.tasks;',
+            'const updateTask = "refresh";',
+        ):
+            with self.subTest(statement=statement):
+                self.assertNotIn('db_mutation', privacy_violations(statement))
+
+    def test_other_sql_write_guards_remain_closed(self):
+        for statement in (
+            'INSERT INTO adtr.tasks VALUES (1);',
+            'DELETE FROM adtr.tasks;',
+            'TRUNCATE adtr.tasks;',
+            'ALTER TABLE adtr.tasks ADD COLUMN unsafe int;',
+        ):
+            with self.subTest(statement=statement):
+                self.assertIn('db_mutation', privacy_violations(statement))
 
     def test_boundary_removal_is_detected(self):
         wrapped = 'safe("fixed", async () => { await page.getByLabel("密码").fill(secret); });'

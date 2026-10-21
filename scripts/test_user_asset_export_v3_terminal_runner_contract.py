@@ -1,4 +1,6 @@
 from ci_workflow_contract import reviewed_workflow, reviewed_source
+# Historical AST checks use the exact health predecessor; actual health has its own contracts.
+from test_directory_v4_runner_contract import restore_health_runner
 """Exact terminal-suite delta; stripping only its frozen additions restores all 60 jobs."""
 import ast
 import hashlib
@@ -224,7 +226,7 @@ class TerminalRunnerContract(unittest.TestCase):
         self.assertNotIn('include-hidden-files', delta)
 
     def test_owned_guard_before_validation_and_cleanup(self):
-        source = Path('scripts/test_auth_e2e.py').read_text()
+        source = restore_health_runner(Path('scripts/test_auth_e2e.py').read_text())
         self.assertLess(source.index('capture_terminal_export(args.suite)'), source.index('creation_attempted = True'))
         self.assertLess(source.index('export_worker_guard.check()'), source.index('validate_terminal_export(args.suite)'))
         cleanup = legacy_main_cleanup(source)
@@ -234,7 +236,7 @@ class TerminalRunnerContract(unittest.TestCase):
         self.assertNotIn('MFA_BYPASS', delta)
 
     def test_cleanup_order_ignores_helper_decoys_but_rejects_reversed_main_order(self):
-        source = Path('scripts/test_auth_e2e.py').read_text()
+        source = restore_health_runner(Path('scripts/test_auth_e2e.py').read_text())
         cleanup = legacy_main_cleanup(source)
         decoy = "def unrelated_helper():\n    process.terminate()\n    export_worker_guard.close()\n\n"
         self.assertEqual(legacy_main_cleanup(decoy + source), cleanup)
@@ -250,7 +252,7 @@ class TerminalRunnerContract(unittest.TestCase):
                             reversed_cleanup.index('process.terminate()'))
 
     def test_cleanup_selector_rejects_missing_or_wrong_finally_dispatch(self):
-        source = Path('scripts/test_auth_e2e.py').read_text()
+        source = restore_health_runner(Path('scripts/test_auth_e2e.py').read_text())
         for changed in (
                 source.replace('def main():', 'def other_main():'),
                 source.replace('if args.suite in V4_CONTROLS_BUDGETS:', 'if False:')):
