@@ -16,14 +16,14 @@ class DirectoryV4ControlsCI(unittest.TestCase):
         expected = ['directory-v4-controls', 'directory-v4-cancel', 'directory-v4-readers']
         additions = [entry for entry in inventory['browser'] if entry['name'] in expected]
         self.assertEqual(additions, [{'name': suite, 'command': 'python3 scripts/test_auth_e2e.py --suite ' + suite, 'specs': ['web/e2e/' + suite + '.spec.ts']} for suite in expected])
-        self.assertEqual(len(inventory['browser']), 54)
+        self.assertEqual(len(inventory['browser']), 55)
         self.assertEqual(len(inventory['fixed']), 7)
-        self.assertEqual(len(inventory['frontend_roots']['web/src/TaskWorkspace.tsx']), 16)
+        self.assertEqual(len(inventory['frontend_roots']['web/src/TaskWorkspace.tsx']), 17)
         self.assertIn('audit', inventory['frontend_roots']['web/src/TaskWorkspace.tsx'])
         legacy = restore_selection(Path('.github/workflows/ci.yml').read_text())
         matrix = legacy.split('  browser:\n', 1)[1].split('    steps:\n', 1)[0]
-        self.assertEqual([(entry['name'], entry['command']) for entry in inventory['browser'] if entry['name'] not in expected], re.findall(r'          - name: ([^\n]+)\n            command: ([^\n]+)', matrix))
-        self.assertEqual(54 + 7 + 8 + 6, 75)  # plan, prepare, contracts, two native, verify.
+        self.assertEqual([(entry['name'], entry['command']) for entry in inventory['browser'] if entry['name'] not in expected + ['messages-isolation']], re.findall(r'          - name: ([^\n]+)\n            command: ([^\n]+)', matrix))
+        self.assertEqual(55 + 7 + 8 + 6, 76)  # plan, prepare, contracts, two native, verify.
 
     def test_runtime_commands_budgets_and_real_discovery(self):
         runner = Path('scripts/test_auth_e2e.py').read_text()

@@ -285,7 +285,8 @@ def main():
         if 'web/src/computer-asset-export-v3-fixtures.ts' not in test_only_dependencies(actual_graph, uncertain, inventory):
             raise ValueError('current test-helper proof drift')
         cases = {
-            'web/src/MessagesWorkspace.tsx': {'messages'},
+            'web/src/MessagesWorkspace.tsx': {'messages', 'messages-isolation'},
+            'web/e2e/messages-isolation.spec.ts': {'messages-isolation'},
             'web/e2e/messages-bulk.spec.ts': {'messages'},
             'web/src/ComputerAssetsV3Workspace.tsx': set(inventory['frontend_roots']['web/src/ComputerAssetsV3Workspace.tsx']),
             'web/src/UserAssetExportV3.tsx': set(inventory['frontend_roots']['web/src/UserAssetsV3Workspace.tsx']),

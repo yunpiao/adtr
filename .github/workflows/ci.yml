@@ -714,10 +714,10 @@ jobs:
           if-no-files-found: error
           retention-days: 7
       - name: Retain synthetic message workspace evidence
-        if: ${{ success() && matrix.name == 'messages' }}
+        if: ${{ success() && (matrix.name == 'messages' || matrix.name == 'messages-isolation') }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: messages-soc-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          name: ${{ matrix.name }}-soc-evidence-${{ github.run_id }}-${{ github.run_attempt }}
           path: web/test-results/**/messages-soc-*
           if-no-files-found: error
           retention-days: 7

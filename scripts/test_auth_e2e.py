@@ -1,6 +1,9 @@
 """Real browser/API/PostgreSQL acceptance on an isolated, owned test database."""
 import argparse
 import base64
+from datetime import datetime
+import hashlib
+import json
 import os
 from pathlib import Path
 import secrets
@@ -14,6 +17,7 @@ import time
 import urllib.error
 import urllib.request
 import uuid
+import zlib
 
 from user_asset_export_v3_ci import configure as configure_user_export, capture as capture_user_export, validate as validate_user_export
 from user_asset_export_v3_terminal_ci import SUITES as EXPORT_TERMINAL_SUITES, configure as configure_terminal_export, capture as capture_terminal_export, validate as validate_terminal_export
@@ -194,8 +198,8 @@ def cleanup_v4_run(controller, worker, server, diagnostics, logs, ldap_fixture,
 
 def browser_command(suite):
     command = ["npm", "run", "test:e2e", "--prefix", "web", "--", f"e2e/{suite}.spec.ts"]
-    if suite == "messages-bulk":
-        command.extend(["--output", "test-results/messages-bulk"])
+    if suite in {"messages-bulk", "messages-isolation"}:
+        command.extend(["--output", f"test-results/{suite}"])
     if suite in REAL_TAB_LIFECYCLE_SUITES:
         # These regressions require genuine background/foreground tab changes.
         # Headless shell keeps tabs visible even after focus emulation is off.
@@ -212,6 +216,429 @@ def browser_command(suite):
     return command
 
 
+def validate_messages_isolation_evidence():
+    """Validate successful evidence, never infer acceptance from an upload glob.
+
+    Fixed diagnostics deliberately do not echo malformed manifest values. Pixel
+    review remains independent; proofEmpty is only the suite's DOM safety gate.
+    """
+    try:
+        def safe_path(path):
+            path = Path(path).absolute()
+            relative = path.relative_to(Path.cwd())
+            current = Path.cwd()
+            for part in relative.parts:
+                current /= part
+                if current.is_symlink():
+                    raise ValueError()
+            return path
+        root = safe_path("web/test-results/messages-isolation").resolve()
+        manifests = list(root.rglob("messages-soc-isolation-evidence.json"))
+        if len(manifests) != 1:
+            raise ValueError()
+        manifest = safe_path(manifests[0])
+        if not 0 < manifest.stat().st_size <= 5_000_000:
+            raise ValueError()
+        def unique(pairs):
+            result = {}
+            for key, value in pairs:
+                if key in result:
+                    raise ValueError()
+                result[key] = value
+            return result
+        data = json.loads(manifest.read_text(), object_pairs_hook=unique)
+        def require(ok):
+            if not ok:
+                raise ValueError()
+        def digest(path):
+            return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+        def revision(*args):
+            return subprocess.check_output(["git", *args], stderr=subprocess.DEVNULL,
+                                           timeout=10, text=True).strip()
+        require(type(data["formatVersion"]) is int and data["formatVersion"] == 1 and data["suite"] == "messages-isolation"
+                and data["status"] == "passed")
+        require(data["checkoutCommit"] == revision("rev-parse", "HEAD")
+                and data["checkoutTree"] == revision("rev-parse", "HEAD^{tree}")
+                and data["dirty"] is False and revision("status", "--porcelain") == "")
+        for field, variable in (("workflowCommit", "GITHUB_SHA"),
+                                ("workflowRun", "GITHUB_RUN_ID"),
+                                ("workflowAttempt", "GITHUB_RUN_ATTEMPT")):
+            value = data[field]
+            require(type(value) is str and value == os.environ.get(variable, ""))
+            if field == "workflowCommit":
+                require(len(value) == 40 and all(char in "0123456789abcdef" for char in value))
+            else:
+                require(value.isascii() and value.isdigit() and int(value) > 0)
+        require(type(data["browser"]) is str and 0 < len(data["browser"]) <= 128)
+        required_sources = {
+            "web/e2e/messages-isolation.spec.ts",
+            "scripts/test_messages_isolation_browser_contract.py",
+            "scripts/test_auth_e2e.py",
+            "scripts/ci_inventory.json",
+            "scripts/ci_selection.py",
+            "scripts/test_ci_selection_contract.py",
+            ".github/workflows/ci.yml",
+            "docs/messages-authenticated-isolation-evidence.md",
+            "web/playwright.config.ts",
+            "scripts/ci_workflow_contract.py",
+            "scripts/fixtures/messages_isolation_ci_delta.json",
+            "scripts/test_directory_v4_controls_ci_contract.py",
+            "scripts/test_directory_v4_runner_contract.py",
+            "scripts/fixtures/messages_isolation_runner_delta.json",
+            "internal/auth/message_http.go",
+            "internal/messages/projection.go",
+            "internal/messages/snapshot.go",
+            "internal/messages/read.go",
+            "internal/messages/bulk.go",
+            "web/e2e/messages-bulk.spec.ts",
+            "web/e2e/messages.spec.ts",
+            "web/e2e/access.spec.ts",
+            "internal/testmessagefixture/main.go",
+            "internal/auth/access_users.go",
+            "internal/auth/access_roles.go",
+            "internal/auth/task_authorization.go",
+            "internal/auth/task_http.go",
+            "internal/messages/types.go",
+            "docs/messages-other-user-read-history-evidence.md",
+            "internal/auth/access_http.go",
+            "internal/auth/service.go",
+            "internal/messagecore/types.go",
+            "web/e2e/navigation.ts",
+            "web/e2e/safe-runtime-diagnostics.ts",
+            "web/test-helpers/navigation.ts",
+            "web/src/MessagesWorkspace.tsx",
+            "web/src/TaskWorkspace.tsx",
+            "web/src/message-api.ts",
+            "web/src/message-read.tsx",
+            "web/src/message-read-intent.ts",
+            "web/package-lock.json",
+            "internal/messages/schema.go",
+            "internal/messages/bulk_schema.go",
+            "internal/messagecore/result.go",
+        }
+        require(required_sources == set(data["sourceSHA256"]))
+        for path, sha in data["sourceSHA256"].items():
+            source = safe_path(path)
+            require(not Path(path).is_absolute() and ".." not in Path(path).parts and source.is_file())
+            require(sha == digest(source))
+        require(data["artifactsSHA256"]["apiWorker"] == digest("bin/adtr")
+                and data["artifactsSHA256"]["frontendEntry"] == digest("web/dist/index.html"))
+        frontend_root = safe_path("web/dist")
+        frontend_files = {path.relative_to(Path.cwd()).as_posix(): digest(path)
+                          for path in frontend_root.rglob("*") if safe_path(path).is_file()}
+        require(data["artifactsSHA256"]["frontendFiles"] == frontend_files
+                and "web/dist/index.html" in frontend_files
+                and any(path.startswith("web/dist/assets/") and path.endswith(".js") for path in frontend_files))
+        def validate_png(content):
+            offset, chunks, compressed = 8, [], bytearray()
+            width = height = channels = 0
+            while offset < len(content):
+                require(offset + 12 <= len(content))
+                size = int.from_bytes(content[offset:offset+4], "big")
+                kind = content[offset+4:offset+8]
+                require(kind in {b"IHDR", b"IDAT", b"IEND", b"sRGB", b"gAMA", b"cHRM", b"pHYs"})
+                end = offset + 8 + size
+                require(end + 4 <= len(content))
+                payload = content[offset+8:end]
+                require(zlib.crc32(kind + payload) & 0xffffffff == int.from_bytes(content[end:end+4], "big"))
+                if not chunks:
+                    require(kind == b"IHDR" and size == 13)
+                    width, height = int.from_bytes(payload[:4], "big"), int.from_bytes(payload[4:8], "big")
+                    require(0 < width <= 1440 and 0 < height <= 12000 and payload[8] == 8
+                            and payload[9] in (2, 6) and payload[10:] == b"\0\0\0")
+                    channels = 3 if payload[9] == 2 else 4
+                else:
+                    require(kind != b"IHDR")
+                if kind == b"IDAT":
+                    compressed.extend(payload)
+                if kind == b"IEND":
+                    require(size == 0 and end + 4 == len(content))
+                chunks.append(kind)
+                offset = end + 4
+            require(chunks[-1] == b"IEND" and b"IDAT" in chunks and chunks.count(b"IEND") == 1)
+            decoder = zlib.decompressobj()
+            expected = (width * channels + 1) * height
+            pixels = decoder.decompress(bytes(compressed), expected + 1)
+            require(len(pixels) == expected and decoder.eof and not decoder.unused_data and not decoder.unconsumed_tail)
+            require(all(pixels[row * (width * channels + 1)] <= 4 for row in range(height)))
+        screenshots = data["screenshots"]
+        require(len(screenshots) == 4)
+        observed = set()
+        for shot in screenshots:
+            filename = shot["file"]
+            require(Path(filename).name == filename and filename.startswith("messages-soc-isolation-")
+                    and filename.endswith(".png") and shot["proofEmpty"] is True
+                    and shot["fullPage"] is True)
+            path = safe_path(manifest.parent / filename)
+            require(not path.is_symlink() and path.resolve().is_relative_to(root))
+            content = path.read_bytes()
+            require(content[:8] == b"\x89PNG\r\n\x1a\n" and 24 < len(content) <= 20_000_000)
+            validate_png(content)
+            viewport = shot["viewport"]
+            require(type(viewport["width"]) is int and type(viewport["height"]) is int)
+            require(int.from_bytes(content[16:20], "big") == viewport["width"]
+                    and viewport["height"] <= int.from_bytes(content[20:24], "big") <= 12000)
+            require(shot["sha256"] == hashlib.sha256(content).hexdigest())
+            observed.add((shot["identity"], viewport["width"], viewport["height"]))
+        require(observed == {(identity, width, height) for identity in ("A", "B")
+                             for width, height in ((1440, 900), (390, 844))})
+        identities = data["identities"]
+        require(len(identities) == 2 and {x["label"] for x in identities} == {"A", "B"}
+                and len({x["userId"] for x in identities}) == 2)
+        tasks = set()
+        for identity in identities:
+            require(identity["sensitiveActions"] == {"A": 8, "B": 6}[identity["label"]]
+                    and 5 <= identity["snapshotAdmissions"] <= 7)
+            require(len(identity["taskIds"]) == 3 and len(set(identity["taskIds"])) == 3
+                    and bool(identity["provenance"]) and bool(identity["baseline"]))
+            tasks.update(identity["taskIds"])
+        require(len(tasks) == 6)
+        stages = data["stages"]
+        require(bool(stages))
+        for stage in stages:
+            require((stage["status"], stage["body"].get("error")) in
+                    {(404, "not_found"), (400, "target_not_in_result")})
+            require(set(stage["body"]) == {"error"} and stage["before"] == stage["after"])
+        bulks = data["positiveBulks"]
+        require(len(bulks) == 4 and {(x["actor"], x["selection"]) for x in bulks}
+                == {(actor, selection) for actor in ("A", "B") for selection in ("selected", "all")})
+        for bulk in bulks:
+            require(bulk["operation"]["state"] == "completed"
+                    and bool(bulk["operation"]["receipt"])
+                    and bulk["protectedBefore"] == bulk["protectedAfter"])
+        budget = data["phaseBudget"]
+        require(budget["limitMs"] == 60000 and 0 <= budget["snapshotElapsedMs"] <= 60000
+                and budget["totpWaits"] == 8)
+        def instant(value):
+            require(type(value) is str and 20 <= len(value) <= 40)
+            normalized = value[:-1] + "+00:00" if value.endswith("Z") else value
+            require(normalized.endswith("+00:00"))
+            seconds, separator, fraction = normalized[:-6].partition(".")
+            require(len(seconds) == 19 and seconds[10] == "T"
+                    and (not separator or (fraction.isascii() and fraction.isdigit() and 1 <= len(fraction) <= 9)))
+            parsed = datetime.fromisoformat(seconds + "+00:00")
+            # Preserve up to nanoseconds instead of silently truncating to
+            # Python datetime's microsecond resolution.
+            return parsed, fraction.ljust(9, "0")
+        def keys(value, expected):
+            require(type(value) is dict and set(value) == set(expected.split()))
+        keys(data, "formatVersion suite status checkoutCommit checkoutTree dirty workflowCommit workflowRun workflowAttempt browser sourceSHA256 artifactsSHA256 screenshots identities stages positiveBulks phaseBudget limitations")
+        keys(data["artifactsSHA256"], "apiWorker frontendEntry frontendFiles")
+        keys(data["phaseBudget"], "snapshotElapsedMs limitMs totpWaits setupSpent")
+        require(all(type(value) is int for value in data["phaseBudget"].values())
+                and 0 <= data["phaseBudget"]["setupSpent"] <= 75000)
+        require(data["limitations"] == ["synthetic tasks-writer role, not reader-only",
+                "API pagination, not two full UI pages", "completed-operation foreign cancellation only",
+                "screenshots require independent pixel review"])
+        for shot in screenshots:
+            keys(shot, "file viewport fullPage identity proofEmpty sha256")
+            keys(shot["viewport"], "width height")
+        allowed_files = {manifest.resolve()} | {(manifest.parent / shot["file"]).resolve() for shot in screenshots}
+        actual_files = {safe_path(path).resolve() for path in Path("web/test-results").rglob("messages-soc-*")}
+        require(actual_files == allowed_files and not manifest.is_symlink())
+        row_keys = {
+            "identity": "id tenant_id authorization_version",
+            "messages": "message_id tenant_id recipient_user_id source_task_id source_event_id source_result_version message_type sub_type title description occurred_at ingested_at",
+            "reads": "tenant_id user_id message_id first_read_at",
+            "single": "tenant_id user_id operation_id result_id message_id first_read_at committed_at newly_read",
+            "bulk": "tenant_id user_id operation_id queue_id result_id selection authorization_version accepted_at updated_at state target processed newly_read already_read",
+            "targets": "tenant_id user_id operation_id ordinal message_id",
+            "receipts": "tenant_id user_id operation_id ordinal first_read_at committed_at newly_read",
+        }
+        by_label = {identity["label"]: identity for identity in identities}
+        message_sets = {}
+        def state(value, owner):
+            keys(value, "identity messages reads single bulk targets receipts")
+            for table, columns in row_keys.items():
+                require(type(value[table]) is list)
+                for row in value[table]:
+                    keys(row, columns)
+                    integer_columns = {"id", "user_id", "recipient_user_id", "source_event_id", "source_result_version",
+                                       "authorization_version", "queue_id", "ordinal", "target", "processed", "newly_read", "already_read"}
+                    for column, cell in row.items():
+                        if column == "newly_read" and table in ("single", "receipts"):
+                            require(type(cell) is bool)
+                        elif column in integer_columns:
+                            require(type(cell) is int and 0 <= cell <= 9_007_199_254_740_991)
+                        else:
+                            require(type(cell) is str and 0 < len(cell) <= 512)
+                    require(row["tenant_id"] == owner["tenantId"])
+                    user_column = "id" if table == "identity" else "recipient_user_id" if table == "messages" else "user_id"
+                    require(type(row[user_column]) is int and row[user_column] == owner["userId"])
+                    for column in ("first_read_at", "committed_at", "accepted_at", "updated_at", "occurred_at", "ingested_at"):
+                        if column in row:
+                            instant(row[column])
+                    for column in ("message_id", "operation_id", "result_id"):
+                        if column in row:
+                            require(type(row[column]) is str and 0 < len(row[column]) <= 128
+                                    and row[column].isascii() and all(char.isalnum() or char in "_-" for char in row[column]))
+            require(value["identity"] == [{"id": owner["userId"], "tenant_id": owner["tenantId"],
+                                           "authorization_version": owner["authorizationVersion"]}])
+            messages = value["messages"]
+            require(len(messages) == 3 and {r["source_task_id"] for r in messages} == set(owner["taskIds"]))
+            ids = {r["message_id"] for r in messages}
+            require(len(ids) == 3)
+            for row in messages:
+                require(type(row["source_event_id"]) is int and row["source_event_id"] > 0
+                        and row["message_id"] == "health-" + str(row["source_event_id"])
+                        and row["message_type"] == "task_result" and row["sub_type"] == "succeeded"
+                        and row["title"] == "Infrastructure health task succeeded"
+                        and row["description"] == "The infrastructure health task completed successfully.")
+            for table in ("reads", "single", "targets"):
+                require(all(row["message_id"] in ids for row in value[table]))
+            reads = {row["message_id"]: row for row in value["reads"]}
+            require(len(reads) == len(value["reads"]) and 1 <= len(reads) <= 3)
+            require(len(value["single"]) == 1)
+            single = value["single"][0]
+            require(single["newly_read"] is True and single["message_id"] in reads
+                    and single["first_read_at"] == reads[single["message_id"]]["first_read_at"])
+            operations = {row["operation_id"]: row for row in value["bulk"]}
+            require(len(operations) == len(value["bulk"]) and len(operations) <= 2)
+            require(all(row["operation_id"] in operations for table in ("targets", "receipts") for row in value[table]))
+            for operation_id, operation in operations.items():
+                require(operation["authorization_version"] == owner["authorizationVersion"]
+                        and operation["state"] == "completed" and operation["selection"] in ("selected", "all"))
+                targets = [row for row in value["targets"] if row["operation_id"] == operation_id]
+                receipts = [row for row in value["receipts"] if row["operation_id"] == operation_id]
+                expected_target = 1 if operation["selection"] == "selected" else 3
+                require(operation["target"] == operation["processed"] == expected_target
+                        and operation["newly_read"] == 1 and operation["already_read"] == expected_target - 1)
+                require(len(targets) == len(receipts) == expected_target
+                        and len({row["ordinal"] for row in targets}) == expected_target
+                        and {row["ordinal"] for row in targets} == {row["ordinal"] for row in receipts}
+                        and len({row["message_id"] for row in targets}) == expected_target)
+                require(sum(row["newly_read"] is True for row in receipts) == 1
+                        and all(type(row["newly_read"]) is bool for row in receipts))
+                for receipt in receipts:
+                    target = next(row for row in targets if row["ordinal"] == receipt["ordinal"])
+                    require(target["message_id"] in reads
+                            and receipt["first_read_at"] == reads[target["message_id"]]["first_read_at"])
+            if "baseline" in owner and value is not owner["baseline"]:
+                require(value["identity"] == owner["baseline"]["identity"]
+                        and messages == owner["baseline"]["messages"]
+                        and value["single"] == owner["baseline"]["single"])
+        for identity in identities:
+            keys(identity, "label userId tenantId authorizationVersion sensitiveActions snapshotAdmissions taskIds provenance baseline")
+            require(type(identity["userId"]) is int and identity["userId"] > 0
+                    and type(identity["authorizationVersion"]) is int and identity["authorizationVersion"] >= 1)
+            require(type(identity["sensitiveActions"]) is int and type(identity["snapshotAdmissions"]) is int)
+            require(type(identity["tenantId"]) is str and 0 < len(identity["tenantId"]) <= 128
+                    and identity["tenantId"].isascii())
+            for task_id in identity["taskIds"]:
+                require(str(uuid.UUID(task_id)) == task_id)
+            baseline = identity["baseline"]
+            state(baseline, identity)
+            require(len(baseline["reads"]) == 1 and not baseline["bulk"] and not baseline["targets"] and not baseline["receipts"])
+            provenance = identity["provenance"]
+            require(len(provenance) == 3 and {p["taskUUID"] for p in provenance} == set(identity["taskIds"]))
+            require(len({p["eventId"] for p in provenance}) == len({p["outboxId"] for p in provenance}) == 3)
+            for proof in provenance:
+                keys(proof, "messageId taskUUID title description occurredAt eventId outboxId sourceResultVersion eventResultVersion kind action state taskDomain eventDomain tenantEqual actorEqual taskEqual eventEqual messageTenant taskTenant eventTenant userTenant recipientUserId taskActorId eventTaskId outboxTaskId outboxEventId")
+                numeric_fields = {"eventId", "outboxId", "sourceResultVersion", "eventResultVersion", "recipientUserId", "taskActorId", "outboxEventId"}
+                boolean_fields = {"tenantEqual", "actorEqual", "taskEqual", "eventEqual"}
+                for field, value in proof.items():
+                    if field in numeric_fields:
+                        require(type(value) is int and 0 < value <= 9_007_199_254_740_991)
+                    elif field in boolean_fields:
+                        require(type(value) is bool)
+                    else:
+                        require(type(value) is str and 0 < len(value) <= 512)
+                instant(proof["occurredAt"])
+                require(all(proof[field] is True for field in ("tenantEqual", "actorEqual", "taskEqual", "eventEqual")))
+                require(proof["kind"] == "infrastructure.health" and proof["action"] == "finished"
+                        and proof["state"] == "succeeded" and proof["taskDomain"] == proof["eventDomain"] == "platform"
+                        and type(proof["sourceResultVersion"]) is int and proof["sourceResultVersion"] > 0
+                        and proof["sourceResultVersion"] == proof["eventResultVersion"])
+                require(proof["messageTenant"] == proof["taskTenant"] == proof["eventTenant"] == proof["userTenant"] == identity["tenantId"]
+                        and proof["recipientUserId"] == proof["taskActorId"] == identity["userId"]
+                        and proof["taskUUID"] == proof["eventTaskId"] == proof["outboxTaskId"]
+                        and proof["eventId"] == proof["outboxEventId"])
+                matches = [row for row in baseline["messages"] if row["message_id"] == proof["messageId"]]
+                require(len(matches) == 1)
+                row = matches[0]
+                require(row["source_task_id"] == proof["taskUUID"] and row["source_event_id"] == proof["eventId"]
+                        and row["source_result_version"] == proof["sourceResultVersion"]
+                        and row["title"] == proof["title"] and row["description"] == proof["description"]
+                        and row["occurred_at"] == proof["occurredAt"])
+            require({p["messageId"] for p in provenance} == {row["message_id"] for row in baseline["messages"]})
+            message_sets[identity["label"]] = {p["messageId"] for p in provenance}
+        require(not message_sets["A"] & message_sets["B"] and by_label["A"]["tenantId"] == by_label["B"]["tenantId"])
+        expected_suffixes = {"foreign-page", "foreign-locate", "foreign-single-receipt", "foreign-read",
+            "foreign-single-replay", "foreign-bulk-selected", "foreign-bulk-all", "own-result-foreign-single",
+            "own-result-foreign-selected-false", "own-result-foreign-selected-true"}
+        expected_suffixes |= {f"{name}-{mode}" for name in ("foreign-bulk-receipt", "foreign-bulk-replay", "foreign-completed-cancel")
+                              for mode in ("selected", "all")}
+        require(len(stages) == 32 and {stage["label"] for stage in stages}
+                == {f"{label}-{suffix}" for label in ("A", "B") for suffix in expected_suffixes})
+        allowed_states = {label: [identity["baseline"]] for label, identity in by_label.items()}
+        by_bulk = {(bulk["actor"], bulk["selection"]): bulk for bulk in bulks}
+        for label in ("A", "B"):
+            owner = by_label[label]
+            other = by_label["B" if label == "A" else "A"]
+            previous = owner["baseline"]
+            for mode in ("selected", "all"):
+                bulk = by_bulk[label, mode]
+                keys(bulk, "actor selection operation before after protectedBefore protectedAfter")
+                state(bulk["before"], owner)
+                state(bulk["after"], owner)
+                state(bulk["protectedBefore"], other)
+                state(bulk["protectedAfter"], other)
+                require(bulk["before"] == previous)
+                expected_protected = other["baseline"] if label == "A" else by_bulk["A", "all"]["after"]
+                require(bulk["protectedBefore"] == bulk["protectedAfter"] == expected_protected)
+                operation = bulk["operation"]
+                keys(operation, "receipt progress state updatedAt")
+                keys(operation["receipt"], "acceptedAt operationId resultId selection target")
+                keys(operation["progress"], "target processed newlyRead alreadyRead failed remaining")
+                require(all(type(value) is int for value in operation["progress"].values()))
+                count = 1 if mode == "selected" else 3
+                require(operation["progress"] == dict(target=count, processed=count, newlyRead=1, alreadyRead=count-1, failed=0, remaining=0))
+                receipt = operation["receipt"]
+                require(type(receipt["target"]) is int and receipt["selection"] == mode and receipt["target"] == count)
+                before, after = bulk["before"], bulk["after"]
+                require(len(after["reads"]) == len(before["reads"]) + 1
+                        and len(after["reads"]) == (2 if mode == "selected" else 3)
+                        and all(row in after["reads"] for row in before["reads"]))
+                for table, increment in (("bulk", 1), ("targets", count), ("receipts", count)):
+                    require(len(after[table]) == len(before[table]) + increment and all(row in after[table] for row in before[table]))
+                added = [row for row in after["bulk"] if row not in before["bulk"]]
+                require(len(added) == 1)
+                persisted = added[0]
+                require(persisted["operation_id"] == receipt["operationId"] and persisted["result_id"] == receipt["resultId"]
+                        and persisted["selection"] == mode and instant(persisted["accepted_at"]) == instant(receipt["acceptedAt"])
+                        and instant(persisted["updated_at"]) == instant(operation["updatedAt"]))
+                if mode == "all":
+                    require(receipt["resultId"] == by_bulk[label, "selected"]["operation"]["receipt"]["resultId"])
+                new_targets = [row["message_id"] for row in after["targets"] if row["operation_id"] == receipt["operationId"]]
+                require(set(new_targets) <= message_sets[label])
+                if mode == "selected":
+                    require(not set(new_targets) & {row["message_id"] for row in before["reads"]})
+                else:
+                    require(set(new_targets) == message_sets[label])
+                previous = after
+                allowed_states[label].append(after)
+        for stage in stages:
+            keys(stage, "label status body before after")
+            caller, suffix = stage["label"].split("-", 1)
+            expected_status = 400 if suffix.startswith("own-result-") else 404
+            require(type(stage["status"]) is int and stage["status"] == expected_status and stage["body"] == {"error": "target_not_in_result" if expected_status == 400 else "not_found"})
+            require(len(stage["before"]) == len(stage["after"]) == 2)
+            for index, label in enumerate(("A", "B")):
+                state(stage["before"][index], by_label[label])
+                state(stage["after"][index], by_label[label])
+                require(stage["before"][index] in allowed_states[label])
+            if suffix.startswith(("foreign-bulk-receipt-", "foreign-bulk-replay-", "foreign-completed-cancel-")):
+                owner = "B" if caller == "A" else "A"
+                mode = suffix.rsplit("-", 1)[1]
+                bulk = by_bulk[owner, mode]
+                expected_states = [bulk["after"] if label == owner else bulk["protectedAfter"] for label in ("A", "B")]
+            else:
+                expected_states = [by_label[label]["baseline"] for label in ("A", "B")]
+            require(stage["before"] == stage["after"] == expected_states)
+    except Exception:
+        raise RuntimeError("messages_isolation_evidence_invalid") from None
+
+
 def validate_asset_refresh_evidence(suite):
     if suite in EMPTY_TRANSITION_SUITES:
         subprocess.run([sys.executable, "scripts/validate_asset_empty_refresh.py",
@@ -222,7 +649,7 @@ def validate_asset_refresh_evidence(suite):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--suite", choices=["directory-v4-controls", "directory-v4-cancel", "directory-v4-readers", "group-asset-export-v3-running-cancel", "computer-asset-export-v3-running-cancel", "user-asset-export-v3-running-cancel", "computer-asset-export-v3", "computer-asset-export-v3-failure", "computer-asset-export-v3-cancel", "group-asset-export-v3", "group-asset-export-v3-failure", "group-asset-export-v3-cancel", "user-asset-export-v3-failure", "user-asset-export-v3-cancel", "user-asset-export-v3", "auth", "access", "resource", "tasks", "messages", "messages-bulk", "audit", "system", "maintenance", "domains", "operations", "profile", "credential-use", "account-references", "operational-logs", "session-invalidation", "account-reference-barrier", "directory", "directory-controls", "directory-readers", "directory-v2", "directory-v2-controls", "directory-v2-readers", "directory-v3-backend", "directory-v4-backend", "group-members-v4", "group-members-v4-empty", "group-members-v4-pagination", "group-members-v4-refresh", "user-assets-v3", "computer-assets-v3", "computer-assets-v3-readers", "group-assets-v3", "group-assets-v3-readers", "directory-v3", "directory-v3-controls", "directory-v3-readers", "user-assets-v2", "user-assets-v2-readers"], default="auth")
+    parser.add_argument("--suite", choices=["directory-v4-controls", "directory-v4-cancel", "directory-v4-readers", "group-asset-export-v3-running-cancel", "computer-asset-export-v3-running-cancel", "user-asset-export-v3-running-cancel", "computer-asset-export-v3", "computer-asset-export-v3-failure", "computer-asset-export-v3-cancel", "group-asset-export-v3", "group-asset-export-v3-failure", "group-asset-export-v3-cancel", "user-asset-export-v3-failure", "user-asset-export-v3-cancel", "user-asset-export-v3", "auth", "access", "resource", "tasks", "messages", "messages-bulk", "messages-isolation", "audit", "system", "maintenance", "domains", "operations", "profile", "credential-use", "account-references", "operational-logs", "session-invalidation", "account-reference-barrier", "directory", "directory-controls", "directory-readers", "directory-v2", "directory-v2-controls", "directory-v2-readers", "directory-v3-backend", "directory-v4-backend", "group-members-v4", "group-members-v4-empty", "group-members-v4-pagination", "group-members-v4-refresh", "user-assets-v3", "computer-assets-v3", "computer-assets-v3-readers", "group-assets-v3", "group-assets-v3-readers", "directory-v3", "directory-v3-controls", "directory-v3-readers", "user-assets-v2", "user-assets-v2-readers"], default="auth")
     parser.add_argument("--expired", action="store_true")
     args = parser.parse_args()
     # Only the three explicit running-cancel suites install the CI controller.
@@ -328,7 +755,7 @@ def main():
             subprocess.run(["docker", "exec", name, "psql", "-U", "postgres", "-d", "adtr_e2e", "-v", "ON_ERROR_STOP=1", "-c",
                             "INSERT INTO adtr.resource_domains(tenant_id,id,name,active) VALUES('default','synthetic-domain-a','Synthetic Domain A',true)"],
                            check=True, capture_output=True, timeout=30)
-        if args.suite == "messages":
+        if args.suite in {"messages", "messages-isolation"}:
             # Read-only provenance checks wait for the real health projection; no message fixtures.
             env["ADTR_E2E_DB_CONTAINER"] = name
         if args.suite == "messages-bulk":
@@ -403,7 +830,7 @@ def main():
         else:
             raise RuntimeError("authentication API failed readiness")
         diagnostics.phase("api-ready")
-        if args.suite in {"tasks", "messages", "messages-bulk", "audit", "system", "maintenance", "domains", "account-references", "operational-logs", "account-reference-barrier"} | DIRECTORY_SUITES:
+        if args.suite in {"tasks", "messages", "messages-bulk", "messages-isolation", "audit", "system", "maintenance", "domains", "account-references", "operational-logs", "account-reference-barrier"} | DIRECTORY_SUITES:
             with socket.socket() as listener:
                 listener.bind(("127.0.0.1", 0))
                 worker_port = listener.getsockname()[1]
@@ -473,7 +900,9 @@ def main():
         # enter an error-context prompt; explicit safe screenshots remain intact.
         env["PLAYWRIGHT_NO_COPY_PROMPT"] = "1"
         diagnostics.phase("browser-start")
-        subprocess.run(command, env=env, check=True, timeout=V4_CONTROLS_BUDGETS[args.suite] if args.suite in V4_CONTROLS_BUDGETS else 930 if args.suite in KIND_RUNNING_CANCEL_SUITES else 930 if args.suite == RUNNING_CANCEL_SUITE else 930 if args.suite in COMPUTER_EXPORT_SUITES else 930 if args.suite in GROUP_EXPORT_SUITES else 930 if args.suite in EXPORT_TERMINAL_SUITES else 930 if args.suite == "user-asset-export-v3" else 660 if args.suite == "account-references" else 930 if args.suite in EMPTY_DIRECTORY_SUITES | USER_ASSETS_V2_SUITES | {"user-assets-v3"} | COMPUTER_ASSETS_V3_SUITES | GROUP_ASSETS_V3_SUITES else 660 if args.suite in {"directory", "directory-v2", "directory-v3-backend", "directory-v4-backend", "group-members-v4", "group-members-v4-empty", "group-members-v4-pagination", "group-members-v4-refresh", "directory-v3"} else 600 if args.suite == "audit" else 540 if args.suite in {"maintenance", "domains", "operations", "credential-use", "account-references", "operational-logs", "account-reference-barrier"} else 480 if args.suite == "system" else 420)
+        subprocess.run(command, env=env, check=True, timeout=720 if args.suite == "messages-isolation" else V4_CONTROLS_BUDGETS[args.suite] if args.suite in V4_CONTROLS_BUDGETS else 930 if args.suite in KIND_RUNNING_CANCEL_SUITES else 930 if args.suite == RUNNING_CANCEL_SUITE else 930 if args.suite in COMPUTER_EXPORT_SUITES else 930 if args.suite in GROUP_EXPORT_SUITES else 930 if args.suite in EXPORT_TERMINAL_SUITES else 930 if args.suite == "user-asset-export-v3" else 660 if args.suite == "account-references" else 930 if args.suite in EMPTY_DIRECTORY_SUITES | USER_ASSETS_V2_SUITES | {"user-assets-v3"} | COMPUTER_ASSETS_V3_SUITES | GROUP_ASSETS_V3_SUITES else 660 if args.suite in {"directory", "directory-v2", "directory-v3-backend", "directory-v4-backend", "group-members-v4", "group-members-v4-empty", "group-members-v4-pagination", "group-members-v4-refresh", "directory-v3"} else 600 if args.suite == "audit" else 540 if args.suite in {"maintenance", "domains", "operations", "credential-use", "account-references", "operational-logs", "account-reference-barrier"} else 480 if args.suite == "system" else 420)
+        if args.suite == "messages-isolation":
+            validate_messages_isolation_evidence()
         if args.suite == "user-asset-export-v3":
             validate_user_export()
         if export_worker_guard is not None:
