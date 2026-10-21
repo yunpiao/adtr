@@ -435,28 +435,73 @@ test("real health epoch rejection, explicit child recovery and original-key repl
   }
   const screenshots: Record<string, unknown> = {};
   async function screenshot(id: string, state: "failed" | "succeeded", width: number, height: number) {
-    await ui(async () => {
+    const slot = state === "failed" ? (width === 1440 ? "parent_desktop" : "parent_mobile")
+      : (width === 1440 ? "child_desktop" : "child_mobile");
+    const captureStages = ["viewport", "proof_empty", "targets", "measure", "fit", "scroll", "contained", "unobscured", "png"] as const;
+    type CaptureStage = typeof captureStages[number];
+    async function capture<T>(stage: CaptureStage, work: () => Promise<T>): Promise<T> {
+      fact(captureStages.includes(stage), "screenshot_stage_invalid");
+      // Both category components are closed literals, never IDs, DOM or errors.
+      return safe(`screenshot_${slot}_${stage}`, () => ui(work));
+    }
+    await capture("viewport", async () => {
+      fact((width === 1440 && height === 900) || (width === 390 && height === 844), "screenshot_viewport_invalid");
       await page.setViewportSize({ width, height });
-      await openDetail(id); await visible(id, state, state === "failed" ? 0 : 1, state === "succeeded" ? parent.task.id : "");
+    });
+    // Do not mask existing navigation and identity helper diagnostics.
+    await openDetail(id);
+    await visible(id, state, state === "failed" ? 0 : 1, state === "succeeded" ? parent.task.id : "");
+    await capture("proof_empty", async () => {
       await expect(page.locator(".task-action")).toHaveCount(0);
-      // Proof controls must be absent or empty. DOM inspection returns only a
-      // boolean; it never serializes a password/code, even on failure.
       const empty = await page.locator('input[type="password"],input[autocomplete="one-time-code"]').evaluateAll(nodes =>
         nodes.every(node => (node as HTMLInputElement).value === ""));
       fact(empty, "proof_not_empty");
-      const targets = state === "failed"
-        ? [page.locator(".task-metadata-panel").getByText("0/5（含首次）", { exact: true }),
-           page.locator(".task-metadata-panel").getByText("authorization_revoked", { exact: true })]
-        : [page.locator(".task-parent-identity"), page.getByLabel("任务实际结果")];
-      await targets[0].scrollIntoViewIfNeeded();
-      // Bounding boxes are only a viewport-content precondition. Independent
-      // pixel review still decides whether these four images are readable/safe.
+    });
+    const targets = await capture("targets", async () => state === "failed"
+      ? [page.locator(".task-metadata-panel").getByText("0/5（含首次）", { exact: true }),
+         page.locator(".task-metadata-panel").getByText("authorization_revoked", { exact: true })]
+      : [page.locator(".task-parent-identity"), page.getByLabel("任务实际结果")]);
+    const boxes = await capture("measure", async () => {
+      const result = [];
       for (const target of targets) {
+        await expect(target).toBeVisible();
+        const box = await target.boundingBox();
+        fact(box && box.width > 0 && box.height > 0, "screenshot_target_missing"); result.push(box);
+      }
+      return result;
+    });
+    const bounds = { left: Math.min(...boxes.map(b => b.x)), top: Math.min(...boxes.map(b => b.y)),
+      right: Math.max(...boxes.map(b => b.x + b.width)), bottom: Math.max(...boxes.map(b => b.y + b.height)) };
+    await capture("fit", async () => {
+      fact(bounds.right - bounds.left <= width && bounds.bottom - bounds.top <= height, "screenshot_targets_cannot_fit");
+    });
+    // Normal document scrolling only. Frame the complete real target union,
+    // never alter DOM/CSS, scale content, crop an image or hide an obstruction.
+    await capture("scroll", () => page.evaluate(({ dx, dy }) => window.scrollBy({ left: dx, top: dy, behavior: "instant" }),
+      { dx: (bounds.left + bounds.right - width) / 2, dy: (bounds.top + bounds.bottom - height) / 2 }));
+    await capture("contained", async () => {
+      for (const target of targets) {
+        await expect(target).toBeVisible();
         const box = await target.boundingBox();
         fact(box && box.x >= 0 && box.y >= 0 && box.x + box.width <= width && box.y + box.height <= height,
           "screenshot_required_content_outside_viewport");
       }
-      const name = `${state === "failed" ? "parent-failed" : "child-succeeded"}-${width === 1440 ? "desktop" : "mobile"}.png`;
+    });
+    await capture("unobscured", async () => {
+      for (const target of targets) {
+        const clear = await target.evaluate(element => {
+          const box = element.getBoundingClientRect();
+          return [[box.left + 1, box.top + 1], [box.right - 1, box.top + 1],
+            [box.left + 1, box.bottom - 1], [box.right - 1, box.bottom - 1],
+            [(box.left + box.right) / 2, (box.top + box.bottom) / 2]].every(([x, y]) => {
+              const hit = document.elementFromPoint(x, y); return hit !== null && (hit === element || element.contains(hit));
+            });
+        });
+        fact(clear, "screenshot_target_obscured");
+      }
+    });
+    const name = `${state === "failed" ? "parent-failed" : "child-succeeded"}-${width === 1440 ? "desktop" : "mobile"}.png`;
+    await capture("png", async () => {
       const bytes = await page.screenshot({ path: testInfo.outputPath(name), fullPage: false, animations: "disabled" });
       fact(bytes.subarray(0, 8).equals(Buffer.from([137,80,78,71,13,10,26,10])) &&
         bytes.readUInt32BE(16) === width && bytes.readUInt32BE(20) === height, "screenshot_dimensions_invalid");

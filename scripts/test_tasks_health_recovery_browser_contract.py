@@ -72,6 +72,34 @@ def navigation_readiness_violations(source):
     return failures
 
 
+def screenshot_violations(source):
+    required = (
+        'const slot = state === "failed" ? (width === 1440 ? "parent_desktop" : "parent_mobile")',
+        ': (width === 1440 ? "child_desktop" : "child_mobile");',
+        'const captureStages = ["viewport", "proof_empty", "targets", "measure", "fit", "scroll", "contained", "unobscured", "png"] as const;',
+        'type CaptureStage = typeof captureStages[number];',
+        'stage: CaptureStage, work: () => Promise<T>',
+        'fact(captureStages.includes(stage), "screenshot_stage_invalid");',
+        'return safe(`screenshot_${slot}_${stage}`, () => ui(work));',
+        'bounds.right - bounds.left <= width && bounds.bottom - bounds.top <= height',
+        'window.scrollBy({ left: dx, top: dy, behavior: "instant" })',
+        'box.x >= 0 && box.y >= 0 && box.x + box.width <= width && box.y + box.height <= height',
+        'document.elementFromPoint(x, y)',
+        'hit === element || element.contains(hit)',
+        'fact(clear, "screenshot_target_obscured");',
+        'fullPage: false, animations: "disabled"',
+        'fact(empty, "proof_not_empty");',
+    )
+    failures = []
+    if any(value not in source for value in required):
+        failures.append('screenshot_boundary_missing')
+    if 'await targets[0].scrollIntoViewIfNeeded();' in source:
+        failures.append('single_target_framing')
+    if re.search(r'\.style\s*[.\[]|setAttribute\s*\(|\b(?:innerHTML|outerHTML)\s*=', source):
+        failures.append('screenshot_dom_rewrite')
+    return failures
+
+
 def mask_literals(source):
     # Preserve offsets so regions and actions can be compared without matching
     # sample text, comments or SQL words embedded in unrelated identifiers.
@@ -98,7 +126,7 @@ def call_regions(masked, names):
 
 
 def privacy_violations(source):
-    result = []
+    result = screenshot_violations(source)
     forbidden = {
         'raw_error': r'catch\s*\(|\bcause\s*:|\b(?:error|err|exception)\.(?:message|stack)',
         'logging': r'\bconsole\.|\.on\(\s*["\'](?:console|response|requestfailed|pageerror)["\']',
@@ -120,7 +148,7 @@ def privacy_violations(source):
         if re.search(pattern, source, re.I):
             result.append(label)
     masked = mask_literals(source)
-    safe_regions = call_regions(masked, ('safe', 'safeWrite', 'proofStep', 'uiResponse', 'observe', 'ui', 'mutation'))
+    safe_regions = call_regions(masked, ('safe', 'safeWrite', 'proofStep', 'uiResponse', 'observe', 'ui', 'mutation', 'capture'))
     # This detects newly appended raw authenticated transports/proof calls even
     # when all required safe helpers still exist elsewhere in the file.
     action = r'\b(?:page|tab|context|target|oldContext|replacementContext)\.(?:request\.)?(?:getBy\w+|locator|goto|goBack|goForward|evaluate|screenshot|reload|get|post|fetch|put|patch|delete)\s*\('
@@ -169,6 +197,24 @@ class PrivacyMutationContract(unittest.TestCase):
             self.source + '\nawait locator.first().click();',
         ):
             self.assertTrue(navigation_readiness_violations(changed))
+
+    def test_screenshot_uses_real_union_and_closed_diagnostics(self):
+        self.assertEqual(screenshot_violations(self.source), [])
+
+    def test_screenshot_cannot_weaken_fit_privacy_or_diagnostics(self):
+        for old, new in (
+            ('stage: CaptureStage,', 'stage: string,'),
+            ('fact(captureStages.includes(stage), "screenshot_stage_invalid");', ''),
+            ('"parent_desktop"', 'id'),
+            ('bounds.right - bounds.left <= width && bounds.bottom - bounds.top <= height', 'true'),
+            ('box.x >= 0 && box.y >= 0 && box.x + box.width <= width && box.y + box.height <= height', 'true'),
+            ('fact(clear, "screenshot_target_obscured");', ''),
+            ('fullPage: false', 'fullPage: true'),
+            ('fact(empty, "proof_not_empty");', ''),
+        ):
+            self.assertTrue(screenshot_violations(self.source.replace(old, new)))
+        for extra in ('await targets[0].scrollIntoViewIfNeeded();', 'element.style.display = "none";'):
+            self.assertTrue(screenshot_violations(self.source + '\n' + extra))
 
     def test_new_bare_actions_are_not_hidden_by_existing_wrappers(self):
         for extra in (

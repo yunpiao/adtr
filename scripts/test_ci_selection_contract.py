@@ -602,15 +602,16 @@ class SelectionContract(unittest.TestCase):
                     'user-asset-export-v3-running-cancel']
         self.assertEqual([entry['name'] for entry in entries[:3]], critical)
         health = next(entry for entry in entries if entry['name'] == 'tasks-health-recovery')
-        ordinary = [entry for entry in entries if entry['name'] != health['name']]
-        expected = ordinary[:3] + [health] + ordinary[3:]
+        group = next(entry for entry in entries if entry['name'] == 'group-members-v4')
+        ordinary = [entry for entry in entries if entry['name'] not in {health['name'], group['name']}]
+        expected = ordinary[:3] + [health, group] + ordinary[3:]
         projected = [{k: v for k, v in entry.items() if k != 'specs'} for entry in expected]
         actual = selection.browser_matrix_entries(entries)
         self.assertEqual(actual, projected)
         self.assertEqual(len(actual), 56)
         self.assertEqual(sorted((entry['name'], entry['command']) for entry in actual),
                          sorted((entry['name'], entry['command']) for entry in entries))
-        self.assertEqual([entry for entry in actual if entry['name'] != health['name']],
+        self.assertEqual([entry for entry in actual if entry['name'] not in {health['name'], group['name']}],
                          [{k: v for k, v in entry.items() if k != 'specs'} for entry in ordinary])
         positions = {entry['name']: index for index, entry in enumerate(actual)}
         for left, right in itertools.combinations(ordinary, 2):
@@ -645,12 +646,50 @@ class SelectionContract(unittest.TestCase):
         self.assertEqual(selection.browser_matrix_entries([health]),
                          [{k: v for k, v in health.items() if k != 'specs'}])
 
+    def test_group_matrix_subset_preserves_all_other_pairs_and_never_adds_coverage(self):
+        by_name = {entry['name']: entry for entry in self.inventory['browser']}
+        critical = ['group-asset-export-v3-running-cancel',
+                    'computer-asset-export-v3-running-cancel',
+                    'user-asset-export-v3-running-cancel']
+        for included in itertools.product((False, True), repeat=3):
+            guards = [name for name, yes in zip(critical, included) if yes]
+            for with_health, with_group in itertools.product((False, True), repeat=2):
+                names = guards + ['messages', 'audit']
+                if with_group:
+                    names.append('group-members-v4')
+                if with_health:
+                    names.append('tasks-health-recovery')
+                entries = [by_name[name] for name in names]
+                before = copy.deepcopy(entries)
+                expected = guards + (['tasks-health-recovery'] if with_health else [])
+                expected += (['group-members-v4'] if with_group else []) + ['messages', 'audit']
+                with self.subTest(guards=guards, health=with_health, group=with_group):
+                    actual = selection.browser_matrix_entries(entries)
+                    self.assertEqual([entry['name'] for entry in actual], expected)
+                    self.assertEqual(sorted((entry['name'], entry['command']) for entry in actual),
+                                     sorted((entry['name'], entry['command']) for entry in entries))
+                    others = [name for name in names if name not in {'tasks-health-recovery', 'group-members-v4'}]
+                    positions = {entry['name']: i for i, entry in enumerate(actual)}
+                    for left, right in itertools.combinations(others, 2):
+                        self.assertLess(positions[left], positions[right])
+                    if not with_group:
+                        legacy_health = [entry for entry in entries if entry['name'] != 'tasks-health-recovery']
+                        if with_health:
+                            legacy_health.insert(len(guards), by_name['tasks-health-recovery'])
+                        original = [{k: v for k, v in entry.items() if k != 'specs'} for entry in legacy_health]
+                        self.assertEqual(json.dumps({'include': actual}), json.dumps({'include': original}))
+                    self.assertEqual(entries, before)
+        group = by_name['group-members-v4']
+        self.assertEqual(selection.browser_matrix_entries([group]),
+                         [{k: v for k, v in group.items() if k != 'specs'}])
+        self.assertEqual(selection.browser_matrix_entries([]), [])
+
     def test_actual_matrix_output_reorders_only_scheduling_not_verified_plan(self):
         plan, _ = self.plan_for_summary(paths=['scripts/ci_selection.py'])
         before = copy.deepcopy(plan)
         by_name = {entry['name']: entry for entry in plan['browser']}
-        ordinary = [entry for entry in plan['browser'] if entry['name'] != 'tasks-health-recovery']
-        expected = ordinary[:3] + [by_name['tasks-health-recovery']] + ordinary[3:]
+        ordinary = [entry for entry in plan['browser'] if entry['name'] not in {'tasks-health-recovery', 'group-members-v4'}]
+        expected = ordinary[:3] + [by_name['tasks-health-recovery'], by_name['group-members-v4']] + ordinary[3:]
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / 'output'
             step_summary = Path(directory) / 'summary'

@@ -273,7 +273,7 @@ def make_plan(event, base, head, inventory, loader=web_sources, tested=None):
 
 
 def browser_matrix_entries(entries):
-    """Move selected health after selected critical guards, without new coverage.
+    """Move selected health/group after critical guards, without new coverage.
 
     Only the emitted matrix is permuted. The immutable selection plan and its
     independent verification retain inventory order. GitHub scheduling is not
@@ -290,6 +290,14 @@ def browser_matrix_entries(entries):
         after_critical = max((i for i, entry in enumerate(ordered)
                               if entry['name'] in critical), default=-1) + 1
         ordered.insert(after_critical, health)
+    group_index = next((i for i, entry in enumerate(ordered)
+                        if entry['name'] == 'group-members-v4'), None)
+    if group_index is not None:
+        group = ordered.pop(group_index)
+        after_priority = max((i for i, entry in enumerate(ordered)
+                              if entry['name'] in critical or entry['name'] == 'tasks-health-recovery'),
+                             default=-1) + 1
+        ordered.insert(after_priority, group)
     return [{key: value for key, value in entry.items() if key != 'specs'}
             for entry in ordered]
 
