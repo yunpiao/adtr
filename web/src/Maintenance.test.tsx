@@ -1019,7 +1019,10 @@ describe("exact original archive target observations", () => {
     if (intent.action !== "archive") throw new Error("Expected archive");
     if (field === "unselected-version") intent.input.targets[1].visibilityVersion++;
     if (field === "unselected-id") intent.input.targets[1].taskUUID = sid;
-    if (field === "action") intent.action = "restore";
+    if (field === "action") {
+      const mutableAction: { action: "archive" | "restore" } = intent;
+      mutableAction.action = "restore";
+    }
     if (field === "key") intent.key = tid;
     if (field === "before") intent.input.before = "2026-10-06T00:01:00Z";
     if (field === "reason") intent.input.reason = "Changed reason";
