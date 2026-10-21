@@ -29,15 +29,32 @@ beforeEach(() => {
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); localStorage.clear(); });
 describe("durable original user export cancellation", () => {
   it("pins complete canonical request without proof/session/filter persistence", async () => {
-    const b = binding(), bytes = await cancelMarkerBytes(b), marker = JSON.parse(bytes);
+    const b = binding();
+    // Date filters are a required pair. Keep a valid interval while changing
+    // either endpoint, so this tests digest coverage rather than input rejection.
+    b.request.startTm = "2026-02-01T00:00:00Z";
+    b.request.endTm = "2026-11-01T00:00:00Z";
+    expect(api.validExportRequest(b.request)).toBe(true);
+    const bytes = await cancelMarkerBytes(b), marker = JSON.parse(bytes);
     expect(Object.keys(marker)).toEqual(["version", "kind", "actorID", "taskID", "domainId", "requestSHA256"]);
     expect(marker.requestSHA256).toMatch(/^[0-9a-f]{64}$/);
     expect(bytes).not.toMatch(/SyntheticPassword|123456|csrf|search|screenColumns|idempotencyKey/);
     const changes = { domainId: "other-domain", expectedRevision: "2", expectedCredentialRevision: "2", observationId: "other-observation", search: "different", sAMAccountName: "different", startTm: "2026-01-01T00:00:00Z", endTm: "2026-12-31T00:00:00Z", creatTm: "desc", screenColumns: [...exportRequest.screenColumns].reverse() };
     for (const [key, value] of Object.entries(changes)) {
       const changed = { ...b, request: { ...b.request, [key]: value } };
+      expect(api.validExportRequest(changed.request), `valid original request after changing ${key}`).toBe(true);
       expect(await cancelMarkerBytes(changed)).not.toBe(bytes);
     }
+  });
+  it.each(["startTm", "endTm"] as const)("rejects a lone %s before marker write or cancellation", async (field) => {
+    const b = binding(); b.request[field] = "2026-06-01T00:00:00Z";
+    const write = vi.spyOn(Storage.prototype, "setItem");
+    expect(api.validExportRequest(b.request)).toBe(false);
+    await expect(cancelMarkerBytes(b)).rejects.toMatchObject({ code: "invalid_input" });
+    await expect(submitUserExportCancel(b, proof, vi.fn())).rejects.toMatchObject({ code: "invalid_response" });
+    expect(write).not.toHaveBeenCalled(); expect(localStorage.length).toBe(0);
+    expect(api.userAssetExportAPI.recheckCancelAuthority).not.toHaveBeenCalled();
+    expect(api.userAssetExportAPI.cancel).not.toHaveBeenCalled();
   });
   it.each(["{", "{}", '{"version":1,"version":1}', "x".repeat(1025)])("never overwrites malformed marker %s", async (raw) => {
     const b = binding(), key = cancelStorageKey(b.profile.ID, b.taskID); localStorage.setItem(key, raw);
