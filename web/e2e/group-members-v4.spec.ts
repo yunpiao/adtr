@@ -1,4 +1,4 @@
-import { observeGroupMembersV4Responses } from "./group-members-v4-response-observer";
+import { observeGroupMembersV4Responses, groupMembersV4ResponseWitness } from "./group-members-v4-response-observer";
 import {
   openMembers,
   captureMembers,
@@ -863,6 +863,7 @@ test("group members dictionary4 real Worker TLS LDAP PostgreSQL API UI facts", a
       state: "succeeded",
     },
     safe,
+    async response => (await groupMembersV4ResponseWitness(response)).value,
   );
   const observed = await readJSON(
     context,

@@ -1,0 +1,13 @@
+{
+  "baselineSHA256": "c6ecd0591b3b8eff1b9d653aa19c6bcb14232616a9f1ff12930705825fd4f03a",
+  "replacements": [
+    {
+      "old": "        if: ${{ success() && matrix.name == 'messages' }}\n",
+      "new": "        if: ${{ success() && (matrix.name == 'messages' || matrix.name == 'messages-isolation') }}\n"
+    },
+    {
+      "old": "          name: messages-soc-evidence-${{ github.run_id }}-${{ github.run_attempt }}\n",
+      "new": "          name: ${{ matrix.name }}-soc-evidence-${{ github.run_id }}-${{ github.run_attempt }}\n"
+    }
+  ]
+}

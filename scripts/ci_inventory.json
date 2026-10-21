@@ -37,6 +37,13 @@
       ]
     },
     {
+      "name": "messages-isolation",
+      "command": "python3 scripts/test_auth_e2e.py --suite messages-isolation",
+      "specs": [
+        "web/e2e/messages-isolation.spec.ts"
+      ]
+    },
+    {
       "name": "user-assets-v2",
       "command": "python3 scripts/test_auth_e2e.py --suite user-assets-v2",
       "specs": [
@@ -391,12 +398,14 @@
   ],
   "frontend_roots": {
     "web/src/MessagesWorkspace.tsx": [
-      "messages"
+      "messages",
+      "messages-isolation"
     ],
     "web/src/TaskWorkspace.tsx": [
       "tasks",
       "audit",
       "messages",
+      "messages-isolation",
       "maintenance",
       "user-assets-v2",
       "directory-v3",

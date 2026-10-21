@@ -15,7 +15,22 @@ BASE_RUNNER_SHA256 = "4dba719fa8f92273bf1eddf272d26cca18b5ebf2cc06ff92c752e4943b
 ROOT = Path(__file__).resolve().parent.parent
 
 
+def restore_isolation_runner(text):
+    delta = json.loads((ROOT / "scripts/fixtures/messages_isolation_runner_delta.json").read_text())
+    for change in reversed(delta["replacements"]):
+        if not change["new"] or text.count(change["new"]) != 1:
+            raise ValueError("isolation runner delta absent, duplicated or altered")
+        text = text.replace(change["new"], change["old"], 1)
+    if hashlib.sha256(text.encode()).hexdigest() != delta["baselineSHA256"]:
+        raise ValueError("non-isolation runner bytes changed")
+    return text
+
+
 def restore_v4_runner(text):
+    return restore_v4_runner_baseline(restore_isolation_runner(text))
+
+
+def restore_v4_runner_baseline(text):
     deltas = json.loads((ROOT / "scripts/fixtures/directory_v4_runner_delta.json").read_text())
     for old, new in reversed(deltas):
         if not new or text.count(new) != 1:
@@ -37,14 +52,32 @@ def runner_function(name, **scope):
 
 class V4RunnerContracts(unittest.TestCase):
     def test_prior_runner_bytes_and_delta_mutations(self):
-        source = (ROOT / "scripts/test_auth_e2e.py").read_text()
-        restore_v4_runner(source)
+        source = restore_isolation_runner((ROOT / "scripts/test_auth_e2e.py").read_text())
+        restore_v4_runner_baseline(source)
         for old, new in json.loads((ROOT / "scripts/fixtures/directory_v4_runner_delta.json").read_text()):
             for changed in (source + new, source.replace(new, old), source.replace(new, new + "# drift\n")):
                 with self.assertRaises(ValueError):
-                    restore_v4_runner(changed)
+                    restore_v4_runner_baseline(changed)
         with self.assertRaises(ValueError):
-            restore_v4_runner(source + "# unrelated drift\n")
+            restore_v4_runner_baseline(source + "# unrelated drift\n")
+
+    def test_isolation_outer_delta_rejects_missing_duplicate_partial_and_unrelated_changes(self):
+        source = (ROOT / "scripts/test_auth_e2e.py").read_text()
+        delta = json.loads((ROOT / "scripts/fixtures/messages_isolation_runner_delta.json").read_text())
+        self.assertEqual(delta["baselineSHA256"], "9bf4f0bc9e7aad5f90d420702109115f3bcf767156ed91451d1d4878eeaa07d7")
+        restored = restore_isolation_runner(source)
+        self.assertEqual(hashlib.sha256(restored.encode()).hexdigest(), delta["baselineSHA256"])
+        for change in delta["replacements"]:
+            for mutated in (source.replace(change["new"], "", 1),
+                            source.replace(change["new"], change["new"] * 2, 1),
+                            source.replace(change["new"], change["old"], 1),
+                            source.replace(change["new"], change["new"] + "# drift\n", 1)):
+                with self.assertRaises(ValueError):
+                    restore_isolation_runner(mutated)
+        with self.assertRaises(ValueError):
+            restore_isolation_runner(restored)
+        with self.assertRaises(ValueError):
+            restore_isolation_runner(source + "# unrelated drift\n")
 
     def test_exact_registration_nonempty_modes_and_budgets(self):
         source = (ROOT / "scripts/test_auth_e2e.py").read_text()
@@ -78,9 +111,11 @@ class V4RunnerContracts(unittest.TestCase):
                        and node.args[0].value == "--suite"
                        for kw in node.keywords if kw.arg == "choices"]
         self.assertEqual(len(old_choices), 1)
-        self.assertEqual(registered, list(scope["V4_CONTROLS_BUDGETS"]) + ast.literal_eval(old_choices[0]))
+        self.assertEqual(registered.count("messages-isolation"), 1)
+        self.assertEqual([suite for suite in registered if suite != "messages-isolation"],
+                         list(scope["V4_CONTROLS_BUDGETS"]) + ast.literal_eval(old_choices[0]))
         self.assertEqual(len(registered), len(set(registered)))
-        self.assertIn("timeout=V4_CONTROLS_BUDGETS[args.suite]", source)
+        self.assertIn('timeout=720 if args.suite == "messages-isolation" else V4_CONTROLS_BUDGETS[args.suite]', source)
 
     def test_fixed_launch_is_only_exact_cancel_and_not_rescue(self):
         source = (ROOT / "scripts/test_auth_e2e.py").read_text()
