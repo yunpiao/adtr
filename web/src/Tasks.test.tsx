@@ -1034,7 +1034,8 @@ describe("specialized dictionary and asset export task controls", () => {
     } else if (href === "#user-assets-v3" || href === "#computer-assets-v3" || href === "#group-assets-v3") {
       expect(guidance).toHaveTextContent("查看原导出结果");
       expect(guidance).toHaveTextContent("重新核验专用权限");
-      expect(guidance).toHaveTextContent("未知提交恢复仍在");
+      expect(guidance).toHaveTextContent(href === "#user-assets-v3" ? "未知创建提交恢复仍在" : "未知提交恢复仍在");
+      if (href === "#user-assets-v3") expect(guidance).toHaveTextContent("核对原用户导出取消");
     } else if (href.endsWith("-assets-v3")) {
       expect(guidance).toHaveTextContent(/不会按此任务 ID\s*自动恢复/);
       expect(guidance).toHaveTextContent("请保留原导出操作记录");
@@ -1502,4 +1503,16 @@ describe("specialized dictionary and asset export task controls", () => {
       expectNoGenericAction();
     },
   );
+});
+
+describe("original user export dedicated cancellation entry", () => {
+  it("keeps generic controls forbidden and the new dedicated control collapsed", async () => {
+    override = (url) => url.startsWith("/api/tasks/detail") ? response({ task: { ...task("running"), taskName: "user_assets.v3.export", domainId: "synthetic-domain-id", maxAttempts: 3 }, events: [] }) : undefined;
+    await detail();
+    expect(screen.getByRole("button", { name: "核对原用户导出取消" })).toBeEnabled();
+    expect(screen.queryByRole("button", { name: "请求取消任务" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "创建恢复任务" })).toBeNull();
+    expect(screen.queryByLabelText("操作者当前密码")).toBeNull();
+    expect(calls("/cancel")).toHaveLength(0); expect(calls("/recover")).toHaveLength(0);
+  });
 });

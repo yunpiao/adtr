@@ -55,6 +55,7 @@ import {
 } from "./TaskPresentation";
 import "./soc-tasks.css";
 import UserAssetExportTaskResult from "./UserAssetExportTaskResult";
+import UserAssetExportTaskCancel from "./UserAssetExportTaskCancel";
 
 interface Intent {
   action: "submit" | "recover";
@@ -1048,6 +1049,9 @@ function TaskDetails({
               task={task}
               sessionChanged={context.sessionChanged}
             />
+          )}
+          {task.taskName === "user_assets.v3.export" && !read.busy && !read.error && (
+            <UserAssetExportTaskCancel profile={context.profile} task={task} sessionChanged={context.sessionChanged} />
           )}
           {task.taskName === "computer_assets.v3.export" && !read.busy && !read.error && (
             <ComputerAssetExportTaskResult

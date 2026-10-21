@@ -90,7 +90,8 @@ export function TaskDedicatedGuidance({ taskName }: { taskName: string }) {
     return (
       <p>
         可用下方“查看原导出结果”按此任务 ID 只读核对原请求与文件，并重新核验专用权限。
-        创建、取消及未知提交恢复仍在「<a href="#user-assets-v3">用户资产</a>」专用面板处理。
+        可用“核对原用户导出取消”显式核对并取消未结束的原任务，无需本标签页的提交回执。
+        创建及未知创建提交恢复仍在「<a href="#user-assets-v3">用户资产</a>」专用面板处理。
       </p>
     );
   if (taskName === "computer_assets.v3.export")
