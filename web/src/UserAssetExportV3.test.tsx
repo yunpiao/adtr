@@ -1,4 +1,6 @@
 // Synthetic DOM contracts, not real API/Worker/LDAP/browser evidence.
+import { webcrypto } from "node:crypto";
+import { cancelMarkerBytes, cancelStorageKey } from "./user-export-cancel-intent";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import UserAssetExportV3 from "./UserAssetExportV3";
@@ -31,8 +33,13 @@ function deferred<T>() {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((r) => { resolve = r; }); return { promise, resolve };
 }
-beforeEach(() => { clearExportRecovery(); gate(); });
-afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); clearExportRecovery(); });
+beforeEach(() => {
+  vi.stubGlobal("navigator", Object.create(navigator));
+  clearExportRecovery(); localStorage.clear(); gate(); vi.stubGlobal("crypto", webcrypto);
+  Object.defineProperty(navigator, "locks", { configurable: true, value: { request: vi.fn(async (_name, _options, callback) => callback({ name: _name })) } });
+  vi.spyOn(userAssetExportAPI, "recheckCancelAuthority").mockResolvedValue(pending);
+});
+afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); clearExportRecovery(); localStorage.clear(); });
 describe("user export DOM", () => {
   it("submits all matching rows, four pins and ordered columns once, clears proof", async () => {
     const held = deferred<typeof exportReceipt>();
@@ -226,4 +233,54 @@ it("retries a restored locator receipt after stream/network failure without any 
     expect(receipt.mock.calls[0][1]).toBe("saved-original-key"); expect(receipt.mock.calls[1][1]).toBe("saved-original-key");
     expect(screen.getByRole("button", { name: "下载用户 XLSX" })).toBeEnabled();
   } finally { vi.useRealTimers(); }
+});
+
+describe("shared old-panel cancellation barrier", () => {
+  it("a marker from the task entry prevents another cancellation but preserves receipt reads", async () => {
+    writeExportRecovery({ version: 1, kind: exportKind, actorID: exportProfile.ID, domainId: exportRequest.domainId, idempotencyKey: "original-key" });
+    const locator = JSON.stringify(readExportRecovery(exportProfile.ID));
+    localStorage.setItem(cancelStorageKey(exportProfile.ID, exportTask.taskUUID), await cancelMarkerBytes({ profile: exportProfile, taskID: exportTask.taskUUID, request: exportRequest, signal: new AbortController().signal, assertCurrent: () => undefined }));
+    vi.spyOn(userAssetExportAPI, "receipt").mockResolvedValue(exportReceipt); vi.spyOn(userAssetExportAPI, "detail").mockResolvedValue(pending);
+    const cancel = vi.spyOn(userAssetExportAPI, "cancel"); view(); await open();
+    expect(screen.queryByRole("button", { name: "取消用户导出任务" })).toBeNull();
+    expect(screen.getByRole("button", { name: "核对原导出回执" })).toBeEnabled();
+    expect(JSON.stringify(readExportRecovery(exportProfile.ID))).toBe(locator); expect(cancel).not.toHaveBeenCalled();
+  });
+  it("unknown cancellation does not run create/receipt automatic recovery or expose a second cancel form", async () => {
+    writeExportRecovery({ version: 1, kind: exportKind, actorID: exportProfile.ID, domainId: exportRequest.domainId, idempotencyKey: "original-key" });
+    const receipt = vi.spyOn(userAssetExportAPI, "receipt").mockResolvedValue(exportReceipt);
+    vi.spyOn(userAssetExportAPI, "detail").mockResolvedValue(pending);
+    const cancel = vi.spyOn(userAssetExportAPI, "cancel").mockRejectedValue(new ApiError("network"));
+    view(); await open(); proof(); fireEvent.click(screen.getByRole("button", { name: "取消用户导出任务" }));
+    await screen.findByText(/可能已发出取消请求/);
+    fireEvent.click(screen.getByRole("button", { name: "核对原导出回执" }));
+    await waitFor(() => expect(receipt).toHaveBeenCalledTimes(2));
+    expect(screen.queryByRole("button", { name: "取消用户导出任务" })).toBeNull(); expect(cancel).toHaveBeenCalledOnce();
+  });
+  it("missing locks preserve normal queued-to-terminal automatic reads", async () => {
+    Object.defineProperty(navigator, "locks", { configurable: true, value: undefined });
+    writeExportRecovery({ version: 1, kind: exportKind, actorID: exportProfile.ID, domainId: exportRequest.domainId, idempotencyKey: "original-key" });
+    vi.spyOn(userAssetExportAPI, "receipt").mockResolvedValue(exportReceipt);
+    const read = vi.spyOn(userAssetExportAPI, "detail").mockResolvedValueOnce(pending).mockResolvedValue(readyExport);
+    view(); await open();
+    expect(screen.getByText(/浏览器缺少可靠的本地存储或独占锁/)).toBeVisible();
+    await waitFor(() => expect(screen.getByRole("button", { name: "下载用户 XLSX" })).toBeEnabled(), { timeout: 3000 });
+    expect(read).toHaveBeenCalledTimes(2);
+  });
+  it("missing locks preserve original read-only network recovery after the capability notice", async () => {
+    Object.defineProperty(navigator, "locks", { configurable: true, value: undefined });
+    writeExportRecovery({ version: 1, kind: exportKind, actorID: exportProfile.ID, domainId: exportRequest.domainId, idempotencyKey: "original-key" });
+    const receipt = vi.spyOn(userAssetExportAPI, "receipt").mockResolvedValue(exportReceipt);
+    vi.spyOn(userAssetExportAPI, "detail").mockResolvedValueOnce(pending).mockRejectedValueOnce(new ApiError("network")).mockResolvedValue(readyExport);
+    const create = vi.spyOn(userAssetExportAPI, "create"), cancel = vi.spyOn(userAssetExportAPI, "cancel");
+    view(); await open(); expect(screen.getByText(/浏览器缺少可靠的本地存储或独占锁/)).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "核对原导出回执" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "下载用户 XLSX" })).toBeEnabled(), { timeout: 4000 });
+    expect(receipt).toHaveBeenCalledTimes(3); expect(create).not.toHaveBeenCalled(); expect(cancel).not.toHaveBeenCalled();
+    expect(readExportRecovery(exportProfile.ID)?.idempotencyKey).toBe("original-key");
+  });
+  it("unsupported locks do not disable existing creation and receipt capability", async () => {
+    Object.defineProperty(navigator, "locks", { configurable: true, value: undefined });
+    view(); await open(); expect(screen.getByRole("button", { name: "创建用户导出" })).toBeEnabled();
+  });
 });

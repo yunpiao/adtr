@@ -421,7 +421,8 @@ GET detail/download路径；不需要创建、取消或receipt权限。专用未
 私有结果并中止旧请求，迟到metadata/bytes不能回填或触发下载。专用403/epoch
 失效清空专用结果，401交会话复核；没有自动重试/轮询新面板。通用任务已有
 状态轮询保持。原sessionStorage导出恢复记录和unknown intent完全不读写；
-创建、取消、未知提交仍由资产页原面板处理，computer/group入口说明保持。
+创建和未知创建仍由资产页原面板处理；本只读结果组件本身不承担取消。下节的
+独立专用取消入口不改变这个GET-only契约，computer/group入口说明保持。
 删除此入口只失去按原taskID取结果的便利，不影响原导出操作；可见副作用是
 任务详情增加权限核对和只读面板，刷新通用详情后需重新打开原结果。
 
@@ -436,3 +437,115 @@ detail/detail/download/detail四GET。两张既有1440×900案例图改为展示
 原结果面板，保持原案例响应、文件和严格证据validator；不以同名文件替代来源
 及字节检查。窄屏未实测。当前切片的运行/截图结论以精确head CI与独立验图为准；
 #26、完整EXP006/AD-F-151/152及产品验收继续开放，不代表真实AD/容量验收。
+
+## AD-F-151 / AD-F-189：无本标签页 locator 的原用户导出取消
+
+[工程 Issue202](https://github.com/yunpiao/adtr/issues/202) 是既有取消能力的可达性与
+未知结果保护集成，不增加 producer、任务种类、服务端状态或权限。来源为
+[Issue26](https://github.com/yunpiao/adtr/issues/26) 的任务状态与文件工作流及
+[Issue12](https://github.com/yunpiao/adtr/issues/12) 的原任务状态；精确取消语义仍是
+本文既有专用 `/cancel` 契约。基线 main
+`86d7c10234b53f647a279e17c3adda6dc06fb5f0`。本节是实现与验收约束，实际运行、
+PNG和清理结论须由最终精确head的CI证据建立；产品验收仍为0/209。
+
+### 入口、原任务绑定与权限
+
+通用任务详情仅对精确 `user_assets.v3.export` 增加独立折叠区“任务原用户导出取消”。
+初始不显示proof，不读专用业务详情，不创建locator。用户点“核对原用户导出取消”
+后才核验专用读取与取消能力，按原taskID读取并固定完整规范请求。原
+UserAssetExportTaskResult仍只有读取/下载GET；通用任务cancel/recover继续禁止此kind。
+原任务ID不是任意任务取消授权：服务端专用TaskTx先调用Engine.DetailTx，校验原
+actor/tenant、owner-scoped授权epoch、kind、域和非归档；CancelTx后再DetailTx并提交。
+仅有readable不能取消，仍需tasks/user_asset_exports writeable、当前域scope、
+entitlement、CSRF/Origin及本次密码/未使用TOTP。取消不重新验证来源pins；不得替换
+为当前列表的新revision/observation。没有新增grant、角色、调度或凭据授权。
+
+“读取原用户导出当前状态”仅显式GET同一原任务。running不能说已停止，
+cancel_requested表示请求已登记但Worker尚未确认，只有真实cancelled可显示
+“服务器已确认取消，没有可下载文件”；其它终态竞争如实展示，不断言取消获胜。
+GET状态不是取消回执，也不能用queued/running/retry_wait证明早先未知POST不会提交。
+
+### 两个取消入口共享的持久未知屏障
+
+旧资产页取消与新任务入口共用localStorage marker和Web Lock。key/lock name固定为
+`adtr.user-export-cancel.v1.<actorID>.<taskID>`，kind固定user_assets.v3.export；不把
+domain或digest放进锁名，防止不同内容变成同一任务的另一把锁。marker精确字段为
+version、kind、actorID、taskID、domainId、requestSHA256，固定键顺序、类型和大小，
+拒绝额外/重复键、非规范JSON或绑定冲突。requestSHA256按本文完整规范请求的固定
+字段顺序计算，保留screenColumns顺序；它只用于一致性，不是授权、服务端状态或回执。
+不保存原filter/request正文、username、幂等键、proof、CSRF、token或响应。hash不使
+筛选条件匿名，只持久化必要的标识符和不透明摘要。
+
+显式提交先清proof输入，再取得exclusive/ifAvailable Web Lock，不排队保留旧proof，
+不steal。锁内再次核当前生命周期与marker、重新授权并GET原detail；若已终态或
+cancel_requested则0 POST，防另一tab清终态marker后本tab旧running表单再次提交。
+无marker且仍允许取消，先写入规范marker并回读完全相同字节，才能调用一次原专用
+cancel。持久化/回读失败、缺锁或锁被占均0 POST；不退回内存、sessionStorage或租约。
+输入证明只存在瞬时表单/当次请求闭包，不写入共享恢复结果或诊断。所有await后均核
+signal/generation；卸载、关闭、来源/任务/身份变化、focus/visibility/storage变化
+清私有显示和proof，中止旧请求，迟到响应不能恢复控制或清marker。30秒deadline只
+限制UI等待，不代表服务器回滚或停止。
+
+未知POST、超时、断连、畸形响应、撤权或其它401/403/404保留只读恢复屏障，不自动
+重发。marker跨重挂载、新标签和重新登录保存；同actor重新进入仍要授权读取原task。
+没有自动过期、清空所有记录或“忘掉未知取消”按钮；放弃原创建locator不删除marker。
+匹配且当前有权限的专用终态可持锁精确删除并确认缺席；cancel_requested保留至终态。
+删除/读回不确定时当前生命周期仍只读，不能声称已remove后marker必然仍存在。
+崩溃发生在写marker后、实际发出请求前也可能留下保守屏障；以后GET非终态不能证明
+当次没有发出，没有凭空制造的取消回执API可以解锁。
+
+### 精确proof拒绝的安全纠正
+
+只有当次专用cancel的完整、最多4096字节UTF-8/无重复键JSON
+`{error:"invalid_credentials"}`，精确HTTP401及application/json、no-store、nosniff，
+才是闭集负向证据。后端requireAccessProof在cancel dispatch前返回该错误并rollback，
+所以该次请求没有取消效果，但仍可能有速率桶/失败审计效果。错误响应不要求不存在的
+actor身份头；若意外出现且不匹配则拒绝。body读取失败、超限、UTF-8/JSON/schema或
+metadata错误仍按401失效私有UI，不能以status0绕过失效，也不能清屏障。
+
+API私有brand绑定当次signal、actor、task和完整原请求，不是任意error.code即可仿造。
+同一锁callback从dispatch持续到可信拒绝后的auth/me、menu/check、原detail、最终
+auth/me，核当前身份字段/CSRF、生命周期、专用读取响应身份头与完整原绑定。成功后
+仅可删除本invocation刚写入的精确marker并确认缺席，才提示重新显式输入fresh proof。
+不能释放再抢锁凭相同字节删除，避免ABA清掉另一attempt；任何授权/绑定/读回失败只读，
+其他未知401不例外。若fresh状态已cancel_requested或terminal，不重新打开取消表单。
+没有自动二次POST，也不清除更早未知请求或其他任务的marker。
+
+Web Locks/localStorage是本客户端两入口跨标签保护的能力依赖，不是后端授权或幂等
+机制的必要条件。支持这些能力的浏览器保留正常旧取消；不支持/不可用时只禁这两个
+取消入口并解释原因，读取、下载、创建及其它业务不受影响。不修改浏览器/系统权限。
+保证只覆盖同新版、同origin与存储分区的协作入口，不覆盖仍开着的旧版页、另一设备、
+站点数据被手动清除或隐私窗口结束；不承诺服务器exactly-once。
+
+### 有界验证与证据
+
+新增DOM/API契约验证原owner/session/task/request、默认折叠GET-only、严格proof拒绝
+纠正、未知跨remount/session/两入口屏障、存储/锁失败0POST、原请求每字段摘要、ABA、
+迟到/撤权清空和固定安全错误。不支持锁/存储时其它操作不退化；正常旧取消继续覆盖。
+合成DOM状态不替代真实浏览器/Web Locks/Worker证明。
+
+既有queued-cancel真实套件保留TLS fixture采集、原创建、专用Worker暂停、queued
+attempt0与零snapshot/manifest/chunk。另开无opener、无sessionStorage locator的同会话
+新标签，从真实任务列表进入原详情；先验证默认没有proof/通用取消，再显式进入专用
+控制并一次取消。原通用非终态轮询继续运行；真实状态转换可使专用准备失效，测试
+等待通用页真实cancelled后再显式GET原详情，不把POST回包当新读取回执。窄native
+fetch前置只读观察器只比较完整预期marker bytes，保存布尔
+值和计数，不读proof/body，不改原fetch参数、缓存或响应，不route/伪造/重放请求。
+旧tab原locator逐字不变；新tab不得创建/receipt/download/通用cancel/recover。
+
+原资产面板继续通过真实receipt/detail恢复，保留取消状态、无下载、原ID与新建按钮
+可视断言；owned Worker恢复后两轮队列仍无执行，原数据库及attempt0不变。proof
+计数仍由owner7/producer9起始，create+cancel后owner9/producer9/exportTasks1，10上限
+不变；900秒测试上限、120秒初始暂停和所有owned-worker deadlines不扩大。
+新增等待分支settle/join后才收尾，新tab关闭与owned Worker恢复均有finally保障；失败
+只输出固定checkpoint，原始异常、Cookie、proof或cause不进入报告。进程/容器清理仍
+由实际runner证据独立证明，不能用取消终态或零artifact推断。
+
+现三文件allowlist与严格证据schema不变：provenance JSON、cancel evidence JSON、
+cancelled-terminal.png。PNG在恢复及不可变数据库验证后真实截取新任务取消入口，
+保留1440×900、原taskID与确认终态、无proof；这是同一suite截图主体的明确改变，
+旧资产面板保留DOM/可视检查，不声称同时保留其新的像素证据。validator继续验证PNG
+SHA/头部与当前checkout/run/source，独立review仍须实际看图，不能用PNG头替代像素。
+原running-cancel真实套件保留为旧入口/后端回归；新入口running/retry_wait/未知响应
+仅DOM/API覆盖，不声称新增running入口真实checkpoint或丢回复artifact。真实AD、
+Windows、容量及完整AD-F/EXP验收继续开放。

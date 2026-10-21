@@ -2,6 +2,7 @@ import { render, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import {
   TaskStateExplanation,
+  TaskDedicatedGuidance,
   TaskTimeline,
   taskKindLabel,
 } from "./TaskPresentation";
@@ -125,4 +126,10 @@ describe("task fact presentation", () => {
     ).toBeEmptyDOMElement();
     expect(screen.getByText("服务器尚未返回事件。")).toBeVisible();
   });
+});
+
+it("distinguishes original-task user cancellation from creation recovery", () => {
+  render(<TaskDedicatedGuidance taskName="user_assets.v3.export" />);
+  expect(screen.getByText(/无需本标签页的提交回执/)).toBeVisible();
+  expect(screen.getByText(/创建及未知创建提交恢复仍在/)).toBeVisible();
 });

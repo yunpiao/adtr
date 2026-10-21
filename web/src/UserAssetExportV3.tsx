@@ -12,6 +12,9 @@ import {
 } from "./user-asset-export-v3-api";
 import type { UserAssetsV3Query } from "./user-assets-v3-api";
 
+import { cancelUnknown, cancelUnavailable, cancelCapability, cancelStorageKey, inspectCancelMarker, submitUserExportCancel,
+  } from "./user-export-cancel-intent";
+
 type Props = { profile: Profile; query: UserAssetsV3Query; disabled: boolean; failure: (error: unknown) => void };
 import { clearExportRecovery, readExportRecovery, writeExportRecovery, type ExportRecovery } from "./user-asset-export-v3-recovery";
 type Intent = { request: ExportRequest; key: string; attempted: boolean; taskID?: string };
@@ -32,7 +35,7 @@ const terminalErrors: Record<string, string> = {
 };
 export default function UserAssetExportV3(props: Props) {
   const request = props.query.observationId ? requestFromQuery(props.query) : null;
-  return <Export key={`${props.profile.ID}:${props.profile.csrfToken}:${JSON.stringify([props.query.domainId, props.query.expectedRevision, props.query.expectedCredentialRevision, request])}`} {...props} request={request} />;
+  return <Export key={`${JSON.stringify([props.profile.ID, props.profile.username, props.profile.role, props.profile.priv, props.profile.hasMfa, props.profile.needChangePwd, props.profile.isExpired, props.profile.csrfToken])}:${JSON.stringify([props.query.domainId, props.query.expectedRevision, props.query.expectedCredentialRevision, request])}`} {...props} request={request} />;
 }
 function Export({ profile, query, disabled, failure, request }: Props & { request: ExportRequest | null }) {
   const [abandoning, setAbandoning] = useState(false);
@@ -42,6 +45,9 @@ function Export({ profile, query, disabled, failure, request }: Props & { reques
   const [error, setError] = useState(""), [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false), [allowed, setAllowed] = useState<boolean[]>([]);
   const [proofVersion, setProofVersion] = useState(0), [revoked, setRevoked] = useState(false);
+  const [cancelBlocked, setCancelBlocked] = useState("");
+  const [privateCancel, setPrivateCancel] = useState(false);
+  const cancelSticky = useRef(false), cancelling = useRef(false), cancelPrepared = useRef(true), cancelTask = useRef("");
   const sequence = useRef(0), locked = useRef(false), controller = useRef<AbortController | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const intentRef = useRef<Intent | null>(null), failureRef = useRef(failure);
@@ -59,29 +65,45 @@ function Export({ profile, query, disabled, failure, request }: Props & { reques
     }
     return false;
   };
-  const operation = async (work: (signal: AbortSignal) => Promise<void>) => {
+  const operation = async (work: (signal: AbortSignal) => Promise<void>, cancelAction = false) => {
     if (locked.current || revoked) return;
     locked.current = true; clearTimeout(timer.current); controller.current?.abort();
     const current = ++sequence.current, control = new AbortController(); controller.current = control;
     setBusy(true); setError(""); setNotice("");
+    cancelling.current = cancelAction;
+    if (cancelAction) timer.current = setTimeout(() => {
+      if (current !== sequence.current) return;
+      resetTransport(); setDetail(null); setProofVersion((v) => v + 1); setCancelBlocked(cancelUnknown); setError(cancelUnknown);
+    }, 30000);
     try { await work(control.signal); }
     catch (reason) {
       if (current !== sequence.current || control.signal.aborted) return;
-      setDetail(null); setError(userAssetExportError(reason));
-      if (!denied(reason) && reason instanceof ApiError && (reason.code === "network" || reason.status >= 500) && (intentRef.current?.attempted || (recovery?.actorID === profile.ID && recovery.domainId === query.domainId))) {
+      setDetail(null); setError(cancelAction ? cancelUnknown : userAssetExportError(reason));
+      if (cancelAction) {
+        setCancelBlocked(cancelUnknown);
+        if (reason instanceof ApiError && reason.status === 404) {
+          intentRef.current = null; setIntent(null); setAllowed([]); setRevoked(true);
+        } else denied(reason);
+        return;
+      }
+      if (!denied(reason) && !cancelSticky.current && (!cancelBlocked || cancelBlocked === cancelUnavailable) && reason instanceof ApiError && (reason.code === "network" || reason.status >= 500) && (intentRef.current?.attempted || (recovery?.actorID === profile.ID && recovery.domainId === query.domainId))) {
         // Retry read-only recovery, never the mutation or a newly generated key.
         timer.current = setTimeout(() => { void operation(recoverSaved); }, 2000);
       }
     } finally {
-      if (current === sequence.current && !control.signal.aborted) { locked.current = false; setBusy(false); }
+      if (current === sequence.current && !control.signal.aborted) { if (cancelAction) clearTimeout(timer.current); cancelling.current = false; locked.current = false; setBusy(false); }
     }
   };
   const active = (signal: AbortSignal) => !signal.aborted && controller.current?.signal === signal;
   const refreshDetail = async (value: ExportReceipt, signal: AbortSignal) => {
     const next = await userAssetExportAPI.detail(value.taskID, value.request, profile.ID, signal);
     if (!active(signal)) return;
-    setDetail(next);
-    if (!terminal(next.task.state)) timer.current = setTimeout(() => { void operation((s) => refreshDetail(next, s)); }, 1500);
+    if (cancelTask.current !== next.taskID) { cancelTask.current = next.taskID; cancelSticky.current = false; }
+    const marker = await inspectCancelMarker({ profile, taskID: next.taskID, request: next.request, signal,
+      assertCurrent: () => { if (!active(signal)) throw new DOMException("Stale operation", "AbortError"); } });
+    if (!active(signal)) return;
+    setCancelBlocked(cancelSticky.current ? cancelUnknown : marker || (!cancelPrepared.current ? "准备状态已清除，请显式核对原导出回执。" : "")); setDetail(next); setPrivateCancel(false);
+    if (!terminal(next.task.state) && (!marker || marker === cancelUnavailable) && !cancelSticky.current && cancelPrepared.current) timer.current = setTimeout(() => { void operation((s) => refreshDetail(next, s)); }, 1500);
   };
   const accept = async (value: ExportReceipt, current: Intent, signal: AbortSignal) => {
     if (!active(signal) || intentRef.current !== current || !sameExportRequest(value.request, current.request)) return;
@@ -101,9 +123,9 @@ function Export({ profile, query, disabled, failure, request }: Props & { reques
       await accept(value, restored, signal);
     }
   };
-  const recover = () => { void operation(recoverSaved); };
+  const recover = () => { cancelPrepared.current = true; void operation(recoverSaved); };
   const show = () => {
-    setOpen(true);
+    cancelPrepared.current = true; setOpen(true);
     void operation(async (signal) => {
       const [menu, checks] = await Promise.all([
         accessRequest<{ menu: Permission[] }>("/menu", signal),
@@ -133,18 +155,37 @@ function Export({ profile, query, disabled, failure, request }: Props & { reques
       await accept(value, current, signal);
     });
   };
+  useLayoutEffect(() => {
+    const invalidateCancel = () => {
+      cancelPrepared.current = false;
+      setProofVersion((v) => v + 1); setCancelBlocked("准备状态已清除，请显式核对原导出回执。");
+      if (cancelling.current || intentRef.current?.taskID) { resetTransport(); setDetail(null); setPrivateCancel(true); }
+    };
+    const storage = (event: StorageEvent) => {
+      const id = intentRef.current?.taskID;
+      try { if (event.storageArea === localStorage && (event.key === null || (id && event.key === cancelStorageKey(profile.ID, id)))) invalidateCancel(); }
+      catch { invalidateCancel(); }
+    };
+    window.addEventListener("storage", storage); window.addEventListener("focus", invalidateCancel);
+    document.addEventListener("visibilitychange", invalidateCancel);
+    return () => { window.removeEventListener("storage", storage); window.removeEventListener("focus", invalidateCancel); document.removeEventListener("visibilitychange", invalidateCancel); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const cancel = (event: FormEvent<HTMLFormElement>) => {
     const values = readValues(event), current = intentRef.current;
-    if (locked.current || !allowed[3] || !current?.taskID || !detail || terminal(detail.task.state)) return;
+    event.currentTarget.reset(); setProofVersion((v) => v + 1);
+    if (locked.current || cancelSticky.current || cancelBlocked || !allowed[3] || !current?.taskID || !detail || !["queued", "running", "retry_wait"].includes(detail.task.state)) return;
     const proof = getProof(values);
     if (!proof) { setError("请输入有效的操作者密码及六位未使用验证码。"); return; }
-    setProofVersion((v) => v + 1);
+    setCancelBlocked(cancelUnknown); setDetail(null); setPrivateCancel(true);
     void operation(async (signal) => {
-      const task = await userAssetExportAPI.cancel(current.taskID!, current.request, proof, profile.ID, profile.csrfToken, signal);
+      const result = await submitUserExportCancel({ profile, taskID: current.taskID!, request: current.request, signal,
+        assertCurrent: () => { if (!active(signal) || intentRef.current !== current) throw new DOMException("Stale operation", "AbortError"); } }, proof,
+        () => { setDetail(null); setProofVersion((v) => v + 1); }, () => { cancelSticky.current = true; });
       if (!active(signal)) return;
-      setNotice(task.state === "cancelled" ? "服务器已确认取消。" : "取消请求已登记，仍需等待服务器确认。");
-      await refreshDetail({ taskID: current.taskID!, request: current.request, task }, signal);
-    });
+      if (result.state === "proof-rejected") cancelSticky.current = false;
+      setCancelBlocked(result.queryOnly ? result.message || cancelUnknown : ""); setNotice(result.message); setDetail(result.detail ?? null); setPrivateCancel(!result.detail);
+    }, true);
   };
   const capturedRequest = intent?.request ?? request;
   const abandonControls = (intent?.attempted || recovery) && <div>
@@ -153,6 +194,7 @@ function Export({ profile, query, disabled, failure, request }: Props & { reques
       <p role="alert">这只删除本标签页的恢复记录，不会取消服务器任务。原任务可能已创建或正在执行；另建导出可能重复。请保留原幂等键与已知任务 ID 供核对。</p>
       <button type="button" onClick={() => {
         resetTransport(); clearExportRecovery(); setRecovery(null); intentRef.current = null;
+        cancelSticky.current = false; cancelPrepared.current = true; cancelTask.current = ""; setCancelBlocked(""); setPrivateCancel(false);
         setIntent(null); setDetail(null); setError(""); setAbandoning(false); setProofVersion((v) => v + 1);
         setNotice("已按你的确认放弃恢复记录，未发送新建或取消请求。");
       }}>确认放弃恢复记录</button>
@@ -166,7 +208,7 @@ function Export({ profile, query, disabled, failure, request }: Props & { reques
     <button type="button" className="secondary" onClick={() => { resetTransport(); setOpen(false); setDetail(null); setProofVersion((v) => v + 1); }}>关闭导出面板</button>
     <p>导出固定观测中全部匹配用户，不限当前页。最多 10,000 行，六个已采集标量列；缺失值写为空单元格，空结果仍生成表头。</p>
     {recovery && !intent && <p role="status">原导出请求尚未确认；下方仅显示当前列表来源，不能用于重发原任务。</p>}
-    {capturedRequest && <dl aria-label="固定导出来源">
+    {!privateCancel && capturedRequest && <dl aria-label="固定导出来源">
       <dt>域</dt><dd>{display(capturedRequest.domainId)}</dd>
       <dt>配置版本 / 凭据版本</dt><dd>{capturedRequest.expectedRevision} / {capturedRequest.expectedCredentialRevision}</dd>
       <dt>固定观测</dt><dd>{display(capturedRequest.observationId)}</dd>
@@ -174,7 +216,7 @@ function Export({ profile, query, disabled, failure, request }: Props & { reques
       <dt>创建时间范围 / 排序</dt><dd>{display(capturedRequest.startTm) || "不限"} 至 {display(capturedRequest.endTm) || "不限"} / {capturedRequest.creatTm || "GUID 升序"}</dd>
     </dl>}
     {!request && <p role="status">当前没有可用固定观测，不能新建导出；仍可核对原回执和取消原任务。</p>}
-    <p aria-label="固定导出列顺序">原有序选择列：{intent ? intent.request.screenColumns.join(" → ") : recovery ? "尚待原回执确认" : columns.join(" → ")}</p>
+    {!privateCancel && <p aria-label="固定导出列顺序">原有序选择列：{intent ? intent.request.screenColumns.join(" → ") : recovery ? "尚待原回执确认" : columns.join(" → ")}</p>}
     <ErrorNotice error={error} />{notice && <p role="status">{notice}</p>}
     {busy && <p role="status">正在核对导出…</p>}
     {request && !intent?.attempted && !recovery && <form onSubmit={submit}>
@@ -190,12 +232,12 @@ function Export({ profile, query, disabled, failure, request }: Props & { reques
     {(intent?.attempted || recovery) && <>
       {recovery && recovery.domainId !== query.domainId && <p role="status">原导出属于域 {display(recovery.domainId)}，请切回该域核对；不能用另一域的新请求覆盖原回执。</p>}
       {intent && (!request || !sameExportRequest(intent.request, { ...request, screenColumns: intent.request.screenColumns })) && <p role="status">正在恢复原操作，以下来源和筛选属于原导出；当前用户列表未改变。</p>}
-      <p>原操作幂等键：<span>{intent?.key ?? recovery?.idempotencyKey}</span></p>
+      {!privateCancel && <p>原操作幂等键：<span>{intent?.key ?? recovery?.idempotencyKey}</span></p>}
       <p>停止等待不会取消服务器任务。提交结果未知时只核对原回执，不自动创建另一任务。</p>
       <button disabled={busy || !allowed[1] || (!!recovery && recovery.domainId !== query.domainId)} onClick={recover}>核对原导出回执</button>
     </>}
     {abandonControls}
-    {request && intent?.attempted && !detail && allowed[0] && <form onSubmit={submit}>
+    {request && intent?.attempted && !detail && allowed[0] && !privateCancel && !cancelSticky.current && <form onSubmit={submit}>
       <p>主动重试保持原请求与原幂等键，需要新的验证码；重新登录后尚未取到原请求时不能重发。</p>
       <fieldset key={proofVersion} disabled={busy || disabled}><ProofFields /></fieldset>
       <button disabled={busy || abandoning || disabled}>使用原请求和幂等键重试</button>
@@ -206,9 +248,12 @@ function Export({ profile, query, disabled, failure, request }: Props & { reques
       <label>导出持久化进度：{detail.task.progress}%<progress aria-label="用户导出持久化进度" value={detail.task.progress} max={100} /></label>
       {detail.task.error && <p>任务错误代码：{display(detail.task.error)}。{terminalErrors[detail.task.error] ?? "具体原因尚待服务端任务记录核对；请保留任务 ID。"}</p>}
       {detail.artifact && <p>实际导出 {detail.artifact.rowCount} 行；{detail.artifact.byteCount} 字节{detail.artifact.rowCount === 0 ? "，文件仅含表头" : ""}</p>}
-      {!terminal(detail.task.state) && allowed[3] && <form onSubmit={cancel}><fieldset key={proofVersion} disabled={busy}><ProofFields /></fieldset><button disabled={busy || detail.task.state === "cancel_requested"}>取消用户导出任务</button></form>}
+      {cancelBlocked && !terminal(detail.task.state) && <p role="status">{cancelBlocked}</p>}
+      {!terminal(detail.task.state) && detail.task.state !== "cancel_requested" && allowed[3] && profile.hasMfa && !profile.needChangePwd && !profile.isExpired && !cancelBlocked && !cancelCapability() && <form onSubmit={cancel}><fieldset key={proofVersion} disabled={busy}><ProofFields /></fieldset><button disabled={busy}>取消用户导出任务</button></form>}
+      {detail.task.state === "cancel_requested" && allowed[3] && <button disabled>取消用户导出任务</button>}
       {terminal(detail.task.state) && allowed[0] && <button disabled={busy || disabled || !request} onClick={() => {
         resetTransport(); clearExportRecovery(); setRecovery(null); intentRef.current = null;
+        cancelSticky.current = false; cancelPrepared.current = true; cancelTask.current = ""; setCancelBlocked(""); setPrivateCancel(false);
         setIntent(null); setDetail(null); setError(""); setNotice(""); setProofVersion((v) => v + 1);
       }}>按当前列表创建另一导出</button>}
       {detail.downloadReady && allowed[4] && <button disabled={busy} onClick={() => {
