@@ -12,7 +12,9 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const SHA = /^[0-9a-f]{40}$/;
 const UI_STAGES = ["browser_proof_or_observation", "recovery_intent_open", "recovery_warning_count",
   "recovery_warning_text", "recovery_cancelled_key", "recovery_intent_cancel", "recovery_intent_closed",
-  "recovery_intent_reopen", "recovery_submitted_key"] as const;
+  "recovery_intent_reopen", "recovery_submitted_key", "navigation_open_ready", "navigation_back_visible",
+  "navigation_return_list", "navigation_open_detail", "navigation_restore_ready", "navigation_detail_visible",
+  "navigation_reload", "navigation_history_back", "navigation_history_forward"] as const;
 type UIStage = typeof UI_STAGES[number];
 const digest = (b: Buffer | string) => createHash("sha256").update(b).digest("hex");
 // JSONB object key order is not semantic. Arrays retain their original order,
@@ -411,11 +413,25 @@ test("real health epoch rejection, explicit child recovery and original-key repl
     await visible(child.task.id, "succeeded", 1, parent.task.id);
   });
   async function openDetail(id: string) {
+    // App session revalidation/remount can temporarily render neither branch.
+    // first() is only a readiness union, never the target of an action.
     await ui(async () => {
-      if (await page.getByRole("button", { name: "返回任务列表", exact: true }).count())
-        await page.getByRole("button", { name: "返回任务列表", exact: true }).click();
-      await page.getByRole("button", { name: `详情 ${id}`, exact: true }).click();
-    });
+      await expect(page.getByRole("button", { name: "返回任务列表", exact: true })
+        .or(page.getByRole("button", { name: `详情 ${id}`, exact: true })).first()).toBeVisible();
+    }, "navigation_open_ready");
+    const backVisible = await ui(() => page.getByRole("button", { name: "返回任务列表", exact: true }).isVisible(), "navigation_back_visible");
+    if (backVisible) await ui(() => page.getByRole("button", { name: "返回任务列表", exact: true }).click(), "navigation_return_list");
+    await ui(() => page.getByRole("button", { name: `详情 ${id}`, exact: true }).click(), "navigation_open_detail");
+  }
+  async function restoredDetail(id: string) {
+    // A missing identity during loading is not evidence that the list restored.
+    await ui(async () => {
+      await expect(page.getByTestId("task-detail-identity")
+        .or(page.getByRole("button", { name: `详情 ${id}`, exact: true })).first()).toBeVisible();
+    }, "navigation_restore_ready");
+    const detailVisible = await ui(() => page.getByTestId("task-detail-identity").isVisible(), "navigation_detail_visible");
+    if (!detailVisible) await openDetail(id);
+    // Caller still checks exact identity, state, attempt, lineage and result.
   }
   const screenshots: Record<string, unknown> = {};
   async function screenshot(id: string, state: "failed" | "succeeded", width: number, height: number) {
@@ -470,15 +486,15 @@ test("real health epoch rejection, explicit child recovery and original-key repl
     const count = recoveryPosts;
     for (const value of [parent, child]) {
       await openDetail(value.task.id);
-      await ui(() => page.reload());
+      await ui(() => page.reload(), "navigation_reload");
       // Reload may restore the list; reopen through actual list controls only.
-      if (await ui(() => page.getByTestId("task-detail-identity").count()) === 0) await openDetail(value.task.id);
+      await restoredDetail(value.task.id);
       await visible(value.task.id, value.task.state, value.task.attempt, value.task.parentID);
       await ui(() => page.getByRole("button", { name: "返回任务列表", exact: true }).click());
-      await ui(() => page.goBack());
-      if (await ui(() => page.getByTestId("task-detail-identity").count()) === 0) await openDetail(value.task.id);
+      await ui(() => page.goBack(), "navigation_history_back");
+      await restoredDetail(value.task.id);
       await visible(value.task.id, value.task.state, value.task.attempt, value.task.parentID);
-      await ui(() => page.goForward());
+      await ui(() => page.goForward(), "navigation_history_forward");
       await openDetail(value.task.id); await visible(value.task.id, value.task.state, value.task.attempt, value.task.parentID);
     }
     fact(recoveryPosts === count && count === 1, "navigation_recovered_again");

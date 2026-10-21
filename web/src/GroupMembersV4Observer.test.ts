@@ -540,13 +540,36 @@ describe("v4 native host binding", () => {
     await expect(groupMembersV4ResponseWitness(h.latest())).rejects.toThrow();
     expect(h.latest().json).not.toHaveBeenCalled();
   });
-  it.each(["actor", "hash", "count"])("rejects wrong access-check %s binding without fallback", async mode => {
+  it.each(["actor", "hash"])("rejects wrong access-check %s binding without fallback", async mode => {
     const h = await harness("/api/access/check", { method: "POST" }), response = await h.consume();
     if (mode === "actor") response.headers = () => ({ "cache-control": "no-store", "x-adtr-user-id": "2" });
     if (mode === "hash") { const take = observer().take; observer().take = (id, ordinal) => ({ ...take(id, ordinal), sha256: "0".repeat(64) }); }
-    if (mode === "count") { const count = observer().count; observer().count = id => count(id) + 1; }
     await expect(groupMembersV4ResponseWitness(response)).rejects.toThrow();
     expect(response.json).not.toHaveBeenCalled();
+  });
+  it("rejects wrong access-check count binding at the unchanged parity deadline without taking bytes or falling back", async () => {
+    // Finish native EOF/release and WebCrypto before virtualizing host polling.
+    const h = await harness("/api/access/check", { method: "POST" }), response = await h.consume();
+    const count = observer().count;
+    observer().count = id => count(id) + 1;
+    const take = vi.spyOn(observer(), "take");
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    try {
+      let settled = false;
+      const observed = groupMembersV4ResponseWitness(response);
+      void observed.then(() => { settled = true; }, () => { settled = true; });
+      const rejected = expect(observed).rejects.toThrow("Directory response invocation/request counts did not match");
+      await vi.advanceTimersByTimeAsync(14_950);
+      expect(settled).toBe(false);
+      expect(take).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(50);
+      await rejected;
+      expect(take).not.toHaveBeenCalled();
+      expect(response.json).not.toHaveBeenCalled();
+      expect(h.fetch).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers(); take.mockRestore(); observer().count = count;
+    }
   });
 
   it.each(["/api/directory/v4/observation", "/api/group-assets/v4/members"])(

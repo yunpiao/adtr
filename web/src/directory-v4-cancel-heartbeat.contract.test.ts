@@ -1,8 +1,10 @@
 import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import ts from "typescript";
 import { describe, expect, it, vi } from "vitest";
 
-const source = readFileSync(new URL("../e2e/directory-v4-cancel.spec.ts", import.meta.url), "utf8");
+// npm test --prefix web runs from web; jsdom/Vite may rewrite import.meta.url.
+const source = readFileSync(resolve(process.cwd(), "e2e", "directory-v4-cancel.spec.ts"), "utf8");
 const tree = ts.createSourceFile("cancel.ts", source, ts.ScriptTarget.Latest, true);
 const nodes: ts.Node[] = [];
 function visit(node: ts.Node) { nodes.push(node); ts.forEachChild(node, visit); }

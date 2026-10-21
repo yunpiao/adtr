@@ -18,6 +18,9 @@ UI_STAGES = (
     'browser_proof_or_observation', 'recovery_intent_open', 'recovery_warning_count',
     'recovery_warning_text', 'recovery_cancelled_key', 'recovery_intent_cancel',
     'recovery_intent_closed', 'recovery_intent_reopen', 'recovery_submitted_key',
+    'navigation_open_ready', 'navigation_back_visible', 'navigation_return_list',
+    'navigation_open_detail', 'navigation_restore_ready', 'navigation_detail_visible',
+    'navigation_reload', 'navigation_history_back', 'navigation_history_forward',
 )
 
 
@@ -43,6 +46,29 @@ def recovery_dialog_violations(source):
     ):
         if assertion not in source:
             failures.append('missing_recovery_warning_assertion')
+    return failures
+
+
+def navigation_readiness_violations(source):
+    failures = []
+    if 'getByTestId("task-detail-identity").count()' in source:
+        failures.append('instant_navigation_branch')
+    if 'getByRole("button", { name: "返回任务列表", exact: true }).count()' in source:
+        failures.append('instant_navigation_branch')
+    expected = (
+        'await expect(page.getByRole("button", { name: "返回任务列表", exact: true })',
+        'await expect(page.getByTestId("task-detail-identity")',
+        '.or(page.getByRole("button", { name: `详情 ${id}`, exact: true })).first()).toBeVisible();',
+        'if (backVisible) await ui(',
+        'if (!detailVisible) await openDetail(id);',
+        'await restoredDetail(value.task.id);',
+    )
+    if any(token not in source for token in expected):
+        failures.append('missing_navigation_readiness')
+    if source.count('await restoredDetail(value.task.id);') != 2:
+        failures.append('missing_navigation_restore')
+    if '.first().click(' in source:
+        failures.append('ambiguous_navigation_action')
     return failures
 
 
@@ -131,6 +157,18 @@ class PrivacyMutationContract(unittest.TestCase):
             self.source.replace('stage: UIStage =', 'stage: string ='),
         ):
             self.assertTrue(recovery_dialog_violations(changed))
+
+    def test_navigation_waits_for_visible_real_branch(self):
+        self.assertEqual(navigation_readiness_violations(self.source), [])
+
+    def test_navigation_readiness_cannot_be_removed_or_used_as_action(self):
+        for changed in (
+            self.source.replace('.first()).toBeVisible();', '.first()).toBeAttached();'),
+            self.source.replace('await restoredDetail(value.task.id);', '', 1),
+            self.source + '\nawait page.getByTestId("task-detail-identity").count();',
+            self.source + '\nawait locator.first().click();',
+        ):
+            self.assertTrue(navigation_readiness_violations(changed))
 
     def test_new_bare_actions_are_not_hidden_by_existing_wrappers(self):
         for extra in (
