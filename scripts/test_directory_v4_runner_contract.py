@@ -15,7 +15,22 @@ BASE_RUNNER_SHA256 = "4dba719fa8f92273bf1eddf272d26cca18b5ebf2cc06ff92c752e4943b
 ROOT = Path(__file__).resolve().parent.parent
 
 
+def restore_health_runner(text):
+    delta = json.loads((ROOT / "scripts/fixtures/tasks_health_recovery_runner_delta.json").read_text())
+    for change in reversed(delta["replacements"]):
+        if not change["new"] or text.count(change["new"]) != 1:
+            raise ValueError("health runner delta absent, duplicated or altered")
+        text = text.replace(change["new"], change["old"], 1)
+    if hashlib.sha256(text.encode()).hexdigest() != delta["baselineSHA256"]:
+        raise ValueError("non-health runner bytes changed")
+    return text
+
+
 def restore_isolation_runner(text):
+    return restore_isolation_runner_predecessor(restore_health_runner(text))
+
+
+def restore_isolation_runner_predecessor(text):
     delta = json.loads((ROOT / "scripts/fixtures/messages_isolation_runner_delta.json").read_text())
     for change in reversed(delta["replacements"]):
         if not change["new"] or text.count(change["new"]) != 1:
@@ -62,10 +77,10 @@ class V4RunnerContracts(unittest.TestCase):
             restore_v4_runner_baseline(source + "# unrelated drift\n")
 
     def test_isolation_outer_delta_rejects_missing_duplicate_partial_and_unrelated_changes(self):
-        source = (ROOT / "scripts/test_auth_e2e.py").read_text()
+        source = restore_health_runner((ROOT / "scripts/test_auth_e2e.py").read_text())
         delta = json.loads((ROOT / "scripts/fixtures/messages_isolation_runner_delta.json").read_text())
         self.assertEqual(delta["baselineSHA256"], "9bf4f0bc9e7aad5f90d420702109115f3bcf767156ed91451d1d4878eeaa07d7")
-        restored = restore_isolation_runner(source)
+        restored = restore_isolation_runner_predecessor(source)
         self.assertEqual(hashlib.sha256(restored.encode()).hexdigest(), delta["baselineSHA256"])
         for change in delta["replacements"]:
             for mutated in (source.replace(change["new"], "", 1),
@@ -73,14 +88,15 @@ class V4RunnerContracts(unittest.TestCase):
                             source.replace(change["new"], change["old"], 1),
                             source.replace(change["new"], change["new"] + "# drift\n", 1)):
                 with self.assertRaises(ValueError):
-                    restore_isolation_runner(mutated)
+                    restore_isolation_runner_predecessor(mutated)
         with self.assertRaises(ValueError):
-            restore_isolation_runner(restored)
+            restore_isolation_runner_predecessor(restored)
         with self.assertRaises(ValueError):
-            restore_isolation_runner(source + "# unrelated drift\n")
+            restore_isolation_runner_predecessor(source + "# unrelated drift\n")
 
     def test_exact_registration_nonempty_modes_and_budgets(self):
-        source = (ROOT / "scripts/test_auth_e2e.py").read_text()
+        raw = (ROOT / "scripts/test_auth_e2e.py").read_text()
+        source = restore_health_runner(raw)
         tree = ast.parse(source)
         scope = {"RUNNING_CANCEL_SUITE": "legacy-user", "GROUP_RUNNING_CANCEL_SUITE": "legacy-group",
                  "COMPUTER_RUNNING_CANCEL_SUITE": "legacy-computer", "EXPORT_TERMINAL_SUITES": set(),
@@ -104,7 +120,7 @@ class V4RunnerContracts(unittest.TestCase):
                    for kw in node.keywords if kw.arg == "choices"]
         self.assertEqual(len(choices), 1)
         registered = ast.literal_eval(choices[0])
-        old_tree = ast.parse(restore_v4_runner(source))
+        old_tree = ast.parse(restore_v4_runner(raw))
         old_choices = [kw.value for node in ast.walk(old_tree) if isinstance(node, ast.Call)
                        and isinstance(node.func, ast.Attribute) and node.func.attr == "add_argument"
                        and node.args and isinstance(node.args[0], ast.Constant)
@@ -118,7 +134,8 @@ class V4RunnerContracts(unittest.TestCase):
         self.assertIn('timeout=720 if args.suite == "messages-isolation" else V4_CONTROLS_BUDGETS[args.suite]', source)
 
     def test_fixed_launch_is_only_exact_cancel_and_not_rescue(self):
-        source = (ROOT / "scripts/test_auth_e2e.py").read_text()
+        raw = (ROOT / "scripts/test_auth_e2e.py").read_text()
+        source = restore_health_runner(raw)
         tree = ast.parse(source)
         gate = next(n for n in ast.walk(tree) if isinstance(n, ast.If)
                     and ast.unparse(n.test) == "args.suite == 'directory-v4-cancel'")
@@ -279,7 +296,7 @@ class V4RunnerContracts(unittest.TestCase):
         self.assertTrue(all(c.args == (.1,) for c in event.wait.call_args_list))
 
     def test_primary_exception_survives_actual_finally_branch(self):
-        tree = ast.parse((ROOT / "scripts/test_auth_e2e.py").read_text())
+        tree = ast.parse(restore_health_runner((ROOT / "scripts/test_auth_e2e.py").read_text()))
         main = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "main")
         outer = next(n for n in main.body if isinstance(n, ast.Try))
         branch = outer.finalbody[0]

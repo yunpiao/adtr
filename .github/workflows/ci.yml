@@ -217,7 +217,7 @@ jobs:
     env:
       ADTR_E2E_NATIVE_STREAM_MODE: ${{ (matrix.name == 'group-asset-export-v3-running-cancel' || matrix.name == 'computer-asset-export-v3-running-cancel' || matrix.name == 'user-asset-export-v3-running-cancel' || matrix.name == 'computer-asset-export-v3' || matrix.name == 'computer-asset-export-v3-failure' || matrix.name == 'computer-asset-export-v3-cancel' || matrix.name == 'group-asset-export-v3' || matrix.name == 'group-asset-export-v3-failure' || matrix.name == 'group-asset-export-v3-cancel' || matrix.name == 'user-asset-export-v3-failure' || matrix.name == 'user-asset-export-v3-cancel' || matrix.name == 'user-asset-export-v3' || matrix.name == 'user-assets-v2' || matrix.name == 'user-assets-v2-readers' || matrix.name == 'user-assets-v3' || matrix.name == 'computer-assets-v3' || matrix.name == 'computer-assets-v3-readers' || matrix.name == 'group-assets-v3' || matrix.name == 'group-assets-v3-readers') && 'stable-body' || 'native-finish' }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: ${{ matrix.name == 'tasks-health-recovery' && 30 || 20 }}
     permissions:
       contents: read
     strategy:
@@ -225,6 +225,9 @@ jobs:
       max-parallel: 8
       matrix: ${{ fromJSON(needs.plan.outputs.browser_matrix) }}
     steps:
+      - name: Bound health recovery job before image and dependency setup
+        if: ${{ matrix.name == 'tasks-health-recovery' }}
+        run: python3 -c 'import os,time; open(os.environ["GITHUB_ENV"], "a").write("ADTR_E2E_HEALTH_JOB_DEADLINE=" + str(int(time.time()) + 1620) + "\n")'
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           persist-credentials: false
@@ -260,7 +263,11 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
       - name: Build real API and frontend
+        if: ${{ matrix.name != 'tasks-health-recovery' }}
         run: go mod verify && make build web-build
+      - name: Install locked health recovery dependencies for runner-owned builds
+        if: ${{ matrix.name == 'tasks-health-recovery' }}
+        run: go mod verify && npm ci --prefix web
       - name: Install real browser
         run: cd web && npx playwright install --with-deps chromium
       - name: Run isolated real browser API database acceptance
@@ -269,12 +276,32 @@ jobs:
           ADTR_CI_POSTGRES_ARCHIVE_SHA: ${{ needs.prepare-postgres.outputs.archive_sha256 }}
           ADTR_CI_POSTGRES_PRODUCER_ATTEMPT: ${{ needs.prepare-postgres.outputs.producer_attempt }}
         run: ${{ matrix.command }}
+      - name: Validate joint health recovery source and final cleanup evidence
+        id: health-recovery-evidence
+        timeout-minutes: 1
+        if: ${{ success() && matrix.name == 'tasks-health-recovery' }}
+        run: python3 scripts/validate_tasks_health_recovery_evidence.py --evidence-dir web/playwright-report/tasks-health-recovery-validated --source-root .
+      - name: Retain jointly validated health recovery evidence
+        timeout-minutes: 1
+        if: ${{ success() && matrix.name == 'tasks-health-recovery' && steps.health-recovery-evidence.outcome == 'success' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: tasks-health-recovery-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            web/playwright-report/tasks-health-recovery-validated/manifest.json
+            web/playwright-report/tasks-health-recovery-validated/cleanup-receipt.json
+            web/playwright-report/tasks-health-recovery-validated/parent-failed-desktop.png
+            web/playwright-report/tasks-health-recovery-validated/parent-failed-mobile.png
+            web/playwright-report/tasks-health-recovery-validated/child-succeeded-desktop.png
+            web/playwright-report/tasks-health-recovery-validated/child-succeeded-mobile.png
+          if-no-files-found: error
+          retention-days: 7
       - name: Validate safe failure diagnostics
         id: safe-diagnostics
-        if: ${{ failure() }}
+        if: ${{ failure() && matrix.name != 'tasks-health-recovery' }}
         run: python3 scripts/e2e_runtime_diagnostics.py .e2e-diagnostics .e2e-validated
       - name: Retain validated safe failure diagnostics
-        if: ${{ failure() && steps.safe-diagnostics.outcome == 'success' }}
+        if: ${{ failure() && matrix.name != 'tasks-health-recovery' && steps.safe-diagnostics.outcome == 'success' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: safe-runtime-${{ matrix.name }}-${{ github.run_id }}-${{ github.run_attempt }}

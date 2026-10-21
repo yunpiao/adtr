@@ -196,9 +196,295 @@ def cleanup_v4_run(controller, worker, server, diagnostics, logs, ldap_fixture,
     return failures
 
 
+def health_environment(source):
+    """Keep real CI image/browser inputs, never inherit application credentials."""
+    allowed = {"ADTR_CI_POSTGRES_BUNDLE", "ADTR_CI_POSTGRES_ARCHIVE_SHA",
+               "ADTR_CI_POSTGRES_PRODUCER_ATTEMPT", "ADTR_E2E_CHROMIUM_PATH",
+               "ADTR_E2E_HEALTH_JOB_DEADLINE", "ADTR_EVENT_HEAD_SHA", "ADTR_EVENT_BASE_SHA"}
+    return {key: value for key, value in source.items()
+            if key in allowed or not key.upper().startswith(("ADTR_", "POSTGRES_", "PG"))}
+
+
+def health_digest(value):
+    return hashlib.sha256(json.dumps(value, sort_keys=True, ensure_ascii=False,
+        separators=(",", ":"), allow_nan=False).encode("utf-8")).hexdigest()
+
+
+def health_git(*args, deadline):
+    return subprocess.run(["git", *args], check=True, stdout=subprocess.PIPE,
+                          stderr=subprocess.PIPE, timeout=health_timeout(30, deadline)).stdout
+
+
+def health_file(path, deadline=None):
+    if deadline is not None:
+        health_timeout(1, deadline)
+    target = Path(path)
+    if target.is_symlink() or any(p.is_symlink() for p in target.parents) or not target.is_file():
+        raise RuntimeError("health_nonregular_file")
+    raw = target.read_bytes()
+    if deadline is not None:
+        health_timeout(1, deadline)
+    if len(raw) > 1024**3:
+        raise RuntimeError("health_invalid_file_size")
+    return {"path": target.as_posix(), "sha256": hashlib.sha256(raw).hexdigest(), "bytes": len(raw)}
+
+
+def health_source_snapshot(deadline):
+    """Observe the actual complete tracked source tree, not browser claims."""
+    if health_git("status", "--porcelain", "--untracked-files=normal", deadline=deadline):
+        raise RuntimeError("health_dirty_checkout")
+    commit = health_git("rev-parse", "HEAD", deadline=deadline).decode().strip()
+    tree = health_git("rev-parse", "HEAD^{tree}", deadline=deadline).decode().strip()
+    sources = []
+    for record in health_git("ls-tree", "-rz", "--full-tree", "HEAD", deadline=deadline).split(b"\0"):
+        health_timeout(1, deadline)
+        if not record:
+            continue
+        header, name = record.split(b"\t", 1)
+        mode, kind, blob = header.decode().split()
+        path = name.decode("utf-8", "strict")
+        if path in {"Makefile", "go.mod", "go.sum"} or path.startswith((".github/workflows/", "cmd/", "internal/", "scripts/", "web/")):
+            if kind != "blob" or mode not in {"100644", "100755"}:
+                raise RuntimeError("health_nonregular_source")
+            item = health_file(path, deadline)
+            raw = Path(path).read_bytes()
+            if hashlib.sha1(b"blob " + str(len(raw)).encode() + b"\0" + raw).hexdigest() != blob:
+                raise RuntimeError("health_source_byte_drift")
+            sources.append(dict(item, gitBlob=blob))
+    health_timeout(1, deadline)
+    sources.sort(key=lambda entry: entry["path"])
+    if not sources:
+        raise RuntimeError("health_source_inventory_empty")
+    return {"commit": commit, "tree": tree, "inventorySHA256": health_digest(sources)}
+
+
+def health_deadline(environment):
+    raw = environment.get("ADTR_E2E_HEALTH_JOB_DEADLINE", "")
+    if not raw.isdigit():
+        raise RuntimeError("health_job_deadline_missing")
+    wall_remaining = int(raw) - time.time()
+    if wall_remaining > 1620:
+        raise RuntimeError("health_job_deadline_invalid")
+    remaining = min(1500, wall_remaining)
+    if remaining <= 300:
+        raise RuntimeError("health_job_deadline_exhausted")
+    return time.monotonic() + remaining
+
+
+def health_timeout(seconds, deadline, reserve=300):
+    if deadline is None:
+        return seconds
+    remaining = deadline - time.monotonic() - reserve
+    if remaining <= 0:
+        raise RuntimeError("health_deadline_exhausted")
+    return min(seconds, remaining)
+
+
+def health_postgres_args(env, deadline):
+    health_timeout(1, deadline)
+    def bounded_run(command, **kwargs):
+        kwargs["timeout"] = health_timeout(kwargs.get("timeout", 15), deadline)
+        kwargs["env"] = env
+        return subprocess.run(command, **kwargs)
+    args = postgres_image_args(IMAGE, environ=env, run=bounded_run)
+    health_timeout(1, deadline)
+    return args
+
+
+def health_build_process(command, env, timeout, capture=True):
+    """Own build or browser groups; timeout cannot leave descendant writers alive."""
+    process = subprocess.Popen(command, env=env, stdout=subprocess.PIPE if capture else None,
+                               stderr=subprocess.PIPE if capture else None, start_new_session=True)
+    try:
+        process.communicate(timeout=timeout)
+        code = process.returncode
+        # The direct build must join its children. A surviving owned process
+        # group is failure, even if npm/go already returned zero.
+        try:
+            os.killpg(process.pid, 0)
+        except ProcessLookupError:
+            return code
+        raise RuntimeError("health_owned_descendant_survived")
+    except BaseException:
+        # pgid is the exact handle created by start_new_session, never a search
+        # or external PID. Attempt every bounded cleanup despite earlier errors.
+        try:
+            os.killpg(process.pid, signal.SIGTERM)
+        except (ProcessLookupError, OSError):
+            pass
+        try:
+            process.communicate(timeout=5)
+        except Exception:
+            pass
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except (ProcessLookupError, OSError):
+            pass
+        try:
+            process.communicate(timeout=5)
+        except Exception:
+            pass
+        raise RuntimeError("health_owned_process_failed") from None
+
+
+def health_build(env, deadline):
+    """Own both bounded builds and freeze output bytes before API/browser start."""
+    source = health_source_snapshot(deadline)
+    nonce = str(uuid.uuid4())
+    identity = dict(commit=source["commit"], tree=source["tree"],
+        workflowSHA=env.get("GITHUB_WORKFLOW_SHA", ""), runID=env.get("GITHUB_RUN_ID", ""),
+        runAttempt=env.get("GITHUB_RUN_ATTEMPT", ""), nonce=nonce)
+    if (env.get("GITHUB_SHA") != source["commit"]
+            or len(identity["workflowSHA"]) != 40
+            or any(c not in "0123456789abcdef" for c in identity["workflowSHA"])
+            or not identity["runID"].isdigit() or int(identity["runID"]) < 1
+            or not identity["runAttempt"].isdigit() or int(identity["runAttempt"]) < 1):
+        raise RuntimeError("health_ci_identity_invalid")
+    steps = []
+    commands = [
+        ("backend", "go_build", ["go", "build", "-buildvcs=false", "-trimpath", "-o", "bin/adtr", "./cmd/adtr"], 180),
+        ("frontend", "npm_build", ["npm", "run", "build", "--prefix", "web"], 120),
+    ]
+    for target, operation, command, timeout in commands:
+        before = health_source_snapshot(deadline)
+        exit_code = health_build_process(command, env, health_timeout(timeout, deadline))
+        after = health_source_snapshot(deadline)
+        health_timeout(1, deadline)
+        if exit_code != 0 or before != source or after != source:
+            raise RuntimeError("health_build_failed_or_source_drift")
+        steps.append(dict(target=target, operation=operation, exitCode=exit_code,
+            sourceBeforeSHA256=before["inventorySHA256"], sourceAfterSHA256=after["inventorySHA256"]))
+    frontend = []
+    for path in Path("web/dist").rglob("*"):
+        health_timeout(1, deadline)
+        if path.is_symlink() or not (path.is_file() or path.is_dir()):
+            raise RuntimeError("health_nonregular_bundle")
+        if path.is_file():
+            frontend.append(health_file(path, deadline))
+    frontend.sort(key=lambda item: item["path"])
+    health_timeout(1, deadline)
+    if not any(item["path"] == "web/dist/index.html" for item in frontend):
+        raise RuntimeError("health_frontend_missing")
+    record = dict(producer="owned_runner", mode="built_in_run", identity=identity,
+        source=source, steps=steps, outputs=dict(binary=health_file("bin/adtr", deadline), frontend=frontend))
+    env["ADTR_E2E_HEALTH_RUN_NONCE"] = nonce
+    # The workflow must independently validate using this same nonsecret nonce.
+    github_env = env.get("GITHUB_ENV")
+    if not github_env or not Path(github_env).is_file() or Path(github_env).is_symlink():
+        raise RuntimeError("health_ci_environment_file_missing")
+    with open(github_env, "a", encoding="utf-8") as stream:
+        stream.write("ADTR_E2E_HEALTH_RUN_NONCE=" + nonce + "\n")
+    return record
+
+
+def cleanup_health_run(controller, worker, server, diagnostics, logs,
+                       creation_attempted, name, owner):
+    """Always try independent cleanup; only completed operations become facts."""
+    operations, failures = [], []
+    transferred = worker_reaped = api_reaped = removed = False
+    state = {"state": "absent", "launchCount": 0}
+    if controller is not None:
+        try:
+            transfer = controller.seal_and_take()
+            worker = transfer.process
+            transferred = True
+            operations.append("seal_and_take")
+            if transfer.failures:
+                failures.append("controller_seal_failed")
+        except Exception:
+            failures.append("controller_seal_failed")
+    try:
+        diagnostics.snapshot(server, worker)
+    except Exception:
+        diagnostics.report["collection_errors"].append("snapshot")
+    reaped, code, forced, problems = cleanup_v4_process(worker, diagnostics.report["processes"]["worker"])
+    worker_reaped = worker is not None and reaped
+    if worker_reaped:
+        operations.append("worker_reap")
+    if problems:
+        failures.append("worker_reap_failed")
+    if controller is not None:
+        try:
+            finished = controller.finish_after_wait(reaped=reaped and transferred,
+                                                    returncode=code, forced_kill=forced)
+            if finished:
+                operations.append("finish_after_wait")
+            else:
+                failures.append("controller_finish_failed")
+            state = controller.state()
+        except Exception:
+            failures.append("controller_finish_failed")
+    reaped, _, _, problems = cleanup_v4_process(server, diagnostics.report["processes"]["api"])
+    api_reaped = server is not None and reaped
+    if api_reaped:
+        operations.append("api_reap")
+    if problems:
+        failures.append("api_reap_failed")
+    try:
+        if http_handler_panicked(logs):
+            failures.append("fixture_close_failed")
+    except Exception:
+        failures.append("fixture_close_failed")
+    try:
+        logs.close()
+    except Exception:
+        failures.append("log_close_failed")
+    if creation_attempted:
+        try:
+            remove_owned_container(name, owner)
+            removed = True
+            operations.append("owned_container_remove")
+        except Exception:
+            failures.append("owned_container_remove_failed")
+    return dict(launchCount=state["launchCount"], ownershipTransferred=transferred,
+        workerReaped=worker_reaped, apiReaped=api_reaped, controllerFinalState=state["state"],
+        ownedContainerRemoved=removed, operations=operations, failures=failures)
+
+
+def close_health_evidence(cleanup, build, env, deadline):
+    """Called only after finally; no success receipt for a skipped cleanup branch."""
+    health_timeout(1, deadline, reserve=0)
+    required = ["seal_and_take", "worker_reap", "finish_after_wait", "api_reap", "owned_container_remove"]
+    if (cleanup["failures"] or cleanup["operations"] != required
+            or cleanup["launchCount"] != 1 or cleanup["controllerFinalState"] != "closed"
+            or not all(cleanup[key] is True for key in
+                       ("ownershipTransferred", "workerReaped", "apiReaped", "ownedContainerRemoved"))):
+        raise RuntimeError("health_cleanup_incomplete")
+    root = Path("web/test-results/tasks-health-recovery")
+    if root.is_symlink() or not root.is_dir():
+        raise RuntimeError("health_evidence_missing")
+    manifests = []
+    for path in root.rglob("*"):
+        health_timeout(1, deadline, reserve=0)
+        if path.is_symlink():
+            raise RuntimeError("health_evidence_symlink")
+        if path.name == "manifest.json" and path.is_file():
+            manifests.append(path)
+    if len(manifests) != 1:
+        raise RuntimeError("health_manifest_count")
+    manifest = manifests[0]
+    health_timeout(1, deadline, reserve=0)
+    receipt = dict(schemaVersion=1, suite="tasks-health-recovery", identity=build["identity"],
+        manifestSHA256=hashlib.sha256(manifest.read_bytes()).hexdigest(), buildSource=build, **cleanup)
+    with (manifest.parent / "cleanup-receipt.json").open("x", encoding="utf-8") as stream:
+        json.dump(receipt, stream, sort_keys=True, ensure_ascii=False, allow_nan=False)
+        stream.write("\n")
+    subprocess.run([sys.executable, "scripts/validate_tasks_health_recovery_evidence.py",
+        "--evidence-dir", str(manifest.parent), "--source-root", "."], env=env, check=True, timeout=health_timeout(60, deadline, reserve=0))
+    publish = Path("web/playwright-report/tasks-health-recovery-validated")
+    publish.mkdir(parents=True, exist_ok=False)
+    for filename in ("manifest.json", "cleanup-receipt.json", "parent-failed-desktop.png",
+                     "parent-failed-mobile.png", "child-succeeded-desktop.png", "child-succeeded-mobile.png"):
+        health_timeout(1, deadline, reserve=0)
+        shutil.copyfile(manifest.parent / filename, publish / filename)
+    # Copying is not acceptance: independently re-read the precise published bytes.
+    subprocess.run([sys.executable, "scripts/validate_tasks_health_recovery_evidence.py",
+        "--evidence-dir", str(publish), "--source-root", "."], env=env, check=True, timeout=health_timeout(60, deadline, reserve=0))
+
+
 def browser_command(suite):
     command = ["npm", "run", "test:e2e", "--prefix", "web", "--", f"e2e/{suite}.spec.ts"]
-    if suite in {"messages-bulk", "messages-isolation"}:
+    if suite in {"messages-bulk", "messages-isolation", "tasks-health-recovery"}:
         command.extend(["--output", f"test-results/{suite}"])
     if suite in REAL_TAB_LIFECYCLE_SUITES:
         # These regressions require genuine background/foreground tab changes.
@@ -663,9 +949,12 @@ def validate_asset_refresh_evidence(suite):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--suite", choices=["directory-v4-controls", "directory-v4-cancel", "directory-v4-readers", "group-asset-export-v3-running-cancel", "computer-asset-export-v3-running-cancel", "user-asset-export-v3-running-cancel", "computer-asset-export-v3", "computer-asset-export-v3-failure", "computer-asset-export-v3-cancel", "group-asset-export-v3", "group-asset-export-v3-failure", "group-asset-export-v3-cancel", "user-asset-export-v3-failure", "user-asset-export-v3-cancel", "user-asset-export-v3", "auth", "access", "resource", "tasks", "messages", "messages-bulk", "messages-isolation", "audit", "system", "maintenance", "domains", "operations", "profile", "credential-use", "account-references", "operational-logs", "session-invalidation", "account-reference-barrier", "directory", "directory-controls", "directory-readers", "directory-v2", "directory-v2-controls", "directory-v2-readers", "directory-v3-backend", "directory-v4-backend", "group-members-v4", "group-members-v4-empty", "group-members-v4-pagination", "group-members-v4-refresh", "user-assets-v3", "computer-assets-v3", "computer-assets-v3-readers", "group-assets-v3", "group-assets-v3-readers", "directory-v3", "directory-v3-controls", "directory-v3-readers", "user-assets-v2", "user-assets-v2-readers"], default="auth")
+    parser.add_argument("--suite", choices=["tasks-health-recovery", "directory-v4-controls", "directory-v4-cancel", "directory-v4-readers", "group-asset-export-v3-running-cancel", "computer-asset-export-v3-running-cancel", "user-asset-export-v3-running-cancel", "computer-asset-export-v3", "computer-asset-export-v3-failure", "computer-asset-export-v3-cancel", "group-asset-export-v3", "group-asset-export-v3-failure", "group-asset-export-v3-cancel", "user-asset-export-v3-failure", "user-asset-export-v3-cancel", "user-asset-export-v3", "auth", "access", "resource", "tasks", "messages", "messages-bulk", "messages-isolation", "audit", "system", "maintenance", "domains", "operations", "profile", "credential-use", "account-references", "operational-logs", "session-invalidation", "account-reference-barrier", "directory", "directory-controls", "directory-readers", "directory-v2", "directory-v2-controls", "directory-v2-readers", "directory-v3-backend", "directory-v4-backend", "group-members-v4", "group-members-v4-empty", "group-members-v4-pagination", "group-members-v4-refresh", "user-assets-v3", "computer-assets-v3", "computer-assets-v3-readers", "group-assets-v3", "group-assets-v3-readers", "directory-v3", "directory-v3-controls", "directory-v3-readers", "user-assets-v2", "user-assets-v2-readers"], default="auth")
     parser.add_argument("--expired", action="store_true")
     args = parser.parse_args()
+    if args.suite == "tasks-health-recovery" and args.expired:
+        raise RuntimeError("health_expired_mode_unsupported")
+    health_run_deadline = health_deadline(os.environ) if args.suite == "tasks-health-recovery" else None
     # Only the three explicit running-cancel suites install the CI controller.
     # The default make build remains untagged. Build before source provenance.
     if args.suite in {RUNNING_CANCEL_SUITE} | KIND_RUNNING_CANCEL_SUITES:
@@ -674,7 +963,11 @@ def main():
     command = browser_command(args.suite)
     name = "adtr-auth-e2e-" + uuid.uuid4().hex[:12]
     password = secrets.token_hex(24)
-    env = dict(os.environ, POSTGRES_PASSWORD=password)
+    env = dict(health_environment(os.environ) if args.suite == "tasks-health-recovery" else os.environ, POSTGRES_PASSWORD=password)
+    health_build_record = health_build(health_environment(env), health_run_deadline) if args.suite == "tasks-health-recovery" else None
+    if health_build_record is not None:
+        env["ADTR_E2E_HEALTH_RUN_NONCE"] = health_build_record["identity"]["nonce"]
+    health_cleanup = None
     # Ignore inherited controller handles and exact-suite selectors.
     for key in (URL_ENV, TOKEN_ENV, "ADTR_E2E_V4_CONTROLS_SUITE"):
         env.pop(key, None)
@@ -732,17 +1025,17 @@ def main():
             subprocess.run(["docker", "run", "--detach", "--rm", "--name", name,
                             "--label", f"{OWNER_LABEL}={owner}",
                             "-e", "POSTGRES_PASSWORD", "-e", "POSTGRES_DB=adtr_e2e",
-                            "-p", "127.0.0.1::5432", *postgres_image_args(IMAGE)], env=env, check=True, capture_output=True, timeout=60)
+                            "-p", "127.0.0.1::5432", *(health_postgres_args(env, health_run_deadline) if args.suite == "tasks-health-recovery" else postgres_image_args(IMAGE))], env=env, check=True, capture_output=True, timeout=health_timeout(60, health_run_deadline))
         except subprocess.CalledProcessError as error:
             report_container_startup_failure(error, password)
             raise
         for _ in range(60):
-            if subprocess.run(["docker", "exec", name, "pg_isready", "-h", "127.0.0.1", "-U", "postgres", "-d", "adtr_e2e"], capture_output=True, timeout=5).returncode == 0:
+            if subprocess.run(["docker", "exec", name, "pg_isready", "-h", "127.0.0.1", "-U", "postgres", "-d", "adtr_e2e"], capture_output=True, timeout=health_timeout(5, health_run_deadline)).returncode == 0:
                 break
             time.sleep(0.5)
         else:
             raise RuntimeError("isolated authentication database did not become ready")
-        db_address = subprocess.check_output(["docker", "port", name, "5432/tcp"], text=True, timeout=10).strip()
+        db_address = subprocess.check_output(["docker", "port", name, "5432/tcp"], text=True, timeout=health_timeout(10, health_run_deadline)).strip()
         with socket.socket() as listener:
             listener.bind(("127.0.0.1", 0))
             port = listener.getsockname()[1]
@@ -758,7 +1051,7 @@ def main():
         if not Path("web/dist/index.html").is_file():
             raise RuntimeError("build the real frontend before running acceptance")
         for mode in ["migrate", "bootstrap"]:
-            subprocess.run(["./bin/adtr", "-mode", mode], env=env, check=True, timeout=60)
+            subprocess.run(["./bin/adtr", "-mode", mode], env=env, check=True, timeout=health_timeout(60, health_run_deadline))
         if args.suite == "account-references":
             # Isolated synthetic role: real function permission with no resource
             # groups. The browser creates its user and authenticates normally.
@@ -769,7 +1062,7 @@ def main():
             subprocess.run(["docker", "exec", name, "psql", "-U", "postgres", "-d", "adtr_e2e", "-v", "ON_ERROR_STOP=1", "-c",
                             "INSERT INTO adtr.resource_domains(tenant_id,id,name,active) VALUES('default','synthetic-domain-a','Synthetic Domain A',true)"],
                            check=True, capture_output=True, timeout=30)
-        if args.suite in {"messages", "messages-isolation"}:
+        if args.suite in {"messages", "messages-isolation", "tasks-health-recovery"}:
             # Read-only provenance checks wait for the real health projection; no message fixtures.
             env["ADTR_E2E_DB_CONTAINER"] = name
         if args.suite == "messages-bulk":
@@ -830,12 +1123,13 @@ def main():
         # Credentials are only needed by explicit bootstrap; never pass them to the server.
         runtime_env = {k: v for k, v in env.items() if not k.startswith("ADTR_BOOTSTRAP_") and not k.startswith("ADTR_E2E_") and k not in ENV_FDS}
         diagnostics.phase("api-start")
+        health_timeout(1, health_run_deadline)
         server = subprocess.Popen(["./bin/adtr", "-mode", "api"], env=runtime_env, stdout=logs, stderr=logs)
         for _ in range(100):
             if server.poll() is not None:
                 raise RuntimeError("authentication API exited during startup")
             try:
-                with urllib.request.urlopen(base + "/readyz", timeout=1) as response:
+                with urllib.request.urlopen(base + "/readyz", timeout=health_timeout(1, health_run_deadline)) as response:
                     if response.status == 200:
                         break
             except (OSError, urllib.error.URLError):
@@ -844,7 +1138,7 @@ def main():
         else:
             raise RuntimeError("authentication API failed readiness")
         diagnostics.phase("api-ready")
-        if args.suite in {"tasks", "messages", "messages-bulk", "messages-isolation", "audit", "system", "maintenance", "domains", "account-references", "operational-logs", "account-reference-barrier"} | DIRECTORY_SUITES:
+        if args.suite in {"tasks", "tasks-health-recovery", "messages", "messages-bulk", "messages-isolation", "audit", "system", "maintenance", "domains", "account-references", "operational-logs", "account-reference-barrier"} | DIRECTORY_SUITES:
             with socket.socket() as listener:
                 listener.bind(("127.0.0.1", 0))
                 worker_port = listener.getsockname()[1]
@@ -860,7 +1154,15 @@ def main():
             # Execution authorization needs persisted actors, not browser secrets.
             for key in ["ADTR_AUTH_KEY", "ADTR_ORIGIN", "ADTR_WEB_DIR"]:
                 worker_env.pop(key, None)
-            if args.suite == "directory-v4-cancel":
+            if args.suite == "tasks-health-recovery":
+                # API is ready, but no worker exists until the explicit browser start.
+                binary = str(Path("bin/adtr").resolve(strict=True))
+                launch = lambda binary=binary, worker_env=dict(worker_env), logs=logs: subprocess.Popen(
+                    [binary, "-mode", "worker"], env=worker_env, stdout=logs, stderr=logs)
+                v4_worker_controller = v4_delayed_worker(
+                    launch, f"http://127.0.0.1:{worker_port}/readyz")
+                env.update(v4_worker_controller.open())
+            elif args.suite == "directory-v4-cancel":
                 # Freeze actual binary, private env, logs and URL before admission.
                 binary = str(Path("bin/adtr").resolve(strict=True))
                 launch = lambda binary=binary, worker_env=dict(worker_env), logs=logs: subprocess.Popen(
@@ -914,7 +1216,12 @@ def main():
         # enter an error-context prompt; explicit safe screenshots remain intact.
         env["PLAYWRIGHT_NO_COPY_PROMPT"] = "1"
         diagnostics.phase("browser-start")
-        subprocess.run(command, env=env, check=True, timeout=720 if args.suite == "messages-isolation" else V4_CONTROLS_BUDGETS[args.suite] if args.suite in V4_CONTROLS_BUDGETS else 930 if args.suite in KIND_RUNNING_CANCEL_SUITES else 930 if args.suite == RUNNING_CANCEL_SUITE else 930 if args.suite in COMPUTER_EXPORT_SUITES else 930 if args.suite in GROUP_EXPORT_SUITES else 930 if args.suite in EXPORT_TERMINAL_SUITES else 930 if args.suite == "user-asset-export-v3" else 660 if args.suite == "account-references" else 930 if args.suite in EMPTY_DIRECTORY_SUITES | USER_ASSETS_V2_SUITES | {"user-assets-v3"} | COMPUTER_ASSETS_V3_SUITES | GROUP_ASSETS_V3_SUITES else 660 if args.suite in {"directory", "directory-v2", "directory-v3-backend", "directory-v4-backend", "group-members-v4", "group-members-v4-empty", "group-members-v4-pagination", "group-members-v4-refresh", "directory-v3"} else 600 if args.suite == "audit" else 540 if args.suite in {"maintenance", "domains", "operations", "credential-use", "account-references", "operational-logs", "account-reference-barrier"} else 480 if args.suite == "system" else 420)
+        if args.suite == "tasks-health-recovery":
+            exit_code = health_build_process(command, env, health_timeout(660, health_run_deadline), capture=False)
+            if exit_code != 0:
+                raise RuntimeError("health_browser_failed")
+        else:
+            subprocess.run(command, env=env, check=True, timeout=720 if args.suite == "messages-isolation" else V4_CONTROLS_BUDGETS[args.suite] if args.suite in V4_CONTROLS_BUDGETS else 930 if args.suite in KIND_RUNNING_CANCEL_SUITES else 930 if args.suite == RUNNING_CANCEL_SUITE else 930 if args.suite in COMPUTER_EXPORT_SUITES else 930 if args.suite in GROUP_EXPORT_SUITES else 930 if args.suite in EXPORT_TERMINAL_SUITES else 930 if args.suite == "user-asset-export-v3" else 660 if args.suite == "account-references" else 930 if args.suite in EMPTY_DIRECTORY_SUITES | USER_ASSETS_V2_SUITES | {"user-assets-v3"} | COMPUTER_ASSETS_V3_SUITES | GROUP_ASSETS_V3_SUITES else 660 if args.suite in {"directory", "directory-v2", "directory-v3-backend", "directory-v4-backend", "group-members-v4", "group-members-v4-empty", "group-members-v4-pagination", "group-members-v4-refresh", "directory-v3"} else 600 if args.suite == "audit" else 540 if args.suite in {"maintenance", "domains", "operations", "credential-use", "account-references", "operational-logs", "account-reference-barrier"} else 480 if args.suite == "system" else 420)
         if args.suite == "messages-isolation":
             validate_messages_isolation_evidence()
         if args.suite == "user-asset-export-v3":
@@ -959,7 +1266,24 @@ def main():
         diagnostics.phase("browser-pass")
         chain = "real browser -> API -> worker/PostgreSQL" if worker is not None or v4_worker_controller is not None else "real browser -> API -> PostgreSQL"
     finally:
-        if args.suite in V4_CONTROLS_BUDGETS:
+        if args.suite == "tasks-health-recovery":
+            primary_error = sys.exc_info()[0] is not None
+            try:
+                health_cleanup = cleanup_health_run(v4_worker_controller, worker, server,
+                    diagnostics, logs, creation_attempted, name, owner)
+                if health_cleanup["failures"] and not primary_error:
+                    raise RuntimeError("health_owned_cleanup_failed")
+            except Exception:
+                if not primary_error:
+                    raise
+                print("health_owned_cleanup_failed", file=sys.stderr)
+            finally:
+                try:
+                    diagnostics.phase("after-cleanup")
+                    diagnostics.write(diagnostic_dir / "runtime.json")
+                except Exception:
+                    print("health_runtime_diagnostics_failed", file=sys.stderr)
+        elif args.suite in V4_CONTROLS_BUDGETS:
             primary_error = sys.exc_info()[0] is not None
             try:
                 failures = cleanup_v4_run(v4_worker_controller, worker, server,
@@ -1101,6 +1425,8 @@ def main():
                     diagnostics.write(diagnostic_dir / "runtime.json")
                 except Exception:
                     print("Safe runtime diagnostics could not be retained", file=sys.stderr)
+    if args.suite == "tasks-health-recovery":
+        close_health_evidence(health_cleanup, health_build_record, env, health_run_deadline)
     if args.suite == "messages":
         # Additive sequential acceptance, fresh owned database; never recurse from bulk.
         subprocess.run([sys.executable, __file__, "--suite", "messages-bulk"], check=True)
@@ -1109,4 +1435,12 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception:
+        if ("--suite=tasks-health-recovery" in sys.argv[1:]
+                or any(a == "--suite" and b == "tasks-health-recovery"
+                       for a, b in zip(sys.argv[1:], sys.argv[2:]))):
+            print("tasks_health_recovery_failed", file=sys.stderr)
+            sys.exit(1)
+        raise

@@ -287,6 +287,7 @@ def main():
         cases = {
             'web/src/MessagesWorkspace.tsx': {'messages', 'messages-isolation'},
             'web/e2e/messages-isolation.spec.ts': {'messages-isolation'},
+            'web/e2e/tasks-health-recovery.spec.ts': {'tasks-health-recovery'},
             'web/e2e/messages-bulk.spec.ts': {'messages'},
             'web/src/ComputerAssetsV3Workspace.tsx': set(inventory['frontend_roots']['web/src/ComputerAssetsV3Workspace.tsx']),
             'web/src/UserAssetExportV3.tsx': set(inventory['frontend_roots']['web/src/UserAssetsV3Workspace.tsx']),
