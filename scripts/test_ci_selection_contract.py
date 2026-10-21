@@ -86,6 +86,7 @@ class SelectionContract(unittest.TestCase):
         root='web/src/TaskWorkspace.tsx'
         expected={
             'tasks', 'audit', 'messages', 'messages-isolation', 'maintenance', 'user-assets-v2',
+            'tasks-health-recovery',
             'directory-v3', 'group-members-v4',
             'user-asset-export-v3', 'user-asset-export-v3-failure',
             'user-asset-export-v3-cancel', 'computer-asset-export-v3',
