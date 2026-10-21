@@ -2,10 +2,70 @@
 import base64
 import copy
 import json
+import re
 from pathlib import Path
 import unittest
 import validate_user_asset_export_v3_terminal_evidence as v
 import test_user_asset_export_v3_evidence_contract as old
+
+
+# A closed source shape, not a general TypeScript parser. Keep the actual outer
+# catch/finally, independent cleanup branches and failure propagation together.
+# Merely mentioning restoreOwnedExportWorker (including in a comment) is not a
+# cleanup witness. Browser/Worker runtime evidence remains independently needed.
+QUEUED_CANCEL_CLEANUP = '''  } catch { failure = phase; }
+  finally {
+    page.off("download", downloaded);
+    if (taskPage) {
+      taskPage.off("request", requested); taskPage.off("download", downloaded);
+      try { await taskPage.close(); } catch { cleanupFailed = true; }
+    }
+    if (restoreWorker) {
+      try { await restoreOwnedExportWorker(); } catch { cleanupFailed = true; }
+    }
+  }
+  // Raw Playwright errors can contain Cookie call logs. Do not attach a cause.
+  if (failure || cleanupFailed) throw new Error(`User export task cancel checkpoint failed: ${failure || "cleanup"}${cleanupFailed ? "; cleanup_failed" : ""}`);
+});
+'''
+QUEUED_CANCEL_ARM = '''    phase = "pause"; restoreWorker = true;
+    const pause = await pauseOwnedExportWorker();'''
+QUEUED_CANCEL_IMAGE = 'const image = await screenshot(taskPage, info, "cancelled-terminal.png");'
+
+
+def queued_cancel_browser_contract(source):
+    v.require(type(source) is str and source.endswith(QUEUED_CANCEL_CLEANUP), 'closed queued cleanup and safe failure propagation')
+    v.require(source.count('  finally {\n') == 1, 'one outer queued cleanup')
+    v.require(source.count('await taskPage.close();') == 1 and source.count('await restoreOwnedExportWorker();') == 1, 'await each owned cleanup exactly once')
+    v.require(re.findall(r'\brestoreWorker\s*=\s*([^;,\n]+)', source) == ['false', 'true'], 'restore guard initialized once and never disarmed')
+    v.require(source.count(QUEUED_CANCEL_ARM) == 1, 'arm restoration before attempting pause')
+    outer_try = '  try {\n    expect(process.env.ADTR_E2E_USER_ASSET_EXPORT_V3_TERMINAL)'
+    v.require(source.count(outer_try) == 1 and source.index(outer_try) < source.index(QUEUED_CANCEL_ARM), 'pause attempt belongs to protected outer try')
+    v.require(source.count('test.setTimeout(900_000);') == 1, 'unchanged queued timeout')
+    # Preserve post-resume DB invariance and old-panel visibility, then require
+    # a real fresh dedicated read and proof-free original identity before the
+    # new-tab screenshot. The existing artifact validator still binds its bytes.
+    ordered = [
+        'const resume = await resumeOwnedExportWorker(context, pause);',
+        'expect(postResume.database).toEqual(database);',
+        'await cancelledStatus.scrollIntoViewIfNeeded();',
+        'phase = "new-entry-terminal-pixels";',
+        'const fresh = await responseValue(freshResponse, setup.actorId);',
+        'expect(fresh).toMatchObject({ taskID: originalTaskID, request, downloadReady: false, downloadStatus: "cancelled", task: { state: "cancelled" } });',
+        'await taskCancelledStatus.scrollIntoViewIfNeeded();',
+        'await expect(taskCancelledStatus).toBeInViewport({ ratio: 1 });',
+        'await expect(originalID).toHaveText(originalTaskID);',
+        'await expect(originalID).toBeInViewport({ ratio: 1 });',
+        '''await expect(taskPage.locator('input[type="password"], input[name="totpCode"]')).toHaveCount(0);''',
+        QUEUED_CANCEL_IMAGE,
+        'await writeTerminalEvidence(info, setup, "queuedCancel",',
+    ]
+    for value in ordered:
+        v.require(source.count(value) == 1, 'unique required queued checkpoint')
+    positions = [source.index(value) for value in ordered]
+    v.require(positions == sorted(positions), 'resumed DB then real new-entry pixels then evidence')
+    v.require(source.count('await screenshot(') == 1, 'one retained queued screenshot')
+    v.require(source.count('toBeInViewport({ ratio: 1 })') >= 5, 'old and new visible terminal identity')
 
 
 def terminal_db(task_id, key, state):
@@ -226,10 +286,56 @@ class TerminalEvidenceContract(unittest.TestCase):
         self.assertIn('terminalError.scrollIntoViewIfNeeded()', failure)
         self.assertGreaterEqual(failure.count('toBeInViewport({ ratio: 1 })'), 4)
         cancel = (root / 'web/e2e/user-asset-export-v3-cancel.spec.ts').read_text()
-        self.assertIn('finally { await restoreOwnedExportWorker(); }', cancel)
+        queued_cancel_browser_contract(cancel)
         self.assertIn('cancelledStatus.scrollIntoViewIfNeeded()', cancel)
         self.assertGreaterEqual(cancel.count('toBeInViewport({ ratio: 1 })'), 3)
-        self.assertLess(cancel.index('expect(postResume.database).toEqual(database)'), cancel.index('await screenshot(page, info,'))
+        self.assertLess(cancel.index('expect(postResume.database).toEqual(database)'), cancel.index('await screenshot(taskPage, info,'))
+
+    def test_queued_browser_cleanup_and_pixel_contract_mutations(self):
+        root = Path(__file__).resolve().parents[1]
+        source = (root / 'web/e2e/user-asset-export-v3-cancel.spec.ts').read_text()
+        queued_cancel_browser_contract(source)
+        restore = '      try { await restoreOwnedExportWorker(); } catch { cleanupFailed = true; }'
+        close = '      try { await taskPage.close(); } catch { cleanupFailed = true; }'
+        proof_empty = '''await expect(taskPage.locator('input[type="password"], input[name="totpCode"]')).toHaveCount(0);'''
+        mutations = [
+            ('missing restore', restore, ''),
+            ('restore is only a comment', restore, '      try { /* await restoreOwnedExportWorker(); */ } catch { cleanupFailed = true; }'),
+            ('unjoined restore', restore, restore.replace('await ', '')),
+            ('restore failure swallowed', restore, '      try { await restoreOwnedExportWorker(); } catch {}'),
+            ('restore depends on a tab', '    if (restoreWorker) {', '    if (taskPage && restoreWorker) {'),
+            ('restore never armed', QUEUED_CANCEL_ARM, QUEUED_CANCEL_ARM.replace('= true', '= false')),
+            ('pause before restoration armed', QUEUED_CANCEL_ARM, '    const pause = await pauseOwnedExportWorker();\n    phase = "pause"; restoreWorker = true;'),
+            ('guard disarmed after pause', QUEUED_CANCEL_ARM, QUEUED_CANCEL_ARM + '\n    restoreWorker = false;'),
+            ('missing tab close', close, ''),
+            ('unjoined tab close', close, close.replace('await ', '')),
+            ('close failure prevents restore', close, '      await taskPage.close();'),
+            ('close failure swallowed', close, '      try { await taskPage.close(); } catch {}'),
+            ('no finally protection', '  finally {\n', '  if (true) {\n'),
+            ('cleanup failure treated as success', 'if (failure || cleanupFailed)', 'if (failure)'),
+            ('outer failure swallowed', '  } catch { failure = phase; }', '  } catch {}'),
+            ('old screenshot target', QUEUED_CANCEL_IMAGE, QUEUED_CANCEL_IMAGE.replace('screenshot(taskPage,', 'screenshot(page,')),
+            ('wrong artifact name', QUEUED_CANCEL_IMAGE, QUEUED_CANCEL_IMAGE.replace('cancelled-terminal.png', 'other.png')),
+            ('missing fresh terminal read', 'const fresh = await responseValue(freshResponse, setup.actorId);', 'const fresh = cancel;'),
+            ('unbound screenshot identity', 'await expect(originalID).toHaveText(originalTaskID);', 'await expect(originalID).toBeVisible();'),
+            ('missing proof destruction check', proof_empty, ''),
+            ('larger timeout', 'test.setTimeout(900_000);', 'test.setTimeout(1_800_000);'),
+        ]
+        for label, before, after in mutations:
+            with self.subTest(mutation=label):
+                self.assertEqual(source.count(before), 1, 'mutation must target one actual checkpoint')
+                with self.assertRaises(ValueError):
+                    queued_cancel_browser_contract(source.replace(before, after, 1))
+        # Both moved calls still exist by name; order/outer-finally checks must
+        # reject them rather than merely finding an expected function string.
+        moved_restore = source.replace(restore, '', 1) + '\nawait restoreOwnedExportWorker();\n'
+        db_check = 'expect(postResume.database).toEqual(database);'
+        early_image = source.replace(QUEUED_CANCEL_IMAGE, '', 1).replace(db_check, QUEUED_CANCEL_IMAGE + '\n    ' + db_check, 1)
+        late_db_check = source.replace(db_check, '', 1).replace(QUEUED_CANCEL_IMAGE, QUEUED_CANCEL_IMAGE + '\n    ' + db_check, 1)
+        for label, changed in [('restore outside finally', moved_restore), ('pixels before DB verification', early_image), ('DB verification after pixels', late_db_check)]:
+            with self.subTest(mutation=label):
+                with self.assertRaises(ValueError):
+                    queued_cancel_browser_contract(changed)
 
 
 if __name__ == '__main__':
