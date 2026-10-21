@@ -1121,6 +1121,20 @@ function TaskDetails({
               失败后通过该页面重新创建导出，生成新的受保护控制记录。
             </p>
           )}
+          {!read.busy &&
+            !read.error &&
+            task.taskUUID === id &&
+            validExportID(task.taskUUID) &&
+            task.taskName === "system.logs_bundle" &&
+            task.domainId === "platform" &&
+            !task.archived && (
+              <p className="warning">
+                <a href={`#operational-logs/detail/${task.taskUUID}`}>
+                  查看原运行日志诊断包
+                </a>
+                。此入口仅核对原任务对应的诊断包；能否查看或下载，以原页面的当前授权和文件校验为准。
+              </p>
+            )}
           {action &&
             !requiresDedicatedTaskControls(task.taskName) &&
             !task.archived &&
