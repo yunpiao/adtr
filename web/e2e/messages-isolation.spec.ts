@@ -722,7 +722,7 @@ test("two authenticated nonempty message histories remain isolated", async ({ br
   requireFact(manifest.phaseBudget.snapshotElapsedMs <= 60_000, "snapshot_phase_deadline");
   const path = testInfo.outputPath("messages-soc-isolation-evidence.json");
   writeFileSync(path, JSON.stringify(manifest, null, 2) + "\n");
-  for (const shot of screenshots) await testInfo.attach(shot.file, { path: testInfo.outputPath(shot.file), contentType: "image/png" });
-  await testInfo.attach("messages-soc-isolation-evidence", { path, contentType: "application/json" });
+  // The workflow uploads these four original PNGs and this one manifest.
+  // Reporter attachments would copy them and violate the exact evidence set.
   for (const a of actors) await safe("browser_observation", () => a.context.close());
 });

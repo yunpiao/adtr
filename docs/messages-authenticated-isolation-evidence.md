@@ -39,3 +39,11 @@ The existing successful-only `messages-soc-*` upload glob and seven-day retentio
 ## Acceptance record still needed
 
 Record the reviewed candidate commit, exact CI run/attempt and job conclusions; inspect and hash the four safe screenshots and manifest; distinguish observed runtime results from planned assertions. Only after current-commit required checks pass and independent review clears the implementation may the authorized merge proceed. Verify merged main and its required checks separately. Until these records exist, runtime response bodies, actual phase duration, admission counts and screenshot pixels remain unverified.
+
+## First CI observation and bounded repair
+
+PR #197 head `e846ca96`, CI run `39527647131` attempt 1 (tested checkout `563114a9`) completed the new browser test successfully in 3.8 minutes, then failed the runner evidence validator with its fixed error category. This is a failed acceptance job, not accepted evidence or screenshot review. The retained safe runtime diagnostics reported normal API/worker startup and cleanup without panic; no accepted manifest or PNG was uploaded. The generic failure did not identify the first rejected condition.
+
+Source inspection found a deterministic artifact-set mismatch: Playwright `testInfo.attach` copies each path attachment into an additional `attachments/` file with the same `messages-soc-*` prefix, while the upload-wide validator correctly requires exactly the four original PNGs and one manifest. The repair removes redundant report attachments while keeping those original five files, their validation, the workflow upload glob and retention unchanged. This source conflict is established; whether it was the first branch reached in that failed run is not recoverable from the generic log.
+
+The validator now reports only a fixed, source-literal validation phase (file discovery, checkout/source/bundle binding, PNG, payload/artifact/ledger schema, provenance, negative matrix, bulk ledger or negative ledger). It still fails closed, suppresses the underlying exception and never prints manifest values, raw exceptions or failed evidence. Phase diagnostics do not bypass validation or authorize uploading failed artifacts. The corrected candidate still requires independent source review, a fresh exact-commit CI result, and actual screenshot pixel review.

@@ -49,6 +49,7 @@ def violations(source):
         r'\.route\(', r'\.routeFromHAR\(', r'\.fulfill\(', r'\.fetch\(',
         r'\blocalStorage\b', r'\bsessionStorage\b', r'\bSIGSTOP\b',
         r'\.clock\.', r'\bwaitForTimeout\(', r'\btest\.skip\(',
+        r'\.attach\s*\(', r'\.attachments\b', r'\bcopyFile(?:Sync)?\s*\(',
         r'\.on\("(?:console|response|requestfailed|pageerror)"',
         r'\b(?:INSERT\s+INTO|UPDATE\s+adtr|DELETE\s+FROM|TRUNCATE|ALTER\s+TABLE)\b',
         r'\b(?:session_hash|token_hash|mfa_last_step|auth_attempts)\b',
@@ -134,6 +135,17 @@ class PrivacyContract(unittest.TestCase):
         self.assertIn('launchOptions: { env: chromiumEnvironment()', self.source)
         self.assertIn('!/^(ADTR_|POSTGRES_|PG)/i.test(entry[0])', self.source)
         self.assertIn('executablePath: process.env.ADTR_E2E_CHROMIUM_PATH', self.source)
+
+    def test_exact_original_evidence_set_has_no_reporter_copies(self):
+        self.assertEqual(self.source.count('.screenshot('), 1)
+        self.assertEqual(len(re.findall(r'\bwriteFileSync\s*\(', self.source)), 1)
+        self.assertIn('path: testInfo.outputPath(file)', self.source)
+        self.assertIn('testInfo.outputPath("messages-soc-isolation-evidence.json")', self.source)
+        self.assertIn('screenshots.length === 4', self.source)
+        for duplicate in ('await testInfo.attach("messages-soc-isolation-evidence", { path });',
+                          'testInfo.attachments.push({ path });',
+                          'copyFileSync(path, duplicatePath);'):
+            self.assertIn("unsafe_source_construct", violations(self.source + "\n" + duplicate))
 
     def test_no_request_listener_serializes_proofs(self):
         listener = self.source.split('context.on("request", request => {', 1)[1].split('\n      });', 1)[0]

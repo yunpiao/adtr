@@ -221,7 +221,10 @@ def validate_messages_isolation_evidence():
 
     Fixed diagnostics deliberately do not echo malformed manifest values. Pixel
     review remains independent; proofEmpty is only the suite's DOM safety gate.
+    Failure phases below are source-literal categories, never exception text,
+    field values, manifest contents or dynamically supplied labels.
     """
+    failure = "messages_isolation_evidence_invalid:file_discovery"
     try:
         def safe_path(path):
             path = Path(path).absolute()
@@ -255,6 +258,7 @@ def validate_messages_isolation_evidence():
         def revision(*args):
             return subprocess.check_output(["git", *args], stderr=subprocess.DEVNULL,
                                            timeout=10, text=True).strip()
+        failure = "messages_isolation_evidence_invalid:checkout_binding"
         require(type(data["formatVersion"]) is int and data["formatVersion"] == 1 and data["suite"] == "messages-isolation"
                 and data["status"] == "passed")
         require(data["checkoutCommit"] == revision("rev-parse", "HEAD")
@@ -270,6 +274,7 @@ def validate_messages_isolation_evidence():
             else:
                 require(value.isascii() and value.isdigit() and int(value) > 0)
         require(type(data["browser"]) is str and 0 < len(data["browser"]) <= 128)
+        failure = "messages_isolation_evidence_invalid:source_binding"
         required_sources = {
             "web/e2e/messages-isolation.spec.ts",
             "scripts/test_messages_isolation_browser_contract.py",
@@ -321,6 +326,7 @@ def validate_messages_isolation_evidence():
             source = safe_path(path)
             require(not Path(path).is_absolute() and ".." not in Path(path).parts and source.is_file())
             require(sha == digest(source))
+        failure = "messages_isolation_evidence_invalid:bundle_binding"
         require(data["artifactsSHA256"]["apiWorker"] == digest("bin/adtr")
                 and data["artifactsSHA256"]["frontendEntry"] == digest("web/dist/index.html"))
         frontend_root = safe_path("web/dist")
@@ -361,6 +367,7 @@ def validate_messages_isolation_evidence():
             pixels = decoder.decompress(bytes(compressed), expected + 1)
             require(len(pixels) == expected and decoder.eof and not decoder.unused_data and not decoder.unconsumed_tail)
             require(all(pixels[row * (width * channels + 1)] <= 4 for row in range(height)))
+        failure = "messages_isolation_evidence_invalid:png_evidence"
         screenshots = data["screenshots"]
         require(len(screenshots) == 4)
         observed = set()
@@ -382,6 +389,7 @@ def validate_messages_isolation_evidence():
             observed.add((shot["identity"], viewport["width"], viewport["height"]))
         require(observed == {(identity, width, height) for identity in ("A", "B")
                              for width, height in ((1440, 900), (390, 844))})
+        failure = "messages_isolation_evidence_invalid:payload_schema"
         identities = data["identities"]
         require(len(identities) == 2 and {x["label"] for x in identities} == {"A", "B"}
                 and len({x["userId"] for x in identities}) == 2)
@@ -433,9 +441,11 @@ def validate_messages_isolation_evidence():
         for shot in screenshots:
             keys(shot, "file viewport fullPage identity proofEmpty sha256")
             keys(shot["viewport"], "width height")
+        failure = "messages_isolation_evidence_invalid:artifact_files"
         allowed_files = {manifest.resolve()} | {(manifest.parent / shot["file"]).resolve() for shot in screenshots}
         actual_files = {safe_path(path).resolve() for path in Path("web/test-results").rglob("messages-soc-*")}
         require(actual_files == allowed_files and not manifest.is_symlink())
+        failure = "messages_isolation_evidence_invalid:ledger_schema"
         row_keys = {
             "identity": "id tenant_id authorization_version",
             "messages": "message_id tenant_id recipient_user_id source_task_id source_event_id source_result_version message_type sub_type title description occurred_at ingested_at",
@@ -517,6 +527,7 @@ def validate_messages_isolation_evidence():
                 require(value["identity"] == owner["baseline"]["identity"]
                         and messages == owner["baseline"]["messages"]
                         and value["single"] == owner["baseline"]["single"])
+        failure = "messages_isolation_evidence_invalid:provenance"
         for identity in identities:
             keys(identity, "label userId tenantId authorizationVersion sensitiveActions snapshotAdmissions taskIds provenance baseline")
             require(type(identity["userId"]) is int and identity["userId"] > 0
@@ -563,6 +574,7 @@ def validate_messages_isolation_evidence():
             require({p["messageId"] for p in provenance} == {row["message_id"] for row in baseline["messages"]})
             message_sets[identity["label"]] = {p["messageId"] for p in provenance}
         require(not message_sets["A"] & message_sets["B"] and by_label["A"]["tenantId"] == by_label["B"]["tenantId"])
+        failure = "messages_isolation_evidence_invalid:negative_matrix"
         expected_suffixes = {"foreign-page", "foreign-locate", "foreign-single-receipt", "foreign-read",
             "foreign-single-replay", "foreign-bulk-selected", "foreign-bulk-all", "own-result-foreign-single",
             "own-result-foreign-selected-false", "own-result-foreign-selected-true"}
@@ -572,6 +584,7 @@ def validate_messages_isolation_evidence():
                 == {f"{label}-{suffix}" for label in ("A", "B") for suffix in expected_suffixes})
         allowed_states = {label: [identity["baseline"]] for label, identity in by_label.items()}
         by_bulk = {(bulk["actor"], bulk["selection"]): bulk for bulk in bulks}
+        failure = "messages_isolation_evidence_invalid:bulk_ledger"
         for label in ("A", "B"):
             owner = by_label[label]
             other = by_label["B" if label == "A" else "A"]
@@ -617,6 +630,7 @@ def validate_messages_isolation_evidence():
                     require(set(new_targets) == message_sets[label])
                 previous = after
                 allowed_states[label].append(after)
+        failure = "messages_isolation_evidence_invalid:negative_ledger"
         for stage in stages:
             keys(stage, "label status body before after")
             caller, suffix = stage["label"].split("-", 1)
@@ -636,7 +650,7 @@ def validate_messages_isolation_evidence():
                 expected_states = [by_label[label]["baseline"] for label in ("A", "B")]
             require(stage["before"] == stage["after"] == expected_states)
     except Exception:
-        raise RuntimeError("messages_isolation_evidence_invalid") from None
+        raise RuntimeError(failure) from None
 
 
 def validate_asset_refresh_evidence(suite):

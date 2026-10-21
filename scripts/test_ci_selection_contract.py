@@ -380,6 +380,15 @@ class SelectionContract(unittest.TestCase):
         scope = dict(Path=Path, hashlib=hashlib, json=json, os=os, subprocess=subprocess, zlib=zlib, datetime=datetime, uuid=uuid)
         exec(compile(ast.Module(body=[function], type_ignores=[]), '<isolated-validator>', 'exec'), scope)
         validate = scope['validate_messages_isolation_evidence']
+        phases = {'file_discovery', 'checkout_binding', 'source_binding', 'bundle_binding',
+                  'png_evidence', 'payload_schema', 'artifact_files', 'ledger_schema',
+                  'provenance', 'negative_matrix', 'bulk_ledger', 'negative_ledger'}
+        expected_failures = {'messages_isolation_evidence_invalid:' + phase for phase in phases}
+        assignments = [node for node in ast.walk(function) if isinstance(node, ast.Assign)
+                       and any(isinstance(target, ast.Name) and target.id == 'failure' for target in node.targets)]
+        self.assertEqual({ast.literal_eval(node.value) for node in assignments}, expected_failures)
+        self.assertTrue(all(isinstance(node.value, ast.Constant) for node in assignments))
+        failure_pattern = '^messages_isolation_evidence_invalid:(' + '|'.join(sorted(phases)) + ')$'
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             output = root / 'web/test-results/messages-isolation'
@@ -482,6 +491,18 @@ class SelectionContract(unittest.TestCase):
                      patch.object(subprocess, 'check_output', side_effect=lambda command, **_: '' if command[-1] == '--porcelain' else 'b'*40 if command[-1] == 'HEAD^{tree}' else 'a'*40):
                     manifest.write_text(json.dumps(good))
                     validate()
+                    # Playwright path attachments create additional prefixed
+                    # copies; even byte-identical copies must not widen upload.
+                    attachments = output / 'attachments'
+                    attachments.mkdir()
+                    for artifact in [manifest] + [output / shot['file'] for shot in shots]:
+                        (attachments / (artifact.stem + '-copy' + artifact.suffix)).write_bytes(artifact.read_bytes())
+                    with self.assertRaisesRegex(RuntimeError, '^messages_isolation_evidence_invalid:artifact_files$'):
+                        validate()
+                    for artifact in attachments.iterdir():
+                        artifact.unlink()
+                    attachments.rmdir()
+                    validate()
                     mutations = [lambda d: d.update(status='failed'),
                                  lambda d: d.update(dirty=True),
                                  lambda d: d.update(formatVersion=True),
@@ -523,26 +544,32 @@ class SelectionContract(unittest.TestCase):
                         invalid = copy.deepcopy(good)
                         mutate(invalid)
                         manifest.write_text(json.dumps(invalid))
-                        with self.assertRaisesRegex(RuntimeError, '^messages_isolation_evidence_invalid$') as caught:
+                        with self.assertRaisesRegex(RuntimeError, failure_pattern) as caught:
                             validate()
                         self.assertTrue(caught.exception.__suppress_context__)
                     manifest.write_text(json.dumps(good))
                     extra = root / 'web/test-results/messages-soc-unvalidated.txt'
                     extra.write_text('must not upload')
-                    with self.assertRaisesRegex(RuntimeError, '^messages_isolation_evidence_invalid$'):
+                    with self.assertRaisesRegex(RuntimeError, failure_pattern):
                         validate()
                     extra.unlink()
+                    with patch.object(subprocess, 'check_output', side_effect=RuntimeError('private sentinel')):
+                        with self.assertRaisesRegex(RuntimeError, '^messages_isolation_evidence_invalid:checkout_binding$') as caught:
+                            validate()
+                        self.assertTrue(caught.exception.__suppress_context__)
+                        self.assertIsNone(caught.exception.__cause__)
+                        self.assertNotIn('private sentinel', str(caught.exception))
                     shot_path = output / shots[0]['file']
                     original_png = shot_path.read_bytes()
                     shot_path.write_bytes(original_png[:-1])
-                    with self.assertRaisesRegex(RuntimeError, '^messages_isolation_evidence_invalid$'):
+                    with self.assertRaisesRegex(RuntimeError, failure_pattern):
                         validate()
                     shot_path.write_bytes(original_png)
                     outside = root / 'outside.png'
                     outside.write_bytes(original_png)
                     shot_path.unlink()
                     shot_path.symlink_to(outside)
-                    with self.assertRaisesRegex(RuntimeError, '^messages_isolation_evidence_invalid$'):
+                    with self.assertRaisesRegex(RuntimeError, failure_pattern):
                         validate()
                     shot_path.unlink()
                     shot_path.write_bytes(original_png)
@@ -551,15 +578,15 @@ class SelectionContract(unittest.TestCase):
                     invalid = copy.deepcopy(good)
                     invalid['screenshots'][0]['sha256'] = hashlib.sha256(corrupted).hexdigest()
                     manifest.write_text(json.dumps(invalid))
-                    with self.assertRaisesRegex(RuntimeError, '^messages_isolation_evidence_invalid$'):
+                    with self.assertRaisesRegex(RuntimeError, failure_pattern):
                         validate()
                     shot_path.write_bytes(original_png)
                     manifest.write_text(json.dumps(good))
                     with patch.object(subprocess, 'check_output', side_effect=lambda command, **_: ' M tracked' if command[-1] == '--porcelain' else 'b'*40 if command[-1] == 'HEAD^{tree}' else 'a'*40):
-                        with self.assertRaisesRegex(RuntimeError, '^messages_isolation_evidence_invalid$'):
+                        with self.assertRaisesRegex(RuntimeError, failure_pattern):
                             validate()
                     manifest.write_text('{"private":"must not echo","private":2}')
-                    with self.assertRaisesRegex(RuntimeError, '^messages_isolation_evidence_invalid$'):
+                    with self.assertRaisesRegex(RuntimeError, failure_pattern):
                         validate()
             finally:
                 os.chdir(original)
