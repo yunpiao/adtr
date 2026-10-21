@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { ApiError } from "./api";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { ApiError, request, type Profile } from "./api";
 import { queryString } from "./access-api";
 import {
   ErrorNotice,
@@ -11,7 +11,7 @@ import {
   readValues,
 } from "./access-common";
 import { stateLabels, supportedKind, taskAPI } from "./task-api";
-import { useTaskMutation, useTaskRead, type TaskContext } from "./task-common";
+import { sessionError, useTaskMutation, useTaskRead, type TaskContext } from "./task-common";
 import {
   maintenanceAPI,
   scheduleLabels,
@@ -725,6 +725,187 @@ const intentPath = (intent: MaintenanceIntent) =>
   intent.action === "pause"
     ? (`POST /api/tasks/schedules/${intent.action}` as const)
     : (`POST /api/tasks/${intent.action}` as const);
+// This is a local binding, not the backend request hash or a historical receipt.
+function archiveSnapshot(intent: MaintenanceIntent | undefined) {
+  if (!intent || !intent.attempted ||
+      (intent.action !== "archive" && intent.action !== "restore")) return null;
+  const { targets, reason, before } = intent.input;
+  if (!Array.isArray(targets) || targets.length < 1 || targets.length > 100 ||
+      targets.some((t) => !t || typeof t.taskUUID !== "string" ||
+        !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(t.taskUUID) ||
+        !Number.isSafeInteger(t.visibilityVersion) || t.visibilityVersion < 0) ||
+      new Set(targets.map((t) => t.taskUUID)).size !== targets.length) return null;
+  return {
+    action: intent.action, idempotencyKey: intent.key,
+    beforePresent: Object.prototype.hasOwnProperty.call(intent.input, "before"),
+    before, reason,
+    targets: targets.map(({ taskUUID, visibilityVersion }) => ({ taskUUID, visibilityVersion })),
+  };
+}
+const identityFields = ["ID", "username", "role", "priv", "csrfToken", "needChangePwd", "isExpired"] as const;
+function sameIdentity(a: Profile, b: Profile) {
+  return identityFields.every((key) => a[key] === b[key]);
+}
+function checkedIdentity(value: unknown): Profile {
+  if (!value || typeof value !== "object") throw new ApiError("invalid_response");
+  const p = value as Profile;
+  if (!Number.isSafeInteger(p.ID) || p.ID <= 0 ||
+      typeof p.username !== "string" || !p.username.trim() ||
+      typeof p.csrfToken !== "string" || !p.csrfToken.trim() ||
+      typeof p.role !== "string" || !p.role.trim() ||
+      !Number.isSafeInteger(p.priv) ||
+      typeof p.needChangePwd !== "boolean" || typeof p.isExpired !== "boolean")
+    throw new ApiError("invalid_response");
+  return p;
+}
+function useArchiveObservation(intent: MaintenanceIntent | undefined, context: TaskContext, mutationBusy: boolean) {
+  const snapshot = archiveSnapshot(intent);
+  const fingerprint = JSON.stringify(snapshot);
+  const allowed = !!snapshot && context.canArchiveView === true && context.can("GET /api/tasks/detail");
+  const [selected, setSelected] = useState("");
+  const [state, setState] = useState<{
+    generation: number; status: "idle" | "reading" | "observed" | "unverified";
+    error?: string; value?: { taskUUID: string; expected: number; archived: boolean; version: number; completed: string };
+  }>({ generation: 0, status: "idle" });
+  const generation = useRef(0);
+  const flight = useRef<{ controller: AbortController; timer?: ReturnType<typeof setTimeout> } | null>(null);
+  const alive = useRef(true);
+  // Copy identity fields in memory only: never serialize/hash the session token.
+  const live = useRef({ fingerprint, selected, allowed, mutationBusy, profile: { ...context.profile }, intent, context });
+  live.current = { fingerprint, selected, allowed, mutationBusy, profile: { ...context.profile }, intent, context };
+  const invalidate = () => {
+    generation.current++;
+    if (flight.current) {
+      clearTimeout(flight.current.timer);
+      flight.current.controller.abort();
+      flight.current = null;
+    }
+    if (alive.current) setState({ generation: generation.current, status: "idle" });
+  };
+  const previous = useRef(live.current);
+  useLayoutEffect(() => {
+    const old = previous.current, now = live.current;
+    if (old.fingerprint !== now.fingerprint || old.allowed !== now.allowed ||
+        old.mutationBusy !== now.mutationBusy || !sameIdentity(old.profile, now.profile)) invalidate();
+    previous.current = now;
+  });
+  useEffect(() => {
+    alive.current = true;
+    const clear = () => invalidate();
+    window.addEventListener("focus", clear);
+    document.addEventListener("visibilitychange", clear);
+    return () => {
+      alive.current = false;
+      invalidate();
+      window.removeEventListener("focus", clear);
+      document.removeEventListener("visibilitychange", clear);
+    };
+  }, []);
+  const observe = async () => {
+    const start = live.current;
+    const original = archiveSnapshot(start.intent);
+    const target = original?.targets.find((t) => t.taskUUID === start.selected);
+    if (!alive.current || flight.current || !start.allowed || start.mutationBusy || !target) return;
+    invalidate();
+    const id = generation.current;
+    const current = { controller: new AbortController(), timer: undefined as ReturnType<typeof setTimeout> | undefined };
+    flight.current = current;
+    const valid = () => alive.current && generation.current === id && flight.current === current &&
+      live.current.selected === start.selected && live.current.allowed && !live.current.mutationBusy &&
+      live.current.context.canArchiveView === true && live.current.context.can("GET /api/tasks/detail") &&
+      sameIdentity(live.current.context.profile, start.profile) &&
+      JSON.stringify(archiveSnapshot(live.current.intent)) === start.fingerprint;
+    setState({ generation: id, status: "reading" });
+    current.timer = setTimeout(() => {
+      if (!valid()) { if (flight.current === current) invalidate(); return; }
+      invalidate();
+      setState({ generation: generation.current, status: "unverified", error: "读取超时，当前状态尚未核实；请稍后手动重试。" });
+    }, 30000);
+    const identity = async () => {
+      const p = checkedIdentity(await request<unknown>("/me", current.controller.signal));
+      if (!valid()) return false;
+      if (!sameIdentity(p, start.profile) || p.needChangePwd || p.isExpired) {
+        invalidate();
+        live.current.context.sessionChanged();
+        return false;
+      }
+      return true;
+    };
+    try {
+      if (!valid() || !(await identity()) || !valid()) return;
+      const detail = await taskAPI.detail(target.taskUUID, current.controller.signal, "all");
+      if (!valid()) return;
+      const t = detail.task;
+      if (t.taskUUID !== target.taskUUID || t.taskName !== "infrastructure.health" ||
+          t.domainId !== "platform" || t.payloadVersion !== 1 || typeof t.archived !== "boolean" ||
+          !Number.isSafeInteger(t.visibilityVersion) || t.visibilityVersion < 0)
+        throw new ApiError("invalid_response");
+      if (!(await identity()) || !valid()) return;
+      setState({ generation: id, status: "observed", value: {
+        taskUUID: target.taskUUID, expected: target.visibilityVersion,
+        archived: t.archived, version: t.visibilityVersion, completed: new Date().toISOString(),
+      } });
+    } catch (error) {
+      if (!valid()) return;
+      if (sessionError(error) || (error instanceof ApiError && error.status === 401)) {
+        invalidate();
+        live.current.context.sessionChanged();
+      } else {
+        const message = error instanceof ApiError && error.status === 403
+          ? "当前读取权限被拒绝，当前状态尚未核实。"
+          : error instanceof ApiError && error.status === 404
+            ? "当前无法读取所选目标；目标可能不存在或当前不可见，原操作结果仍未知。"
+            : error instanceof ApiError && error.code === "result_too_large"
+              ? "完整任务详情超出现有限制，当前状态尚未核实。"
+              : "读取未能核实当前状态；请稍后手动重试。";
+        setState({ generation: id, status: "unverified", error: message });
+      }
+    } finally {
+      clearTimeout(current.timer);
+      if (flight.current === current) {
+        const stillValid = valid();
+        flight.current = null;
+        // A source object or authority can change while the transport is pending.
+        if (generation.current === id && !stillValid) invalidate();
+      }
+    }
+  };
+  const bound = previous.current.fingerprint === fingerprint &&
+    sameIdentity(previous.current.profile, context.profile) && allowed && !mutationBusy &&
+    state.generation === generation.current;
+  const value = bound ? state.value : undefined;
+  return { invalidate, section: intent?.attempted && (intent.action === "archive" || intent.action === "restore") ? (
+    <section aria-label="归档目标逐项核对">
+      <h4>核对原目标当前状态</h4>
+      <p className="warning">这里只核对该目标当前状态，不确认原操作是否提交。确认原操作仍须使用原幂等键、相同内容和新的验证码。</p>
+      {!snapshot ? <p role="status">原目标清单无效，不能读取当前状态。</p> : <>
+        <p>原目标总数：{snapshot.targets.length}</p>
+        <Field label="选择待核对目标">
+          <select value={selected} disabled={!allowed || mutationBusy} onChange={(e) => {
+            invalidate();
+            live.current.selected = e.target.value;
+            setSelected(e.target.value);
+          }}>
+            <option value="">请选择原目标</option>
+            {snapshot.targets.map((t) => <option key={t.taskUUID} value={t.taskUUID}>{t.taskUUID}（原预期版本 {t.visibilityVersion}）</option>)}
+          </select>
+        </Field>
+        <button type="button" disabled={!allowed || mutationBusy || !snapshot.targets.some((t) => t.taskUUID === selected) || (bound && state.status === "reading")} onClick={() => void observe()}>读取所选目标当前状态</button>
+        {!allowed && <p role="status">当前权限不允许读取归档目标详情。</p>}
+        {bound && state.status === "reading" ? <p role="status">正在核对所选目标当前状态…</p> :
+          !value && !(bound && state.error) && <p role="status">尚未核对当前目标状态</p>}
+        {bound && state.error && <p role="status">{state.error}</p>}
+        {value && <dl aria-label="归档目标当前状态">
+          <dt>目标 UUID</dt><dd>{value.taskUUID}</dd>
+          <dt>原预期可见性版本</dt><dd>{value.expected}</dd>
+          <dt>当前可见性</dt><dd>{value.archived ? "已归档" : "默认可见"}</dd>
+          <dt>当前可见性版本</dt><dd>{value.version}</dd>
+          <dt>浏览器观察完成时间（UTC）</dt><dd>{value.completed}</dd>
+        </dl>}
+      </>}
+    </section>
+  ) : null };
+}
 function MaintenanceConfirm({
   context,
   open,
@@ -748,11 +929,7 @@ function MaintenanceConfirm({
             message: `当前计划：${scheduleLabels[v.schedule.state]}，控制版本 ${v.schedule.controlVersion}`,
           }));
       if (intent.action === "archive" || intent.action === "restore")
-        return taskAPI
-          .list("pageIdx=1&pageSize=20&visibility=all", signal)
-          .then((v) => ({
-            message: `已重新读取 ${v.tasks.length} 项真实任务；收据仅确认原操作，当前可见性以任务详情为准。`,
-          }));
+        return null;
       return maintenanceAPI
         .schedules("pageIdx=1&pageSize=20", signal)
         .then((v) => ({
@@ -761,6 +938,7 @@ function MaintenanceConfirm({
     },
     context.sessionChanged,
   );
+  const observation = useArchiveObservation(intent, context, mutation.busy);
   if (!intent)
     return (
       <>
@@ -791,6 +969,7 @@ function MaintenanceConfirm({
           mutation.setError("请输入有效的操作者密码和六位未使用验证码。");
           return;
         }
+        observation.invalidate();
         attemptMaintenanceIntent(context.profile, intent);
         void mutation.run(
           async (signal) => {
@@ -885,6 +1064,7 @@ function MaintenanceConfirm({
           原请求可能已生效。继续核对使用同一幂等键、相同内容和新的验证码；离开或停止等待不能撤销操作。刷新或重新登录同一账户后可继续核对；其他账户不能读取此待确认记录。
         </p>
       )}
+      {observation.section}
       <ErrorNotice error={mutation.error || read.error} />
       {read.data && <p role="status">{read.data.message}</p>}
       {!allowed && <p role="status">当前权限不允许此维护操作。</p>}
@@ -912,6 +1092,7 @@ function MaintenanceConfirm({
             busy={mutation.busy}
             disabled={!allowed}
             cancel={() => {
+              observation.invalidate();
               if (!intent.attempted) discardMaintenanceIntent(context.profile);
               open(
                 destination,

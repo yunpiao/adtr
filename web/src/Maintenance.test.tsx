@@ -1,3 +1,6 @@
+import { createHash } from "node:crypto";
+import { MaintenanceContent } from "./TaskMaintenance";
+import type { TaskContext } from "./task-common";
 import { revealNavigation } from "./test-navigation";
 import {
   act,
@@ -19,6 +22,8 @@ import {
 import type { Profile } from "./api";
 import { maintenanceAPI, utcSecond, type Schedule } from "./maintenance-api";
 import {
+  beginMaintenanceIntent,
+  attemptMaintenanceIntent,
   discardMaintenanceIntent,
   maintenanceIntent,
 } from "./maintenance-intent";
@@ -808,4 +813,383 @@ describe("uncertain recovery whose parent was archived", () => {
       ),
     ).toContain(sid);
   });
+});
+
+describe("exact original archive target observations", () => {
+  const other = "00000000-0000-4000-8000-000000000012";
+  const targets = [
+    { taskUUID: tid, visibilityVersion: 0 },
+    { taskUUID: other, visibilityVersion: 4 },
+  ];
+  const warning = "这里只核对该目标当前状态，不确认原操作是否提交。确认原操作仍须使用原幂等键、相同内容和新的验证码。";
+  function setup(options: {
+    action?: "archive" | "restore"; attempted?: boolean;
+    targets?: typeof targets; canRead?: boolean; canWrite?: boolean;
+  } = {}) {
+    const intent = beginMaintenanceIntent(profile, {
+      action: options.action ?? "archive",
+      input: {
+        reason: "Synthetic original reason",
+        ...(options.action === "restore" ? {} : { before: "2026-10-07T00:01:00Z" }),
+        targets: options.targets ?? targets,
+      },
+    });
+    if (options.attempted !== false) attemptMaintenanceIntent(profile, intent);
+    const context: TaskContext = {
+      profile: { ...profile }, canArchiveView: options.canRead !== false,
+      can: (operation) => operation.startsWith("GET") ? options.canRead !== false : options.canWrite !== false,
+      sessionChanged: vi.fn(),
+    };
+    const open = vi.fn();
+    const view = render(<MaintenanceContent view={{ type: "maintenance-confirm" }} context={context} open={open} />);
+    const rerender = () => view.rerender(<MaintenanceContent view={{ type: "maintenance-confirm" }} context={context} open={open} />);
+    return { intent, context, open, ...view, rerender };
+  }
+  const select = (id = tid) => fill("选择待核对目标", id);
+  const observe = () => click("读取所选目标当前状态");
+  const observed = () => screen.findByLabelText("归档目标当前状态");
+  const deferred = () => {
+    let resolve!: (response: Response) => void;
+    const promise = new Promise<Response>((r) => { resolve = r; });
+    return { promise, resolve };
+  };
+  async function release(pending: ReturnType<typeof deferred>, data: unknown) {
+    await act(async () => { pending.resolve(await response(data)); });
+  }
+  const digest = (intent: ReturnType<typeof maintenanceIntent>) => {
+    if (!intent || (intent.action !== "archive" && intent.action !== "restore")) throw new Error("Expected archive input");
+    const originalTargets = intent.input.targets.map(({ taskUUID, visibilityVersion }) => ({ taskUUID, visibilityVersion }))
+      .sort((a, b) => a.taskUUID < b.taskUUID ? -1 : a.taskUUID > b.taskUUID ? 1 : 0);
+    if (new Set(originalTargets.map((t) => t.taskUUID)).size !== originalTargets.length) throw new Error("Duplicate targets");
+    const hash = (value: unknown) => createHash("sha256").update(JSON.stringify(value), "utf8").digest("hex");
+    return {
+      originalIntentSHA256: hash({ action: intent.action, idempotencyKey: intent.key,
+        ...(intent.action === "archive" ? { before: intent.input.before } : {}),
+        reason: intent.input.reason, targets: originalTargets }),
+      originalTargetsSHA256: hash(originalTargets), originalTargetCount: originalTargets.length,
+    };
+  };
+  it.each(["archive", "restore"] as const)("does no automatic reads for attempted %s, then exactly three one-shot GETs", async (action) => {
+    const { intent } = setup({ action });
+    expect(screen.getByText("尚未核对当前目标状态")).toBeInTheDocument();
+    expect(screen.getByRole("combobox")).toHaveValue("");
+    expect(screen.getAllByRole("option")).toHaveLength(3);
+    expect(fetcher).not.toHaveBeenCalled();
+    const before = JSON.stringify(intent), evidence = digest(intent);
+    select();
+    expect(fetcher).not.toHaveBeenCalled();
+    observe();
+    observe();
+    await observed();
+    expect(fetcher.mock.calls.map(([url]) => url)).toEqual([
+      "/api/auth/me", `/api/tasks/detail?taskUUID=${tid}&visibility=all`, "/api/auth/me",
+    ]);
+    expect(fetcher.mock.calls.every(([, init]) => init.method === "GET")).toBe(true);
+    expect(screen.getByText(warning)).toBeInTheDocument();
+    expect(JSON.stringify(intent)).toBe(before);
+    expect(digest(maintenanceIntent(profile))).toEqual(evidence);
+    expect(screen.getByLabelText("操作者当前密码")).toHaveValue("");
+  });
+  it("does not expose an observer for an unattempted operation", () => {
+    setup({ attempted: false });
+    expect(screen.queryByLabelText("选择待核对目标")).not.toBeInTheDocument();
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+  it.each([21, 100])("selects target %i directly without list scans", async (count) => {
+    const many = Array.from({ length: count }, (_, i) => ({ taskUUID: `00000000-0000-4000-8000-${String(i + 100).padStart(12, "0")}`, visibilityVersion: i }));
+    const last = many[count - 1];
+    override = (url) => url.startsWith("/api/tasks/detail?") ? response({ task: { ...task(true), taskUUID: last.taskUUID, visibilityVersion: count + 10 }, events: [] }) : undefined;
+    const { intent } = setup({ targets: many });
+    select(last.taskUUID); observe();
+    expect(await observed()).toHaveTextContent(last.taskUUID);
+    expect(calls("detail")).toHaveLength(1);
+    expect(calls("detail")[0][0]).toContain(`taskUUID=${last.taskUUID}&visibility=all`);
+    expect(intent.input).toHaveProperty("targets", many);
+  });
+  it.each(["duplicate", "too-many", "negative", "unsafe", "uuid"])("rejects a malformed in-memory target list: %s", (mode) => {
+    const { intent, rerender } = setup();
+    if (intent.action !== "archive") throw new Error("Expected archive");
+    if (mode === "duplicate") intent.input.targets.push({ ...targets[0] });
+    if (mode === "too-many") intent.input.targets = Array.from({ length: 101 }, () => ({ ...targets[0] }));
+    if (mode === "negative") intent.input.targets[0].visibilityVersion = -1;
+    if (mode === "unsafe") intent.input.targets[0].visibilityVersion = Number.MAX_SAFE_INTEGER + 1;
+    if (mode === "uuid") intent.input.targets[0].taskUUID = "foreign";
+    rerender();
+    expect(screen.getByText("原目标清单无效，不能读取当前状态。")).toBeInTheDocument();
+    expect(screen.queryByLabelText("选择待核对目标")).not.toBeInTheDocument();
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+  it("requires read permission without requiring mutation permission", async () => {
+    const { context, rerender } = setup({ canRead: false, canWrite: false });
+    expect(screen.getByRole("button", { name: "读取所选目标当前状态" })).toBeDisabled();
+    expect(fetcher).not.toHaveBeenCalled();
+    context.canArchiveView = true;
+    context.can = (operation) => operation.startsWith("GET");
+    rerender(); select(); observe(); await observed();
+    expect(screen.getByRole("button", { name: "使用原幂等键核对维护操作" })).toBeDisabled();
+    context.canArchiveView = false; rerender();
+    expect(screen.queryByLabelText("归档目标当前状态")).not.toBeInTheDocument();
+  });
+  it.each([
+    [403, "forbidden", "当前读取权限被拒绝"],
+    [404, "not_found", "当前无法读取所选目标"],
+    [422, "result_too_large", "完整任务详情超出现有限制"],
+    [500, "internal", "读取未能核实当前状态"],
+  ])("clears old values on detail error %i and never retries", async (status, code, label) => {
+    const { intent } = setup();
+    select(); observe(); await observed();
+    const original = JSON.stringify(intent);
+    override = (url) => url.startsWith("/api/tasks/detail?") ? response({ error: code }, status as number) : undefined;
+    observe();
+    expect(screen.queryByLabelText("归档目标当前状态")).not.toBeInTheDocument();
+    await screen.findByText(new RegExp(label as string));
+    vi.useFakeTimers();
+    await act(async () => { vi.advanceTimersByTime(32000); });
+    expect(fetcher).toHaveBeenCalledTimes(5);
+    expect(JSON.stringify(maintenanceIntent(profile))).toBe(original);
+  });
+  it.each(["wrong-id", "wrong-kind", "wrong-scope", "bad-version", "bad-archived", "network", "malformed"])("rejects unverified detail: %s", async (mode) => {
+    setup();
+    override = (url) => {
+      if (!url.startsWith("/api/tasks/detail?")) return;
+      if (mode === "network") return Promise.reject(new Error("Synthetic private transport detail"));
+      const current: Record<string, unknown> = { ...task() };
+      if (mode === "wrong-id") current.taskUUID = other;
+      if (mode === "wrong-kind") current.taskName = "other.kind";
+      if (mode === "wrong-scope") current.domainId = "foreign";
+      if (mode === "bad-version") current.visibilityVersion = -1;
+      if (mode === "bad-archived") current.archived = "yes";
+      return response(mode === "malformed" ? {} : { task: current, events: [] });
+    };
+    select(); observe();
+    await screen.findByText("读取未能核实当前状态；请稍后手动重试。");
+    expect(screen.queryByLabelText("归档目标当前状态")).not.toBeInTheDocument();
+    expect(document.body).not.toHaveTextContent("Synthetic private transport detail");
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(maintenanceIntent(profile)?.key).toBeDefined();
+  });
+  it.each(["ID", "username", "role", "priv", "csrfToken", "needChangePwd", "isExpired"] as const)("invalidates on valid auth identity mismatch in %s", async (field) => {
+    const { context } = setup();
+    const changed = { ...profile, [field]: typeof profile[field] === "boolean" ? true : typeof profile[field] === "number" ? 2 : "changed" };
+    override = (url) => url === "/api/auth/me" ? response(changed) : undefined;
+    select(); observe();
+    await waitFor(() => expect(context.sessionChanged).toHaveBeenCalledTimes(1));
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(screen.queryByLabelText("归档目标当前状态")).not.toBeInTheDocument();
+    expect(maintenanceIntent(profile)?.attempted).toBe(true);
+  });
+  it.each([null, {}, { ...profile, ID: 0 }, { ...profile, csrfToken: "" }, { ...profile, priv: "1" }, { ...profile, isExpired: 0 }])("rejects malformed identity without adopting it", async (identity) => {
+    const { context } = setup();
+    override = (url) => url === "/api/auth/me" ? response(identity) : undefined;
+    select(); observe();
+    await screen.findByText("读取未能核实当前状态；请稍后手动重试。");
+    expect(context.sessionChanged).not.toHaveBeenCalled();
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+  it.each([1, 3])("handles 401 during auth stage %i without displaying task data", async (stage) => {
+    const { context } = setup(); let count = 0;
+    override = () => ++count === stage ? response({ error: "unauthenticated" }, 401) : undefined;
+    select(); observe();
+    await waitFor(() => expect(context.sessionChanged).toHaveBeenCalledTimes(1));
+    expect(fetcher).toHaveBeenCalledTimes(stage);
+    expect(screen.queryByLabelText("归档目标当前状态")).not.toBeInTheDocument();
+  });
+  it.each([1, 2, 3])("ignores late stage %i after same-user session rotation", async (stage) => {
+    const { context, rerender } = setup(); let count = 0; const pending = deferred();
+    override = () => ++count === stage ? pending.promise : undefined;
+    select(); observe();
+    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(stage));
+    context.profile = { ...profile, csrfToken: "new-session" }; rerender();
+    expect((fetcher.mock.calls[stage - 1][1].signal as AbortSignal).aborted).toBe(true);
+    await release(pending, stage === 2 ? { task: task(true), events: [] } : profile);
+    expect(screen.queryByLabelText("归档目标当前状态")).not.toBeInTheDocument();
+    expect(fetcher).toHaveBeenCalledTimes(stage);
+  });
+  it("invalidates a postflight mismatch instead of displaying the detail", async () => {
+    const { context } = setup(); let auth = 0;
+    override = (url) => url === "/api/auth/me" && ++auth === 2 ? response({ ...profile, ID: 2 }) : undefined;
+    select(); observe();
+    await waitFor(() => expect(context.sessionChanged).toHaveBeenCalledTimes(1));
+    expect(screen.queryByLabelText("归档目标当前状态")).not.toBeInTheDocument();
+  });
+  it.each(["unselected-version", "unselected-id", "action", "key", "before", "reason"])("binds every original input field, including %s", async (field) => {
+    const { intent, rerender } = setup(); const pending = deferred();
+    override = (url) => url.startsWith("/api/tasks/detail?") ? pending.promise : undefined;
+    select(); observe(); await waitFor(() => expect(calls("detail")).toHaveLength(1));
+    if (intent.action !== "archive") throw new Error("Expected archive");
+    if (field === "unselected-version") intent.input.targets[1].visibilityVersion++;
+    if (field === "unselected-id") intent.input.targets[1].taskUUID = sid;
+    if (field === "action") {
+      const mutableAction: { action: "archive" | "restore" } = intent;
+      mutableAction.action = "restore";
+    }
+    if (field === "key") intent.key = tid;
+    if (field === "before") intent.input.before = "2026-10-06T00:01:00Z";
+    if (field === "reason") intent.input.reason = "Changed reason";
+    rerender(); await release(pending, { task: task(true), events: [] });
+    expect(screen.queryByLabelText("归档目标当前状态")).not.toBeInTheDocument();
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+  it("cancels selection A before reading B and ignores a late abort-insensitive A", async () => {
+    setup(); const pending = deferred();
+    override = (url) => url.includes(`taskUUID=${tid}`) ? pending.promise : url.includes(`taskUUID=${other}`) ? response({ task: { ...task(true), taskUUID: other, visibilityVersion: 9 }, events: [] }) : undefined;
+    select(); observe(); await waitFor(() => expect(calls("detail")).toHaveLength(1));
+    select(other);
+    expect((calls("detail")[0][1].signal as AbortSignal).aborted).toBe(true);
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    observe(); expect(await observed()).toHaveTextContent(other);
+    await release(pending, { task: task(true), events: [] });
+    expect(screen.getByLabelText("归档目标当前状态")).toHaveTextContent(other);
+    expect(screen.getByLabelText("归档目标当前状态")).not.toHaveTextContent(tid);
+  });
+  it("bounds the full sequence at 30 seconds, then permits only an explicit new read", async () => {
+    setup(); const pending = deferred();
+    override = (url) => url === "/api/auth/me" ? pending.promise : undefined;
+    vi.useFakeTimers(); select(); observe();
+    await act(async () => { vi.advanceTimersByTime(29999); });
+    expect(screen.getByText("正在核对所选目标当前状态…")).toBeInTheDocument();
+    await act(async () => { vi.advanceTimersByTime(1); });
+    expect(screen.getByText("读取超时，当前状态尚未核实；请稍后手动重试。")).toBeInTheDocument();
+    await act(async () => { vi.advanceTimersByTime(32000); });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect((fetcher.mock.calls[0][1].signal as AbortSignal).aborted).toBe(true);
+    await release(pending, profile);
+    expect(screen.queryByLabelText("归档目标当前状态")).not.toBeInTheDocument();
+    override = () => undefined; vi.useRealTimers(); observe(); await observed();
+    expect(fetcher).toHaveBeenCalledTimes(4);
+  });
+  it("clears observations on focus and on unmount/reentry without persisting values", async () => {
+    const view = setup(); select(); observe(); await observed();
+    fireEvent.focus(window);
+    expect(screen.queryByLabelText("归档目标当前状态")).not.toBeInTheDocument();
+    observe(); await observed(); view.unmount();
+    expect(sessionStorage.getItem(`adtr.pending-task-maintenance:${profile.ID}:${profile.username}`)).not.toContain("completed");
+    render(<MaintenanceContent view={{ type: "maintenance-confirm" }} context={view.context} open={view.open} />);
+    expect(screen.getByText("尚未核对当前目标状态")).toBeInTheDocument();
+    expect(screen.queryByLabelText("归档目标当前状态")).not.toBeInTheDocument();
+    expect(fetcher).toHaveBeenCalledTimes(6);
+  });
+  it("aborts unmounted work even if the transport ignores abort", async () => {
+    const view = setup(); const pending = deferred();
+    override = () => pending.promise;
+    select(); observe(); view.unmount();
+    expect((fetcher.mock.calls[0][1].signal as AbortSignal).aborted).toBe(true);
+    await release(pending, profile);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+  it("retains complete sorted evidence and the exact original replay body with a fresh proof", async () => {
+    const { intent, open } = setup(); const evidence = digest(intent);
+    const reordered = { ...intent, input: { ...intent.input, targets: [...targets].reverse() } } as typeof intent;
+    expect(digest(reordered)).toEqual(evidence);
+    expect(digest({ ...intent, input: { ...intent.input, targets: [targets[0]] } } as typeof intent).originalTargetsSHA256).not.toBe(evidence.originalTargetsSHA256);
+    expect(() => digest({ ...intent, input: { ...intent.input, targets: [targets[0], targets[0]] } } as typeof intent)).toThrow("Duplicate targets");
+    override = (url, init) => {
+      if (url.startsWith("/api/tasks/detail?")) {
+        const id = new URL(url, "https://synthetic.invalid").searchParams.get("taskUUID")!;
+        return response({ task: { ...task(true), taskUUID: id, visibilityVersion: id === tid ? 1 : 5 }, events: [] });
+      }
+      if (url === "/api/tasks/archive") {
+        const body = JSON.parse(init.body as string);
+        expect(digest({ ...intent, key: body.idempotencyKey, input: body })).toEqual(evidence);
+        return response({ receipt: { operationUUID: sid, occurredAt: plan().createdAt, action: "archive", reason: body.reason, before: body.before,
+          targets: targets.map((t) => ({ ...t, visibilityVersion: t.visibilityVersion + 1, archived: true })),
+        }, replayed: true });
+      }
+    };
+    select(); observe(); await observed(); select(other); observe(); await observed();
+    expect(maintenanceIntent(profile)?.key).toBe(intent.key);
+    expect(screen.getByText(warning)).toBeInTheDocument();
+    proof("654321"); click("使用原幂等键核对维护操作");
+    await waitFor(() => expect(open).toHaveBeenCalledTimes(1));
+    expect(calls("archive")).toHaveLength(1);
+    const body = JSON.parse(calls("archive")[0][1].body as string);
+    expect(body).toMatchObject({ idempotencyKey: intent.key, targets, totpCode: "654321" });
+    expect(maintenanceIntent(profile)).toBeUndefined();
+  });
+  it.each([1, 2, 3])("synchronously cancels observation stage %i when a proof mutation starts", async (stage) => {
+    const { intent } = setup();
+    const original = JSON.stringify(intent), pending = deferred(), mutation = deferred();
+    let reads = 0;
+    override = (url, init) => {
+      if (url === "/api/tasks/archive") return mutation.promise;
+      if (init.method === "GET" && ++reads === stage) return pending.promise;
+    };
+    select(); observe();
+    await waitFor(() => expect(reads).toBe(stage));
+    proof("654321"); click("使用原幂等键核对维护操作");
+    expect((fetcher.mock.calls[stage - 1][1].signal as AbortSignal).aborted).toBe(true);
+    expect(screen.queryByLabelText("归档目标当前状态")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "读取所选目标当前状态" })).toBeDisabled();
+    observe();
+    await release(pending, stage === 2 ? { task: task(true), events: [] } : profile);
+    expect(reads).toBe(stage);
+    expect(screen.queryByLabelText("归档目标当前状态")).not.toBeInTheDocument();
+    await act(async () => { mutation.resolve(await response({ error: "internal" }, 500)); });
+    expect(JSON.stringify(maintenanceIntent(profile))).toBe(original);
+    expect(calls("archive")).toHaveLength(1);
+    expect(reads).toBe(stage);
+  });
+  it("counts preflight and detail time against the same postflight deadline", async () => {
+    setup();
+    const pre = deferred(), detail = deferred(), post = deferred();
+    let auth = 0;
+    override = (url) => url === "/api/auth/me" ? (++auth === 1 ? pre.promise : post.promise)
+      : url.startsWith("/api/tasks/detail?") ? detail.promise : undefined;
+    vi.useFakeTimers(); select(); observe();
+    await act(async () => { vi.advanceTimersByTime(20000); });
+    await release(pre, profile);
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    await act(async () => { vi.advanceTimersByTime(9000); });
+    await release(detail, { task: task(true), events: [] });
+    expect(fetcher).toHaveBeenCalledTimes(3);
+    await act(async () => { vi.advanceTimersByTime(999); });
+    expect(screen.getByText("正在核对所选目标当前状态…")).toBeInTheDocument();
+    await act(async () => { vi.advanceTimersByTime(1); });
+    expect(screen.getByText("读取超时，当前状态尚未核实；请稍后手动重试。")).toBeInTheDocument();
+    expect((fetcher.mock.calls[2][1].signal as AbortSignal).aborted).toBe(true);
+    await release(post, profile);
+    await act(async () => { vi.advanceTimersByTime(32000); });
+    expect(fetcher).toHaveBeenCalledTimes(3);
+    expect(screen.queryByLabelText("归档目标当前状态")).not.toBeInTheDocument();
+    expect(maintenanceIntent(profile)?.attempted).toBe(true);
+  });
+  it.each(["ID", "username"] as const)("clears a late result when the mounted owner changes %s", async (field) => {
+    const { context, rerender } = setup();
+    const pending = deferred();
+    override = (url) => url.startsWith("/api/tasks/detail?") ? pending.promise : undefined;
+    select(); observe(); await waitFor(() => expect(calls("detail")).toHaveLength(1));
+    context.profile = { ...profile, [field]: field === "ID" ? 2 : "other-owner" };
+    rerender();
+    expect((calls("detail")[0][1].signal as AbortSignal).aborted).toBe(true);
+    await release(pending, { task: task(true), events: [] });
+    expect(screen.queryByLabelText("归档目标当前状态")).not.toBeInTheDocument();
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+  it.each(["archive-view", "detail"])("requires and revokes the independent %s read gate", async (gate) => {
+    const { context, rerender } = setup();
+    if (gate === "archive-view") context.canArchiveView = false;
+    else context.can = (operation) => operation !== "GET /api/tasks/detail";
+    rerender();
+    expect(screen.getByRole("button", { name: "读取所选目标当前状态" })).toBeDisabled();
+    expect(fetcher).not.toHaveBeenCalled();
+    context.canArchiveView = true; context.can = () => true; rerender();
+    select(); observe(); await observed();
+    if (gate === "archive-view") context.canArchiveView = false;
+    else context.can = (operation) => operation !== "GET /api/tasks/detail";
+    rerender();
+    expect(screen.queryByLabelText("归档目标当前状态")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "读取所选目标当前状态" })).toBeDisabled();
+    expect(fetcher).toHaveBeenCalledTimes(3);
+  });
+  it.each(["ID", "username", "role", "priv", "csrfToken", "needChangePwd", "isExpired"] as const)("rejects postflight mismatch in %s", async (field) => {
+    const { context } = setup(); let auth = 0;
+    const changed = { ...profile, [field]: typeof profile[field] === "boolean" ? true : typeof profile[field] === "number" ? 2 : "changed" };
+    override = (url) => url === "/api/auth/me" && ++auth === 2 ? response(changed) : undefined;
+    select(); observe();
+    await waitFor(() => expect(context.sessionChanged).toHaveBeenCalledTimes(1));
+    expect(fetcher).toHaveBeenCalledTimes(3);
+    expect(screen.queryByLabelText("归档目标当前状态")).not.toBeInTheDocument();
+    expect(maintenanceIntent(profile)?.attempted).toBe(true);
+  });
+
 });

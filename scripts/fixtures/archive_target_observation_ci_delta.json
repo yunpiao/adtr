@@ -1,0 +1,9 @@
+{
+  "baselineSHA256": "b0438a548e350c5748a4353e103e24938ae7119620eb78af9479be715e4221ed",
+  "replacements": [
+    {
+      "old": "      - name: Retain synthetic profile visual evidence\n",
+      "new": "      - name: Validate exact maintenance target observation evidence\n        id: archive-target-observation-evidence\n        timeout-minutes: 1\n        if: ${{ success() && matrix.name == 'maintenance' }}\n        run: python3 scripts/test_archive_target_observation_ci_contract.py --validate-evidence\n      - name: Retain validated maintenance target observation evidence\n        timeout-minutes: 1\n        if: ${{ success() && matrix.name == 'maintenance' && steps.archive-target-observation-evidence.outcome == 'success' }}\n        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2\n        with:\n          name: archive-target-observation-${{ github.run_id }}-${{ github.run_attempt }}\n          path: |\n            web/playwright-report/archive-target-observation-validated/archive-target-observation.json\n            web/playwright-report/archive-target-observation-validated/archive-target-observation-1440.png\n            web/playwright-report/archive-target-observation-validated/archive-target-observation-390.png\n          if-no-files-found: error\n          retention-days: 7\n      - name: Retain synthetic profile visual evidence\n"
+    }
+  ]
+}

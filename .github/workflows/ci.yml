@@ -333,6 +333,23 @@ jobs:
             web/test-results/**/directory-v3-empty-assets-observed-empty-group-390.png
           if-no-files-found: error
           retention-days: 7
+      - name: Validate exact maintenance target observation evidence
+        id: archive-target-observation-evidence
+        timeout-minutes: 1
+        if: ${{ success() && matrix.name == 'maintenance' }}
+        run: python3 scripts/test_archive_target_observation_ci_contract.py --validate-evidence
+      - name: Retain validated maintenance target observation evidence
+        timeout-minutes: 1
+        if: ${{ success() && matrix.name == 'maintenance' && steps.archive-target-observation-evidence.outcome == 'success' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: archive-target-observation-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            web/playwright-report/archive-target-observation-validated/archive-target-observation.json
+            web/playwright-report/archive-target-observation-validated/archive-target-observation-1440.png
+            web/playwright-report/archive-target-observation-validated/archive-target-observation-390.png
+          if-no-files-found: error
+          retention-days: 7
       - name: Retain synthetic profile visual evidence
         if: ${{ success() && matrix.name == 'profile' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
