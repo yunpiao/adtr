@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { webcrypto } from "node:crypto";
-import { exportJSON, exportReceipt, exportRequest, exportTask, readyExport } from "./computer-asset-export-v3-fixtures";
-import { downloadStatuses, exportColumns, parseExportReceipt, requestFromQuery, sameExportRequest, computerAssetExportAPI, validExportRequest } from "./computer-asset-export-v3-api";
+import { ApiError, type Profile } from "./api";
+import { userAssetExportAPI } from "./user-asset-export-v3-api";
+import { exportJSON, exportProfile, exportReceipt, exportRequest, exportTask, readyExport } from "./computer-asset-export-v3-fixtures";
+import { downloadStatuses, exportColumns, isComputerExportCancelProofRejected, parseExportReceipt, requestFromQuery, sameExportRequest, computerAssetExportAPI, validExportRequest, type ExportRequest, type ComputerExportCancelBinding } from "./computer-asset-export-v3-api";
 const signal = () => new AbortController().signal;
 afterEach(() => vi.unstubAllGlobals());
 describe("computer asset export immutable parser", () => {
@@ -282,5 +284,386 @@ describe("task-ID-only original export read", () => {
     await expect(computerAssetExportAPI.detailByTask("../other", exportRequest.domainId, 1, signal())).rejects.toMatchObject({ code: "invalid_input" });
     await expect(computerAssetExportAPI.detailByTask(readyExport.taskID, "", 1, signal())).rejects.toMatchObject({ code: "invalid_input" });
     expect(fetch).not.toHaveBeenCalled();
+  });
+});
+
+const cancelProof = { actorPassword: "synthetic-proof-only", totpCode: "123456" };
+const copyRequest = (): ExportRequest => ({ ...exportRequest, screenColumns: [...exportRequest.screenColumns] });
+const cancelBinding = (): ComputerExportCancelBinding => ({ taskID: exportTask.taskUUID, request: copyRequest(), actor: 1, signal: signal() });
+function proofResponse(body: BodyInit | null = '{"error":"invalid_credentials"}', headerPatch: Record<string, string> = {}, status = 401) {
+  return new Response(body, { status, headers: { "Content-Type": "application/json", "Cache-Control": "no-store",
+    "X-Content-Type-Options": "nosniff", ...headerPatch } });
+}
+async function rejectedCancel(binding: ComputerExportCancelBinding): Promise<unknown> {
+  try { await computerAssetExportAPI.cancel(binding.taskID, binding.request, cancelProof, binding.actor, exportProfile.csrfToken, binding.signal); }
+  catch (error) { return error; }
+  throw new Error("Expected cancellation rejection");
+}
+describe("exact current-request cancel proof rejection", () => {
+  it.each([undefined, "1"])("accepts the actual error without requiring an actor header (%s)", async (actor) => {
+    const binding = cancelBinding();
+    const fetcher = vi.fn().mockResolvedValue(proofResponse(undefined, actor === undefined ? {} : { "X-ADTR-User-ID": actor }));
+    vi.stubGlobal("fetch", fetcher);
+    const error = await rejectedCancel(binding);
+    expect(error).toMatchObject({ code: "invalid_credentials", status: 401 });
+    expect(isComputerExportCancelProofRejected(error, binding)).toBe(true);
+    expect(isComputerExportCancelProofRejected(error, binding)).toBe(false);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(fetcher.mock.calls[0][0]).toBe("/api/computer-assets/v3/exports/cancel");
+    expect(fetcher.mock.calls[0][1]).toMatchObject({ method: "POST", credentials: "same-origin", cache: "no-store", redirect: "error", signal: binding.signal });
+  });
+  it("binds the immutable full request, actor, exact task and owned signal", async () => {
+    const binding = cancelBinding(); vi.stubGlobal("fetch", vi.fn().mockResolvedValue(proofResponse()));
+    const error = await rejectedCancel(binding);
+    for (const wrong of [{ ...binding, taskID: "another-task" }, { ...binding, actor: 2 }, { ...binding, signal: signal() },
+      ...Object.entries({ domainId: "another-domain", expectedRevision: "2", expectedCredentialRevision: "3", observationId: "another-observation",
+        search: "other", startTm: "2026-01-01T00:00:00Z", endTm: "2026-02-01T00:00:00Z", creatTm: "asc",
+        screenColumns: [...exportColumns].reverse() }).map(([key, value]) => ({ ...binding, request: { ...binding.request, [key]: value } }))]) {
+      expect(isComputerExportCancelProofRejected(error, wrong)).toBe(false);
+    }
+    binding.request.search = "changed after response";
+    expect(isComputerExportCancelProofRejected(error, binding)).toBe(false);
+    expect(isComputerExportCancelProofRejected(error, { ...binding, request: copyRequest() })).toBe(true);
+    expect(error).not.toHaveProperty("request"); expect(error).not.toHaveProperty("binding");
+    expect(error).not.toHaveProperty("body"); expect(error).not.toHaveProperty("headers");
+    expect(error).not.toHaveProperty("actorPassword"); expect(error).not.toHaveProperty("totpCode");
+  });
+  it("cannot brand a fabricated error or a similar response from another operation", async () => {
+    const binding = cancelBinding();
+    expect(isComputerExportCancelProofRejected(new ApiError("invalid_credentials", 401), binding)).toBe(false);
+    expect(isComputerExportCancelProofRejected({ code: "invalid_credentials", status: 401 }, binding)).toBe(false);
+    for (const operation of [
+      () => computerAssetExportAPI.create(binding.request, "original-key", cancelProof, 1, exportProfile.csrfToken, binding.signal),
+      () => computerAssetExportAPI.receipt(binding.request.domainId, "original-key", 1, binding.signal),
+      () => computerAssetExportAPI.detail(binding.taskID, binding.request, 1, binding.signal),
+    ]) {
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(proofResponse()));
+      const error: unknown = await operation().catch((reason: unknown) => reason);
+      expect(error).toMatchObject({ code: "unauthenticated", status: 401 });
+      expect(isComputerExportCancelProofRejected(error, binding)).toBe(false);
+    }
+  });
+  it("never trusts another export API's genuine rejection or a copied error identity", async () => {
+    const binding = cancelBinding();
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(proofResponse()));
+    const foreign = await userAssetExportAPI.cancel(binding.taskID, { ...binding.request, sAMAccountName: "" },
+      cancelProof, binding.actor, exportProfile.csrfToken, binding.signal).catch((error: unknown) => error);
+    expect(foreign).toMatchObject({ code: "invalid_credentials", status: 401 });
+    expect(isComputerExportCancelProofRejected(foreign, binding)).toBe(false);
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(proofResponse()));
+    const own = await rejectedCancel(binding);
+    expect(isComputerExportCancelProofRejected(Object.assign(new ApiError("invalid_credentials", 401), own), binding)).toBe(false);
+    expect(isComputerExportCancelProofRejected(Object.create(own as object), binding)).toBe(false);
+    expect(isComputerExportCancelProofRejected(own, binding)).toBe(true);
+    expect(isComputerExportCancelProofRejected(own, binding)).toBe(false);
+  });
+  it("compares valid nonempty date boundaries exactly, not just request validation", async () => {
+    const binding = { ...cancelBinding(), request: { ...copyRequest(),
+      startTm: "2026-01-01T00:00:00Z", endTm: "2026-02-01T00:00:00Z" } };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(proofResponse()));
+    const error = await rejectedCancel(binding);
+    for (const patch of [{ startTm: "2026-01-02T00:00:00Z" }, { endTm: "2026-02-02T00:00:00Z" }]) {
+      const request = { ...binding.request, ...patch };
+      expect(validExportRequest(request)).toBe(true);
+      expect(isComputerExportCancelProofRejected(error, { ...binding, request })).toBe(false);
+    }
+    expect(isComputerExportCancelProofRejected(error, binding)).toBe(true);
+  });
+  it.each(["Content-Type", "Cache-Control", "X-Content-Type-Options"])("requires each error metadata header: %s", async (name) => {
+    const binding = cancelBinding(), response = proofResponse(); response.headers.delete(name);
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response));
+    const error = await rejectedCancel(binding);
+    expect(error).toMatchObject({ code: "unauthenticated", status: 401 });
+    expect(isComputerExportCancelProofRejected(error, binding)).toBe(false);
+  });
+  it.each([
+    ["wrong actor", () => proofResponse(undefined, { "X-ADTR-User-ID": "2" })],
+    ["empty actor", () => proofResponse(undefined, { "X-ADTR-User-ID": "" })],
+    ["wrong MIME", () => proofResponse(undefined, { "Content-Type": "text/html" })],
+    ["missing metadata", () => new Response('{"error":"invalid_credentials"}', { status: 401 })],
+    ["wrong cache", () => proofResponse(undefined, { "Cache-Control": "public" })],
+    ["combined cache", () => proofResponse(undefined, { "Cache-Control": "no-store, private" })],
+    ["wrong nosniff", () => proofResponse(undefined, { "X-Content-Type-Options": "other" })],
+    ["absent body", () => proofResponse(null)],
+    ["empty body", () => proofResponse("")],
+    ["wrong error", () => proofResponse('{"error":"unauthenticated"}')],
+    ["extra field", () => proofResponse('{"error":"invalid_credentials","result":true}')],
+    ["duplicate key", () => proofResponse('{"error":"invalid_credentials","error":"invalid_credentials"}')],
+    ["escaped duplicate", () => proofResponse('{"error":"invalid_credentials","\\u0065rror":"invalid_credentials"}')],
+    ["array", () => proofResponse('[{"error":"invalid_credentials"}]')],
+    ["truncated JSON", () => proofResponse('{"error":"invalid_credentials"')],
+    ["trailing JSON", () => proofResponse('{"error":"invalid_credentials"}{}')],
+    ["invalid UTF-8", () => proofResponse(new Uint8Array([0xc3, 0x28]))],
+    ["oversize body", () => proofResponse(" ".repeat(4097))],
+    ["oversize length", () => proofResponse(undefined, { "Content-Length": "4097" })],
+    ["noncanonical length", () => proofResponse(undefined, { "Content-Length": "030" })],
+    ["length mismatch", () => proofResponse(undefined, { "Content-Length": "1" })],
+    ["read failure", () => proofResponse(new ReadableStream<Uint8Array>({ pull(controller) { controller.error(new TypeError("synthetic connection failure")); } }))],
+  ] as const)("keeps %s as an unbranded authority failure", async (_label, response) => {
+    const binding = cancelBinding(); vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response()));
+    const error = await rejectedCancel(binding);
+    expect(error).toMatchObject({ code: "unauthenticated", status: 401 });
+    expect(isComputerExportCancelProofRejected(error, binding)).toBe(false);
+  });
+  it("requires complete bytes at the inclusive 4096-byte boundary", async () => {
+    const raw = '{"error":"invalid_credentials"}', body = raw + " ".repeat(4096 - raw.length);
+    const tracked = observeReader(proofResponse(body, { "Content-Length": "4096", "Content-Type": "application/json; charset=utf-8" }));
+    const binding = cancelBinding(); vi.stubGlobal("fetch", vi.fn().mockResolvedValue(tracked.response));
+    expect(isComputerExportCancelProofRejected(await rejectedCancel(binding), binding)).toBe(true);
+    expect(tracked.release).toHaveBeenCalledTimes(1); expect(tracked.cancel).not.toHaveBeenCalled();
+  });
+  it.each([400, 403, 404, 409, 429, 500])("never brands invalid_credentials with status %i", async (status) => {
+    const binding = cancelBinding(); vi.stubGlobal("fetch", vi.fn().mockResolvedValue(proofResponse(undefined, {}, status)));
+    const error = await rejectedCancel(binding);
+    expect(error).toMatchObject({ status }); expect(isComputerExportCancelProofRejected(error, binding)).toBe(false);
+  });
+  it("never applies a late proof rejection after abort, including a transport ignoring abort", async () => {
+    const control = new AbortController(), binding = { ...cancelBinding(), signal: control.signal };
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(async () => { control.abort(); return proofResponse(); }));
+    const error = await rejectedCancel(binding);
+    expect(error).toMatchObject({ name: "AbortError" }); expect(isComputerExportCancelProofRejected(error, binding)).toBe(false);
+  });
+  it("aborts a pending proof-error stream without branding it", async () => {
+    const tracked = observeReader(proofResponse(new ReadableStream<Uint8Array>()));
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(tracked.response));
+    const control = new AbortController(), binding = { ...cancelBinding(), signal: control.signal };
+    const pending = rejectedCancel(binding);
+    await vi.waitFor(() => expect(tracked.acquire).toHaveBeenCalledTimes(1)); control.abort();
+    const error = await pending;
+    expect(error).toMatchObject({ name: "AbortError" }); expect(isComputerExportCancelProofRejected(error, binding)).toBe(false);
+    expect(tracked.release).toHaveBeenCalledTimes(1);
+  });
+  it("revokes an otherwise valid unconsumed rejection when its invocation aborts", async () => {
+    const control = new AbortController(), binding = { ...cancelBinding(), signal: control.signal };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(proofResponse()));
+    const error = await rejectedCancel(binding); control.abort();
+    expect(isComputerExportCancelProofRejected(error, binding)).toBe(false);
+    expect(isComputerExportCancelProofRejected(error, { ...binding, signal: signal() })).toBe(false);
+  });
+  it("retains status 401 even if discarding malformed error bytes fails", async () => {
+    const binding = cancelBinding(), response = proofResponse(undefined, { "Content-Type": "text/html" });
+    const cancel = vi.spyOn(response.body!, "cancel").mockRejectedValue(new TypeError("synthetic cleanup failure"));
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response));
+    const error = await rejectedCancel(binding);
+    expect(error).toMatchObject({ code: "unauthenticated", status: 401 });
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(isComputerExportCancelProofRejected(error, binding)).toBe(false);
+  });
+  it("does not turn a fetch rejection into proof rejection or retry cancellation", async () => {
+    const binding = cancelBinding(), fetcher = vi.fn().mockRejectedValue(new TypeError("synthetic disconnect"));
+    vi.stubGlobal("fetch", fetcher);
+    const error = await rejectedCancel(binding);
+    expect(error).toMatchObject({ code: "network" });
+    expect(isComputerExportCancelProofRejected(error, binding)).toBe(false);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+  it("rejects an in-flight original request mutation before applying a successful cancel result", async () => {
+    const binding = cancelBinding();
+    const fetcher = vi.fn().mockImplementation(async () => {
+      binding.request.screenColumns.reverse();
+      return exportJSON({ taskID: binding.taskID, task: { ...exportTask, state: "cancel_requested" } });
+    }); vi.stubGlobal("fetch", fetcher);
+    const error = await rejectedCancel(binding);
+    expect(error).toMatchObject({ code: "invalid_response" });
+    expect(isComputerExportCancelProofRejected(error, binding)).toBe(false);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+  it("preserves the existing successful Task result and exact dedicated request", async () => {
+    const task = { ...exportTask, state: "cancel_requested" }, binding = cancelBinding();
+    const fetcher = vi.fn().mockResolvedValue(exportJSON({ taskID: binding.taskID, task })); vi.stubGlobal("fetch", fetcher);
+    expect(await computerAssetExportAPI.cancel(binding.taskID, binding.request, cancelProof, 1, exportProfile.csrfToken, binding.signal)).toEqual(task);
+    const submitted = JSON.parse(fetcher.mock.calls[0][1].body) as Record<string, unknown>;
+    expect(Object.keys(submitted).sort()).toEqual(["actorPassword", "taskID", "totpCode"]);
+    expect(submitted.taskID).toBe(binding.taskID);
+    expect(submitted.actorPassword === cancelProof.actorPassword && submitted.totpCode === cancelProof.totpCode).toBe(true);
+  });
+});
+
+const cancelMenu = () => ({ menu: ["domains", "directory_assets", "tasks", "computer_asset_exports"].map((mark) =>
+  ({ mark, auth: { readable: true, writeable: mark === "tasks" || mark === "computer_asset_exports" } })) });
+const cancelDetail = () => ({ ...exportReceipt, downloadReady: false, downloadStatus: "pending" });
+function authorityJSON(value: unknown) {
+  return new Response(JSON.stringify(value), { headers: { "Content-Type": "application/json", "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" } });
+}
+function recheckResponses() {
+  return [authorityJSON(exportProfile), authorityJSON(cancelMenu()), authorityJSON({ results: [true, true] }),
+    exportJSON(cancelDetail()), authorityJSON(exportProfile)];
+}
+function installRecheck(responses = recheckResponses()) {
+  const fetcher = vi.fn(); for (const response of responses) fetcher.mockResolvedValueOnce(response);
+  vi.stubGlobal("fetch", fetcher); return fetcher;
+}
+describe("cancel-specific current authority recheck", () => {
+  it("checks both session boundaries and only the two existing dedicated paths", async () => {
+    const owned = signal(), fetcher = installRecheck();
+    expect(await computerAssetExportAPI.recheckCancelAuthority(exportTask.taskUUID, copyRequest(), exportProfile, owned)).toEqual(cancelDetail());
+    expect(fetcher.mock.calls.map(([path]) => path)).toEqual(["/api/auth/me", "/api/access/menu", "/api/access/check",
+      `/api/computer-assets/v3/exports/detail?taskID=${exportTask.taskUUID}`, "/api/auth/me"]);
+    for (const [path, init] of fetcher.mock.calls) {
+      expect(init).toMatchObject({ credentials: "same-origin", cache: "no-store", redirect: "error", signal: owned });
+      expect(init.method).toBe(path === "/api/access/check" ? "POST" : "GET");
+      if (path !== "/api/access/check") expect(init).not.toHaveProperty("body");
+    }
+    expect(JSON.parse(fetcher.mock.calls[2][1].body)).toEqual({ paths: ["GET /api/computer-assets/v3/exports/detail", "POST /api/computer-assets/v3/exports/cancel"] });
+    expect(Object.keys(fetcher.mock.calls[2][1].headers).sort()).toEqual(["Content-Type", "X-CSRF-Token"]);
+    expect(fetcher.mock.calls[2][1].headers["Content-Type"]).toBe("application/json");
+    expect(fetcher.mock.calls[2][1].headers["X-CSRF-Token"] === exportProfile.csrfToken).toBe(true);
+  });
+  it.each(["ID", "username", "role", "priv", "csrfToken", "hasMfa", "needChangePwd", "isExpired"] as const)("rejects changed or malformed %s at either session boundary", async (key) => {
+    const values: Record<string, unknown> = { ID: 2, username: "another-actor", role: "other-role", priv: 1,
+      csrfToken: "another-session", hasMfa: false, needChangePwd: true, isExpired: true };
+    for (const index of [0, 4]) {
+      const responses = recheckResponses(); responses[index] = authorityJSON({ ...exportProfile, [key]: values[key] });
+      const fetcher = installRecheck(responses);
+      await expect(computerAssetExportAPI.recheckCancelAuthority(exportTask.taskUUID, copyRequest(), exportProfile, signal())).rejects.toMatchObject({ status: 401 });
+      expect(fetcher).toHaveBeenCalledTimes(index + 1);
+    }
+  });
+  it.each([
+    ["non-array menu", () => ({ menu: {} })],
+    ["extra top-level field", () => ({ ...cancelMenu(), other: true })],
+    ["duplicate required mark", () => ({ menu: [...cancelMenu().menu, cancelMenu().menu[0]] })],
+    ["missing required mark", () => ({ menu: cancelMenu().menu.slice(1) })],
+    ["unreadable mark", () => ({ menu: cancelMenu().menu.map((node) => ({ ...node, auth: { ...node.auth, readable: false } })) })],
+    ["nonwriteable tasks", () => ({ menu: cancelMenu().menu.map((node) => node.mark === "tasks" ? { ...node, auth: { readable: true, writeable: false } } : node) })],
+    ["nonwriteable exporter", () => ({ menu: cancelMenu().menu.map((node) => node.mark === "computer_asset_exports" ? { ...node, auth: { readable: true, writeable: false } } : node) })],
+    ["malformed auth", () => ({ menu: [{ mark: "domains", auth: { readable: "true", writeable: false } }, ...cancelMenu().menu.slice(1)] })],
+    ["malformed writeable", () => ({ menu: cancelMenu().menu.map((node) => ({ ...node, auth: { ...node.auth, writeable: 1 } })) })],
+    ["missing boolean", () => ({ menu: cancelMenu().menu.map((node) => ({ ...node, auth: { readable: true } })) })],
+    ["foreign exporter grant", () => ({ menu: cancelMenu().menu.map((node) => node.mark === "computer_asset_exports" ? { ...node, mark: "user_asset_exports" } : node) })],
+    ["unknown grant field", () => ({ menu: cancelMenu().menu.map((node) => ({ ...node, auth: { ...node.auth, other: true } })) })],
+  ] as const)("rejects %s before checking or reading the task", async (_label, menu) => {
+    const responses = recheckResponses(); responses[1] = authorityJSON(menu()); const fetcher = installRecheck(responses);
+    await expect(computerAssetExportAPI.recheckCancelAuthority(exportTask.taskUUID, copyRequest(), exportProfile, signal())).rejects.toThrow();
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+  it.each([{ results: [true, false] }, { results: [false, true] }, { results: [true] }, { results: [true, true, true] },
+    { results: [true, "true"] }, { results: null }, { results: [true, true], other: true }])("rejects non-exact/all-true checks %j", async (value) => {
+    const responses = recheckResponses(); responses[2] = authorityJSON(value); const fetcher = installRecheck(responses);
+    await expect(computerAssetExportAPI.recheckCancelAuthority(exportTask.taskUUID, copyRequest(), exportProfile, signal())).rejects.toThrow();
+    expect(fetcher).toHaveBeenCalledTimes(3);
+  });
+  it.each([
+    { taskID: "another-task" }, { task: { ...exportTask, taskName: "group_assets.v3.export" } },
+    { task: { ...exportTask, domainId: "another-domain" } }, { request: { ...exportRequest, expectedRevision: "2" } },
+    { request: { ...exportRequest, expectedCredentialRevision: "3" } }, { request: { ...exportRequest, observationId: "another-observation" } },
+    { request: { ...exportRequest, search: "other" } }, { request: { ...exportRequest, screenColumns: [...exportColumns].reverse() } },
+  ])("binds the original detail and all source pins %j", async (patch) => {
+    const responses = recheckResponses(); responses[3] = exportJSON({ ...cancelDetail(), ...patch }); const fetcher = installRecheck(responses);
+    await expect(computerAssetExportAPI.recheckCancelAuthority(exportTask.taskUUID, copyRequest(), exportProfile, signal())).rejects.toMatchObject({ code: "invalid_response" });
+    expect(fetcher).toHaveBeenCalledTimes(4);
+  });
+  it("requires the dedicated actor header while auth/access omit it", async () => {
+    const responses = recheckResponses(); responses[3] = authorityJSON(cancelDetail()); installRecheck(responses);
+    await expect(computerAssetExportAPI.recheckCancelAuthority(exportTask.taskUUID, copyRequest(), exportProfile, signal())).rejects.toMatchObject({ status: 401 });
+  });
+  it.each([0, 1, 2, 4])("accepts a matching optional actor header and rejects a conflicting one at step %i", async (index) => {
+    const matching = recheckResponses(); matching[index].headers.set("X-ADTR-User-ID", "1");
+    installRecheck(matching);
+    await expect(computerAssetExportAPI.recheckCancelAuthority(exportTask.taskUUID, copyRequest(), exportProfile, signal())).resolves.toEqual(cancelDetail());
+    for (const actor of ["2", "", "01"]) {
+      const responses = recheckResponses(); responses[index].headers.set("X-ADTR-User-ID", actor);
+      const fetcher = installRecheck(responses);
+      await expect(computerAssetExportAPI.recheckCancelAuthority(exportTask.taskUUID, copyRequest(), exportProfile, signal())).rejects.toMatchObject({ status: 401 });
+      expect(fetcher).toHaveBeenCalledTimes(index + 1);
+    }
+  });
+  it.each([0, 1, 2, 3, 4])("keeps unparseable authority failures at step %i authoritative and unbranded", async (index) => {
+    for (const status of [401, 403]) {
+      const responses = recheckResponses(); responses[index] = new Response("x".repeat(70000), { status });
+      const fetcher = installRecheck(responses), binding = cancelBinding();
+      const error: unknown = await computerAssetExportAPI.recheckCancelAuthority(binding.taskID, binding.request, exportProfile, binding.signal).catch((reason: unknown) => reason);
+      expect(error).toMatchObject({ status });
+      expect(isComputerExportCancelProofRejected(error, binding)).toBe(false);
+      expect(fetcher).toHaveBeenCalledTimes(index + 1);
+    }
+  });
+  it.each([0, 1, 2, 4])("bounds unique complete JSON and metadata at authority step %i", async (index) => {
+    for (const bad of [
+      () => new Response(" ".repeat(65537), { headers: authorityJSON({}).headers }),
+      () => new Response('{"menu":[],"menu":[]}', { headers: authorityJSON({}).headers }),
+      () => new Response(new Uint8Array([0xc3, 0x28]), { headers: authorityJSON({}).headers }),
+      () => new Response("{}", { headers: { ...Object.fromEntries(authorityJSON({}).headers), "Content-Length": "3" } }),
+      () => new Response("{}", { headers: { "Content-Type": "application/json" } }),
+      () => new Response("{}", { headers: { ...Object.fromEntries(authorityJSON({}).headers), "Content-Type": "text/html" } }),
+      () => new Response("{}", { status: 201, headers: authorityJSON({}).headers }),
+    ]) {
+      const responses = recheckResponses(); responses[index] = bad(); const fetcher = installRecheck(responses);
+      await expect(computerAssetExportAPI.recheckCancelAuthority(exportTask.taskUUID, copyRequest(), exportProfile, signal())).rejects.toThrow();
+      expect(fetcher).toHaveBeenCalledTimes(index + 1);
+    }
+  });
+  it.each([0, 1, 2, 3, 4])("stops after an abort at step %i even when fetch resolves late", async (index) => {
+    const control = new AbortController(), responses = recheckResponses(); let count = 0;
+    const fetcher = vi.fn().mockImplementation(async () => { const current = count++; if (current === index) control.abort(); return responses[current]; });
+    vi.stubGlobal("fetch", fetcher);
+    await expect(computerAssetExportAPI.recheckCancelAuthority(exportTask.taskUUID, copyRequest(), exportProfile, control.signal)).rejects.toMatchObject({ name: "AbortError" });
+    expect(fetcher).toHaveBeenCalledTimes(index + 1);
+  });
+  it("rejects in-place identity or original-request changes without continuing", async () => {
+    for (const field of ["profile", "request"]) {
+      const profile: Profile = { ...exportProfile }, request = copyRequest();
+      const fetcher = vi.fn().mockImplementation(async () => {
+        if (field === "profile") profile.csrfToken = "changed-session"; else request.screenColumns.reverse();
+        return authorityJSON(exportProfile);
+      }); vi.stubGlobal("fetch", fetcher);
+      await expect(computerAssetExportAPI.recheckCancelAuthority(exportTask.taskUUID, request, profile, signal())).rejects.toThrow();
+      expect(fetcher).toHaveBeenCalledTimes(1);
+    }
+  });
+  it.each([0, 1, 2, 3, 4])("rechecks the captured identity and complete request after await %i", async (index) => {
+    for (const field of ["profile", "request"]) {
+      const profile: Profile = { ...exportProfile }, request = copyRequest(), responses = recheckResponses(); let count = 0;
+      const fetcher = vi.fn().mockImplementation(async () => {
+        const step = count++;
+        if (step === index) {
+          if (field === "profile") profile.csrfToken = "changed-session"; else request.screenColumns.reverse();
+        }
+        return responses[step];
+      }); vi.stubGlobal("fetch", fetcher);
+      await expect(computerAssetExportAPI.recheckCancelAuthority(exportTask.taskUUID, request, profile, signal())).rejects.toThrow();
+      expect(fetcher).toHaveBeenCalledTimes(index + 1);
+    }
+  });
+  it("pins every valid original request field, including each nonempty date boundary", async () => {
+    const original: ExportRequest = { ...copyRequest(), search: " Device ", creatTm: "asc",
+      startTm: "2026-01-01T00:00:00Z", endTm: "2026-02-01T00:00:00Z" };
+    const changes: Partial<ExportRequest>[] = [
+      { domainId: "another-domain" }, { expectedRevision: "2" }, { expectedCredentialRevision: "3" },
+      { observationId: "another-observation" }, { search: "Device" }, { startTm: "2026-01-02T00:00:00Z" },
+      { endTm: "2026-02-02T00:00:00Z" }, { creatTm: "desc" }, { screenColumns: [...exportColumns].reverse() },
+    ];
+    for (const patch of changes) {
+      const request = { ...original, ...patch }; expect(validExportRequest(request)).toBe(true);
+      const responses = recheckResponses(); responses[3] = exportJSON({ ...cancelDetail(), request,
+        task: { ...exportTask, domainId: request.domainId } });
+      const fetcher = installRecheck(responses);
+      await expect(computerAssetExportAPI.recheckCancelAuthority(exportTask.taskUUID, original, exportProfile, signal())).rejects.toMatchObject({ code: "invalid_response" });
+      expect(fetcher).toHaveBeenCalledTimes(4);
+    }
+  });
+  it.each(["queued", "running", "retry_wait", "cancel_requested", "cancelled", "failed", "succeeded"] as const)("reports %s without posting or interpreting it as cancellation success", async (state) => {
+    const detail = state === "succeeded" ? readyExport : { ...cancelDetail(), task: { ...exportTask, state },
+      downloadStatus: state === "cancelled" ? "cancelled" : state === "failed" ? "failed" : "pending" };
+    const responses = recheckResponses(); responses[3] = exportJSON(detail);
+    const fetcher = installRecheck(responses);
+    expect(await computerAssetExportAPI.recheckCancelAuthority(exportTask.taskUUID, copyRequest(), exportProfile, signal())).toEqual(detail);
+    expect(fetcher.mock.calls.filter(([, init]) => init.method === "POST").map(([path]) => path)).toEqual(["/api/access/check"]);
+  });
+  it("rejects expired, forced-change or missing-MFA captured profiles without fetching", async () => {
+    const fetcher = vi.fn(); vi.stubGlobal("fetch", fetcher);
+    for (const patch of [{ hasMfa: false }, { needChangePwd: true }, { isExpired: true }])
+      await expect(computerAssetExportAPI.recheckCancelAuthority(exportTask.taskUUID, copyRequest(), { ...exportProfile, ...patch }, signal())).rejects.toMatchObject({ status: 401 });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+  it("rejects malformed captured inputs and pre-aborted invocations before any fetch", async () => {
+    const fetcher = vi.fn(); vi.stubGlobal("fetch", fetcher);
+    for (const patch of [{ ID: 0 }, { ID: Number.MAX_SAFE_INTEGER + 1 }, { username: "" }, { role: "" }, { csrfToken: "" }, { priv: 0.5 }])
+      await expect(computerAssetExportAPI.recheckCancelAuthority(exportTask.taskUUID, copyRequest(), { ...exportProfile, ...patch }, signal())).rejects.toMatchObject({ status: 401 });
+    await expect(computerAssetExportAPI.recheckCancelAuthority("../task", copyRequest(), exportProfile, signal())).rejects.toMatchObject({ code: "invalid_input" });
+    await expect(computerAssetExportAPI.recheckCancelAuthority(exportTask.taskUUID, { ...copyRequest(), screenColumns: [] }, exportProfile, signal())).rejects.toMatchObject({ code: "invalid_input" });
+    const control = new AbortController(); control.abort();
+    await expect(computerAssetExportAPI.recheckCancelAuthority(exportTask.taskUUID, copyRequest(), exportProfile, control.signal)).rejects.toMatchObject({ name: "AbortError" });
+    expect(fetcher).not.toHaveBeenCalled();
   });
 });
