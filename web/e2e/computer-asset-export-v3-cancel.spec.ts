@@ -30,6 +30,7 @@ type QueuedCancelPhase =
   | "old-panel-task-id-scroll"
   | "old-panel-task-id-viewport"
   | "old-panel-create-button-scroll"
+  | "old-panel-create-button-center"
   | "old-panel-create-button-geometry"
   | "old-panel-create-button-viewport"
   | "new-entry-terminal-pixels"
@@ -275,6 +276,8 @@ test("queued export is cancelled from its original task without a tab locator an
     await expect(panel.getByText(`任务 ID：${originalTaskID}`, { exact: true })).toBeInViewport({ ratio: 1 });
     phase = "old-panel-create-button-scroll";
     await panel.getByRole("button", { name: "按当前列表创建另一导出", exact: true }).scrollIntoViewIfNeeded();
+    phase = "old-panel-create-button-center";
+    await panel.getByRole("button", { name: "按当前列表创建另一导出", exact: true }).evaluate(element => element.scrollIntoView({ block: "center", inline: "nearest", behavior: "instant" }));
     phase = "old-panel-create-button-geometry";
     try {
       buttonGeometry = projectComputerButtonGeometry(await panel.getByRole("button", { name: "按当前列表创建另一导出", exact: true }).evaluate(captureComputerButtonGeometry));
