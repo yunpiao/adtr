@@ -264,6 +264,99 @@ function healthDetail(value: unknown, id: string, archived: boolean, visibilityV
     task.result.database === "ready" && task.result.queue === "ready");
   return value as unknown as TaskDetail;
 }
+
+async function openOriginalScheduleOccurrence(
+  page: Page, scheduleID: string, taskID: string, active: () => void,
+) {
+  const origin = new URL(page.url()).origin;
+  let selected: Request | undefined;
+  let admittedRequest = false, validatedResponse = false, failed = false;
+  let businessWrites = 0, downloads = 0;
+  const work: Promise<void>[] = [];
+  const countWrite = (request: Request) => {
+    try {
+      const url = new URL(request.url());
+      if (url.origin === origin && request.method() === "POST" &&
+          (url.pathname === "/api/tasks" || url.pathname.startsWith("/api/tasks/"))) businessWrites++;
+    } catch { failed = true; }
+  };
+  const countDownload = () => { downloads++; };
+  const selectRequest = (request: Request) => {
+    if (selected) return;
+    try {
+      const url = new URL(request.url());
+      if (url.origin !== origin || url.pathname !== "/api/tasks/detail" ||
+          url.searchParams.get("taskUUID") !== taskID) return;
+      // Select the first actual object before metadata validation. A bad first
+      // candidate must fail, not be replaced by a later successful response.
+      selected = request;
+      admittedRequest = request.method() === "GET" && request.resourceType() === "fetch" &&
+        request.serviceWorker() === null && request.frame() === page.mainFrame() &&
+        request.redirectedFrom() === null && request.redirectedTo() === null &&
+        url.hash === "" && [...url.searchParams.keys()].length === 2 &&
+        url.searchParams.getAll("taskUUID").length === 1 &&
+        url.searchParams.getAll("visibility").length === 1 &&
+        url.searchParams.get("visibility") === "all";
+    } catch { failed = true; }
+  };
+  try {
+    page.on("request", countWrite);
+    page.on("download", countDownload);
+    active();
+    await page.getByRole("button", { name: "周期计划", exact: true }).click({ timeout: 15_000 });
+    active();
+    await page.getByRole("button", { name: `计划详情 ${scheduleID}`, exact: true }).click({ timeout: 15_000 });
+    active();
+    const button = page.getByRole("table", { name: "计划发生记录", exact: true })
+      .getByRole("button", { name: `查看该次实际任务 ${taskID}`, exact: true });
+    await expect(button).toBeVisible({ timeout: 15_000 });
+    active();
+    await expect(button).toBeEnabled({ timeout: 15_000 });
+    active();
+    // Arm only after the history page is ready. Earlier detail responses cannot
+    // satisfy this waiter because their original Request was never selected.
+    page.on("request", selectRequest);
+    const responseWork = page.waitForResponse((response) => response.request() === selected,
+      { timeout: 15_000 }).then(async (response) => {
+      active();
+      requireSafe(admittedRequest && response.status() === 200 && !response.fromServiceWorker() &&
+        response.request().redirectedFrom() === null && response.request().redirectedTo() === null);
+      const headers = response.headers();
+      requireSafe(/^application\/json(?:;|$)/i.test(headers["content-type"] ?? "") &&
+        headers["cache-control"] === "no-store" && headers["x-content-type-options"] === "nosniff");
+      // Parse this same Response once, without waiting for click completion.
+      // A CDP/body/JSON failure remains failure; no GET or parsing retry exists.
+      const value = await response.json();
+      active();
+      healthDetail(value, taskID, false, 2);
+      validatedResponse = true;
+    }).catch(() => { failed = true; });
+    work.push(responseWork);
+    const clickWork = button.click({ timeout: 15_000 }).then(() => { active(); })
+      .catch(() => { failed = true; });
+    work.push(clickWork);
+    await Promise.allSettled(work);
+    active();
+    requireSafe(!failed && admittedRequest && validatedResponse);
+    await expect(page.getByTestId("task-detail-identity")).toHaveText(taskID);
+    active();
+    await expect(page.locator('.task-state[data-state="succeeded"]')).toBeVisible();
+    active();
+    await expect(page.getByLabel("任务实际结果")).toContainText('"database": "ready"');
+    active();
+    await expect(page.getByLabel("任务实际结果")).toContainText('"queue": "ready"');
+    active();
+    requireSafe(businessWrites === 0 && downloads === 0);
+  } finally {
+    page.off("request", selectRequest);
+    page.off("request", countWrite);
+    page.off("download", countDownload);
+    // Both branches own immediate rejection handlers. JSON uses the original
+    // Playwright/page lifecycle, not a detached race or a claimed hard abort.
+    await Promise.allSettled(work);
+  }
+}
+
 function immutableTaskDigest(detail: TaskDetail) {
   return sha256(JSON.stringify({ ...detail.task, archived: false, visibilityVersion: 0 }));
 }
@@ -513,7 +606,7 @@ test("real scheduled health occurrence and reversible visibility through browser
 }, info) => {
   test.setTimeout(480_000);
   type Phase = "original_setup" | "producer_schedule" | "bootstrap_health" |
-    "producer_visibility" | "reader_setup" | "reader_checks" | "archive_observation" | "evidence";
+    "producer_visibility" | "history_task_navigation" | "reader_setup" | "reader_checks" | "archive_observation" | "evidence";
   let phase: Phase = "original_setup", failedPhase: Phase | undefined;
   let stopped = false, cleanupFailed = false;
   let readerContext: BrowserContext | undefined;
@@ -845,6 +938,11 @@ test("real scheduled health occurrence and reversible visibility through browser
       expect.objectContaining({ action: "admitted", taskUUID: tid }),
     ]),
   );
+  // Reuse the same real occurrence after the original latest-task and complete
+  // archive/restore chain. No second cycle, business write, proof or replay.
+  phase = "history_task_navigation";
+  await openOriginalScheduleOccurrence(page, sid, tid, active);
+  phase = "producer_visibility";
   active();
   const replayCreateCode = await freshCode(mfa);
   active();
