@@ -1,3 +1,4 @@
+import GroupAssetExportTaskCancel from "./GroupAssetExportTaskCancel";
 import GroupAssetExportTaskResult from "./GroupAssetExportTaskResult";
 import ComputerAssetExportTaskCancel from "./ComputerAssetExportTaskCancel";
 import ComputerAssetExportTaskResult from "./ComputerAssetExportTaskResult";
@@ -1070,6 +1071,9 @@ function TaskDetails({
               task={task}
               sessionChanged={context.sessionChanged}
             />
+          )}
+          {task.taskName === "group_assets.v3.export" && !read.busy && !read.error && !task.archived && task.domainId !== "platform" && (
+            <GroupAssetExportTaskCancel profile={context.profile} task={task} sessionChanged={context.sessionChanged} />
           )}
           <div className="actions compact">
             {!action &&
