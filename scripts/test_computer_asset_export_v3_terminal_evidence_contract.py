@@ -2,10 +2,117 @@
 import base64
 import copy
 import json
+import re
 from pathlib import Path
 import unittest
 import validate_computer_asset_export_v3_terminal_evidence as v
 import test_computer_asset_export_v3_evidence_contract as old
+
+
+# A closed source shape, not a general TypeScript parser. Keep the actual outer
+# catch/finally, independent cleanup branches and failure propagation together.
+# Merely mentioning restoreOwnedExportWorker (including in a comment) is not a
+# cleanup witness. Browser/Worker runtime evidence remains independently needed.
+QUEUED_CANCEL_CLEANUP = '''  } catch { failure = phase; }
+  finally {
+    page.off("download", downloaded);
+    if (taskPage) {
+      taskPage.off("request", requested); taskPage.off("download", downloaded);
+      try { await taskPage.close(); } catch { cleanupFailed = true; }
+    }
+    if (restoreWorker) {
+      try { await restoreOwnedExportWorker(); } catch { cleanupFailed = true; }
+    }
+  }
+  // Raw Playwright errors can contain Cookie call logs. Do not attach a cause.
+  if (failure || cleanupFailed) throw new Error(`Computer export task cancel checkpoint failed: ${failure || "cleanup"}${cleanupFailed ? "; cleanup_failed" : ""}`);
+});
+'''
+QUEUED_CANCEL_ARM = '''    phase = "pause"; restoreWorker = true;
+    const pause = await pauseOwnedExportWorker();'''
+QUEUED_CANCEL_IMAGE = 'const image = await screenshot(taskPage, info, "cancelled-terminal.png");'
+
+QUEUED_RECEIPT_OBSERVER = '''// Two original GET witnesses, one explicit old-panel action. Both observers
+// use fresh Request identity; nested allSettled branches join before returning.
+async function observedReceiptAndDetail(page: Page, actor: number, taskID: string, domainId: string, idempotencyKey: string) {
+  const button = panelFor(page).getByRole("button", { name: "核对原导出回执", exact: true });
+  await expect(button).toBeEnabled();
+  const receiptResponses: Response[] = [];
+  const detailResponse = await observedAction(page,
+    (r) => new URL(r.url()).pathname === `${exportPrefix}/detail` && new URL(r.url()).searchParams.get("taskID") === taskID && r.method() === "GET",
+    async () => {
+      receiptResponses.push(await observedAction(page,
+        (r) => new URL(r.url()).pathname === `${exportPrefix}/receipt` && new URL(r.url()).searchParams.get("domainId") === domainId && new URL(r.url()).searchParams.get("idempotencyKey") === idempotencyKey && r.method() === "GET",
+        () => button.click()));
+    });
+  const receiptResponse = receiptResponses[0];
+  if (receiptResponses.length !== 1 || !receiptResponse) throw new Error("Original computer export receipt checkpoint failed");
+  const receipt = await responseValue(receiptResponse, actor), detail = await responseValue(detailResponse, actor);
+  expect(receipt.taskID).toBe(taskID);
+  expect(detail.taskID).toBe(taskID);
+  return { receipt, detail };
+}
+'''
+
+
+def queued_cancel_browser_contract(source):
+    v.require(type(source) is str and source.endswith(QUEUED_CANCEL_CLEANUP), 'closed queued cleanup and safe failure propagation')
+    v.require(source.count('  finally {\n') == 1, 'one outer queued cleanup')
+    v.require(source.count('await taskPage.close();') == 1 and source.count('await restoreOwnedExportWorker();') == 1, 'await each owned cleanup exactly once')
+    v.require(re.findall(r'\brestoreWorker\s*=\s*([^;,\n]+)', source) == ['false', 'true'], 'restore guard initialized once and never disarmed')
+    v.require(source.count(QUEUED_CANCEL_ARM) == 1, 'arm restoration before attempting pause')
+    outer_try = '  try {\n    expect(process.env.ADTR_E2E_COMPUTER_ASSET_EXPORT_V3_TERMINAL)'
+    v.require(source.count(outer_try) == 1 and source.index(outer_try) < source.index(QUEUED_CANCEL_ARM), 'pause attempt belongs to protected outer try')
+    v.require(source.count('test.setTimeout(900_000);') == 1, 'unchanged queued timeout')
+    v.require(source.count(QUEUED_RECEIPT_OBSERVER) == 1, 'paired fresh receipt and detail with one joined action')
+    v.require('receiptAndDetail' not in source, 'no legacy pathname-only receipt observer')
+    v.require(source.count('await observedReceiptAndDetail(page, setup.actorId, originalTaskID, request.domainId, operation.idempotencyKey)') == 2, 'both old-panel recoveries use original request witnesses')
+    # Preserve post-resume DB invariance and old-panel visibility, then require
+    # a real fresh dedicated read and proof-free original identity before the
+    # new-tab screenshot. The existing artifact validator still binds its bytes.
+    ordered = [
+        'const resume = await resumeOwnedExportWorker(context, pause);',
+        'expect(postResume.database).toEqual(database);',
+        'await cancelledStatus.scrollIntoViewIfNeeded();',
+        'phase = "new-entry-terminal-pixels";',
+        'const fresh = await responseValue(freshResponse, setup.actorId);',
+        'expect(fresh).toMatchObject({ taskID: originalTaskID, request, downloadReady: false, downloadStatus: "cancelled", task: { state: "cancelled" } });',
+        'await taskCancelledStatus.scrollIntoViewIfNeeded();',
+        'await expect(taskCancelledStatus).toBeInViewport({ ratio: 1 });',
+        'await expect(originalID).toHaveText(originalTaskID);',
+        'await expect(originalID).toBeInViewport({ ratio: 1 });',
+        'await expect(control).toBeVisible();',
+        '''const screenshotProofInputs = 'input[type="password"], input[name="actorPassword"], input[name="totpCode"]';''',
+        'await expect(control.locator(screenshotProofInputs)).toHaveCount(0);',
+        'await expect(taskPage.locator(screenshotProofInputs)).toHaveCount(0);',
+        QUEUED_CANCEL_IMAGE,
+        'await writeTerminalEvidence(info, setup, "queuedCancel",',
+    ]
+    for value in ordered:
+        v.require(source.count(value) == 1, 'unique required queued checkpoint')
+    positions = [source.index(value) for value in ordered]
+    v.require(positions == sorted(positions), 'resumed DB then real new-entry pixels then evidence')
+    v.require(source.count('await screenshot(') == 1, 'one retained queued screenshot')
+    v.require(source.count('toBeInViewport({ ratio: 1 })') >= 5, 'old and new visible terminal identity')
+    # These are actual request/cleanup operations, not merely named helpers.
+    for token in (
+        'const seen = new Set<BrowserRequest>();',
+        'if (!armed || !predicate(request)) return;',
+        'seen.add(request);',
+        'if (settled || !seen.has(response.request())) return;',
+        'if (response.fromServiceWorker()) { fail(); return; }',
+        'const results = await Promise.allSettled([completed, actionResult] as const);',
+        'clearTimeout(timer); page.off("request", started); page.off("response", received); page.off("requestfailed", failed);',
+        'fail(); await completed.catch(() => undefined);',
+        'return original.apply(this, args);',
+        'witness.matched = witness.matched && localStorage.getItem(key) === expected;',
+        '.toEqual({ calls: 1, matched: true, observationErrors: 0 });',
+        'expect(queued).toMatchObject({ state: "queued", attempt: 0, snapshotCount: 0, manifestCount: 0, chunkCount: 0 });',
+        'expect(database).toMatchObject({ state: "cancelled", error: "cancelled", attempt: 0, snapshotCount: 0, manifestCount: 0, chunkCount: 0 });',
+        'await expect(panel.getByText(`任务 ID：${originalTaskID}`, { exact: true })).toBeInViewport({ ratio: 1 });',
+        'await expect(panel.getByRole("button", { name: "按当前列表创建另一导出", exact: true })).toBeInViewport({ ratio: 1 });',
+    ):
+        v.require(source.count(token) == 1, 'retained original state or fresh bounded browser observation')
 
 
 def terminal_db(task_id, key, state):
@@ -229,10 +336,75 @@ class TerminalEvidenceContract(unittest.TestCase):
         self.assertIn('terminalError.scrollIntoViewIfNeeded()', failure)
         self.assertGreaterEqual(failure.count('toBeInViewport({ ratio: 1 })'), 4)
         cancel = (root / 'web/e2e/computer-asset-export-v3-cancel.spec.ts').read_text()
-        self.assertIn('finally { await restoreOwnedExportWorker(); }', cancel)
+        queued_cancel_browser_contract(cancel)
         self.assertIn('cancelledStatus.scrollIntoViewIfNeeded()', cancel)
         self.assertGreaterEqual(cancel.count('toBeInViewport({ ratio: 1 })'), 3)
-        self.assertLess(cancel.index('expect(postResume.database).toEqual(database)'), cancel.index('await screenshot(page, info,'))
+        self.assertLess(cancel.index('expect(postResume.database).toEqual(database)'), cancel.index('await screenshot(taskPage, info,'))
+
+    def test_queued_browser_cleanup_and_pixel_contract_mutations(self):
+        root = Path(__file__).resolve().parents[1]
+        source = (root / 'web/e2e/computer-asset-export-v3-cancel.spec.ts').read_text()
+        queued_cancel_browser_contract(source)
+        restore = '      try { await restoreOwnedExportWorker(); } catch { cleanupFailed = true; }'
+        close = '      try { await taskPage.close(); } catch { cleanupFailed = true; }'
+        proof_empty = 'await expect(taskPage.locator(screenshotProofInputs)).toHaveCount(0);'
+        mutations = [
+            ('legacy unbound receipt helper', 'await observedReceiptAndDetail(page, setup.actorId, originalTaskID, request.domainId, operation.idempotencyKey);', 'await receiptAndDetail(page, setup.actorId, originalTaskID);'),
+            ('receipt action replayed', '() => button.click()));', 'async () => { await button.click(); await button.click(); }));'),
+            ('receipt witness not joined', 'receiptResponses.push(await observedAction(page,', 'receiptResponses.push(observedAction(page,'),
+            ('receipt domain unbound', 'new URL(r.url()).searchParams.get("domainId") === domainId && ', ''),
+            ('receipt original key unbound', 'new URL(r.url()).searchParams.get("idempotencyKey") === idempotencyKey && ', ''),
+            ('receipt response identity unchecked', 'expect(receipt.taskID).toBe(taskID);', ''),
+            ('detail response identity unchecked', 'expect(detail.taskID).toBe(taskID);', ''),
+            ('missing direct section proof absence', 'await expect(control.locator(screenshotProofInputs)).toHaveCount(0);', ''),
+            ('new section may be absent', 'await expect(control).toBeVisible();', ''),
+            ('old response accepted', 'if (settled || !seen.has(response.request())) return;', 'if (settled) return;'),
+            ('request witness not armed', 'if (!armed || !predicate(request)) return;', 'if (!predicate(request)) return;'),
+            ('service worker response accepted', 'if (response.fromServiceWorker()) { fail(); return; }', ''),
+            ('observation not joined', 'const results = await Promise.allSettled([completed, actionResult] as const);', 'const results = await Promise.all([completed, actionResult] as const);'),
+            ('native request arguments replaced', 'return original.apply(this, args);', 'return original.apply(this, []);'),
+            ('marker not checked', 'witness.matched = witness.matched && localStorage.getItem(key) === expected;', 'witness.matched = true;'),
+            ('queued zero artifacts unchecked', 'expect(queued).toMatchObject({ state: "queued", attempt: 0, snapshotCount: 0, manifestCount: 0, chunkCount: 0 });', ''),
+            ('terminal zero artifacts unchecked', 'expect(database).toMatchObject({ state: "cancelled", error: "cancelled", attempt: 0, snapshotCount: 0, manifestCount: 0, chunkCount: 0 });', ''),
+            ('old task identity no longer visible', 'await expect(panel.getByText(`任务 ID：${originalTaskID}`, { exact: true })).toBeInViewport({ ratio: 1 });', ''),
+            ('old new-export action no longer visible', 'await expect(panel.getByRole("button", { name: "按当前列表创建另一导出", exact: true })).toBeInViewport({ ratio: 1 });', ''),
+            ('missing restore', restore, ''),
+            ('restore is only a comment', restore, '      try { /* await restoreOwnedExportWorker(); */ } catch { cleanupFailed = true; }'),
+            ('unjoined restore', restore, restore.replace('await ', '')),
+            ('restore failure swallowed', restore, '      try { await restoreOwnedExportWorker(); } catch {}'),
+            ('restore depends on a tab', '    if (restoreWorker) {', '    if (taskPage && restoreWorker) {'),
+            ('restore never armed', QUEUED_CANCEL_ARM, QUEUED_CANCEL_ARM.replace('= true', '= false')),
+            ('pause before restoration armed', QUEUED_CANCEL_ARM, '    const pause = await pauseOwnedExportWorker();\n    phase = "pause"; restoreWorker = true;'),
+            ('guard disarmed after pause', QUEUED_CANCEL_ARM, QUEUED_CANCEL_ARM + '\n    restoreWorker = false;'),
+            ('missing tab close', close, ''),
+            ('unjoined tab close', close, close.replace('await ', '')),
+            ('close failure prevents restore', close, '      await taskPage.close();'),
+            ('close failure swallowed', close, '      try { await taskPage.close(); } catch {}'),
+            ('no finally protection', '  finally {\n', '  if (true) {\n'),
+            ('cleanup failure treated as success', 'if (failure || cleanupFailed)', 'if (failure)'),
+            ('outer failure swallowed', '  } catch { failure = phase; }', '  } catch {}'),
+            ('old screenshot target', QUEUED_CANCEL_IMAGE, QUEUED_CANCEL_IMAGE.replace('screenshot(taskPage,', 'screenshot(page,')),
+            ('wrong artifact name', QUEUED_CANCEL_IMAGE, QUEUED_CANCEL_IMAGE.replace('cancelled-terminal.png', 'other.png')),
+            ('missing fresh terminal read', 'const fresh = await responseValue(freshResponse, setup.actorId);', 'const fresh = cancel;'),
+            ('unbound screenshot identity', 'await expect(originalID).toHaveText(originalTaskID);', 'await expect(originalID).toBeVisible();'),
+            ('missing proof destruction check', proof_empty, ''),
+            ('larger timeout', 'test.setTimeout(900_000);', 'test.setTimeout(1_800_000);'),
+        ]
+        for label, before, after in mutations:
+            with self.subTest(mutation=label):
+                self.assertEqual(source.count(before), 1, 'mutation must target one actual checkpoint')
+                with self.assertRaises(ValueError):
+                    queued_cancel_browser_contract(source.replace(before, after, 1))
+        # Both moved calls still exist by name; order/outer-finally checks must
+        # reject them rather than merely finding an expected function string.
+        moved_restore = source.replace(restore, '', 1) + '\nawait restoreOwnedExportWorker();\n'
+        db_check = 'expect(postResume.database).toEqual(database);'
+        early_image = source.replace(QUEUED_CANCEL_IMAGE, '', 1).replace(db_check, QUEUED_CANCEL_IMAGE + '\n    ' + db_check, 1)
+        late_db_check = source.replace(db_check, '', 1).replace(QUEUED_CANCEL_IMAGE, QUEUED_CANCEL_IMAGE + '\n    ' + db_check, 1)
+        for label, changed in [('restore outside finally', moved_restore), ('pixels before DB verification', early_image), ('DB verification after pixels', late_db_check)]:
+            with self.subTest(mutation=label):
+                with self.assertRaises(ValueError):
+                    queued_cancel_browser_contract(changed)
 
 
 if __name__ == '__main__':
