@@ -170,7 +170,92 @@ QUEUED_CANCEL_RATIO_CLEANUP = QUEUED_CANCEL_CLEANUP.replace(
 ).replace(QUEUED_CANCEL_RATIO_OLD_FAILURE, QUEUED_CANCEL_RATIO_FAILURE, 1)
 
 
+# The one pre-assert sample restores the exact main1ec6 host-only source.
+# Keep every historical classifier/positioning/stage hash below unchanged.
+QUEUED_CANCEL_GEOMETRY_BASELINE_SHA256 = "0662e56d861111fc2161c2d9b59d9fd01914e4688ca94ced1e7ad54491138258"
+QUEUED_CANCEL_GEOMETRY_IMPORT = 'import { captureComputerButtonGeometry, projectComputerButtonGeometry, computerButtonGeometrySuffix, type ComputerButtonGeometry, classifyComputerViewportResult, computerViewportResultSuffix, type ComputerViewportRatioClass } from "./computer-asset-export-v3-viewport-result";\n'
+QUEUED_CANCEL_GEOMETRY_INIT = '  let buttonGeometry: ComputerButtonGeometry | null = null;\n'
+QUEUED_CANCEL_GEOMETRY_ENUM = '  | "old-panel-create-button-geometry"\n'
+QUEUED_CANCEL_GEOMETRY_SAMPLE = '    phase = "old-panel-create-button-geometry";\n    try {\n      buttonGeometry = projectComputerButtonGeometry(await panel.getByRole("button", { name: "按当前列表创建另一导出", exact: true }).evaluate(captureComputerButtonGeometry));\n    } catch { buttonGeometry = { status: "unavailable" }; }\n'
+QUEUED_CANCEL_GEOMETRY_FAILURE = '  if (failure || cleanupFailed) throw new Error(`Computer export task cancel checkpoint failed: ${failure || "cleanup"}${cleanupFailed ? "; cleanup_failed" : ""}${computerViewportResultSuffix(viewportRatioClass)}${failure === "old-panel-create-button-viewport" ? computerButtonGeometrySuffix(buttonGeometry) : ""}`);\n'
+
+QUEUED_CANCEL_GEOMETRY_PHASE_TYPE = QUEUED_CANCEL_CURRENT_PHASE_TYPE.replace(
+    '  | "old-panel-create-button-viewport"\n',
+    QUEUED_CANCEL_GEOMETRY_ENUM + '  | "old-panel-create-button-viewport"\n', 1,
+)
+QUEUED_CANCEL_GEOMETRY_POST_RESUME = QUEUED_CANCEL_CURRENT_POST_RESUME_STAGES.replace(
+    '    phase = "old-panel-create-button-viewport";\n',
+    QUEUED_CANCEL_GEOMETRY_SAMPLE + '    phase = "old-panel-create-button-viewport";\n', 1,
+)
+QUEUED_CANCEL_GEOMETRY_CLEANUP = QUEUED_CANCEL_RATIO_CLEANUP.replace(
+    QUEUED_CANCEL_RATIO_FAILURE, QUEUED_CANCEL_GEOMETRY_FAILURE, 1,
+)
+
+
+# Explicit native centering is a separate positioning action, never a mutation
+# hidden inside the read-only geometry callback. Preserve every historical hash.
+QUEUED_CANCEL_CENTER_BASELINE_SHA256 = "3050f592ea8f988aed99e2de4e15e47eb00422503fb3f5d8c22695a352c9d46e"
+QUEUED_CANCEL_CENTER_ENUM = '  | "old-panel-create-button-center"\n'
+QUEUED_CANCEL_CENTER_LINE = '    await panel.getByRole("button", { name: "按当前列表创建另一导出", exact: true }).evaluate(element => element.scrollIntoView({ block: "center", inline: "nearest", behavior: "instant" }));\n'
+QUEUED_CANCEL_CENTER_BLOCK = '    phase = "old-panel-create-button-center";\n' + QUEUED_CANCEL_CENTER_LINE
+QUEUED_CANCEL_CENTER_PHASE_TYPE = QUEUED_CANCEL_GEOMETRY_PHASE_TYPE.replace(
+    QUEUED_CANCEL_GEOMETRY_ENUM, QUEUED_CANCEL_CENTER_ENUM + QUEUED_CANCEL_GEOMETRY_ENUM, 1,
+)
+QUEUED_CANCEL_CENTER_POST_RESUME = QUEUED_CANCEL_GEOMETRY_POST_RESUME.replace(
+    QUEUED_CANCEL_GEOMETRY_SAMPLE, QUEUED_CANCEL_CENTER_BLOCK + QUEUED_CANCEL_GEOMETRY_SAMPLE, 1,
+)
+
+
+QUEUED_CANCEL_GEOMETRY_CALLBACK = 'export function captureComputerButtonGeometry(element: Element): ComputerButtonGeometry {\n  try {\n    const document = element.ownerDocument;\n    const view = document?.defaultView, root = document?.documentElement;\n    if (!view || !root) return { status: "unavailable" };\n    const rect = element.getBoundingClientRect();\n    const connected = element.isConnected;\n    const left = rect.left, top = rect.top, right = rect.right, bottom = rect.bottom;\n    const width = rect.width, height = rect.height;\n    const innerWidth = view.innerWidth, innerHeight = view.innerHeight;\n    const clientWidth = root.clientWidth, clientHeight = root.clientHeight;\n    if (typeof connected !== "boolean" ||\n        !Number.isFinite(left) || !Number.isFinite(top) || !Number.isFinite(right) || !Number.isFinite(bottom) ||\n        !Number.isFinite(width) || !Number.isFinite(height) ||\n        Math.abs(left) > 1_000_000 || Math.abs(top) > 1_000_000 || Math.abs(right) > 1_000_000 || Math.abs(bottom) > 1_000_000 ||\n        width < 0 || width > 1_000_000 || height < 0 || height > 1_000_000 || right < left || bottom < top ||\n        !Number.isInteger(innerWidth) || innerWidth < 1 || innerWidth > 16_384 ||\n        !Number.isInteger(innerHeight) || innerHeight < 1 || innerHeight > 16_384 ||\n        !Number.isInteger(clientWidth) || clientWidth < 1 || clientWidth > 16_384 ||\n        !Number.isInteger(clientHeight) || clientHeight < 1 || clientHeight > 16_384) return { status: "unavailable" };\n    return { status: "sampled", connected, left, top, right, bottom, width, height, innerWidth, innerHeight, clientWidth, clientHeight };\n  } catch {\n    return { status: "unavailable" };\n  }\n}\n\n'
+
+
+def queued_cancel_geometry_helper_contract(source):
+    v.require(type(source) is str, 'geometry helper source text')
+    encoded = source.encode('utf-8')
+    v.require(hashlib.sha256(encoded[:2774]).hexdigest() == 'db9d3121d410c1c1c6c420bfec22c4cff88709cf5c7775e38c2a9b1f0a77135b', 'original matcher helper prefix unchanged')
+    v.require(source.count(QUEUED_CANCEL_GEOMETRY_CALLBACK) == 1, 'one exact self-contained synchronous callback')
+    v.require(source.count('export function captureComputerButtonGeometry(') == 1, 'no duplicate browser callback export')
+
+
+def restore_queued_cancel_center(source):
+    v.require(type(source) is str, 'queued center source text')
+    # Count-and-delete alone would admit an operation moved after its assertion.
+    # Pin both current shapes, then pin every remaining raw UTF-8 byte.
+    v.require(source.count(QUEUED_CANCEL_CENTER_PHASE_TYPE) == 1, 'complete current 25-phase vocabulary')
+    v.require(source.count(QUEUED_CANCEL_CENTER_POST_RESUME) == 1, 'original scroll then awaited native center then geometry then ratio1')
+    for addition in (QUEUED_CANCEL_CENTER_ENUM, QUEUED_CANCEL_CENTER_BLOCK):
+        v.require(source.count(addition) == 1, 'one exact center positioning delta')
+        source = source.replace(addition, '', 1)
+    encoded = source.encode('utf-8')
+    v.require(len(encoded) == 22859 and hashlib.sha256(encoded).hexdigest() == QUEUED_CANCEL_CENTER_BASELINE_SHA256,
+              'center inverse preserves original geometry, requests, ratio and cleanup bytes')
+    return source
+
+
+def restore_queued_cancel_geometry(source):
+    source = restore_queued_cancel_center(source)
+    v.require(type(source) is str, 'queued geometry source text')
+    v.require(source.startswith(QUEUED_CANCEL_GEOMETRY_IMPORT + QUEUED_CANCEL_RATIO_FIRST_IMPORT), 'expanded helper import in exact original position')
+    v.require(source.count(QUEUED_CANCEL_RATIO_INIT + QUEUED_CANCEL_GEOMETRY_INIT) == 1, 'empty geometry state beside original matcher state')
+    v.require(source.count(QUEUED_CANCEL_GEOMETRY_PHASE_TYPE) == 1, 'complete current 24-phase vocabulary')
+    v.require(source.count(QUEUED_CANCEL_GEOMETRY_POST_RESUME) == 1, 'exact single pre-assert sample and original assertion order')
+    v.require(source.count(QUEUED_CANCEL_GEOMETRY_CLEANUP) == 1 and source.endswith(QUEUED_CANCEL_GEOMETRY_CLEANUP), 'unchanged cleanup before target-gated geometry suffix')
+    for current, previous in (
+        (QUEUED_CANCEL_GEOMETRY_IMPORT, QUEUED_CANCEL_RATIO_IMPORT),
+        (QUEUED_CANCEL_GEOMETRY_INIT, ''),
+        (QUEUED_CANCEL_GEOMETRY_ENUM, ''),
+        (QUEUED_CANCEL_GEOMETRY_SAMPLE, ''),
+        (QUEUED_CANCEL_GEOMETRY_FAILURE, QUEUED_CANCEL_RATIO_FAILURE),
+    ):
+        v.require(source.count(current) == 1, 'one exact pre-assert geometry delta')
+        source = source.replace(current, previous, 1)
+    v.require(hashlib.sha256(source.encode('utf-8')).hexdigest() == QUEUED_CANCEL_GEOMETRY_BASELINE_SHA256,
+              'geometry inverse preserves original requests, ratio, catch and cleanup bytes')
+    return source
+
+
 def restore_queued_cancel_viewport_result(source):
+    source = restore_queued_cancel_geometry(source)
     v.require(type(source) is str, 'queued host viewport source text')
     v.require(source.startswith(QUEUED_CANCEL_RATIO_IMPORT + QUEUED_CANCEL_RATIO_FIRST_IMPORT), 'host import in exact original position')
     v.require(source.count(QUEUED_CANCEL_PHASE_INIT + '\n' + QUEUED_CANCEL_RATIO_INIT) == 1, 'empty host result beside original phase initialization')
@@ -226,7 +311,7 @@ def restore_queued_cancel_stages(source):
 
 def queued_cancel_browser_contract(source):
     restore_queued_cancel_stages(source)
-    v.require(type(source) is str and source.endswith(QUEUED_CANCEL_RATIO_CLEANUP), 'closed queued cleanup and safe failure propagation')
+    v.require(type(source) is str and source.endswith(QUEUED_CANCEL_GEOMETRY_CLEANUP), 'closed queued cleanup and safe failure propagation')
     v.require(source.count('  finally {\n') == 1, 'one outer queued cleanup')
     v.require(source.count('await taskPage.close();') == 1 and source.count('await restoreOwnedExportWorker();') == 1, 'await each owned cleanup exactly once')
     v.require(re.findall(r'\brestoreWorker\s*=\s*([^;,\n]+)', source) == ['false', 'true'], 'restore guard initialized once and never disarmed')
@@ -518,11 +603,11 @@ class TerminalEvidenceContract(unittest.TestCase):
         self.assertEqual(hashlib.sha256(diagnostic.encode('utf-8')).hexdigest(), QUEUED_CANCEL_SCROLL_BASELINE_SHA256)
         self.assertEqual(diagnostic.count(QUEUED_CANCEL_PHASE_TYPE), 1)
         self.assertEqual(diagnostic.count(QUEUED_CANCEL_POST_RESUME_STAGES), 1)
-        self.assertEqual(source.count(QUEUED_CANCEL_CURRENT_PHASE_TYPE), 1)
-        self.assertEqual(source.count(QUEUED_CANCEL_CURRENT_POST_RESUME_STAGES), 1)
-        phases = re.findall(r'^  \| "([a-z-]+)"', QUEUED_CANCEL_CURRENT_PHASE_TYPE, re.MULTILINE)
-        self.assertEqual(len(phases), 23)
-        self.assertEqual(len(set(phases)), 23)
+        self.assertEqual(source.count(QUEUED_CANCEL_CENTER_PHASE_TYPE), 1)
+        self.assertEqual(source.count(QUEUED_CANCEL_CENTER_POST_RESUME), 1)
+        phases = re.findall(r'^  \| "([a-z-]+)"', QUEUED_CANCEL_CENTER_PHASE_TYPE, re.MULTILINE)
+        self.assertEqual(len(phases), 25)
+        self.assertEqual(len(set(phases)), 25)
         historical = restore_queued_cancel_stages(source)
         self.assertEqual(hashlib.sha256(historical.encode('utf-8')).hexdigest(), QUEUED_CANCEL_STAGE_BASELINE_SHA256)
         # The four exact additions are the only source delta. Existing scrolls,
@@ -562,12 +647,15 @@ class TerminalEvidenceContract(unittest.TestCase):
             assignment = f'    phase = "{target}-scroll";\n'
             scroll = f'    await {locator}.scrollIntoViewIfNeeded();\n'
             assertion = f'    await expect({locator}).toBeInViewport({{ ratio: 1 }});\n'
-            viewport = f'    phase = "{target}-viewport";\n' + assertion
+            geometry_enum = (QUEUED_CANCEL_CENTER_ENUM + QUEUED_CANCEL_GEOMETRY_ENUM) if target == 'old-panel-create-button' else ''
+            geometry_sample = (QUEUED_CANCEL_CENTER_BLOCK + QUEUED_CANCEL_GEOMETRY_SAMPLE) if target == 'old-panel-create-button' else ''
+            viewport_enum = geometry_enum + f'  | "{target}-viewport"\n'
+            viewport = geometry_sample + f'    phase = "{target}-viewport";\n' + assertion
             mutations = (
                 ('missing enum', enum, ''),
                 ('duplicate enum', enum, enum * 2),
                 ('comment-only enum', enum, '  // ' + enum.strip() + '\n'),
-                ('enum after viewport member', enum + f'  | "{target}-viewport"\n', f'  | "{target}-viewport"\n' + enum),
+                ('enum after viewport member', enum + viewport_enum, viewport_enum + enum),
                 ('missing phase', assignment, ''),
                 ('duplicate phase', assignment, assignment * 2),
                 ('comment-only phase', assignment, '    // ' + assignment.strip() + '\n'),
@@ -597,7 +685,7 @@ class TerminalEvidenceContract(unittest.TestCase):
                     with self.assertRaises(ValueError):
                         queued_cancel_browser_contract(source.replace(before, after, 1))
         task_viewport = '    phase = "old-panel-task-id-viewport";\n' + f'    await expect({task_locator}).toBeInViewport({{ ratio: 1 }});\n'
-        button_viewport = '    phase = "old-panel-create-button-viewport";\n' + f'    await expect({button_locator}).toBeInViewport({{ ratio: 1 }});\n'
+        button_viewport = QUEUED_CANCEL_CENTER_BLOCK + QUEUED_CANCEL_GEOMETRY_SAMPLE + '    phase = "old-panel-create-button-viewport";\n' + f'    await expect({button_locator}).toBeInViewport({{ ratio: 1 }});\n'
         pair = QUEUED_CANCEL_TASK_ID_SCROLL + task_viewport + QUEUED_CANCEL_BUTTON_SCROLL + button_viewport
         mutations = (
             ('reversed target order', pair, QUEUED_CANCEL_BUTTON_SCROLL + button_viewport + QUEUED_CANCEL_TASK_ID_SCROLL + task_viewport),
@@ -623,8 +711,8 @@ class TerminalEvidenceContract(unittest.TestCase):
         # Whole-block moves still contain all required names exactly once.
         # They must be rejected by the pinned current shape plus exact inverse.
         for label, block in (
-            ('moved entire current phase type', QUEUED_CANCEL_CURRENT_PHASE_TYPE),
-            ('moved entire current positioning block', QUEUED_CANCEL_CURRENT_POST_RESUME_STAGES),
+            ('moved entire current phase type', QUEUED_CANCEL_CENTER_PHASE_TYPE),
+            ('moved entire current positioning block', QUEUED_CANCEL_CENTER_POST_RESUME),
         ):
             with self.subTest(mutation=label):
                 self.assertEqual(source.count(block), 1, 'move targets one actual current block')
@@ -682,9 +770,9 @@ class TerminalEvidenceContract(unittest.TestCase):
         mutations = [
             ('untyped phase', QUEUED_CANCEL_PHASE_INIT, QUEUED_CANCEL_ORIGINAL_INIT),
             ('unknown phase vocabulary', '  | "evidence";', '  | "evidence" | "unknown";'),
-            ('duplicate phase vocabulary', QUEUED_CANCEL_CURRENT_PHASE_TYPE, QUEUED_CANCEL_CURRENT_PHASE_TYPE * 2),
-            ('missing phase vocabulary', QUEUED_CANCEL_CURRENT_PHASE_TYPE, ''),
-            ('duplicate diagnostic block', QUEUED_CANCEL_CURRENT_POST_RESUME_STAGES, QUEUED_CANCEL_CURRENT_POST_RESUME_STAGES * 2),
+            ('duplicate phase vocabulary', QUEUED_CANCEL_CENTER_PHASE_TYPE, QUEUED_CANCEL_CENTER_PHASE_TYPE * 2),
+            ('missing phase vocabulary', QUEUED_CANCEL_CENTER_PHASE_TYPE, ''),
+            ('duplicate diagnostic block', QUEUED_CANCEL_CENTER_POST_RESUME, QUEUED_CANCEL_CENTER_POST_RESUME * 2),
             ('stage after await', receipt_step, receipt + '\n    phase = "post-resume-receipt-detail";'),
             ('wrong fixed stage', '    phase = "post-resume-database";', '    phase = "post-resume-receipt-detail";'),
             ('DB before receipt', receipt_step + '\n' + database_step, database_step + '\n' + receipt_step),
@@ -799,8 +887,8 @@ class TerminalEvidenceContract(unittest.TestCase):
         self.assertEqual(hashlib.sha256(restored.encode('utf-8')).hexdigest(), QUEUED_CANCEL_RATIO_BASELINE_SHA256)
         self.assertEqual(hashlib.sha256(restore_queued_cancel_scrolls(source).encode('utf-8')).hexdigest(), QUEUED_CANCEL_SCROLL_BASELINE_SHA256)
         self.assertEqual(hashlib.sha256(restore_queued_cancel_stages(source).encode('utf-8')).hexdigest(), QUEUED_CANCEL_STAGE_BASELINE_SHA256)
-        self.assertEqual(source.count(QUEUED_CANCEL_CURRENT_POST_RESUME_STAGES), 1)
-        self.assertEqual(source.count(QUEUED_CANCEL_CURRENT_PHASE_TYPE), 1)
+        self.assertEqual(source.count(QUEUED_CANCEL_CENTER_POST_RESUME), 1)
+        self.assertEqual(source.count(QUEUED_CANCEL_CENTER_PHASE_TYPE), 1)
         original_finally = QUEUED_CANCEL_CLEANUP.split('  finally {\n', 1)[1].split('  // Raw Playwright errors', 1)[0]
         actual_finally = source.split('  finally {\n', 1)[1].split('  // Raw Playwright errors', 1)[0]
         self.assertEqual(actual_finally, original_finally)
@@ -824,9 +912,9 @@ class TerminalEvidenceContract(unittest.TestCase):
         button = '    phase = "old-panel-create-button-viewport";\n'
         late_failure = QUEUED_CANCEL_RATIO_CATCH.replace('    failure = phase;\n', '', 1).replace('\n  }', '\n    failure = phase;\n  }', 1)
         mutations = (
-            ('missing import', QUEUED_CANCEL_RATIO_IMPORT, ''),
-            ('duplicate import', QUEUED_CANCEL_RATIO_IMPORT, QUEUED_CANCEL_RATIO_IMPORT * 2),
-            ('wrong helper import', QUEUED_CANCEL_RATIO_IMPORT, QUEUED_CANCEL_RATIO_IMPORT.replace('computer-asset-export-v3-viewport-result', 'user-asset-export-v3-viewport-result')),
+            ('missing import', QUEUED_CANCEL_GEOMETRY_IMPORT, ''),
+            ('duplicate import', QUEUED_CANCEL_GEOMETRY_IMPORT, QUEUED_CANCEL_GEOMETRY_IMPORT * 2),
+            ('wrong helper import', QUEUED_CANCEL_GEOMETRY_IMPORT, QUEUED_CANCEL_GEOMETRY_IMPORT.replace('computer-asset-export-v3-viewport-result', 'user-asset-export-v3-viewport-result')),
             ('missing empty sentinel', QUEUED_CANCEL_RATIO_INIT, ''),
             ('duplicate empty sentinel', QUEUED_CANCEL_RATIO_INIT, QUEUED_CANCEL_RATIO_INIT * 2),
             ('pretend full ratio initially', QUEUED_CANCEL_RATIO_INIT, QUEUED_CANCEL_RATIO_INIT.replace('= "";', '= "exact_one";')),
@@ -851,12 +939,12 @@ class TerminalEvidenceContract(unittest.TestCase):
             ('raw console error', capture, capture + '\n      console.error(error);'),
             ('intervening phase operation', button, button + '    await page.title();\n'),
             ('suffix before cleanup', capture, capture + '\n      computerViewportResultSuffix(viewportRatioClass);'),
-            ('suffix removed', QUEUED_CANCEL_RATIO_FAILURE, QUEUED_CANCEL_RATIO_OLD_FAILURE),
-            ('raw diagnostic interpolation', QUEUED_CANCEL_RATIO_FAILURE, QUEUED_CANCEL_RATIO_FAILURE.replace('computerViewportResultSuffix(viewportRatioClass)', 'viewportRatioClass')),
-            ('raw error interpolation', QUEUED_CANCEL_RATIO_FAILURE, QUEUED_CANCEL_RATIO_FAILURE.replace('computerViewportResultSuffix(viewportRatioClass)', 'error.stack')),
-            ('cleanup failure no longer fails', QUEUED_CANCEL_RATIO_FAILURE, QUEUED_CANCEL_RATIO_FAILURE.replace('failure || cleanupFailed', 'failure')),
-            ('diagnostic replaces original phase', QUEUED_CANCEL_RATIO_FAILURE, QUEUED_CANCEL_RATIO_FAILURE.replace('failure || "cleanup"', 'viewportRatioClass')),
-            ('diagnostic treated as pass', QUEUED_CANCEL_RATIO_FAILURE, '  if (viewportRatioClass) return;\n' + QUEUED_CANCEL_RATIO_FAILURE),
+            ('suffix removed', QUEUED_CANCEL_GEOMETRY_FAILURE, QUEUED_CANCEL_RATIO_OLD_FAILURE),
+            ('raw diagnostic interpolation', QUEUED_CANCEL_GEOMETRY_FAILURE, QUEUED_CANCEL_GEOMETRY_FAILURE.replace('computerViewportResultSuffix(viewportRatioClass)', 'viewportRatioClass')),
+            ('raw error interpolation', QUEUED_CANCEL_GEOMETRY_FAILURE, QUEUED_CANCEL_GEOMETRY_FAILURE.replace('computerViewportResultSuffix(viewportRatioClass)', 'error.stack')),
+            ('cleanup failure no longer fails', QUEUED_CANCEL_GEOMETRY_FAILURE, QUEUED_CANCEL_GEOMETRY_FAILURE.replace('failure || cleanupFailed', 'failure')),
+            ('diagnostic replaces original phase', QUEUED_CANCEL_GEOMETRY_FAILURE, QUEUED_CANCEL_GEOMETRY_FAILURE.replace('failure || "cleanup"', 'viewportRatioClass')),
+            ('diagnostic treated as pass', QUEUED_CANCEL_GEOMETRY_FAILURE, '  if (viewportRatioClass) return;\n' + QUEUED_CANCEL_GEOMETRY_FAILURE),
             ('unrelated source drift', '// No replay, body interception, synthetic response or cache change.', '// Unrelated source changed.'),
         )
         for label, before, after in mutations:
@@ -867,15 +955,15 @@ class TerminalEvidenceContract(unittest.TestCase):
         # These removals/reinsertions preserve names/counts and would survive
         # deletion-only inverse logic; exact original positions must reject them.
         for label, block in (
-            ('moved host import', QUEUED_CANCEL_RATIO_IMPORT),
+            ('moved host import', QUEUED_CANCEL_GEOMETRY_IMPORT),
             ('moved diagnostic declaration', QUEUED_CANCEL_RATIO_INIT),
             ('moved complete capture', QUEUED_CANCEL_RATIO_CATCH),
-            ('moved current cleanup suffix', QUEUED_CANCEL_RATIO_CLEANUP),
+            ('moved current cleanup suffix', QUEUED_CANCEL_GEOMETRY_CLEANUP),
         ):
             with self.subTest(mutation=label):
                 self.assertEqual(source.count(block), 1, 'move targets one actual current block')
                 remainder = source.replace(block, '', 1)
-                changed = block + remainder if block == QUEUED_CANCEL_RATIO_CLEANUP else remainder + block
+                changed = block + remainder if block == QUEUED_CANCEL_GEOMETRY_CLEANUP else remainder + block
                 with self.assertRaises(ValueError):
                     queued_cancel_browser_contract(changed)
         for label, changed in (
@@ -885,6 +973,252 @@ class TerminalEvidenceContract(unittest.TestCase):
             with self.subTest(mutation=label):
                 with self.assertRaises(ValueError):
                     queued_cancel_browser_contract(changed)
+
+
+    def test_queued_pre_assert_geometry_inverse(self):
+        root = Path(__file__).resolve().parents[1]
+        source = (root / 'web/e2e/computer-asset-export-v3-cancel.spec.ts').read_bytes().decode('utf-8')
+        restored = restore_queued_cancel_geometry(source)
+        self.assertEqual(len(restored.encode('utf-8')), 22233)
+        self.assertEqual(hashlib.sha256(restored.encode('utf-8')).hexdigest(), QUEUED_CANCEL_GEOMETRY_BASELINE_SHA256)
+        self.assertEqual(hashlib.sha256(restore_queued_cancel_viewport_result(source).encode('utf-8')).hexdigest(), QUEUED_CANCEL_RATIO_BASELINE_SHA256)
+        self.assertEqual(hashlib.sha256(restore_queued_cancel_scrolls(source).encode('utf-8')).hexdigest(), QUEUED_CANCEL_SCROLL_BASELINE_SHA256)
+        self.assertEqual(hashlib.sha256(restore_queued_cancel_stages(source).encode('utf-8')).hexdigest(), QUEUED_CANCEL_STAGE_BASELINE_SHA256)
+        phases = re.findall(r'^  \| "([a-z-]+)"', QUEUED_CANCEL_CENTER_PHASE_TYPE, re.MULTILINE)
+        self.assertEqual(len(phases), 25)
+        self.assertEqual(len(set(phases)), 25)
+        self.assertEqual(source.count(QUEUED_CANCEL_RATIO_CATCH), 1)
+        expected_finally = QUEUED_CANCEL_RATIO_CLEANUP.split('  finally {\n', 1)[1].split('  // Raw Playwright errors', 1)[0]
+        actual_finally = source.split('  finally {\n', 1)[1].split('  // Raw Playwright errors', 1)[0]
+        self.assertEqual(actual_finally, expected_finally)
+        scroll = 'await panel.getByRole("button", { name: "按当前列表创建另一导出", exact: true }).scrollIntoViewIfNeeded();'
+        assertion = 'await expect(panel.getByRole("button", { name: "按当前列表创建另一导出", exact: true })).toBeInViewport({ ratio: 1 });'
+        self.assertLess(source.index(scroll), source.index(QUEUED_CANCEL_GEOMETRY_SAMPLE))
+        self.assertLess(source.index(QUEUED_CANCEL_GEOMETRY_SAMPLE), source.index(assertion))
+        self.assertEqual(source.count('.evaluate(captureComputerButtonGeometry)'), 1)
+        self.assertEqual(source.count('computerButtonGeometrySuffix(buttonGeometry)'), 1)
+        self.assertLess(source.index('await restoreOwnedExportWorker();'), source.index('computerButtonGeometrySuffix(buttonGeometry)'))
+        queued_cancel_browser_contract(source)
+        helper = (root / 'web/e2e/computer-asset-export-v3-viewport-result.ts').read_bytes().decode('utf-8')
+        queued_cancel_geometry_helper_contract(helper)
+        unit = (root / 'web/src/ComputerExportViewportResult.test.ts').read_bytes()
+        self.assertEqual(hashlib.sha256(unit[:9385]).hexdigest(), 'aaac0eb1cc1915d623f7802b6043fe3a73bcc23d55905a5bb816f09025cae611')
+        for invalid in (None, b'', 0, {}, []):
+            with self.subTest(invalid_type=type(invalid).__name__):
+                with self.assertRaises(ValueError):
+                    restore_queued_cancel_geometry(invalid)
+
+    def test_queued_pre_assert_geometry_source_mutations(self):
+        root = Path(__file__).resolve().parents[1]
+        source = (root / 'web/e2e/computer-asset-export-v3-cancel.spec.ts').read_bytes().decode('utf-8')
+        queued_cancel_browser_contract(source)
+        assignment = '      buttonGeometry = projectComputerButtonGeometry(await panel.getByRole("button", { name: "按当前列表创建另一导出", exact: true }).evaluate(captureComputerButtonGeometry));'
+        gate = '${failure === "old-panel-create-button-viewport" ? computerButtonGeometrySuffix(buttonGeometry) : ""}'
+        mutations = (
+            ('missing geometry import', QUEUED_CANCEL_GEOMETRY_IMPORT, QUEUED_CANCEL_RATIO_IMPORT),
+            ('missing geometry state', QUEUED_CANCEL_GEOMETRY_INIT, ''),
+            ('duplicate geometry state', QUEUED_CANCEL_GEOMETRY_INIT, QUEUED_CANCEL_GEOMETRY_INIT * 2),
+            ('unbound geometry state', QUEUED_CANCEL_GEOMETRY_INIT, QUEUED_CANCEL_GEOMETRY_INIT.replace('= null;', '= { status: "unavailable" };')),
+            ('missing geometry phase', QUEUED_CANCEL_GEOMETRY_ENUM, ''),
+            ('duplicate geometry phase', QUEUED_CANCEL_GEOMETRY_ENUM, QUEUED_CANCEL_GEOMETRY_ENUM * 2),
+            ('missing sample', QUEUED_CANCEL_GEOMETRY_SAMPLE, ''),
+            ('duplicate sample', QUEUED_CANCEL_GEOMETRY_SAMPLE, QUEUED_CANCEL_GEOMETRY_SAMPLE * 2),
+            ('different browser target', QUEUED_CANCEL_GEOMETRY_SAMPLE, QUEUED_CANCEL_GEOMETRY_SAMPLE.replace('panel.getByRole', 'taskPage.getByRole')),
+            ('different button name', QUEUED_CANCEL_GEOMETRY_SAMPLE, QUEUED_CANCEL_GEOMETRY_SAMPLE.replace('按当前列表创建另一导出', '取消计算机导出任务')),
+            ('nonexact locator', QUEUED_CANCEL_GEOMETRY_SAMPLE, QUEUED_CANCEL_GEOMETRY_SAMPLE.replace('exact: true', 'exact: false')),
+            ('evaluateAll changes lifecycle', QUEUED_CANCEL_GEOMETRY_SAMPLE, QUEUED_CANCEL_GEOMETRY_SAMPLE.replace('.evaluate(', '.evaluateAll(')),
+            ('browser function closure changed', QUEUED_CANCEL_GEOMETRY_SAMPLE, QUEUED_CANCEL_GEOMETRY_SAMPLE.replace('evaluate(captureComputerButtonGeometry)', 'evaluate(() => captureComputerButtonGeometry(document.body))')),
+            ('unawaited capture', assignment, assignment.replace('(await panel', '(panel')),
+            ('race leaves pending capture', assignment, assignment.replace('await panel.getByRole', 'await Promise.race([panel.getByRole').replace('.evaluate(captureComputerButtonGeometry));', '.evaluate(captureComputerButtonGeometry), Promise.resolve({ status: "unavailable" })]));')),
+            ('new capture timeout', assignment, assignment.replace('evaluate(captureComputerButtonGeometry)', 'evaluate(captureComputerButtonGeometry, undefined, { timeout: 5_000 })')),
+            ('raw sample cache', assignment, assignment.replace('projectComputerButtonGeometry(await ', '(await ')),
+            ('sample decides test pass', assignment, assignment + '\n      if (buttonGeometry.status === "sampled") return;'),
+            ('sample starts request', assignment, assignment + '\n      await context.request.get("/api/auth/me");'),
+            ('sample retries', assignment, assignment + '\n' + assignment),
+            ('sample error escapes', '    } catch { buttonGeometry = { status: "unavailable" }; }', '    } catch (error) { throw error; }'),
+            ('sample error serialized', '    } catch { buttonGeometry = { status: "unavailable" }; }', '    } catch (error) { console.error(error); }'),
+            ('failure catch opens browser work', QUEUED_CANCEL_RATIO_CATCH, QUEUED_CANCEL_RATIO_CATCH.replace('    failure = phase;', '    failure = phase;\n    await page.evaluate(() => document.body);')),
+            ('suffix missing', gate, ''),
+            ('suffix on every phase', gate, '${computerButtonGeometrySuffix(buttonGeometry)}'),
+            ('suffix on wrong phase', gate, gate.replace('old-panel-create-button-viewport', 'old-panel-task-id-viewport')),
+            ('raw geometry interpolation', gate, '${buttonGeometry}'),
+            ('raw JSON interpolation', gate, '${JSON.stringify(buttonGeometry)}'),
+            ('suffix before cleanup', assignment, assignment + '\n      computerButtonGeometrySuffix(buttonGeometry);'),
+            ('larger total test budget', 'test.setTimeout(900_000);', 'test.setTimeout(1_800_000);'),
+        )
+        for label, before, after in mutations:
+            with self.subTest(mutation=label):
+                self.assertEqual(source.count(before), 1, 'geometry mutation must target actual current source once')
+                with self.assertRaises(ValueError):
+                    queued_cancel_browser_contract(source.replace(before, after, 1))
+        button_scroll = '    await panel.getByRole("button", { name: "按当前列表创建另一导出", exact: true }).scrollIntoViewIfNeeded();\n'
+        button_assert = '    await expect(panel.getByRole("button", { name: "按当前列表创建另一导出", exact: true })).toBeInViewport({ ratio: 1 });\n'
+        without_sample = source.replace(QUEUED_CANCEL_GEOMETRY_SAMPLE, '', 1)
+        moved = (
+            ('sample before original scroll', without_sample.replace(button_scroll, QUEUED_CANCEL_GEOMETRY_SAMPLE + button_scroll, 1)),
+            ('sample after original assertion', without_sample.replace(button_assert, button_assert + QUEUED_CANCEL_GEOMETRY_SAMPLE, 1)),
+            ('whole sample moved to end', without_sample + QUEUED_CANCEL_GEOMETRY_SAMPLE),
+            ('complete phase type moved', source.replace(QUEUED_CANCEL_CENTER_PHASE_TYPE, '', 1) + QUEUED_CANCEL_CENTER_PHASE_TYPE),
+            ('complete positioning block moved', source.replace(QUEUED_CANCEL_CENTER_POST_RESUME, '', 1) + QUEUED_CANCEL_CENTER_POST_RESUME),
+            ('physical CRLF drift', source.replace('\n', '\r\n')),
+            ('extra final newline', source + '\n'),
+        )
+        for label, changed in moved:
+            with self.subTest(mutation=label):
+                self.assertNotEqual(changed, source)
+                with self.assertRaises(ValueError):
+                    queued_cancel_browser_contract(changed)
+
+    def test_queued_center_positioning_inverse(self):
+        root = Path(__file__).resolve().parents[1]
+        source = (root / 'web/e2e/computer-asset-export-v3-cancel.spec.ts').read_bytes().decode('utf-8')
+        restored = restore_queued_cancel_center(source)
+        self.assertEqual(len(restored.encode('utf-8')), 22859)
+        self.assertEqual(hashlib.sha256(restored.encode('utf-8')).hexdigest(), QUEUED_CANCEL_CENTER_BASELINE_SHA256)
+        self.assertEqual(restored.count(QUEUED_CANCEL_GEOMETRY_PHASE_TYPE), 1)
+        self.assertEqual(restored.count(QUEUED_CANCEL_GEOMETRY_POST_RESUME), 1)
+        self.assertEqual(source.count(QUEUED_CANCEL_CENTER_PHASE_TYPE), 1)
+        self.assertEqual(source.count(QUEUED_CANCEL_CENTER_POST_RESUME), 1)
+        phases = re.findall(r'^  \| "([a-z-]+)"', QUEUED_CANCEL_CENTER_PHASE_TYPE, re.MULTILINE)
+        self.assertEqual(len(phases), 25)
+        self.assertEqual(len(set(phases)), 25)
+        ordered = (
+            QUEUED_CANCEL_BUTTON_SCROLL,
+            QUEUED_CANCEL_CENTER_BLOCK,
+            QUEUED_CANCEL_GEOMETRY_SAMPLE,
+            '    phase = "old-panel-create-button-viewport";\n',
+            '    await expect(panel.getByRole("button", { name: "按当前列表创建另一导出", exact: true })).toBeInViewport({ ratio: 1 });\n',
+        )
+        for value in ordered:
+            self.assertEqual(source.count(value), 1)
+        positions = [source.index(value) for value in ordered]
+        self.assertEqual(positions, sorted(positions))
+        self.assertEqual(source.count('.scrollIntoView({'), 1)
+        self.assertEqual(source.count('.evaluate(element => element.scrollIntoView('), 1)
+        self.assertEqual(source.count('.evaluate(captureComputerButtonGeometry)'), 1)
+        self.assertEqual(source.count('.scrollIntoViewIfNeeded()'), restored.count('.scrollIntoViewIfNeeded()'))
+        self.assertEqual(source.count('toBeInViewport({ ratio: 1 })'), restored.count('toBeInViewport({ ratio: 1 })'))
+        self.assertEqual(source.count(QUEUED_CANCEL_RATIO_CATCH), 1)
+        self.assertTrue(source.endswith(QUEUED_CANCEL_GEOMETRY_CLEANUP))
+        for path, expected in (
+            ('web/e2e/computer-asset-export-v3-viewport-result.ts', '4e0027835fa329a1bb93ef78afe6c3506ad5b0c3a459d475f51f84a0cd924a81'),
+            ('web/src/ComputerExportViewportResult.test.ts', '441195aead10829d0a0699caebeae0a1ef783060a31af3586467c98f396d4e64'),
+        ):
+            self.assertEqual(hashlib.sha256((root / path).read_bytes()).hexdigest(), expected)
+        queued_cancel_browser_contract(source)
+        for invalid in (None, b'', 0, {}, []):
+            with self.subTest(invalid_type=type(invalid).__name__):
+                with self.assertRaises(ValueError):
+                    restore_queued_cancel_center(invalid)
+
+    def test_queued_center_positioning_mutations(self):
+        root = Path(__file__).resolve().parents[1]
+        source = (root / 'web/e2e/computer-asset-export-v3-cancel.spec.ts').read_bytes().decode('utf-8')
+        queued_cancel_browser_contract(source)
+        enum = QUEUED_CANCEL_CENTER_ENUM
+        block = QUEUED_CANCEL_CENTER_BLOCK
+        line = QUEUED_CANCEL_CENTER_LINE
+        phase = '    phase = "old-panel-create-button-center";\n'
+        call = line.strip().removeprefix('await ').removesuffix(';')
+        mutations = (
+            ('missing center enum', enum, ''),
+            ('duplicate center enum', enum, enum * 2),
+            ('comment-only center enum', enum, '  // ' + enum.strip() + '\n'),
+            ('missing center phase', phase, ''),
+            ('duplicate center phase', phase, phase * 2),
+            ('dynamic center phase', phase, '    phase = "old-panel-create-button-center:" + originalTaskID;\n'),
+            ('wrong center phase', phase, '    phase = "old-panel-create-button-scroll";\n'),
+            ('center phase after operation', block, line + phase),
+            ('missing center operation', line, ''),
+            ('duplicate center operation', line, line * 2),
+            ('missing center block', block, ''),
+            ('duplicate center block', block, block * 2),
+            ('wrong page target', line, line.replace('panel.', 'taskPage.', 1)),
+            ('wrong button name', line, line.replace('按当前列表创建另一导出', '创建导出', 1)),
+            ('inexact button target', line, line.replace('exact: true', 'exact: false', 1)),
+            ('first button target', line, line.replace('.evaluate(', '.first().evaluate(', 1)),
+            ('nth button target', line, line.replace('.evaluate(', '.nth(0).evaluate(', 1)),
+            ('unawaited native operation', line, line.replace('await ', '', 1)),
+            ('evaluateAll lifecycle', line, line.replace('.evaluate(', '.evaluateAll(', 1)),
+            ('async callback', line, line.replace('element =>', 'async element =>', 1)),
+            ('discarded native return', line, line.replace('element => element.', 'element => { element.', 1).replace('}));', '}); });', 1)),
+            ('smooth instead of instant', line, line.replace('behavior: "instant"', 'behavior: "smooth"', 1)),
+            ('auto instead of instant', line, line.replace('behavior: "instant"', 'behavior: "auto"', 1)),
+            ('omitted explicit behavior', line, line.replace(', behavior: "instant"', '', 1)),
+            ('start instead of center', line, line.replace('block: "center"', 'block: "start"', 1)),
+            ('end instead of center', line, line.replace('block: "center"', 'block: "end"', 1)),
+            ('omitted block alignment', line, line.replace('block: "center", ', '', 1)),
+            ('expanded inline centering', line, line.replace('inline: "nearest"', 'inline: "center"', 1)),
+            ('omitted explicit inline', line, line.replace('inline: "nearest", ', '', 1)),
+            ('added evaluation timeout', line, line.replace('}));', '}), undefined, { timeout: 120_000 });', 1)),
+            ('raced native operation', line, '    await Promise.race([' + call + ', Promise.resolve()]);\n'),
+            ('parallel native operation', line, '    await Promise.all([' + call + ', panel.click()]);\n'),
+            ('swallowed positioning rejection', line, '    await ' + call + '.catch(() => undefined);\n'),
+            ('explicit retry', line, '    try {\n' + line + '    } catch {\n' + line + '    }\n'),
+            ('post-scroll delay', line, line + '    await page.waitForTimeout(1000);\n'),
+            ('post-scroll click', line, line + '    await panel.click();\n'),
+            ('post-scroll focus', line, line + '    await taskPage.bringToFront();\n'),
+            ('extra receipt read', line, line + '    await observedReceiptAndDetail(page, setup.actorId, originalTaskID, request.domainId, operation.idempotencyKey);\n'),
+            ('extra proof action', line, line + '    await proof(taskPage);\n'),
+            ('larger viewport', line, line + '    await page.setViewportSize({ width: 1440, height: 1800 });\n'),
+            ('CSS workaround', line, line + '    await page.addStyleTag({ content: "button { height: 1px }" });\n'),
+            ('raw center error output', line, '    await ' + call + '.catch(error => { console.error(error); });\n'),
+            ('longer suite budget', 'test.setTimeout(900_000);', 'test.setTimeout(1_800_000);'),
+            ('unrelated source bytes', '// No replay, body interception, synthetic response or cache change.', '// Unrelated source changed.'),
+        )
+        for label, before, after in mutations:
+            with self.subTest(mutation=label):
+                self.assertEqual(source.count(before), 1, 'center mutation targets actual source once')
+                self.assertNotEqual(before, after)
+                with self.assertRaises(ValueError):
+                    queued_cancel_browser_contract(source.replace(before, after, 1))
+        without = source.replace(block, '', 1)
+        viewport = '    phase = "old-panel-create-button-viewport";\n'
+        assertion = '    await expect(panel.getByRole("button", { name: "按当前列表创建另一导出", exact: true })).toBeInViewport({ ratio: 1 });\n'
+        moved = (
+            ('center before original stable scroll', without.replace(QUEUED_CANCEL_BUTTON_SCROLL, block + QUEUED_CANCEL_BUTTON_SCROLL, 1)),
+            ('center after geometry sample', without.replace(viewport, block + viewport, 1)),
+            ('center after original ratio1', without.replace(assertion, assertion + block, 1)),
+            ('center block at end', without + block),
+            ('center enum after geometry', source.replace(enum + QUEUED_CANCEL_GEOMETRY_ENUM, QUEUED_CANCEL_GEOMETRY_ENUM + enum, 1)),
+            ('center enum at end', source.replace(enum, '', 1) + enum),
+            ('current whole phase type moved', source.replace(QUEUED_CANCEL_CENTER_PHASE_TYPE, '', 1) + QUEUED_CANCEL_CENTER_PHASE_TYPE),
+            ('current whole sequence moved', source.replace(QUEUED_CANCEL_CENTER_POST_RESUME, '', 1) + QUEUED_CANCEL_CENTER_POST_RESUME),
+            ('physical CRLF drift', source.replace('\n', '\r\n')),
+            ('extra final newline', source + '\n'),
+        )
+        for label, changed in moved:
+            with self.subTest(mutation=label):
+                self.assertNotEqual(changed, source)
+                with self.assertRaises(ValueError):
+                    queued_cancel_browser_contract(changed)
+
+    def test_queued_geometry_callback_source_mutations(self):
+        root = Path(__file__).resolve().parents[1]
+        source = (root / 'web/e2e/computer-asset-export-v3-viewport-result.ts').read_bytes().decode('utf-8')
+        queued_cancel_geometry_helper_contract(source)
+        start = 'export function captureComputerButtonGeometry('
+        rect = '    const rect = element.getBoundingClientRect();'
+        mutations = (
+            ('callback removed', QUEUED_CANCEL_GEOMETRY_CALLBACK, ''),
+            ('callback duplicated', QUEUED_CANCEL_GEOMETRY_CALLBACK, QUEUED_CANCEL_GEOMETRY_CALLBACK * 2),
+            ('async browser callback', start, 'export async function captureComputerButtonGeometry('),
+            ('repeated rect sample', rect, rect + '\n    element.getBoundingClientRect();'),
+            ('DOM text disclosed', rect, rect + '\n    return { text: element.textContent };'),
+            ('URL disclosed', rect, rect + '\n    return { url: document.URL };'),
+            ('credentials inspected', rect, rect + '\n    return { cookie: document.cookie };'),
+            ('computed style read', rect, rect + '\n    getComputedStyle(element);'),
+            ('new timer', rect, rect + '\n    setTimeout(() => {}, 1);'),
+            ('new request', rect, rect + '\n    fetch("/api/auth/me");'),
+            ('new observer', rect, rect + '\n    new IntersectionObserver(() => {}).observe(element);'),
+            ('loop introduced', rect, rect + '\n    for (const child of element.children) child.getBoundingClientRect();'),
+            ('module closure dependency', rect, rect + '\n    projectComputerButtonGeometry(rect);'),
+        )
+        for label, before, after in mutations:
+            with self.subTest(mutation=label):
+                self.assertEqual(source.count(before), 1, 'callback mutation targets actual current helper')
+                with self.assertRaises(ValueError):
+                    queued_cancel_geometry_helper_contract(source.replace(before, after, 1))
 
 
 if __name__ == '__main__':

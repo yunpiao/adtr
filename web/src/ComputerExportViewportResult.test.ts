@@ -168,3 +168,162 @@ describe("closed original computer viewport matcher projection", () => {
     expect(calls).toBe(0);
   });
 });
+
+import { captureComputerButtonGeometry, projectComputerButtonGeometry, computerButtonGeometrySuffix } from "../e2e/computer-asset-export-v3-viewport-result";
+
+const geometrySample = () => ({ status: "sampled", connected: true, left: 10, top: 10, right: 90, bottom: 70, width: 80, height: 60, innerWidth: 100, innerHeight: 80, clientWidth: 100, clientHeight: 80 });
+const geometryElement = () => {
+  const rect: Record<string, unknown> = { left: 10, top: 10, right: 90, bottom: 70, width: 80, height: 60 };
+  const view: Record<string, unknown> = { innerWidth: 100, innerHeight: 80 };
+  const root: Record<string, unknown> = { clientWidth: 100, clientHeight: 80 };
+  const document = { defaultView: view, documentElement: root };
+  const getBoundingClientRect = vi.fn(() => rect);
+  const element = { ownerDocument: document, isConnected: true, getBoundingClientRect };
+  return { rect, view, root, document, element, getBoundingClientRect, capture: () => captureComputerButtonGeometry(element as unknown as Element) };
+};
+
+describe("single pre-assert computer button geometry", () => {
+  it("reads one rect and emits only twelve primitive fields without mutating its input", () => {
+    const f = geometryElement();
+    const before = { ...f.rect };
+    const result = f.capture();
+    expect(result).toEqual(geometrySample());
+    expect(Object.keys(result)).toHaveLength(12);
+    expect(f.getBoundingClientRect).toHaveBeenCalledTimes(1);
+    expect(f.rect).toEqual(before);
+    expect(result).not.toBe(f.rect);
+    const projected = projectComputerButtonGeometry(result);
+    expect(projected).toEqual(result);
+    expect(projected).not.toBe(result);
+  });
+
+  it("does not inspect text, identifiers, attributes, styles, storage or network", () => {
+    const f = geometryElement();
+    let calls = 0;
+    const forbidden = () => { calls++; throw new Error(canary); };
+    for (const [target, keys] of [
+      [f.element, ["innerText", "textContent", "innerHTML", "outerHTML", "id", "style", "getAttribute", "scrollIntoView", "getClientRects"]],
+      [f.document, ["URL", "cookie", "querySelector", "elementFromPoint"]],
+      [f.view, ["location", "localStorage", "sessionStorage", "fetch", "getComputedStyle", "setTimeout", "IntersectionObserver"]],
+    ] as [object, string[]][]) {
+      for (const key of keys) Object.defineProperty(target, key, { get: forbidden });
+    }
+    expect(f.capture()).toEqual(geometrySample());
+    expect(calls).toBe(0);
+  });
+
+  it("contains acquisition-data failures without returning the exception or DOM reference", () => {
+    const throwing = geometryElement();
+    throwing.getBoundingClientRect.mockImplementation(() => { throw new Error(canary); });
+    expect(throwing.capture()).toEqual({ status: "unavailable" });
+    for (const key of ["defaultView", "documentElement"]) {
+      const f = geometryElement();
+      Object.defineProperty(f.document, key, { value: null });
+      expect(f.capture()).toEqual({ status: "unavailable" });
+      expect(f.getBoundingClientRect).not.toHaveBeenCalled();
+    }
+    const detached = geometryElement();
+    detached.element.isConnected = false;
+    detached.rect.width = 0; detached.rect.right = 10;
+    expect(detached.capture()).toEqual({ ...geometrySample(), connected: false, width: 0, right: 10 });
+  });
+
+  it("rejects nonfinite, malformed and out-of-envelope numbers before transfer and again on the host", () => {
+    for (const field of ["left", "top", "right", "bottom", "width", "height"]) {
+      for (const value of [NaN, Infinity, -Infinity, 1_000_001, -1_000_001, null, "20", new Number(20)]) {
+        const f = geometryElement(); f.rect[field] = value;
+        expect(f.capture()).toEqual({ status: "unavailable" });
+        expect(projectComputerButtonGeometry({ ...geometrySample(), [field]: value })).toEqual({ status: "unavailable" });
+      }
+    }
+    for (const field of ["innerWidth", "innerHeight", "clientWidth", "clientHeight"]) {
+      for (const value of [0, -1, 16_385, 1.5, NaN, Infinity, undefined, "100", new Number(100)]) {
+        const f = geometryElement(); (field.startsWith("inner") ? f.view : f.root)[field] = value;
+        expect(f.capture()).toEqual({ status: "unavailable" });
+        expect(projectComputerButtonGeometry({ ...geometrySample(), [field]: value })).toEqual({ status: "unavailable" });
+      }
+      for (const value of [1, 16_384]) {
+        const f = geometryElement(); (field.startsWith("inner") ? f.view : f.root)[field] = value;
+        expect(f.capture()).toEqual({ ...geometrySample(), [field]: value });
+      }
+    }
+    for (const override of [{ width: -1 }, { height: -1 }, { right: 9 }, { bottom: 9 }, { connected: "true" }]) {
+      expect(projectComputerButtonGeometry({ ...geometrySample(), ...override })).toEqual({ status: "unavailable" });
+    }
+  });
+
+  it("supports finite envelope edges and subpixel differences without rounding them away", () => {
+    const f = geometryElement();
+    Object.assign(f.rect, { left: -1_000_000, top: -1_000_000, right: 0, bottom: 0, width: 1_000_000, height: 1_000_000 });
+    expect(f.capture().status).toBe("sampled");
+    const excess = 100 + Number.EPSILON * 100;
+    const value = { ...geometrySample(), right: excess, width: excess - 10 };
+    const suffix = computerButtonGeometrySuffix(value);
+    expect(suffix).toContain(`right:${String(excess)},`);
+    expect(suffix).toContain("clip_inner:right,clip_client:right");
+    expect(computerButtonGeometrySuffix({ ...value, right: 100, width: 90 })).toContain("clip_inner:none,clip_client:none");
+  });
+
+  it("maps all sixteen edge combinations for each viewport independently", () => {
+    const expected = ["none", "top", "right", "top_right", "bottom", "top_bottom", "right_bottom", "top_right_bottom", "left", "top_left", "right_left", "top_right_left", "bottom_left", "top_bottom_left", "right_bottom_left", "top_right_bottom_left"];
+    for (let mask = 0; mask < 16; mask++) {
+      const left = mask & 8 ? -10 : 10, top = mask & 1 ? -10 : 10;
+      const right = mask & 2 ? 110 : 90, bottom = mask & 4 ? 90 : 70;
+      const value = { ...geometrySample(), left, top, right, bottom, width: right - left, height: bottom - top };
+      expect(computerButtonGeometrySuffix(value)).toContain(`clip_inner:${expected[mask]},clip_client:${expected[mask]}`);
+    }
+    const value = { ...geometrySample(), left: 0, top: 0, right: 100, bottom: 80, width: 100, height: 80, clientWidth: 96, clientHeight: 76 };
+    expect(computerButtonGeometrySuffix(value)).toContain("clip_inner:none,clip_client:right_bottom");
+    expect(computerButtonGeometrySuffix({ ...geometrySample(), right: 10, width: 0 })).toContain("zero_area:true");
+  });
+
+  it("admits only the exact own-data schema and ignores no hidden extra fields", () => {
+    const valid = geometrySample();
+    expect(projectComputerButtonGeometry({ status: "unavailable" })).toEqual({ status: "unavailable" });
+    for (const key of Object.keys(valid)) {
+      const missing: Record<string, unknown> = { ...valid }; delete missing[key];
+      const inherited = Object.assign(Object.create({ [key]: (valid as Record<string, unknown>)[key] }), missing);
+      expect(projectComputerButtonGeometry(missing)).toEqual({ status: "unavailable" });
+      expect(projectComputerButtonGeometry(inherited)).toEqual({ status: "unavailable" });
+    }
+    for (const value of [null, undefined, true, 1, canary, [], () => valid, { ...valid, extra: canary }, { ...valid, [Symbol(canary)]: 1 }, { ...valid, status: "other" }]) {
+      expect(projectComputerButtonGeometry(value)).toEqual({ status: "unavailable" });
+    }
+    const nullPrototype = Object.assign(Object.create(null), valid);
+    expect(projectComputerButtonGeometry(nullPrototype)).toEqual(valid);
+  });
+
+  it("rejects proxies and accessors without running traps, getters or coercion", () => {
+    let calls = 0;
+    const trap = () => { calls++; throw new Error(canary); };
+    const proxy = new Proxy(geometrySample(), { get: trap, ownKeys: trap, getOwnPropertyDescriptor: trap, getPrototypeOf: trap });
+    const revoked = Proxy.revocable(geometrySample(), { get: trap }); revoked.revoke();
+    for (const value of [proxy, revoked.proxy]) {
+      expect(projectComputerButtonGeometry(value)).toEqual({ status: "unavailable" });
+      expect(computerButtonGeometrySuffix(value)).toBe("; viewport_geometry=source:pre_assert,status:unavailable");
+    }
+    for (const field of Object.keys(geometrySample())) {
+      const value = Object.defineProperty(geometrySample(), field, { get: trap });
+      expect(projectComputerButtonGeometry(value)).toEqual({ status: "unavailable" });
+    }
+    for (const key of ["message", "log", "stack", "cause", "toJSON", "toString", "valueOf", Symbol.toPrimitive, Symbol.for("nodejs.util.inspect.custom")]) {
+      const value = Object.defineProperty(geometrySample(), key, { get: trap });
+      expect(computerButtonGeometrySuffix(value)).toBe("; viewport_geometry=source:pre_assert,status:unavailable");
+    }
+    expect(calls).toBe(0);
+  });
+
+  it("contains host reflection failures and produces only fixed or bounded ASCII output", () => {
+    const descriptor = vi.spyOn(Object, "getOwnPropertyDescriptor").mockImplementation(() => { throw new Error(canary); });
+    let result: unknown;
+    try { result = projectComputerButtonGeometry(geometrySample()); }
+    finally { descriptor.mockRestore(); }
+    expect(result).toEqual({ status: "unavailable" });
+    const value = geometrySample();
+    const suffix = computerButtonGeometrySuffix(value);
+    expect(suffix).toBe("; viewport_geometry=source:pre_assert,status:sampled,connected:true,left:10,top:10,right:90,bottom:70,width:80,height:60,innerWidth:100,innerHeight:80,clientWidth:100,clientHeight:80,zero_area:false,clip_inner:none,clip_client:none");
+    expect(suffix.length).toBeLessThanOrEqual(512);
+    expect(suffix).toMatch(/^[\x20-\x7e]+$/);
+    expect(suffix).not.toContain(canary);
+  });
+});

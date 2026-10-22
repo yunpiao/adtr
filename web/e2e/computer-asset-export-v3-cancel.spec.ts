@@ -1,4 +1,4 @@
-import { classifyComputerViewportResult, computerViewportResultSuffix, type ComputerViewportRatioClass } from "./computer-asset-export-v3-viewport-result";
+import { captureComputerButtonGeometry, projectComputerButtonGeometry, computerButtonGeometrySuffix, type ComputerButtonGeometry, classifyComputerViewportResult, computerViewportResultSuffix, type ComputerViewportRatioClass } from "./computer-asset-export-v3-viewport-result";
 import { test, expect, type Page, type Request as BrowserRequest, type Response } from "@playwright/test";
 import { expectSpecializedTaskReadOnly } from "./specialized-task-controls";
 import { proof } from "./computer-assets-v3-fixture";
@@ -30,6 +30,8 @@ type QueuedCancelPhase =
   | "old-panel-task-id-scroll"
   | "old-panel-task-id-viewport"
   | "old-panel-create-button-scroll"
+  | "old-panel-create-button-center"
+  | "old-panel-create-button-geometry"
   | "old-panel-create-button-viewport"
   | "new-entry-terminal-pixels"
   | "evidence";
@@ -122,6 +124,7 @@ test("queued export is cancelled from its original task without a tab locator an
   test.setTimeout(900_000);
   let phase: QueuedCancelPhase = "setup", failure: QueuedCancelPhase | "" = "", cleanupFailed = false, restoreWorker = false;
   let viewportRatioClass: ComputerViewportRatioClass | "" = "";
+  let buttonGeometry: ComputerButtonGeometry | null = null;
   let taskPage: Page | undefined;
   let downloads = 0;
   const downloaded = () => { downloads++; };
@@ -273,6 +276,12 @@ test("queued export is cancelled from its original task without a tab locator an
     await expect(panel.getByText(`任务 ID：${originalTaskID}`, { exact: true })).toBeInViewport({ ratio: 1 });
     phase = "old-panel-create-button-scroll";
     await panel.getByRole("button", { name: "按当前列表创建另一导出", exact: true }).scrollIntoViewIfNeeded();
+    phase = "old-panel-create-button-center";
+    await panel.getByRole("button", { name: "按当前列表创建另一导出", exact: true }).evaluate(element => element.scrollIntoView({ block: "center", inline: "nearest", behavior: "instant" }));
+    phase = "old-panel-create-button-geometry";
+    try {
+      buttonGeometry = projectComputerButtonGeometry(await panel.getByRole("button", { name: "按当前列表创建另一导出", exact: true }).evaluate(captureComputerButtonGeometry));
+    } catch { buttonGeometry = { status: "unavailable" }; }
     phase = "old-panel-create-button-viewport";
     await expect(panel.getByRole("button", { name: "按当前列表创建另一导出", exact: true })).toBeInViewport({ ratio: 1 });
 
@@ -327,5 +336,5 @@ test("queued export is cancelled from its original task without a tab locator an
     }
   }
   // Raw Playwright errors can contain Cookie call logs. Do not attach a cause.
-  if (failure || cleanupFailed) throw new Error(`Computer export task cancel checkpoint failed: ${failure || "cleanup"}${cleanupFailed ? "; cleanup_failed" : ""}${computerViewportResultSuffix(viewportRatioClass)}`);
+  if (failure || cleanupFailed) throw new Error(`Computer export task cancel checkpoint failed: ${failure || "cleanup"}${cleanupFailed ? "; cleanup_failed" : ""}${computerViewportResultSuffix(viewportRatioClass)}${failure === "old-panel-create-button-viewport" ? computerButtonGeometrySuffix(buttonGeometry) : ""}`);
 });
