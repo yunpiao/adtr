@@ -1065,6 +1065,7 @@ describe("task visibility remains in the fixed identity", () => {
 // Direct component tests exercise real useTaskRead and taskAPI transport. Only
 // synthetic server responses are supplied; App cases below cover actual routing.
 describe("current direct-parent detail action", () => {
+  type DetailDone = Parameters<typeof TaskDetails>[0]["done"];
   afterEach(() => discardMaintenanceIntent(profile));
   const parentID = secondID;
   const ancestorID = "aaaaaaaa-0000-4000-8000-000000000003";
@@ -1128,7 +1129,7 @@ describe("current direct-parent detail action", () => {
     };
     let id = firstID;
     let archived = options.archived ?? false;
-    let done = vi.fn();
+    let done = vi.fn<DetailDone>();
     const content = () => {
       const node = (
         <TaskDetails context={context} id={id} archived={archived} done={done} />
@@ -1148,7 +1149,7 @@ describe("current direct-parent detail action", () => {
         context?: TaskContext;
         id?: string;
         archived?: boolean;
-        done?: ReturnType<typeof vi.fn>;
+        done?: typeof done;
       }) {
         context = next.context ?? context;
         id = next.id ?? id;
@@ -1361,7 +1362,7 @@ describe("current direct-parent detail action", () => {
     const view = setup();
     const retained = capture(await ready());
     const previous = view.done;
-    const replacement = vi.fn();
+    const replacement = vi.fn<DetailDone>();
     view.change({ context: { ...view.context, canArchiveView: false }, done: replacement });
     act(retained);
     expect(previous).not.toHaveBeenCalled();
