@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { StrictMode } from "react";
 import { MaintenanceContent } from "./TaskMaintenance";
 import type { TaskContext } from "./task-common";
 import { revealNavigation } from "./test-navigation";
@@ -8,10 +9,11 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
-import TaskWorkspace, { discardTaskIntent } from "./TaskWorkspace";
+import TaskWorkspace, { attemptTaskIntent, beginTaskIntent, discardTaskIntent } from "./TaskWorkspace";
 import { PermissionEditor } from "./access-common";
 import {
   labels,
@@ -19,7 +21,7 @@ import {
   type Permission,
   type PermissionInput,
 } from "./access-api";
-import type { Profile } from "./api";
+import { ApiError, type Profile } from "./api";
 import { maintenanceAPI, utcSecond, type Schedule } from "./maintenance-api";
 import {
   beginMaintenanceIntent,
@@ -1192,4 +1194,419 @@ describe("exact original archive target observations", () => {
     expect(maintenanceIntent(profile)?.attempted).toBe(true);
   });
 
+});
+
+describe("schedule history original-task navigation", () => {
+  const older = "00000000-0000-4000-8000-000000000012";
+  const latest = "00000000-0000-4000-8000-000000000013";
+  type Detail = Awaited<ReturnType<typeof maintenanceAPI.detail>>;
+  const event = (taskUUID = tid, id = 2) => ({
+    id, action: "admitted", taskUUID, controlVersion: 1,
+    createdAt: "2026-10-07T00:00:00Z",
+  });
+  const history = (taskUUID = tid, pageIdx = 1): Detail => ({
+    schedule: { ...plan(), lastTaskUUID: latest },
+    page: { ...page, pageIdx, total: 21, totalPage: 2 },
+    events: [event(taskUUID)], exhausted: pageIdx === 2,
+  });
+  const name = (id = tid) => `查看该次实际任务 ${id}`;
+  const businessWrites = () => fetcher.mock.calls.filter(([url, init]) =>
+    url.startsWith("/api/tasks") && init.method === "POST",
+  );
+  const deferred = () => {
+    let resolve!: (value: Detail) => void;
+    let reject!: (error: unknown) => void;
+    const promise = new Promise<Detail>((yes, no) => { resolve = yes; reject = no; });
+    return { promise, resolve, reject };
+  };
+  async function release(pending: ReturnType<typeof deferred>, data: Detail) {
+    await act(async () => { pending.resolve(data); });
+  }
+  // Capture the actual React closure, not a new DOM dispatch that would honor
+  // disabled or fetch newer props. This exercises pre-effect stale handlers.
+  function capture(button: HTMLElement): () => void {
+    const key = Object.keys(button).find((value) => value.startsWith("__reactProps$"));
+    if (!key) throw new Error("Missing rendered button props");
+    const props = (button as unknown as Record<string, { onClick?: () => void }>)[key];
+    if (typeof props.onClick !== "function") throw new Error("Missing rendered click handler");
+    return props.onClick;
+  }
+  async function ready(id = tid) {
+    const button = await screen.findByRole("button", { name: name(id) });
+    await waitFor(() => expect(button).toBeEnabled());
+    return button;
+  }
+  function setup(strict = false) {
+    const context: TaskContext = {
+      profile: { ...profile }, canArchiveView: true,
+      can: (operation) => operation.startsWith("GET"), sessionChanged: vi.fn(),
+    };
+    const open = vi.fn();
+    const content = (nextContext = context, id = sid) => {
+      const node = <MaintenanceContent view={{ type: "schedule-detail", id }} context={nextContext} open={open} />;
+      return strict ? <StrictMode>{node}</StrictMode> : node;
+    };
+    const view = render(content());
+    return { ...view, context, open, rerender: (nextContext = context, id = sid) => view.rerender(content(nextContext, id)) };
+  }
+  function serve(data: Detail) {
+    override = (url) => {
+      if (url.startsWith("/api/tasks/schedules/detail?")) return response(data);
+      if (url.startsWith("/api/tasks/detail?")) {
+        const id = new URL(url, "https://synthetic.invalid").searchParams.get("taskUUID")!;
+        return response({ task: { ...task(), taskUUID: id }, events: [] });
+      }
+    };
+  }
+  it("opens each admitted original A/B, including the older row, while latest still opens C", async () => {
+    const data = history(); data.events.push(event(older, 1)); serve(data);
+    await scheduleDetail();
+    const table = screen.getByRole("table", { name: "计划发生记录" });
+    const rows = within(table).getAllByRole("row");
+    expect(within(rows[2]).getByRole("button", { name: name(older) })).toBeEnabled();
+    expect(within(rows[2]).getByText(older, { exact: true })).toBeVisible();
+    const original = await ready();
+    expect(original).toHaveAttribute("type", "button");
+    expect(original).toHaveTextContent("查看该次实际任务");
+    for (const [label, id] of [[name(), tid], [name(older), older], ["查看最近实际任务", latest]]) {
+      click(label);
+      expect(await screen.findByTestId("task-detail-identity")).toHaveTextContent(id);
+      expect(calls("detail").at(-1)![0]).toBe(`/api/tasks/detail?taskUUID=${id}&visibility=all`);
+      click("周期计划");
+      await screen.findByRole("table", { name: "周期计划列表" });
+      click(`计划详情 ${sid}`); await ready();
+    }
+    expect(calls("detail")).toHaveLength(3);
+    expect(businessWrites()).toHaveLength(0);
+  });
+  it.each(["paused", "authorization_blocked"] as const)("allows readable %s history without any write grant", async (state) => {
+    const data = history(); data.schedule.state = state;
+    vi.spyOn(maintenanceAPI, "detail").mockResolvedValue(data);
+    const view = setup(); await ready();
+    click(name()); expect(view.open).toHaveBeenCalledExactlyOnceWith({ type: "detail", id: tid, archived: true });
+    expect(businessWrites()).toHaveLength(0);
+  });
+  it("retains non-admitted and malformed task text through the real source validator without a link", async () => {
+    const data = history();
+    data.events = [
+      { ...event(tid, 1), action: "skipped_overlap" },
+      { ...event(older, 2), action: "future_action" },
+      event("ABCDEFAB-0000-4000-8000-000000000011", 3),
+      event(` ${tid}`, 4), event("", 5),
+    ];
+    serve(data); await scheduleDetail();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^查看该次实际任务 / })).not.toBeInTheDocument();
+    expect(screen.getByRole("table", { name: "计划发生记录" })).toHaveTextContent("future_action");
+    expect(calls("detail")).toHaveLength(0);
+    expect(businessWrites()).toHaveLength(0);
+  });
+  it.each([
+    "unknown-action", "skip-action", "control-action", "empty-id", "uppercase-id",
+    "whitespace-id", "noncanonical-id", "zero-event", "unsafe-event", "duplicate-event",
+    "wrong-page", "wrong-page-size", "wrong-schedule", "wrong-kind", "wrong-scope", "wrong-version",
+  ])("does not enable an untrusted history source: %s", async (mode) => {
+    const data = history();
+    if (mode === "unknown-action") data.events[0].action = "future_action";
+    if (mode === "skip-action") data.events[0].action = "skipped_overlap";
+    if (mode === "control-action") data.events[0].action = "paused";
+    if (mode === "empty-id") data.events[0].taskUUID = "";
+    if (mode === "uppercase-id") data.events[0].taskUUID = "ABCDEFAB-0000-4000-8000-000000000011";
+    if (mode === "whitespace-id") data.events[0].taskUUID = ` ${tid}`;
+    if (mode === "noncanonical-id") data.events[0].taskUUID = tid.replaceAll("-", "");
+    if (mode === "zero-event") data.events[0].id = 0;
+    if (mode === "unsafe-event") data.events[0].id = Number.MAX_SAFE_INTEGER + 1;
+    if (mode === "duplicate-event") data.events.push(event(older, data.events[0].id));
+    if (mode === "wrong-page") data.page.pageIdx = 2;
+    if (mode === "wrong-page-size") data.page.pageSize = 10;
+    if (mode === "wrong-schedule") data.schedule.scheduleUUID = older;
+    if (mode === "wrong-kind") data.schedule.taskName = "unknown.kind";
+    if (mode === "wrong-scope") data.schedule.domainId = "foreign";
+    if (mode === "wrong-version") data.schedule.payloadVersion = 2;
+    // Deliberately bypass API validation to test the local guard as well.
+    vi.spyOn(maintenanceAPI, "detail").mockResolvedValue(data);
+    const view = setup();
+    await screen.findByRole("table", { name: "计划发生记录" });
+    for (const button of screen.queryAllByRole("button", { name: /^查看该次实际任务 / })) {
+      expect(button).toBeDisabled(); act(() => capture(button)());
+    }
+    expect(view.open).not.toHaveBeenCalled();
+    expect(calls("detail")).toHaveLength(0);
+    expect(businessWrites()).toHaveLength(0);
+  });
+  it.each(["GET /api/tasks/schedules/detail", "GET /api/tasks/detail"] as const)("checks the current %s gate even in an older click closure", async (denied) => {
+    vi.spyOn(maintenanceAPI, "detail").mockResolvedValue(history());
+    const view = setup();
+    const previous = capture(await ready());
+    const forbidden = { ...view.context, can: (operation: Parameters<TaskContext["can"]>[0]) => operation.startsWith("GET") && operation !== denied };
+    view.rerender(forbidden);
+    expect(screen.getByRole("button", { name: name() })).toBeDisabled();
+    act(previous); expect(view.open).not.toHaveBeenCalled();
+    view.rerender(view.context); await ready();
+    click(name()); expect(view.open).toHaveBeenCalledExactlyOnceWith({ type: "detail", id: tid, archived: true });
+  });
+  it("takes archive visibility from the current context rather than a captured grant", async () => {
+    vi.spyOn(maintenanceAPI, "detail").mockResolvedValue(history());
+    const view = setup(); const previous = capture(await ready());
+    view.rerender({ ...view.context, canArchiveView: false });
+    act(previous);
+    expect(view.open).toHaveBeenCalledExactlyOnceWith({ type: "detail", id: tid, archived: false });
+  });
+  it.each([
+    { archive: true, status: 200 }, { archive: false, status: 200 },
+    { archive: false, status: 403 }, { archive: false, status: 404 },
+    { archive: true, status: 403 },
+  ])("uses fresh destination authorization without restore: archive=$archive status=$status", async ({ archive, status }) => {
+    override = (url, init) => {
+      if (url === "/api/access/menu") return response({ menu: metadata().map((item) => ({ ...item, auth: { ...item.auth, writeable: archive && item.mark === "tasks" } })) });
+      if (url === "/api/access/check") return response({ results: JSON.parse(init.body as string).paths.map((path: string) => path.startsWith("GET")) });
+      if (url.startsWith("/api/tasks/schedules/detail?")) return response(history());
+      if (url.startsWith("/api/tasks/detail?")) return status === 200
+        ? response({ task: task(archive), events: [] })
+        : response({ error: status === 403 ? "forbidden" : "not_found" }, status);
+    };
+    await scheduleDetail(); await ready();
+    expect(screen.queryByRole("button", { name: "启用计划" })).not.toBeInTheDocument();
+    click(name());
+    if (status === 200) {
+      expect(await screen.findByTestId("task-detail-identity")).toHaveTextContent(tid);
+      if (archive) await screen.findByText(/任务已归档，原执行结果/);
+    } else {
+      await screen.findByRole("alert");
+      expect(screen.queryByTestId("task-detail-identity")).not.toBeInTheDocument();
+    }
+    expect(calls("detail")).toHaveLength(1);
+    expect(calls("detail")[0][0]).toBe(`/api/tasks/detail?taskUUID=${tid}${archive ? "&visibility=all" : ""}`);
+    expect(businessWrites()).toHaveLength(0);
+  });
+  it("keeps the original target when destination identity validation fails", async () => {
+    serve(history()); const prior = override;
+    override = (url, init) => url.startsWith("/api/tasks/detail?")
+      ? response({ task: { ...task(), taskUUID: latest }, events: [] }) : prior(url, init);
+    await scheduleDetail(); await ready(); click(name());
+    await screen.findByRole("alert");
+    expect(screen.queryByTestId("task-detail-identity")).not.toBeInTheDocument();
+    expect(calls("detail")[0][0]).toContain(`taskUUID=${tid}`);
+    expect(calls("detail").every(([url]) => !url.includes(`taskUUID=${latest}`))).toBe(true);
+    expect(businessWrites()).toHaveLength(0);
+  });
+  it("invalidates synchronously on refresh and never revives an older closure even for the same DTO", async () => {
+    const data = history(), pending = deferred();
+    const api = vi.spyOn(maintenanceAPI, "detail").mockResolvedValueOnce(data).mockReturnValueOnce(pending.promise);
+    const view = setup(); const previous = capture(await ready());
+    const refresh = capture(screen.getByRole("button", { name: "刷新计划详情" }));
+    act(() => {
+      refresh(); previous();
+      expect(api).toHaveBeenCalledTimes(1);
+      expect(view.open).not.toHaveBeenCalled();
+    });
+    expect(screen.getByRole("button", { name: name() })).toBeDisabled();
+    await release(pending, data); await ready();
+    act(previous); expect(view.open).not.toHaveBeenCalled();
+    click(name()); expect(view.open).toHaveBeenCalledExactlyOnceWith({ type: "detail", id: tid, archived: true });
+  });
+  it("invalidates before pagination effects and rejects wrong-page metadata until a current retry", async () => {
+    const pending = deferred();
+    const api = vi.spyOn(maintenanceAPI, "detail").mockResolvedValueOnce(history()).mockReturnValueOnce(pending.promise).mockResolvedValueOnce(history(older, 2));
+    const view = setup(); const previous = capture(await ready());
+    const next = capture(screen.getByRole("button", { name: "下一页" }));
+    act(() => {
+      next(); previous();
+      expect(api).toHaveBeenCalledTimes(1);
+      expect(view.open).not.toHaveBeenCalled();
+    });
+    expect(api.mock.calls[1][1]).toBe(2);
+    expect(api.mock.calls[0][2].aborted).toBe(true);
+    await release(pending, history(older, 1));
+    expect(screen.getByRole("button", { name: name(older) })).toBeDisabled();
+    act(() => { previous(); capture(screen.getByRole("button", { name: name(older) }))(); });
+    expect(view.open).not.toHaveBeenCalled();
+    click("刷新计划详情"); await ready(older);
+    expect(api.mock.calls[2][1]).toBe(2);
+    act(previous); expect(view.open).not.toHaveBeenCalled();
+    click(name(older)); expect(view.open).toHaveBeenCalledExactlyOnceWith({ type: "detail", id: older, archived: true });
+  });
+  it.each([
+    { stale: "success", order: "old-first" }, { stale: "failure", order: "old-first" },
+    { stale: "success", order: "new-first" }, { stale: "failure", order: "new-first" },
+  ])("keeps newer pending/accepted state through an abort-insensitive $stale ($order)", async ({ stale, order }) => {
+    const old = deferred(), current = deferred();
+    const api = vi.spyOn(maintenanceAPI, "detail").mockResolvedValueOnce(history()).mockReturnValueOnce(old.promise).mockReturnValueOnce(current.promise);
+    const view = setup(); const previous = capture(await ready());
+    click("刷新计划详情"); click("刷新计划详情");
+    expect(api).toHaveBeenCalledTimes(3);
+    expect(api.mock.calls[1][2].aborted).toBe(true);
+    const finishOld = () => act(async () => {
+      if (stale === "success") old.resolve(history());
+      else old.reject(new ApiError("network"));
+    });
+    if (order === "old-first") {
+      await finishOld();
+      expect(screen.getByRole("button", { name: name() })).toBeDisabled();
+      act(previous); expect(view.open).not.toHaveBeenCalled();
+      await release(current, history(older));
+    } else {
+      await release(current, history(older)); await ready(older);
+      await finishOld();
+    }
+    await ready(older);
+    expect(screen.queryByRole("button", { name: name() })).not.toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    act(previous); expect(view.open).not.toHaveBeenCalled();
+    click(name(older)); expect(view.open).toHaveBeenCalledExactlyOnceWith({ type: "detail", id: older, archived: true });
+  });
+  it("fences same-key background polling and restores only the current automatic retry", async () => {
+    const first = history(); first.schedule.state = "enabled";
+    const poll = deferred(), retry = deferred();
+    const api = vi.spyOn(maintenanceAPI, "detail").mockResolvedValueOnce(first).mockReturnValueOnce(poll.promise).mockReturnValueOnce(retry.promise);
+    vi.useFakeTimers();
+    const view = setup(); await act(async () => {});
+    const button = screen.getByRole("button", { name: name() });
+    expect(button).toBeEnabled(); const previous = capture(button);
+    await act(async () => { vi.advanceTimersByTime(1000); });
+    expect(api).toHaveBeenCalledTimes(2);
+    expect(screen.getByRole("button", { name: name() })).toBeDisabled();
+    expect(screen.queryByText("正在读取计划详情…")).not.toBeInTheDocument();
+    act(previous); expect(view.open).not.toHaveBeenCalled();
+    await act(async () => { poll.reject(new ApiError("network")); });
+    expect(screen.queryByRole("table", { name: "计划发生记录" })).not.toBeInTheDocument();
+    expect(screen.getByRole("alert")).toBeInTheDocument();
+    await act(async () => { vi.advanceTimersByTime(1999); });
+    expect(api).toHaveBeenCalledTimes(2);
+    await act(async () => { vi.advanceTimersByTime(1); });
+    expect(api).toHaveBeenCalledTimes(3);
+    act(previous); expect(view.open).not.toHaveBeenCalled();
+    await release(retry, history(older));
+    expect(screen.getByRole("button", { name: name(older) })).toBeEnabled();
+    act(previous); expect(view.open).not.toHaveBeenCalled();
+    click(name(older)); expect(view.open).toHaveBeenCalledExactlyOnceWith({ type: "detail", id: older, archived: true });
+  });
+  it("propagates a current session failure once instead of retaining an enabled old row", async () => {
+    const api = vi.spyOn(maintenanceAPI, "detail").mockResolvedValueOnce(history()).mockRejectedValueOnce(new ApiError("unauthenticated", 401));
+    const view = setup(); const previous = capture(await ready());
+    click("刷新计划详情");
+    await waitFor(() => expect(view.context.sessionChanged).toHaveBeenCalledTimes(1));
+    act(previous);
+    expect(view.open).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: name() })).not.toBeInTheDocument();
+    expect(api).toHaveBeenCalledTimes(2);
+  });
+  it.each(["ID", "username", "csrfToken"] as const)("invalidates both accepted and in-flight history when the current %s changes", async (field) => {
+    const pending = deferred();
+    vi.spyOn(maintenanceAPI, "detail").mockResolvedValueOnce(history()).mockReturnValueOnce(pending.promise).mockResolvedValueOnce(history(older));
+    const view = setup(); const previous = capture(await ready());
+    click("刷新计划详情");
+    const next = { ...view.context, profile: { ...profile, [field]: field === "ID" ? 2 : "changed" } };
+    view.rerender(next);
+    act(previous); expect(view.open).not.toHaveBeenCalled();
+    await release(pending, history());
+    for (const button of screen.queryAllByRole("button", { name: /^查看该次实际任务 / })) expect(button).toBeDisabled();
+    act(previous); expect(view.open).not.toHaveBeenCalled();
+    click("刷新计划详情"); await ready(older);
+    act(previous); expect(view.open).not.toHaveBeenCalled();
+    click(name(older)); expect(view.open).toHaveBeenCalledExactlyOnceWith({ type: "detail", id: older, archived: true });
+  });
+  it.each(["ID", "username", "csrfToken"] as const)("rejects an accepted old callback on current %s replacement without another read", async (field) => {
+    vi.spyOn(maintenanceAPI, "detail").mockResolvedValue(history());
+    const view = setup(); const previous = capture(await ready());
+    view.rerender({ ...view.context, profile: { ...profile, [field]: field === "ID" ? 2 : "changed" } });
+    expect(screen.getByRole("button", { name: name() })).toBeDisabled();
+    act(previous); expect(view.open).not.toHaveBeenCalled();
+  });
+  it.each(["membership", "target", "action", "duplicate"])("rechecks exact captured row %s at activation", async (mode) => {
+    const data = history();
+    vi.spyOn(maintenanceAPI, "detail").mockResolvedValue(data);
+    const view = setup(); const previous = capture(await ready());
+    if (mode === "membership") data.events = [event()];
+    if (mode === "target") data.events[0].taskUUID = older;
+    if (mode === "action") data.events[0].action = "skipped_overlap";
+    if (mode === "duplicate") data.events.push(event(older, data.events[0].id));
+    act(previous); expect(view.open).not.toHaveBeenCalled();
+  });
+  it("leaves a current failure unavailable even when an older successful response arrives later", async () => {
+    const old = deferred(), current = deferred();
+    vi.spyOn(maintenanceAPI, "detail").mockResolvedValueOnce(history()).mockReturnValueOnce(old.promise).mockReturnValueOnce(current.promise).mockResolvedValueOnce(history(older));
+    const view = setup(); const previous = capture(await ready());
+    click("刷新计划详情"); click("刷新计划详情");
+    await act(async () => { current.reject(new ApiError("forbidden", 403)); });
+    await screen.findByRole("alert");
+    await release(old, history());
+    expect(screen.queryByRole("table", { name: "计划发生记录" })).not.toBeInTheDocument();
+    act(previous); expect(view.open).not.toHaveBeenCalled();
+    click("刷新计划详情"); await ready(older);
+    act(previous); expect(view.open).not.toHaveBeenCalled();
+  });
+  it("invalidates a captured accepted row immediately when the schedule changes", async () => {
+    const pending = deferred();
+    vi.spyOn(maintenanceAPI, "detail").mockResolvedValueOnce(history()).mockReturnValueOnce(pending.promise);
+    const view = setup(); const previous = capture(await ready());
+    view.rerender(view.context, older); act(previous);
+    expect(view.open).not.toHaveBeenCalled();
+    const current = history(latest); current.schedule.scheduleUUID = older;
+    await release(pending, current); await ready(latest);
+    act(previous); expect(view.open).not.toHaveBeenCalled();
+    click(name(latest)); expect(view.open).toHaveBeenCalledExactlyOnceWith({ type: "detail", id: latest, archived: true });
+  });
+  it("does not revive callbacks or late results after unmount and reentry", async () => {
+    const pending = deferred();
+    const api = vi.spyOn(maintenanceAPI, "detail").mockResolvedValueOnce(history()).mockReturnValueOnce(pending.promise).mockResolvedValueOnce(history(older));
+    const view = setup(); const previous = capture(await ready());
+    click("刷新计划详情"); view.unmount();
+    expect(api.mock.calls[1][2].aborted).toBe(true);
+    act(previous); expect(view.open).not.toHaveBeenCalled();
+    const replacement = setup(); await ready(older);
+    await release(pending, history());
+    act(previous);
+    expect(view.open).not.toHaveBeenCalled(); expect(replacement.open).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: name(older) })).toBeEnabled();
+    expect(screen.queryByRole("button", { name: name() })).not.toBeInTheDocument();
+  });
+  it("restores mounted readiness after StrictMode cleanup while ignoring the first mount result", async () => {
+    const old = deferred(), current = deferred();
+    const api = vi.spyOn(maintenanceAPI, "detail").mockReturnValueOnce(old.promise).mockReturnValueOnce(current.promise);
+    const view = setup(true);
+    expect(api).toHaveBeenCalledTimes(2);
+    expect(api.mock.calls[0][2].aborted).toBe(true);
+    await release(current, history(older)); await ready(older);
+    await release(old, history());
+    expect(screen.getByRole("button", { name: name(older) })).toBeEnabled();
+    expect(screen.queryByRole("button", { name: name() })).not.toBeInTheDocument();
+    click(name(older)); expect(view.open).toHaveBeenCalledExactlyOnceWith({ type: "detail", id: older, archived: true });
+  });
+  it("keeps attempted maintenance and recovery bytes through real actor-bound Back/Forward", async () => {
+    const maintenance = beginMaintenanceIntent(profile, {
+      action: "enable", input: { scheduleUUID: sid, expectedControlVersion: 1 },
+    });
+    attemptMaintenanceIntent(profile, maintenance);
+    const recovery = beginTaskIntent(profile, "recover", tid);
+    attemptTaskIntent(profile, recovery);
+    const maintenanceKey = `adtr.pending-task-maintenance:${profile.ID}:${encodeURIComponent(profile.username)}`;
+    const recoveryKey = `adtr.pending-task:${profile.ID}:${encodeURIComponent(profile.username)}`;
+    const savedMaintenance = sessionStorage.getItem(maintenanceKey);
+    const savedRecovery = sessionStorage.getItem(recoveryKey);
+    const originalMaintenance = JSON.stringify(maintenance);
+    const originalRecovery = JSON.stringify(recovery);
+    serve(history()); render(<App />);
+    await screen.findByRole("heading", { name: "账户概览" });
+    await revealNavigation("后台任务"); click("后台任务");
+    await screen.findByRole("table", { name: "任务列表" });
+    click("周期计划"); await screen.findByRole("table", { name: "周期计划列表" });
+    click(`计划详情 ${sid}`); await ready();
+    expect(screen.getByRole("button", { name: "启用计划" })).toBeDisabled();
+    click(name());
+    expect(await screen.findByTestId("task-detail-identity")).toHaveTextContent(tid);
+    await screen.findByLabelText("恢复幂等键");
+    expect(screen.getByLabelText("操作者当前密码")).toHaveValue("");
+    expect(screen.getByLabelText("未使用的认证器验证码")).toHaveValue("");
+    act(() => window.history.back());
+    await screen.findByRole("table", { name: "计划发生记录" }); await ready();
+    act(() => window.history.forward());
+    expect(await screen.findByTestId("task-detail-identity")).toHaveTextContent(tid);
+    expect(sessionStorage.getItem(maintenanceKey)).toBe(savedMaintenance);
+    expect(sessionStorage.getItem(recoveryKey)).toBe(savedRecovery);
+    expect(JSON.stringify(maintenanceIntent(profile))).toBe(originalMaintenance);
+    expect(JSON.stringify(recovery)).toBe(originalRecovery);
+    expect(calls("detail").every(([url]) => url === `/api/tasks/detail?taskUUID=${tid}&visibility=all`)).toBe(true);
+    expect(businessWrites()).toHaveLength(0);
+  });
 });

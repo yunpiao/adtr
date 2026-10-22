@@ -20,6 +20,7 @@ import {
   validUTC,
   type Schedule,
   type ScheduleDefinition,
+  type ScheduleEvent,
 } from "./maintenance-api";
 import {
   attemptMaintenanceIntent,
@@ -359,6 +360,37 @@ const eventLabels: Record<string, string> = {
   skipped_overlap: "跳过重叠执行",
   schedule_time_overflow: "时间超出范围",
 };
+type HistoryDetail = Awaited<ReturnType<typeof maintenanceAPI.detail>>;
+type HistoryKey = {
+  actor: number;
+  username: string;
+  csrf: string;
+  id: string;
+  pageIdx: number;
+};
+const historyKey = (
+  context: TaskContext,
+  id: string,
+  pageIdx: number,
+): HistoryKey => ({
+  actor: context.profile.ID,
+  username: context.profile.username,
+  csrf: context.profile.csrfToken,
+  id,
+  pageIdx,
+});
+const sameHistoryKey = (a: HistoryKey, b: HistoryKey) =>
+  a.actor === b.actor &&
+  a.username === b.username &&
+  a.csrf === b.csrf &&
+  a.id === b.id &&
+  a.pageIdx === b.pageIdx;
+const historyTask = (event: ScheduleEvent) =>
+  Number.isSafeInteger(event.id) &&
+  event.id > 0 &&
+  event.action === "admitted" &&
+  /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(event.taskUUID);
+type HistorySnapshot = { token: number; key: HistoryKey; data: HistoryDetail };
 function ScheduleDetails({
   context,
   open,
@@ -368,14 +400,105 @@ function ScheduleDetails({
   open: MaintenanceOpen;
   id: string;
 }) {
-  const [pageIdx, setPage] = useState(1),
-    read = useTaskRead(
-      `${id}:${pageIdx}`,
-      (s) => maintenanceAPI.detail(id, pageIdx, s),
-      context.sessionChanged,
-      (v) => v.schedule.state === "enabled",
-    ),
-    plan = read.data?.schedule;
+  const [pageIdx, setPage] = useState(1);
+  const [, notifyHistory] = useState(0);
+  const mounted = useRef(false);
+  const fence = useRef({
+    token: 0,
+    pending: true,
+    accepted: null as HistorySnapshot | null,
+  });
+  const key = historyKey(context, id, pageIdx);
+  const renderedKey = useRef(key);
+  const invalidateHistory = () => {
+    fence.current.token++;
+    fence.current.pending = true;
+    fence.current.accepted = null;
+  };
+  // Render and explicit controls close the gap before useTaskRead's effect runs.
+  if (!sameHistoryKey(renderedKey.current, key)) {
+    invalidateHistory();
+    renderedKey.current = key;
+  }
+  useLayoutEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      invalidateHistory();
+    };
+  }, []);
+  const read = useTaskRead(
+    `${id}:${pageIdx}`,
+    async (signal) => {
+      invalidateHistory();
+      const token = fence.current.token;
+      const sourceKey = key;
+      const current = () =>
+        mounted.current &&
+        !signal.aborted &&
+        token === fence.current.token &&
+        sameHistoryKey(sourceKey, renderedKey.current);
+      if (mounted.current) notifyHistory((n) => n + 1);
+      try {
+        const data = await maintenanceAPI.detail(id, pageIdx, signal);
+        if (current()) fence.current.accepted = { token, key: sourceKey, data };
+        return data;
+      } catch (error) {
+        if (current()) fence.current.accepted = null;
+        throw error;
+      } finally {
+        // An old success, failure or finally must not unlock a newer read.
+        if (current()) {
+          fence.current.pending = false;
+          notifyHistory((n) => n + 1);
+        }
+      }
+    },
+    context.sessionChanged,
+    (v) => v.schedule.state === "enabled",
+  );
+  const currentHistory = useRef({ context, open, id, pageIdx, read });
+  currentHistory.current = { context, open, id, pageIdx, read };
+  const snapshot = fence.current.accepted;
+  const historyReady = (event: ScheduleEvent, taskUUID: string) => {
+    if (!snapshot) return false;
+    const current = currentHistory.current;
+    const data = snapshot.data;
+    return (
+      mounted.current &&
+      !fence.current.pending &&
+      fence.current.accepted === snapshot &&
+      snapshot.token === fence.current.token &&
+      sameHistoryKey(
+        snapshot.key,
+        historyKey(current.context, current.id, current.pageIdx),
+      ) &&
+      current.context.can("GET /api/tasks/schedules/detail") &&
+      current.context.can("GET /api/tasks/detail") &&
+      !current.read.busy &&
+      !current.read.error &&
+      data === current.read.data &&
+      data.schedule.scheduleUUID === current.id &&
+      data.schedule.taskName === "infrastructure.health" &&
+      data.schedule.domainId === "platform" &&
+      data.schedule.payloadVersion === 1 &&
+      data.page.pageIdx === current.pageIdx &&
+      data.page.pageSize === 20 &&
+      data.events.includes(event) &&
+      data.events.filter((row) => row.id === event.id).length === 1 &&
+      historyTask(event) &&
+      event.taskUUID === taskUUID
+    );
+  };
+  const refresh = () => {
+    invalidateHistory();
+    read.refresh();
+  };
+  const changePage = (next: number) => {
+    invalidateHistory();
+    setPage(next);
+  };
+  const plan = read.data?.schedule;
   const blocked = !!maintenanceIntent(context.profile)?.attempted;
   return (
     <>
@@ -387,7 +510,7 @@ function ScheduleDetails({
         >
           返回周期计划
         </button>
-        <button className="secondary" onClick={read.refresh}>
+        <button className="secondary" onClick={refresh}>
           刷新计划详情
         </button>
       </div>
@@ -460,27 +583,51 @@ function ScheduleDetails({
                 </tr>
               </thead>
               <tbody>
-                {read.data!.events.map((e) => (
-                  <tr key={e.id}>
-                    <td>
-                      {eventLabels[e.action] ?? e.action}
-                      <small className="block">{e.action}</small>
-                    </td>
-                    <td>
-                      {e.count ?? "—"} / {e.firstIndex ?? "—"} →{" "}
-                      {e.lastIndex ?? "—"}
-                    </td>
-                    <td>
-                      {e.firstAt ?? "—"}
-                      <small className="block">{e.lastAt ?? "—"}</small>
-                    </td>
-                    <td>{e.taskUUID || "无"}</td>
-                    <td>
-                      {e.controlVersion}
-                      <small className="block">{e.createdAt}</small>
-                    </td>
-                  </tr>
-                ))}
+                {read.data!.events.map((e) => {
+                  const taskUUID = e.taskUUID;
+                  return (
+                    <tr key={e.id}>
+                      <td>
+                        {eventLabels[e.action] ?? e.action}
+                        <small className="block">{e.action}</small>
+                      </td>
+                      <td>
+                        {e.count ?? "—"} / {e.firstIndex ?? "—"} →{" "}
+                        {e.lastIndex ?? "—"}
+                      </td>
+                      <td>
+                        {e.firstAt ?? "—"}
+                        <small className="block">{e.lastAt ?? "—"}</small>
+                      </td>
+                      <td>
+                        {e.taskUUID || "无"}
+                        {historyTask(e) && (
+                          <button
+                            type="button"
+                            className="secondary"
+                            aria-label={`查看该次实际任务 ${taskUUID}`}
+                            disabled={!historyReady(e, taskUUID)}
+                            onClick={() => {
+                              if (!historyReady(e, taskUUID)) return;
+                              const current = currentHistory.current;
+                              current.open({
+                                type: "detail",
+                                id: taskUUID,
+                                archived: current.context.canArchiveView,
+                              });
+                            }}
+                          >
+                            查看该次实际任务
+                          </button>
+                        )}
+                      </td>
+                      <td>
+                        {e.controlVersion}
+                        <small className="block">{e.createdAt}</small>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -489,7 +636,7 @@ function ScheduleDetails({
             page={read.data!.page}
             exhausted={read.data!.exhausted}
             busy={read.busy}
-            change={setPage}
+            change={changePage}
           />
         </>
       )}
