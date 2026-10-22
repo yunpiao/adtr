@@ -7,8 +7,15 @@ import {
   within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { StrictMode } from "react";
 import App from "./App";
-import TaskWorkspace, { discardTaskIntent } from "./TaskWorkspace";
+import TaskWorkspace, {
+  TaskDetails,
+  attemptTaskIntent,
+  beginTaskIntent,
+  discardTaskIntent,
+  taskIntent,
+} from "./TaskWorkspace";
 import { labels, marks, type Permission } from "./access-api";
 import type { Profile } from "./api";
 import { taskOperations, type Task } from "./task-api";
@@ -19,6 +26,8 @@ import {
   type TaskNavigationSnapshot,
 } from "./task-view-state";
 import { revealNavigation } from "./test-navigation";
+import type { TaskContext } from "./task-common";
+import { discardMaintenanceIntent } from "./maintenance-intent";
 
 // App/history integration in jsdom with an isolated synthetic transport. These
 // assertions are DOM unit evidence, not real browser/API acceptance evidence.
@@ -1051,4 +1060,606 @@ describe("task visibility remains in the fixed identity", () => {
       expectNoMutation();
     },
   );
+});
+
+// Direct component tests exercise real useTaskRead and taskAPI transport. Only
+// synthetic server responses are supplied; App cases below cover actual routing.
+describe("current direct-parent detail action", () => {
+  type DetailDone = Parameters<typeof TaskDetails>[0]["done"];
+  afterEach(() => discardMaintenanceIntent(profile));
+  const parentID = secondID;
+  const ancestorID = "aaaaaaaa-0000-4000-8000-000000000003";
+  const name = (id = parentID) => `查看父任务 ${id}`;
+  const child = (extra: Partial<Task> = {}) =>
+    task(firstID, { parentTaskUUID: parentID, ...extra });
+  function serve(extra: Partial<Task> = {}) {
+    override = (url) => {
+      if (!url.startsWith("/api/tasks/detail?")) return undefined;
+      const id = queryOf(url).get("taskUUID");
+      return response({
+        task:
+          id === firstID
+            ? child(extra)
+            : task(id!, { parentTaskUUID: id === parentID ? ancestorID : "" }),
+        events: [],
+      });
+    };
+  }
+  // Retain the actual rendered React callback so disabled DOM dispatch and new
+  // props cannot conceal a stale-closure bug in the event-time fence.
+  function capture(button: HTMLElement): () => void {
+    const key = Object.keys(button).find((value) =>
+      value.startsWith("__reactProps$"),
+    );
+    if (!key) throw new Error("Missing rendered button props");
+    const props = (
+      button as unknown as Record<string, { onClick?: () => void }>
+    )[key];
+    if (typeof props.onClick !== "function")
+      throw new Error("Missing rendered click handler");
+    return props.onClick;
+  }
+  // Reconcile has no standalone DOM control. Read its actual committed
+  // TaskAction prop without mocking the shared hook or replacing TaskAction.
+  function actionReconcile(form: HTMLElement): () => void {
+    type Fiber = {
+      return?: Fiber;
+      memoizedProps?: { reconcile?: () => void };
+    };
+    const key = Object.keys(form).find((value) =>
+      value.startsWith("__reactFiber$"),
+    );
+    if (!key) throw new Error("Missing rendered form fiber");
+    let fiber: Fiber | undefined = (
+      form as unknown as Record<string, Fiber>
+    )[key];
+    while (fiber) {
+      if (typeof fiber.memoizedProps?.reconcile === "function")
+        return fiber.memoizedProps.reconcile;
+      fiber = fiber.return;
+    }
+    throw new Error("Missing committed reconcile callback");
+  }
+  function setup(options: { archived?: boolean; strict?: boolean } = {}) {
+    let context: TaskContext = {
+      profile: { ...profile },
+      canArchiveView: true,
+      can: (operation) => operation.startsWith("GET"),
+      sessionChanged: vi.fn(),
+    };
+    let id = firstID;
+    let archived = options.archived ?? false;
+    let done = vi.fn<DetailDone>();
+    const content = () => {
+      const node = (
+        <TaskDetails context={context} id={id} archived={archived} done={done} />
+      );
+      return options.strict ? <StrictMode>{node}</StrictMode> : node;
+    };
+    const mounted = render(content());
+    return {
+      ...mounted,
+      get context() {
+        return context;
+      },
+      get done() {
+        return done;
+      },
+      change(next: {
+        context?: TaskContext;
+        id?: string;
+        archived?: boolean;
+        done?: typeof done;
+      }) {
+        context = next.context ?? context;
+        id = next.id ?? id;
+        archived = next.archived ?? archived;
+        done = next.done ?? done;
+        mounted.rerender(content());
+      },
+    };
+  }
+  const ready = (id = parentID) =>
+    screen.findByRole("button", { name: name(id) });
+  async function release(
+    pending: ReturnType<typeof deferred>,
+    data: Task,
+    status = 200,
+  ) {
+    await act(async () => {
+      pending.resolve(
+        await response(status === 200 ? { task: data, events: [] } : { error: "forbidden" }, status),
+      );
+    });
+  }
+
+  it("opens the exact immediate parent, never the child or an ancestor, using read-only authority", async () => {
+    serve();
+    const view = setup();
+    view.change({ context: { ...view.context, canArchiveView: false } });
+    const button = await ready();
+    expect(button).toHaveAttribute("type", "button");
+    expect(button).toHaveTextContent("查看父任务");
+    expect(document.querySelector(".task-parent-identity span")).toHaveTextContent(parentID);
+    fireEvent.click(button);
+    expect(view.done).toHaveBeenCalledExactlyOnceWith({ type: "detail", id: parentID, archived: false });
+    expect(screen.queryByRole("button", { name: "创建恢复任务" })).toBeNull();
+    expectNoMutation();
+  });
+
+  it.each(["", "not-a-uuid", "AAAAAAAA-0000-4000-8000-000000000003", firstID])(
+    "preserves available parent text but rejects unusable parent %s",
+    async (parentTaskUUID) => {
+      serve({ parentTaskUUID });
+      const view = setup();
+      await screen.findByTestId("task-detail-identity");
+      expect(screen.queryByRole("button", { name: /^查看父任务 / })).toBeNull();
+      if (parentTaskUUID)
+        expect(document.querySelector(".task-parent-identity")).toHaveTextContent(parentTaskUUID);
+      expect(view.done).not.toHaveBeenCalled();
+      expect(calls("/api/tasks/detail")).toHaveLength(1);
+      expectNoMutation();
+    },
+  );
+
+  it.each(["wrong child", "denied read"])(
+    "does not create a parent action after %s",
+    async (failure) => {
+      override = (url) => url.startsWith("/api/tasks/detail?")
+        ? failure === "wrong child"
+          ? response({ task: task(parentID, { parentTaskUUID: ancestorID }), events: [] })
+          : response({ error: "forbidden" }, 403)
+        : undefined;
+      const view = setup();
+      await screen.findByRole("alert");
+      expect(screen.queryByRole("button", { name: /^查看父任务 / })).toBeNull();
+      expect(screen.queryByTestId("task-detail-identity")).toBeNull();
+      expect(view.done).not.toHaveBeenCalled();
+      expectNoMutation();
+    },
+  );
+
+  it("has no parent action before the initial response and synchronously fences toolbar refresh", async () => {
+    const first = deferred();
+    const refreshed = deferred();
+    let reads = 0;
+    override = (url) => url.startsWith("/api/tasks/detail?")
+      ? ++reads === 1 ? first.promise : refreshed.promise
+      : undefined;
+    const view = setup();
+    expect(screen.queryByRole("button", { name: /^查看父任务 / })).toBeNull();
+    await release(first, child());
+    const retained = capture(await ready());
+    const refresh = capture(screen.getByRole("button", { name: "刷新任务详情" }));
+    act(() => {
+      refresh();
+      retained();
+      expect(view.done).not.toHaveBeenCalled();
+      expect(calls("/api/tasks/detail")).toHaveLength(1);
+    });
+    expect(calls("/api/tasks/detail")).toHaveLength(2);
+    expect(screen.queryByRole("button", { name: /^查看父任务 / })).toBeNull();
+    await release(refreshed, child());
+    act(retained);
+    expect(view.done).not.toHaveBeenCalled();
+    fireEvent.click(await ready());
+    expect(view.done).toHaveBeenCalledOnce();
+    expectNoMutation();
+  });
+
+  it.each(["closed", "reconcile"])(
+    "synchronously fences the existing TaskAction %s refresh without changing its read count",
+    async (seam) => {
+      serve({ state: "running", terminalAt: null });
+      const view = setup();
+      view.change({ context: { ...view.context, can: () => true } });
+      await ready();
+      click("请求取消任务");
+      const form = screen.getByLabelText("操作者当前密码").closest("form")!;
+      const retained = capture(await ready());
+      const invoke = seam === "closed"
+        ? capture(within(form).getByRole("button", { name: "取消" }))
+        : actionReconcile(form);
+      const held = deferred();
+      override = (url) => url.startsWith("/api/tasks/detail?") ? held.promise : undefined;
+      act(() => {
+        invoke();
+        retained();
+        expect(view.done).not.toHaveBeenCalled();
+        expect(calls("/api/tasks/detail")).toHaveLength(1);
+      });
+      expect(calls("/api/tasks/detail")).toHaveLength(2);
+      expect(form.isConnected).toBe(seam === "reconcile");
+      await release(held, child({ state: "running", terminalAt: null }));
+      fireEvent.click(await ready());
+      expect(view.done).toHaveBeenCalledOnce();
+      view.unmount();
+      expectNoMutation();
+    },
+  );
+
+  it("fences an in-flight automatic poll while preserving the ordinary task, action and entered proof", async () => {
+    vi.useFakeTimers();
+    serve({ state: "running", terminalAt: null });
+    const view = setup();
+    view.change({ context: { ...view.context, can: () => true } });
+    await act(async () => {});
+    screen.getByRole("button", { name: name() });
+    click("请求取消任务");
+    fill("操作者当前密码", "Synthetic Parent Navigation Password 123");
+    fill("未使用的认证器验证码", "654321");
+    const password = screen.getByLabelText("操作者当前密码");
+    const form = password.closest("form");
+    const result = screen.getByLabelText("任务实际结果");
+    const retained = capture(screen.getByRole("button", { name: name() }));
+    const next = deferred();
+    override = (url) => url.startsWith("/api/tasks/detail?") ? next.promise : undefined;
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    act(retained);
+    expect(view.done).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("操作者当前密码")).toBe(password);
+    expect(password).toHaveValue("Synthetic Parent Navigation Password 123");
+    expect(screen.getByLabelText("未使用的认证器验证码")).toHaveValue("654321");
+    expect(password.closest("form")).toBe(form);
+    expect(screen.getByLabelText("任务实际结果")).toBe(result);
+    await release(next, child({ state: "running", terminalAt: null }));
+    fireEvent.click(screen.getByRole("button", { name: name() }));
+    expect(view.done).toHaveBeenCalledOnce();
+    view.unmount();
+    expectNoMutation();
+  });
+
+  it("does not remount existing export controls or repeat their permission reads during a detail poll", async () => {
+    vi.useFakeTimers();
+    serve({ taskName: "user_assets.v3.export", domainId: "synthetic-domain", state: "running", terminalAt: null });
+    const view = setup();
+    await act(async () => {});
+    const retained = capture(screen.getByRole("button", { name: name() }));
+    const result = screen.getByRole("region", { name: "任务原用户导出结果" });
+    const cancel = screen.getByRole("region", { name: "任务原用户导出取消" });
+    const checks = calls("/api/access/check").length;
+    const held = deferred();
+    override = (url) => url.startsWith("/api/tasks/detail?") ? held.promise : undefined;
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    act(retained);
+    expect(view.done).not.toHaveBeenCalled();
+    expect(screen.getByRole("region", { name: "任务原用户导出结果" })).toBe(result);
+    expect(screen.getByRole("region", { name: "任务原用户导出取消" })).toBe(cancel);
+    expect(calls("/api/access/check")).toHaveLength(checks);
+    expect(screen.queryByRole("button", { name: "请求取消任务" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "创建恢复任务" })).toBeNull();
+    view.unmount();
+    expectNoMutation();
+  });
+
+  it.each([200, 403])(
+    "ignores an abort-insensitive superseded completion with status %s and rejects old handlers after a new parent",
+    async (status) => {
+      serve();
+      const view = setup();
+      const retained = capture(await ready());
+      const late = deferred();
+      override = (url) => url.startsWith("/api/tasks/detail?") ? late.promise : undefined;
+      click("刷新任务详情");
+      const signal = calls("/api/tasks/detail").at(-1)![1].signal as AbortSignal;
+      serve({ parentTaskUUID: ancestorID });
+      click("刷新任务详情");
+      await ready(ancestorID);
+      expect(signal.aborted).toBe(true);
+      await release(late, child(), status);
+      act(retained);
+      expect(view.done).not.toHaveBeenCalled();
+      expect(screen.queryByRole("button", { name: name() })).toBeNull();
+      fireEvent.click(await ready(ancestorID));
+      expect(view.done).toHaveBeenCalledExactlyOnceWith({ type: "detail", id: ancestorID, archived: true });
+      expect(screen.queryByRole("alert")).toBeNull();
+      expectNoMutation();
+    },
+  );
+
+  it("uses the latest committed done and archive authority, not the source task's archive flag or old closure", async () => {
+    serve({ archived: false });
+    const view = setup();
+    const retained = capture(await ready());
+    const previous = view.done;
+    const replacement = vi.fn<DetailDone>();
+    view.change({ context: { ...view.context, canArchiveView: false }, done: replacement });
+    act(retained);
+    expect(previous).not.toHaveBeenCalled();
+    expect(replacement).toHaveBeenCalledExactlyOnceWith({ type: "detail", id: parentID, archived: false });
+    replacement.mockClear();
+    view.change({ context: { ...view.context, canArchiveView: true } });
+    act(retained);
+    expect(replacement).toHaveBeenCalledExactlyOnceWith({ type: "detail", id: parentID, archived: true });
+    expectNoMutation();
+  });
+
+  it.each(["detail", "source visibility"])(
+    "rejects a retained callback when current %s authority is revoked, including before another render",
+    async (gate) => {
+      serve();
+      const view = setup({ archived: true });
+      const retained = capture(await ready());
+      if (gate === "detail") view.context.can = () => false;
+      else view.context.canArchiveView = false;
+      act(retained);
+      expect(view.done).not.toHaveBeenCalled();
+      view.change({ context: { ...view.context } });
+      expect(screen.queryByRole("button", { name: /^查看父任务 / })).toBeNull();
+      act(retained);
+      expect(view.done).not.toHaveBeenCalled();
+      expectNoMutation();
+    },
+  );
+
+  it.each(["ID", "username", "csrfToken", "role", "priv", "needChangePwd", "isExpired"] as const)(
+    "rejects an accepted read after current profile identity changes %s without a fresh detail",
+    async (field) => {
+      serve();
+      const view = setup();
+      const retained = capture(await ready());
+      const previous = view.context.profile[field];
+      const replacement = typeof previous === "number" ? previous + 1
+        : typeof previous === "boolean" ? !previous : `${previous}-replacement`;
+      view.change({ context: { ...view.context, profile: { ...view.context.profile, [field]: replacement } } });
+      act(retained);
+      expect(view.done).not.toHaveBeenCalled();
+      expect(screen.queryByRole("button", { name: /^查看父任务 / })).toBeNull();
+      click("刷新任务详情");
+      fireEvent.click(await ready());
+      expect(view.done).toHaveBeenCalledOnce();
+      expectNoMutation();
+    },
+  );
+
+  it("kills retained callbacks at unmount and isolates a new task before its response", async () => {
+    serve();
+    const view = setup();
+    const retained = capture(await ready());
+    const held = deferred();
+    override = (url) => url.startsWith("/api/tasks/detail?") ? held.promise : undefined;
+    view.change({ id: ancestorID });
+    act(retained);
+    expect(view.done).not.toHaveBeenCalled();
+    view.unmount();
+    await release(held, task(ancestorID, { parentTaskUUID: parentID }));
+    act(retained);
+    expect(view.done).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("task-detail-identity")).toBeNull();
+    expectNoMutation();
+  });
+
+  it("restores the live fence after StrictMode cleanup while ignoring the first mount response", async () => {
+    const old = deferred();
+    let reads = 0;
+    override = (url) => url.startsWith("/api/tasks/detail?")
+      ? ++reads === 1 ? old.promise : response({ task: child(), events: [] })
+      : undefined;
+    const view = setup({ strict: true });
+    const button = await ready();
+    expect(calls("/api/tasks/detail")).toHaveLength(2);
+    expect(calls("/api/tasks/detail")[0][1].signal.aborted).toBe(true);
+    await release(old, child({ parentTaskUUID: ancestorID }));
+    expect(screen.queryByRole("button", { name: name(ancestorID) })).toBeNull();
+    fireEvent.click(button);
+    expect(view.done).toHaveBeenCalledExactlyOnceWith({ type: "detail", id: parentID, archived: true });
+    expectNoMutation();
+  });
+
+  const stored = () => Object.fromEntries(
+    Array.from({ length: sessionStorage.length }, (_, index) => sessionStorage.key(index)!)
+      .sort().map((key) => [key, sessionStorage.getItem(key)]),
+  );
+  function seedOtherRecords() {
+    const key = "bbbbbbbb-0000-4000-8000-000000000004";
+    sessionStorage.setItem("adtr.pending-task:202:other_actor", JSON.stringify({
+      owner: 202, username: "other_actor", action: "recover", taskUUID: firstID, key,
+    }));
+    for (const [kind, actorID] of [
+      ["user", profile.ID], ["computer", 202], ["group", profile.ID],
+    ] as const)
+      sessionStorage.setItem(`adtr.${kind}-assets-v3.export-recovery`, JSON.stringify({
+        version: 1, kind: `${kind}_assets.v3.export`, actorID,
+        domainId: "synthetic-domain", idempotencyKey: key,
+      }));
+    sessionStorage.setItem(`adtr.pending-task-maintenance:${profile.ID}:${profile.username}`, JSON.stringify({
+      owner: profile.ID, username: profile.username, key, action: "restore",
+      input: { reason: "synthetic pending maintenance", targets: [{ taskUUID: ancestorID, visibilityVersion: 1 }] },
+    }));
+  }
+
+  it.each(["submit", "current recovery", "other recovery"])(
+    "preserves attempted %s and dedicated/maintenance/other-actor bytes through read-only navigation",
+    async (pending) => {
+      seedOtherRecords();
+      const intent = beginTaskIntent(profile, pending === "submit" ? "submit" : "recover",
+        pending === "submit" ? undefined : pending === "current recovery" ? firstID : ancestorID);
+      attemptTaskIntent(profile, intent);
+      const before = stored();
+      serve({ state: "failed" });
+      save({ view: { type: "detail", id: firstID }, query: applied });
+      const view = render(<App />);
+      await ready();
+      if (pending === "current recovery") {
+        fill("操作者当前密码", "Synthetic Unsent Recovery Password 123");
+        fill("未使用的认证器验证码", "123456");
+      }
+      fireEvent.click(await ready());
+      await waitFor(() => expect(screen.getByTestId("task-detail-identity")).toHaveTextContent(parentID));
+      expect(stored()).toEqual(before);
+      expect(taskIntent(profile)).toBe(intent);
+      expect(intent.attempted).toBe(true);
+      expect(screen.queryByLabelText("操作者当前密码")).toBeNull();
+      expect(JSON.stringify(window.history.state)).not.toContain("Synthetic Unsent");
+      expect(JSON.stringify(window.history.state)).not.toContain("parentReadToken");
+      expectNoMutation();
+      view.unmount();
+      discardMaintenanceIntent(profile);
+    },
+  );
+
+  it.each([false, true])(
+    "preserves the existing matching invalid generic recovery cleanup for a dedicated kind, attempted=%s",
+    async (attempted) => {
+      seedOtherRecords();
+      const intent = beginTaskIntent(profile, "recover", firstID);
+      if (attempted) attemptTaskIntent(profile, intent);
+      const ownerKey = `adtr.pending-task:${profile.ID}:${profile.username}`;
+      const expected = stored();
+      delete expected[ownerKey];
+      serve({ taskName: "domain.directory_read.v4", state: "failed" });
+      save({ view: { type: "detail", id: firstID } });
+      const view = render(<App />);
+      await ready();
+      await waitFor(() => expect(taskIntent(profile)).toBeUndefined());
+      expect(sessionStorage.getItem(ownerKey)).toBeNull();
+      expect(screen.queryByRole("button", { name: "创建恢复任务" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "确认恢复任务" })).toBeNull();
+      expect(stored()).toEqual(expected);
+      fireEvent.click(await ready());
+      await waitFor(() => expect(screen.getByTestId("task-detail-identity")).toHaveTextContent(parentID));
+      expect(stored()).toEqual(expected);
+      expectNoMutation();
+      view.unmount();
+      discardMaintenanceIntent(profile);
+    },
+  );
+
+  it("does not clear a nonmatching generic recovery when the child uses dedicated controls", async () => {
+    seedOtherRecords();
+    const intent = beginTaskIntent(profile, "recover", ancestorID);
+    attemptTaskIntent(profile, intent);
+    const before = stored();
+    serve({ taskName: "domain.directory_read.v4", state: "failed" });
+    save({ view: { type: "detail", id: firstID } });
+    const view = render(<App />);
+    fireEvent.click(await ready());
+    await waitFor(() => expect(screen.getByTestId("task-detail-identity")).toHaveTextContent(parentID));
+    expect(taskIntent(profile)).toBe(intent);
+    expect(stored()).toEqual(before);
+    expectNoMutation();
+    view.unmount();
+    discardMaintenanceIntent(profile);
+  });
+
+  it("preserves actor-bound child/parent history, query, selection and fresh reads through Back, Forward and remount", async () => {
+    serve();
+    // Page two's selected child differs from the parent and grandparent.
+    override = (url) => {
+      if (url.startsWith("/api/tasks/detail?")) {
+        const id = queryOf(url).get("taskUUID")!;
+        return response({ task: task(id, { parentTaskUUID: id === secondID ? firstID : ancestorID }), events: [] });
+      }
+      return undefined;
+    };
+    const view = render(<App />);
+    await screen.findByRole("table", { name: "任务列表" });
+    await filterPageTwo();
+    await openDetail(secondID);
+    const childEntry = currentEntry();
+    click(name(firstID));
+    await waitFor(() => expect(screen.getByTestId("task-detail-identity")).toHaveTextContent(firstID));
+    expect(calls("/api/tasks/detail").at(-1)![0]).toBe(`/api/tasks/detail?taskUUID=${firstID}&visibility=all`);
+    const parentEntry = currentEntry();
+    expect(parentEntry.state[namespace].owner).toEqual(childEntry.state[namespace].owner);
+    expect(parentEntry.state[namespace].query).toEqual(applied);
+    expect(parentEntry.state[namespace].listReturn).toEqual(childEntry.state[namespace].listReturn);
+    act(() => window.history.back());
+    await waitFor(() => expect(screen.getByTestId("task-detail-identity")).toHaveTextContent(secondID));
+    expect(currentEntry()).toEqual(childEntry);
+    expect(calls("/api/tasks/detail").at(-1)![0]).toBe(`/api/tasks/detail?taskUUID=${secondID}`);
+    act(() => window.history.forward());
+    await waitFor(() => expect(screen.getByTestId("task-detail-identity")).toHaveTextContent(firstID));
+    expect(currentEntry()).toEqual(parentEntry);
+    const reads = calls("/api/tasks/detail").length;
+    view.unmount();
+    render(<App />);
+    await screen.findByTestId("task-detail-identity");
+    expect(calls("/api/tasks/detail")).toHaveLength(reads + 1);
+    expect(currentEntry()).toEqual(parentEntry);
+    click("返回任务列表");
+    expect(await screen.findByRole("button", { name: `详情 ${secondID}` })).toHaveFocus();
+    expectInputs(applied);
+    expectNoMutation();
+  });
+
+  it.each([403, 404])(
+    "lets the destination deny an active parent with %s, clearing child content and never broadening visibility",
+    async (status) => {
+      menu.find((node) => node.mark === "tasks")!.auth.writeable = false;
+      menu.find((node) => node.mark === "task_archive")!.auth.readable = false;
+      denied = new Set(taskOperations.filter((operation) => operation.startsWith("POST")));
+      override = (url) => {
+        if (!url.startsWith("/api/tasks/detail?")) return undefined;
+        return queryOf(url).get("taskUUID") === firstID
+          ? response({ task: child({ result: { marker: "private-child-only" } }), events: [] })
+          : response({ error: status === 403 ? "forbidden" : "not_found" }, status);
+      };
+      save({ view: { type: "detail", id: firstID } });
+      render(<App />);
+      fireEvent.click(await ready());
+      await screen.findByRole("alert");
+      expect(calls("/api/tasks/detail").at(-1)![0]).toBe(`/api/tasks/detail?taskUUID=${parentID}`);
+      expect(calls("/api/tasks/detail")).toHaveLength(2);
+      expect(screen.queryByTestId("task-detail-identity")).toBeNull();
+      expect(screen.queryByText(/private-child-only/)).toBeNull();
+      expect(screen.queryByLabelText("任务实际结果")).toBeNull();
+      expect(screen.queryByRole("button", { name: /^查看父任务 / })).toBeNull();
+      act(() => window.history.back());
+      await ready();
+      expect(screen.getByTestId("task-detail-identity")).toHaveTextContent(firstID);
+      expectNoMutation();
+    },
+  );
+
+  it.each(["ID", "username", "csrfToken"] as const)(
+    "isolates retained parent actions and late responses after workspace %s replacement",
+    async (field) => {
+      serve();
+      save({ view: { type: "detail", id: firstID } });
+      const view = render(<TaskWorkspace profile={profile} sessionChanged={vi.fn()} />);
+      const retained = capture(await ready());
+      const late = deferred();
+      override = (url) => url.startsWith("/api/tasks/detail?") ? late.promise : undefined;
+      click("刷新任务详情");
+      const signal = calls("/api/tasks/detail").at(-1)![1].signal as AbortSignal;
+      profile = field === "ID" ? { ...profile, ID: profile.ID + 1 }
+        : { ...profile, [field]: `${profile[field]}-replacement` };
+      serve({ parentTaskUUID: ancestorID });
+      view.rerender(<TaskWorkspace profile={profile} sessionChanged={vi.fn()} />);
+      if (field === "csrfToken") await ready(ancestorID);
+      else await screen.findByRole("table", { name: "任务列表" });
+      const reads = calls("/api/tasks/detail").length;
+      const entry = currentEntry();
+      expect(signal.aborted).toBe(true);
+      await release(late, child());
+      act(retained);
+      expect(currentEntry()).toEqual(entry);
+      expect(calls("/api/tasks/detail")).toHaveLength(reads);
+      expect(screen.queryByRole("button", { name: name() })).toBeNull();
+      expectNoMutation();
+    },
+  );
+
+  it("retires the action and old response after App accepts a replacement identity", async () => {
+    serve();
+    save({ view: { type: "detail", id: firstID } });
+    render(<App />);
+    const retained = capture(await ready());
+    const late = deferred();
+    override = (url) => url.startsWith("/api/tasks/detail?") ? late.promise : undefined;
+    click("刷新任务详情");
+    profile = { ...profile, csrfToken: `${profile.csrfToken}-accepted-replacement` };
+    act(() => window.dispatchEvent(new Event("focus")));
+    await screen.findByRole("heading", { name: "账户概览" });
+    const reads = calls("/api/tasks/detail").length;
+    const entry = currentEntry();
+    await release(late, child());
+    act(retained);
+    expect(currentEntry()).toEqual(entry);
+    expect(calls("/api/tasks/detail")).toHaveLength(reads);
+    expect(screen.queryByRole("button", { name: /^查看父任务 / })).toBeNull();
+    expect(screen.queryByTestId("task-detail-identity")).toBeNull();
+    expectNoMutation();
+  });
 });

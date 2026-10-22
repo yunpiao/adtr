@@ -6,6 +6,7 @@ separately authorized. A lexical guard complements, never replaces, source
 review and a genuine production-worker/browser run.
 """
 from pathlib import Path
+import hashlib
 import re
 import subprocess
 import unittest
@@ -21,6 +22,7 @@ UI_STAGES = (
     'navigation_open_ready', 'navigation_back_visible', 'navigation_return_list',
     'navigation_open_detail', 'navigation_restore_ready', 'navigation_detail_visible',
     'navigation_reload', 'navigation_history_back', 'navigation_history_forward',
+    'lineage_parent', 'lineage_back', 'lineage_forward',
 )
 
 
@@ -394,6 +396,174 @@ if (cases.some(([actual, expected]) => actual !== expected)) process.exit(1);
 '''
         result = subprocess.run(['node', '-e', program], capture_output=True, timeout=10, check=False)
         self.assertEqual(result.returncode, 0, 'pure semantic equality contract failed')
+
+
+
+
+# Exact additive lineage projection. New mutations act on CURRENT raw source.
+LINEAGE_BASE_SHA256 = 'ecc83cb71fdefa736efada3b1120c275cc436125b9493e56b6f3e758502260ef'
+LINEAGE_IMPORT = 'import { test, expect, type BrowserContext, type Page, type Request } from "@playwright/test";\n'
+LINEAGE_STAGES = 'const UI_STAGES = ["browser_proof_or_observation", "recovery_intent_open", "recovery_warning_count",\n  "recovery_warning_text", "recovery_cancelled_key", "recovery_intent_cancel", "recovery_intent_closed",\n  "recovery_intent_reopen", "recovery_submitted_key", "navigation_open_ready", "navigation_back_visible",\n  "navigation_return_list", "navigation_open_detail", "navigation_restore_ready", "navigation_detail_visible",\n  "navigation_reload", "navigation_history_back", "navigation_history_forward",\n  "lineage_parent", "lineage_back", "lineage_forward"] as const;\n'
+LINEAGE_HELPER = '  // First host-observed detail request, not first successful response. This is\n  // the existing Playwright/CDP JSON evidence level, not a native-fetch witness.\n  async function lineageDetail(expected: { id: string; state: "failed" | "succeeded";\n    attempt: 0 | 1; parentID: string; error: string }, visibility: "active" | "all",\n    action: () => Promise<unknown>) {\n    const timeout = Math.min(10000, remaining());\n    let armed = false, listenerFailed = false, taskWrites = 0;\n    let selected: Request | null = null;\n    const old = new Set<Request>();\n    const requestObserved = (request: Request) => {\n      try {\n        if (!armed) {\n          if (old.size >= 32) listenerFailed = true;\n          else old.add(request);\n          return;\n        }\n        const url = new URL(request.url()), method = request.method();\n        if ((url.pathname === "/api/tasks" || url.pathname.startsWith("/api/tasks/")) &&\n          !["GET", "HEAD", "OPTIONS"].includes(method)) taskWrites++;\n        if (old.has(request) || selected !== null || url.pathname !== "/api/tasks/detail") return;\n        selected = request;\n        const keys = [...url.searchParams.keys()].sort();\n        fact(url.origin === origin && url.hash === "" && url.username === "" && url.password === "" &&\n          method === "GET" && request.resourceType() === "fetch" && request.serviceWorker() === null &&\n          request.frame() === page.mainFrame() && request.redirectedFrom() === null && request.redirectedTo() === null &&\n          url.searchParams.getAll("taskUUID").length === 1 && url.searchParams.get("taskUUID") === expected.id &&\n          equal(keys, visibility === "all" ? ["taskUUID", "visibility"] : ["taskUUID"]) &&\n          (visibility === "all" ? url.searchParams.get("visibility") === "all" : !url.searchParams.has("visibility")),\n          "lineage_request_invalid");\n      } catch { listenerFailed = true; }\n    };\n    try {\n      page.on("request", requestObserved);\n      const readOutcome = page.waitForResponse(response => response.request() === selected, { timeout })\n        .then(async response => {\n          fact(!listenerFailed && response.status() === 200 && !response.fromServiceWorker() &&\n            response.request().redirectedFrom() === null && response.request().redirectedTo() === null,\n            "lineage_response_invalid");\n          const contentType = await response.headerValue("content-type");\n          fact(contentType !== null && /^application\\/json(?:;\\s*charset=utf-8)?$/i.test(contentType) &&\n            await response.headerValue("cache-control") === "no-store" &&\n            await response.headerValue("x-content-type-options") === "nosniff", "lineage_metadata_invalid");\n          const value = await response.json();\n          fact(object(value) && object(value.task) && Array.isArray(value.events) &&\n            value.task.taskUUID === expected.id && value.task.state === expected.state &&\n            value.task.attempt === expected.attempt && value.task.parentTaskUUID === expected.parentID &&\n            value.task.error === expected.error, "lineage_detail_invalid");\n        }).then(() => true, () => false);\n      armed = true;\n      let actionOutcome: Promise<boolean>;\n      try { actionOutcome = action().then(() => true, () => false); }\n      catch { actionOutcome = Promise.resolve(false); }\n      // Both branches already have rejection handlers, so join cannot abandon\n      // the other branch on first rejection. No retry or detached body read.\n      const [readOK, actionOK] = await Promise.all([readOutcome, actionOutcome]);\n      fact(readOK && actionOK && !listenerFailed, "lineage_observation_failed");\n      await visible(expected.id, expected.state, expected.attempt, expected.parentID);\n      fact(!listenerFailed && taskWrites === 0, "lineage_wrote_task");\n    } finally {\n      armed = false;\n      page.off("request", requestObserved);\n      selected = null;\n      old.clear();\n    }\n  }\n'
+LINEAGE_PROBES = '    const lineageBefore = snapshot();\n    const parentExpected = { id: parent.task.id, state: "failed" as const, attempt: 0 as const,\n      parentID: "", error: "authorization_revoked" };\n    const childExpected = { id: child.task.id, state: "succeeded" as const, attempt: 1 as const,\n      parentID: parent.task.id, error: "" };\n    await ui(() => lineageDetail(parentExpected, "all", () =>\n      page.getByRole("button", { name: `查看父任务 ${parent.task.id}`, exact: true }).click()), "lineage_parent");\n    await ui(() => lineageDetail(childExpected, "active", () => page.goBack()), "lineage_back");\n    await ui(() => lineageDetail(parentExpected, "all", () => page.goForward()), "lineage_forward");\n    fact(equal(lineageBefore, snapshot()), "lineage_changed_persistence");\n'
+LINEAGE_BASE_IMPORT = 'import { test, expect, type BrowserContext, type Page } from "@playwright/test";\n'
+LINEAGE_BASE_STAGES = 'const UI_STAGES = ["browser_proof_or_observation", "recovery_intent_open", "recovery_warning_count",\n  "recovery_warning_text", "recovery_cancelled_key", "recovery_intent_cancel", "recovery_intent_closed",\n  "recovery_intent_reopen", "recovery_submitted_key", "navigation_open_ready", "navigation_back_visible",\n  "navigation_return_list", "navigation_open_detail", "navigation_restore_ready", "navigation_detail_visible",\n  "navigation_reload", "navigation_history_back", "navigation_history_forward"] as const;\n'
+
+
+LINEAGE_MUTATIONS = (
+    ('remaining_timeout', 'const timeout = Math.min(10000, remaining());', 'const timeout = 20000;'),
+    ('bounded_old', 'if (old.size >= 32) listenerFailed = true;', 'if (false) listenerFailed = true;'),
+    ('old_record', 'else old.add(request);', 'else old.clear();'),
+    ('armed_gate', 'if (!armed) {', 'if (false) {'),
+    ('no_old_upgrade', 'if (old.has(request) || selected !== null || url.pathname !== "/api/tasks/detail") return;', 'if (selected !== null || url.pathname !== "/api/tasks/detail") return;'),
+    ('lock_first', 'if (old.has(request) || selected !== null || url.pathname !== "/api/tasks/detail") return;', 'if (old.has(request) || url.pathname !== "/api/tasks/detail") return;'),
+    ('lock_before_validation', 'selected = request;', ''),
+    ('no_success_prefilter', 'selected = request;', 'if (method !== "GET" || request.resourceType() !== "fetch") return; selected = request;'),
+    ('canonical_origin', 'url.origin === origin && url.hash === ""', 'true'),
+    ('no_url_credentials', 'url.username === "" && url.password === ""', 'true'),
+    ('method', 'method === "GET" && request.resourceType() === "fetch"', 'request.resourceType() === "fetch"'),
+    ('fetch', 'method === "GET" && request.resourceType() === "fetch"', 'method === "GET"'),
+    ('worker', 'request.serviceWorker() === null', 'true'),
+    ('frame', 'request.frame() === page.mainFrame()', 'true'),
+    ('request_redirect', 'request.redirectedFrom() === null && request.redirectedTo() === null', 'true'),
+    ('unique_id', 'url.searchParams.getAll("taskUUID").length === 1', 'true'),
+    ('requested_id', 'url.searchParams.get("taskUUID") === expected.id', 'true'),
+    ('exact_query', 'equal(keys, visibility === "all" ? ["taskUUID", "visibility"] : ["taskUUID"])', 'true'),
+    ('visibility', '(visibility === "all" ? url.searchParams.get("visibility") === "all" : !url.searchParams.has("visibility"))', 'true'),
+    ('listener_error', '} catch { listenerFailed = true; }', '} catch { listenerFailed = false; }'),
+    ('raw_listener_error', '} catch { listenerFailed = true; }', '} catch (error) { throw error; }'),
+    ('listener_install', 'page.on("request", requestObserved);', ''),
+    ('same_request_response', 'response => response.request() === selected', 'response => new URL(response.url()).pathname === "/api/tasks/detail"'),
+    ('first_not_successful', 'response => response.request() === selected', 'response => response.status() === 200'),
+    ('invalid_request_fails', 'fact(!listenerFailed && response.status() === 200 && !response.fromServiceWorker() &&', 'fact(response.status() === 200 && !response.fromServiceWorker() &&'),
+    ('response_status', 'response.status() === 200 && !response.fromServiceWorker()', '!response.fromServiceWorker()'),
+    ('response_worker', 'response.status() === 200 && !response.fromServiceWorker()', 'response.status() === 200'),
+    ('response_redirect', 'response.request().redirectedFrom() === null && response.request().redirectedTo() === null', 'true'),
+    ('response_json_metadata', 'contentType !== null && /^application\\/json(?:;\\s*charset=utf-8)?$/i.test(contentType)', 'true'),
+    ('no_store', 'await response.headerValue("cache-control") === "no-store"', 'true'),
+    ('no_sniff', 'await response.headerValue("x-content-type-options") === "nosniff"', 'true'),
+    ('json_once', 'const value = await response.json();', 'await response.json(); const value = await response.json();'),
+    ('json_failure_no_fallback', 'const value = await response.json();', 'const value = await response.json().catch(() => ({ task: expected, events: [] }));'),
+    ('body_shape', 'object(value) && object(value.task) && Array.isArray(value.events)', 'true'),
+    ('body_identity', 'value.task.taskUUID === expected.id', 'true'),
+    ('body_state', 'value.task.state === expected.state', 'true'),
+    ('body_attempt', 'value.task.attempt === expected.attempt', 'true'),
+    ('body_parent', 'value.task.parentTaskUUID === expected.parentID', 'true'),
+    ('body_error', 'value.task.error === expected.error', 'true'),
+    ('read_immediate_handler', '}).then(() => true, () => false);', '}).then(() => true);'),
+    ('one_action', 'try { actionOutcome = action().then(() => true, () => false); }', 'try { await action(); actionOutcome = action().then(() => true, () => false); }'),
+    ('action_immediate_handler', 'try { actionOutcome = action().then(() => true, () => false); }', 'try { actionOutcome = action().then(() => true); }'),
+    ('sync_action_failure', 'catch { actionOutcome = Promise.resolve(false); }', 'catch { actionOutcome = Promise.resolve(true); }'),
+    ('join_both', 'await Promise.all([readOutcome, actionOutcome]);', 'await Promise.race([readOutcome, actionOutcome]);'),
+    ('action_must_succeed', 'fact(readOK && actionOK && !listenerFailed, "lineage_observation_failed");', 'fact(readOK && !listenerFailed, "lineage_observation_failed");'),
+    ('read_must_succeed', 'fact(readOK && actionOK && !listenerFailed, "lineage_observation_failed");', 'fact(actionOK && !listenerFailed, "lineage_observation_failed");'),
+    ('exact_dom', 'await visible(expected.id, expected.state, expected.attempt, expected.parentID);', ''),
+    ('no_task_writes', 'fact(!listenerFailed && taskWrites === 0, "lineage_wrote_task");', ''),
+    ('count_writes', '!["GET", "HEAD", "OPTIONS"].includes(method)) taskWrites++;', '!["GET", "HEAD", "OPTIONS"].includes(method)) taskWrites = 0;'),
+    ('listener_remove', 'page.off("request", requestObserved);', ''),
+    ('clear_selected', 'selected = null;', ''),
+    ('clear_old', 'old.clear();', ''),
+    ('parent_button_only', 'page.getByRole("button", { name: `查看父任务 ${parent.task.id}`, exact: true }).click()', 'openDetail(parent.task.id)'),
+    ('parent_exact_name', 'name: `查看父任务 ${parent.task.id}`, exact: true', 'name: `查看父任务 ${child.task.id}`, exact: true'),
+    ('parent_mode', 'lineageDetail(parentExpected, "all", () =>\n', 'lineageDetail(parentExpected, "active", () =>\n'),
+    ('back_exact', 'lineageDetail(childExpected, "active", () => page.goBack())', 'lineageDetail(parentExpected, "active", () => page.goBack())'),
+    ('back_mode', 'lineageDetail(childExpected, "active", () => page.goBack())', 'lineageDetail(childExpected, "all", () => page.goBack())'),
+    ('back_no_fallback', 'lineageDetail(childExpected, "active", () => page.goBack())', 'lineageDetail(childExpected, "active", () => restoredDetail(child.task.id))'),
+    ('forward_no_fallback', 'lineageDetail(parentExpected, "all", () => page.goForward())', 'lineageDetail(parentExpected, "all", () => openDetail(parent.task.id))'),
+    ('persistence_before', 'const lineageBefore = snapshot();', 'const lineageBefore = {};'),
+    ('persistence_after', 'fact(equal(lineageBefore, snapshot()), "lineage_changed_persistence");', ''),
+    ('parent_expected_error', 'parentID: "", error: "authorization_revoked" };', 'parentID: "", error: "" };'),
+    ('child_expected_parent', 'parentID: parent.task.id, error: "" };', 'parentID: child.task.id, error: "" };'),
+    ('closed_parent_phase', '}).click()), "lineage_parent");', '}).click()), parent.task.id);'),
+)
+
+LINEAGE_MOVES = (
+    ('arm_after_action', '      armed = true;\n', '      try { actionOutcome = action().then(() => true, () => false); }\n      catch { actionOutcome = Promise.resolve(false); }\n'),
+    ('lock_after_validation', '        selected = request;\n', '          "lineage_request_invalid");\n'),
+    ('listener_removed_before_join', '      page.off("request", requestObserved);\n', '      armed = true;\n'),
+    ('zero_writes_before_dom', '      fact(!listenerFailed && taskWrites === 0, "lineage_wrote_task");\n', '      fact(readOK && actionOK && !listenerFailed, "lineage_observation_failed");\n'),
+)
+
+def restore_lineage_source(source):
+    if not source.startswith(LINEAGE_IMPORT):
+        raise ValueError('lineage_import_position')
+    for shape in (LINEAGE_STAGES, LINEAGE_HELPER, LINEAGE_PROBES):
+        if source.count(shape) != 1:
+            raise ValueError('lineage_shape')
+    if source.count(LINEAGE_HELPER + '  const screenshots: Record<string, unknown> = {};') != 1:
+        raise ValueError('lineage_helper_position')
+    if source.count(LINEAGE_PROBES + '    fact(recoveryPosts === count && count === 1, "navigation_recovered_again");') != 1:
+        raise ValueError('lineage_probes_position')
+    restored = source
+    for added, original in ((LINEAGE_IMPORT, LINEAGE_BASE_IMPORT), (LINEAGE_STAGES, LINEAGE_BASE_STAGES),
+                            (LINEAGE_HELPER, ''), (LINEAGE_PROBES, '')):
+        if restored.count(added) != 1:
+            raise ValueError('lineage_addition_count')
+        restored = restored.replace(added, original, 1)
+    if hashlib.sha256(restored.encode('utf-8')).hexdigest() != LINEAGE_BASE_SHA256:
+        raise ValueError('lineage_historical_bytes')
+    return restored
+
+
+class ParentLineageContract(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        # read_text() would normalize physical CRLF and weaken the byte contract.
+        cls.source = SPEC.read_bytes().decode('utf-8')
+
+    def test_exact_lineage_additions_preserve_original_source(self):
+        restored = restore_lineage_source(self.source)
+        self.assertEqual(hashlib.sha256(restored.encode('utf-8')).hexdigest(), LINEAGE_BASE_SHA256)
+        self.assertEqual(privacy_violations(self.source), [])
+        self.assertEqual(recovery_dialog_violations(self.source), [])
+        self.assertEqual(navigation_readiness_violations(self.source), [])
+        self.assertEqual(screenshot_violations(self.source), [])
+        self.assertEqual(scenario_violations(self.source), [])
+
+    def test_lineage_addition_removal_duplicate_or_relocation_is_rejected(self):
+        for label, shape in (('import', LINEAGE_IMPORT), ('stages', LINEAGE_STAGES),
+                             ('helper', LINEAGE_HELPER), ('probes', LINEAGE_PROBES)):
+            self.assertEqual(self.source.count(shape), 1, label)
+            for mode, changed in (
+                ('missing', self.source.replace(shape, '', 1)),
+                ('duplicate', self.source.replace(shape, shape + shape, 1)),
+                ('moved', self.source.replace(shape, '', 1) + shape),
+            ):
+                with self.subTest(label=label, mode=mode), self.assertRaises(ValueError):
+                    restore_lineage_source(changed)
+
+    def test_lineage_safety_decisions_on_actual_source(self):
+        for label, before, after in LINEAGE_MUTATIONS:
+            with self.subTest(label=label):
+                self.assertEqual(self.source.count(before), 1, label)
+                self.assertNotEqual(before, after)
+                with self.assertRaises(ValueError):
+                    restore_lineage_source(self.source.replace(before, after, 1))
+
+    def test_lineage_async_ordering_on_actual_source(self):
+        for label, moved, destination in LINEAGE_MOVES:
+            with self.subTest(label=label):
+                self.assertEqual(self.source.count(moved), 1, label)
+                self.assertEqual(self.source.count(destination), 1, label)
+                changed = self.source.replace(moved, '', 1).replace(destination, destination + moved, 1)
+                self.assertNotEqual(changed, self.source)
+                with self.assertRaises(ValueError):
+                    restore_lineage_source(changed)
+
+    def test_lineage_projection_rejects_legacy_bytes_and_line_endings_drift(self):
+        for label, changed in (
+            ('physical_crlf', self.source.replace('\n', '\r\n')),
+            ('extra_newline', self.source + '\n'),
+            ('suite_budget', self.source.replace('test.setTimeout(600000)', 'test.setTimeout(600001)', 1)),
+            ('lifecycle_budget', self.source.replace('phase("replayLifecycleEvidence", 60000', 'phase("replayLifecycleEvidence", 60001', 1)),
+            ('proof_budget', self.source.replace('sensitiveActions === 7', 'sensitiveActions === 8', 1)),
+            ('screenshot_target', self.source.replace('page.locator(".task-parent-identity"), page.getByLabel("任务实际结果")', 'page.getByLabel("任务实际结果")', 1)),
+            ('cleanup', self.source.replace('await safe("browser_context_close", () => context.close());', '', 1)),
+        ):
+            with self.subTest(label=label):
+                self.assertNotEqual(changed, self.source)
+                with self.assertRaises(ValueError):
+                    restore_lineage_source(changed)
 
 
 if __name__ == '__main__':

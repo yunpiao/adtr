@@ -1,4 +1,4 @@
-import { test, expect, type BrowserContext, type Page } from "@playwright/test";
+import { test, expect, type BrowserContext, type Page, type Request } from "@playwright/test";
 import { createHash, createHmac, randomBytes } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { lstatSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
@@ -14,7 +14,8 @@ const UI_STAGES = ["browser_proof_or_observation", "recovery_intent_open", "reco
   "recovery_warning_text", "recovery_cancelled_key", "recovery_intent_cancel", "recovery_intent_closed",
   "recovery_intent_reopen", "recovery_submitted_key", "navigation_open_ready", "navigation_back_visible",
   "navigation_return_list", "navigation_open_detail", "navigation_restore_ready", "navigation_detail_visible",
-  "navigation_reload", "navigation_history_back", "navigation_history_forward"] as const;
+  "navigation_reload", "navigation_history_back", "navigation_history_forward",
+  "lineage_parent", "lineage_back", "lineage_forward"] as const;
 type UIStage = typeof UI_STAGES[number];
 const digest = (b: Buffer | string) => createHash("sha256").update(b).digest("hex");
 // JSONB object key order is not semantic. Arrays retain their original order,
@@ -433,6 +434,71 @@ test("real health epoch rejection, explicit child recovery and original-key repl
     if (!detailVisible) await openDetail(id);
     // Caller still checks exact identity, state, attempt, lineage and result.
   }
+  // First host-observed detail request, not first successful response. This is
+  // the existing Playwright/CDP JSON evidence level, not a native-fetch witness.
+  async function lineageDetail(expected: { id: string; state: "failed" | "succeeded";
+    attempt: 0 | 1; parentID: string; error: string }, visibility: "active" | "all",
+    action: () => Promise<unknown>) {
+    const timeout = Math.min(10000, remaining());
+    let armed = false, listenerFailed = false, taskWrites = 0;
+    let selected: Request | null = null;
+    const old = new Set<Request>();
+    const requestObserved = (request: Request) => {
+      try {
+        if (!armed) {
+          if (old.size >= 32) listenerFailed = true;
+          else old.add(request);
+          return;
+        }
+        const url = new URL(request.url()), method = request.method();
+        if ((url.pathname === "/api/tasks" || url.pathname.startsWith("/api/tasks/")) &&
+          !["GET", "HEAD", "OPTIONS"].includes(method)) taskWrites++;
+        if (old.has(request) || selected !== null || url.pathname !== "/api/tasks/detail") return;
+        selected = request;
+        const keys = [...url.searchParams.keys()].sort();
+        fact(url.origin === origin && url.hash === "" && url.username === "" && url.password === "" &&
+          method === "GET" && request.resourceType() === "fetch" && request.serviceWorker() === null &&
+          request.frame() === page.mainFrame() && request.redirectedFrom() === null && request.redirectedTo() === null &&
+          url.searchParams.getAll("taskUUID").length === 1 && url.searchParams.get("taskUUID") === expected.id &&
+          equal(keys, visibility === "all" ? ["taskUUID", "visibility"] : ["taskUUID"]) &&
+          (visibility === "all" ? url.searchParams.get("visibility") === "all" : !url.searchParams.has("visibility")),
+          "lineage_request_invalid");
+      } catch { listenerFailed = true; }
+    };
+    try {
+      page.on("request", requestObserved);
+      const readOutcome = page.waitForResponse(response => response.request() === selected, { timeout })
+        .then(async response => {
+          fact(!listenerFailed && response.status() === 200 && !response.fromServiceWorker() &&
+            response.request().redirectedFrom() === null && response.request().redirectedTo() === null,
+            "lineage_response_invalid");
+          const contentType = await response.headerValue("content-type");
+          fact(contentType !== null && /^application\/json(?:;\s*charset=utf-8)?$/i.test(contentType) &&
+            await response.headerValue("cache-control") === "no-store" &&
+            await response.headerValue("x-content-type-options") === "nosniff", "lineage_metadata_invalid");
+          const value = await response.json();
+          fact(object(value) && object(value.task) && Array.isArray(value.events) &&
+            value.task.taskUUID === expected.id && value.task.state === expected.state &&
+            value.task.attempt === expected.attempt && value.task.parentTaskUUID === expected.parentID &&
+            value.task.error === expected.error, "lineage_detail_invalid");
+        }).then(() => true, () => false);
+      armed = true;
+      let actionOutcome: Promise<boolean>;
+      try { actionOutcome = action().then(() => true, () => false); }
+      catch { actionOutcome = Promise.resolve(false); }
+      // Both branches already have rejection handlers, so join cannot abandon
+      // the other branch on first rejection. No retry or detached body read.
+      const [readOK, actionOK] = await Promise.all([readOutcome, actionOutcome]);
+      fact(readOK && actionOK && !listenerFailed, "lineage_observation_failed");
+      await visible(expected.id, expected.state, expected.attempt, expected.parentID);
+      fact(!listenerFailed && taskWrites === 0, "lineage_wrote_task");
+    } finally {
+      armed = false;
+      page.off("request", requestObserved);
+      selected = null;
+      old.clear();
+    }
+  }
   const screenshots: Record<string, unknown> = {};
   async function screenshot(id: string, state: "failed" | "succeeded", width: number, height: number) {
     const slot = state === "failed" ? (width === 1440 ? "parent_desktop" : "parent_mobile")
@@ -561,6 +627,16 @@ test("real health epoch rejection, explicit child recovery and original-key repl
       await ui(() => page.goForward(), "navigation_history_forward");
       await openDetail(value.task.id); await visible(value.task.id, value.task.state, value.task.attempt, value.task.parentID);
     }
+    const lineageBefore = snapshot();
+    const parentExpected = { id: parent.task.id, state: "failed" as const, attempt: 0 as const,
+      parentID: "", error: "authorization_revoked" };
+    const childExpected = { id: child.task.id, state: "succeeded" as const, attempt: 1 as const,
+      parentID: parent.task.id, error: "" };
+    await ui(() => lineageDetail(parentExpected, "all", () =>
+      page.getByRole("button", { name: `查看父任务 ${parent.task.id}`, exact: true }).click()), "lineage_parent");
+    await ui(() => lineageDetail(childExpected, "active", () => page.goBack()), "lineage_back");
+    await ui(() => lineageDetail(parentExpected, "all", () => page.goForward()), "lineage_forward");
+    fact(equal(lineageBefore, snapshot()), "lineage_changed_persistence");
     fact(recoveryPosts === count && count === 1, "navigation_recovered_again");
     lifecycle = { reloadParent: true, reloadChild: true, backForwardParent: true, backForwardChild: true,
       recoveryPostsBefore: count, recoveryPostsAfter: recoveryPosts };
