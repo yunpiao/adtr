@@ -141,6 +141,8 @@ it("distinguishes original-task computer cancellation from creation recovery and
   expect(screen.getByText(/创建及未知创建提交恢复仍在/)).toBeVisible();
   expect(screen.getByRole("link", { name: "计算机资产" })).toHaveAttribute("href", "#computer-assets-v3");
   view.rerender(<TaskDedicatedGuidance taskName="group_assets.v3.export" />);
-  expect(screen.getByText(/创建、取消及未知提交恢复仍在/)).toBeVisible();
+  expect(screen.getByText(/核对原组导出取消/)).toHaveTextContent("无需本标签页的提交回执");
+  expect(screen.getByText(/创建及未知创建提交恢复仍在/)).toBeVisible();
+  expect(screen.getByRole("link", { name: "组资产" })).toHaveAttribute("href", "#group-assets-v3");
   expect(screen.queryByText(/核对原计算机导出取消/)).toBeNull();
 });

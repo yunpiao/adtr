@@ -1,4 +1,4 @@
-import { ApiError } from "./api";
+import { ApiError, type Profile } from "./api";
 import type { Proof } from "./access-api";
 import { validDomainID, validRevision } from "./domain-api";
 import { integer, object, validTask, type Task } from "./task-api";
@@ -55,6 +55,35 @@ export function sameExportRequest(a: ExportRequest, b: ExportRequest) {
   return requestKeys.every((key) => key === "screenColumns"
     ? a.screenColumns.length === b.screenColumns.length && a.screenColumns.every((v, i) => b.screenColumns[i] === v)
     : a[key as keyof ExportRequest] === b[key as keyof ExportRequest]);
+}
+export type GroupExportCancelBinding = {
+  taskID: string; request: ExportRequest; actor: Profile; signal: AbortSignal;
+};
+type CancelProfile = Readonly<Pick<Profile, (typeof cancelProfileKeys)[number]>>;
+type CancelProofOrigin = Omit<GroupExportCancelBinding, "actor"> & { actor: CancelProfile };
+function copyCancelRequest(request: ExportRequest): ExportRequest {
+  const copy: ExportRequest = { domainId: request.domainId, expectedRevision: request.expectedRevision,
+    expectedCredentialRevision: request.expectedCredentialRevision, observationId: request.observationId,
+    search: request.search, creatTm: request.creatTm, screenColumns: [...request.screenColumns] };
+  Object.freeze(copy.screenColumns);
+  return Object.freeze(copy);
+}
+function copyCancelProfile(profile: Profile): CancelProfile {
+  return Object.freeze({ ID: profile.ID, username: profile.username, role: profile.role, priv: profile.priv,
+    csrfToken: profile.csrfToken, hasMfa: profile.hasMfa, needChangePwd: profile.needChangePwd, isExpired: profile.isExpired });
+}
+// Module-private provenance, not an API-error code convention or authorization.
+// Never retain proof, response bodies or unrelated profile display fields.
+const cancelProofRejections = new WeakMap<object, CancelProofOrigin>();
+export function isGroupExportCancelProofRejected(error: unknown, binding: GroupExportCancelBinding): boolean {
+  if (!(error instanceof ApiError) || binding.signal.aborted || !validExportID(binding.taskID) ||
+    !validExportRequest(binding.request)) return false;
+  const origin = cancelProofRejections.get(error);
+  if (!origin || origin.signal !== binding.signal || origin.taskID !== binding.taskID ||
+    !matchingCancelProfile(binding.actor, origin.actor) || !sameExportRequest(origin.request, binding.request)) return false;
+  // Only a matching catch around this invocation consumes the origin, once.
+  cancelProofRejections.delete(error);
+  return true;
 }
 function exportTask(value: unknown, domain: string, id?: string): value is Task {
   if (!validTask(value)) return false;
@@ -187,6 +216,76 @@ async function json(response: Response, signal: AbortSignal) {
   if (response.headers.get("Content-Type")?.split(";")[0] !== "application/json") return invalid();
   return value;
 }
+async function rejectCancelProof(response: Response, binding: CancelProofOrigin, current: () => void): Promise<never> {
+  const { signal } = binding;
+  try {
+    current();
+    const actor = response.headers.get("X-ADTR-User-ID");
+    if (response.status !== 401 || response.headers.get("Content-Type")?.split(";")[0] !== "application/json" ||
+      response.headers.get("Cache-Control") !== "no-store" || response.headers.get("X-Content-Type-Options") !== "nosniff" ||
+      (actor !== null && actor !== String(binding.actor.ID))) return invalid();
+    const raw = await bytes(response, signal, 4096);
+    current();
+    const value = uniqueJSON(new TextDecoder("utf-8", { fatal: true }).decode(raw));
+    if (!object(value) || !exact(value, ["error"]) || value.error !== "invalid_credentials") return invalid();
+  } catch {
+    // Malformed, incomplete and failed bodies remain HTTP authority failures.
+    // A status-0 parser/transport error must never bypass private UI invalidation.
+    try { await response.body?.cancel(); } catch { /* Cleanup cannot establish rejection. */ }
+    signal.throwIfAborted();
+    throw new ApiError("unauthenticated", 401);
+  }
+  current();
+  const error = new ApiError("invalid_credentials", 401);
+  cancelProofRejections.set(error, binding);
+  throw error;
+}
+const cancelAuthorityPaths = [`GET ${exportPrefix}/detail`, `POST ${exportPrefix}/cancel`];
+const cancelProfileKeys = ["ID", "username", "role", "priv", "csrfToken", "hasMfa", "needChangePwd", "isExpired"] as const;
+function matchingCancelProfile(value: unknown, captured: CancelProfile): boolean {
+  return object(value) && integer(value.ID, 1) && typeof value.username === "string" && value.username.length > 0 &&
+    typeof value.role === "string" && value.role.length > 0 && typeof value.priv === "number" && Number.isSafeInteger(value.priv) &&
+    typeof value.csrfToken === "string" && value.csrfToken.length > 0 && value.hasMfa === true &&
+    value.needChangePwd === false && value.isExpired === false &&
+    cancelProfileKeys.every((key) => value[key] === captured[key]);
+}
+async function cancelAuthorityJSON(path: "/api/auth/me" | "/api/access/menu" | "/api/access/check",
+  actor: number, csrf: string, signal: AbortSignal): Promise<unknown> {
+  signal.throwIfAborted();
+  const check = path === "/api/access/check";
+  let response: Response;
+  try {
+    response = await fetch(path, { method: check ? "POST" : "GET", credentials: "same-origin", cache: "no-store",
+      redirect: "error", signal, headers: check ? { "Content-Type": "application/json", "X-CSRF-Token": csrf } : {},
+      ...(check ? { body: JSON.stringify({ paths: cancelAuthorityPaths }) } : {}) });
+  } catch { signal.throwIfAborted(); throw new ApiError("network"); }
+  signal.throwIfAborted();
+  // Auth/access normally omit the export actor header. Never invent it or
+  // accept a conflicting one as evidence of the captured session identity.
+  const headerActor = response.headers.get("X-ADTR-User-ID");
+  if (response.ok && (response.status !== 200 || response.headers.get("Cache-Control") !== "no-store" ||
+    response.headers.get("X-Content-Type-Options") !== "nosniff" ||
+    (headerActor !== null && headerActor !== String(actor)))) {
+    await response.body?.cancel().catch(() => undefined);
+    signal.throwIfAborted();
+    throw new ApiError("unauthenticated", 401);
+  }
+  const value = await json(response, signal);
+  signal.throwIfAborted();
+  return value;
+}
+function requireCancelMenu(value: unknown): void {
+  if (!object(value) || !exact(value, ["menu"]) || !Array.isArray(value.menu)) return invalid();
+  const grants = new Map<string, { readable: boolean; writeable: boolean }>();
+  for (const node of value.menu) {
+    if (!object(node) || typeof node.mark !== "string" || !node.mark || grants.has(node.mark) ||
+      !object(node.auth) || !exact(node.auth, ["readable", "writeable"]) ||
+      typeof node.auth.readable !== "boolean" || typeof node.auth.writeable !== "boolean") return invalid();
+    grants.set(node.mark, { readable: node.auth.readable, writeable: node.auth.writeable });
+  }
+  if (!["domains", "directory_assets", "tasks", "group_asset_exports"].every((mark) => grants.get(mark)?.readable) ||
+    !["tasks", "group_asset_exports"].every((mark) => grants.get(mark)?.writeable)) throw new ApiError("forbidden", 403);
+}
 export const groupAssetExportAPI = {
   async create(request: ExportRequest, idempotencyKey: string, proof: Proof, actor: number, csrf: string, signal: AbortSignal) {
     if (!validExportRequest(request) || !validExportID(idempotencyKey)) throw new ApiError("invalid_input");
@@ -206,11 +305,57 @@ export const groupAssetExportAPI = {
     if (!validExportID(taskID) || !validExportRequest(request)) throw new ApiError("invalid_input");
     return parseExportReceipt(await json(await fetchExport(`/detail?${new URLSearchParams({ taskID })}`, actor, signal), signal), request.domainId, request, "detail", taskID) as ExportDetail;
   },
-  async cancel(taskID: string, request: ExportRequest, proof: Proof, actor: number, csrf: string, signal: AbortSignal) {
+  async cancel(taskID: string, request: ExportRequest, proof: Proof, actor: number, csrf: string, signal: AbortSignal, capturedProfile?: Profile) {
+    signal.throwIfAborted();
     if (!validExportID(taskID) || !validExportRequest(request)) throw new ApiError("invalid_input");
-    const value = await json(await fetchExport("/cancel", actor, signal, { taskID, ...proof }, csrf), signal);
-    if (!object(value) || !exact(value, ["taskID", "task"]) || value.taskID !== taskID || !exportTask(value.task, request.domainId, taskID)) return invalid();
+    const original = copyCancelRequest(request);
+    const profile = capturedProfile === undefined ? undefined : copyCancelProfile(capturedProfile);
+    if (profile && (!matchingCancelProfile(capturedProfile, profile) || actor !== profile.ID || csrf !== profile.csrfToken))
+      throw new ApiError("invalid_input");
+    const current = () => {
+      signal.throwIfAborted();
+      if (profile && !matchingCancelProfile(capturedProfile, profile)) throw new ApiError("unauthenticated", 401);
+      if (!validExportRequest(request) || !sameExportRequest(request, original)) return invalid();
+    };
+    // Capture before fetch. Existing callers without a profile keep ordinary
+    // 401 handling; only explicitly bound current-version cancellation can brand.
+    const response = await fetchExport("/cancel", actor, signal, { taskID, ...proof }, csrf);
+    signal.throwIfAborted();
+    if (response.status === 401 && profile)
+      return rejectCancelProof(response, { taskID, request: original, actor: profile, signal }, current);
+    const value = await json(response, signal);
+    current();
+    if (!object(value) || !exact(value, ["taskID", "task"]) || value.taskID !== taskID || !exportTask(value.task, original.domainId, taskID)) return invalid();
     return value.task;
+  },
+  async recheckCancelAuthority(taskID: string, request: ExportRequest, capturedProfile: Profile, signal: AbortSignal): Promise<ExportDetail> {
+    signal.throwIfAborted();
+    if (!validExportID(taskID) || !validExportRequest(request)) throw new ApiError("invalid_input");
+    const original = copyCancelRequest(request), profile = copyCancelProfile(capturedProfile);
+    const current = () => {
+      signal.throwIfAborted();
+      if (!matchingCancelProfile(capturedProfile, profile)) throw new ApiError("unauthenticated", 401);
+      if (!validExportRequest(request) || !sameExportRequest(request, original)) return invalid();
+    };
+    current();
+    const before = await cancelAuthorityJSON("/api/auth/me", profile.ID, profile.csrfToken, signal);
+    current();
+    if (!matchingCancelProfile(before, profile)) throw new ApiError("unauthenticated", 401);
+    const menu = await cancelAuthorityJSON("/api/access/menu", profile.ID, profile.csrfToken, signal);
+    current(); requireCancelMenu(menu);
+    const checks = await cancelAuthorityJSON("/api/access/check", profile.ID, profile.csrfToken, signal);
+    current();
+    if (!object(checks) || !exact(checks, ["results"]) || !Array.isArray(checks.results) ||
+      checks.results.length !== cancelAuthorityPaths.length || checks.results.some((allowed) => typeof allowed !== "boolean")) return invalid();
+    if (!checks.results.every((allowed) => allowed)) throw new ApiError("forbidden", 403);
+    // The dedicated backend enforces owner, tenant, current epoch and scope.
+    // Old source availability is intentionally not a new producer prerequisite.
+    const detail = await this.detail(taskID, original, profile.ID, signal);
+    current();
+    const after = await cancelAuthorityJSON("/api/auth/me", profile.ID, profile.csrfToken, signal);
+    current();
+    if (!matchingCancelProfile(after, profile)) throw new ApiError("unauthenticated", 401);
+    return detail;
   },
   async download(detail: ExportDetail, actor: number, signal: AbortSignal): Promise<Blob> {
     // A fresh detail read binds current session, kind, exact source and manifest.

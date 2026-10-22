@@ -1396,6 +1396,25 @@ describe("specialized dictionary and asset export task controls", () => {
     expectNoGenericAction();
   });
 
+  it("mounts the original group cancel control collapsed without a locator or business request", async () => {
+    override = (url) => url.startsWith("/api/tasks/detail") ? response(taskDetail(specialTask("group_assets.v3.export", "running"))) : undefined;
+    await detail();
+    expect(screen.getByRole("region", { name: "任务原组导出取消" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "核对原组导出取消" })).toBeEnabled();
+    expect(screen.queryByRole("button", { name: "取消原组导出任务" })).toBeNull();
+    expect(sessionStorage.getItem(groupExportRecoveryStorage)).toBeNull();
+    expectNoGenericAction();
+    expect(fetcher.mock.calls.filter(([url]) => String(url).startsWith("/api/group-assets/v3/exports"))).toHaveLength(0);
+  });
+
+  it.each(["archived", "platform"])("does not mount group cancellation for %s generic detail", async (mode) => {
+    const current = { ...specialTask("group_assets.v3.export"), ...(mode === "archived" ? { archived: true } : mode === "platform" ? { domainId: "platform" } : {}) };
+    override = (url) => url.startsWith("/api/tasks/detail") ? response(taskDetail(current)) : undefined;
+    await detail();
+    expect(screen.queryByRole("region", { name: "任务原组导出取消" })).toBeNull();
+    expectNoGenericAction();
+  });
+
   const specialTask = (
     taskName: string,
     state: TaskState = "failed",
@@ -1471,9 +1490,10 @@ describe("specialized dictionary and asset export task controls", () => {
     } else if (href === "#user-assets-v3" || href === "#computer-assets-v3" || href === "#group-assets-v3") {
       expect(guidance).toHaveTextContent("查看原导出结果");
       expect(guidance).toHaveTextContent("重新核验专用权限");
-      expect(guidance).toHaveTextContent((href === "#user-assets-v3" || href === "#computer-assets-v3") ? "未知创建提交恢复仍在" : "未知提交恢复仍在");
+      expect(guidance).toHaveTextContent("未知创建提交恢复仍在");
       if (href === "#user-assets-v3") expect(guidance).toHaveTextContent("核对原用户导出取消");
       if (href === "#computer-assets-v3") expect(guidance).toHaveTextContent("核对原计算机导出取消");
+      if (href === "#group-assets-v3") expect(guidance).toHaveTextContent("核对原组导出取消");
     } else if (href.endsWith("-assets-v3")) {
       expect(guidance).toHaveTextContent(/不会按此任务 ID\s*自动恢复/);
       expect(guidance).toHaveTextContent("请保留原导出操作记录");

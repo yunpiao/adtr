@@ -1,3 +1,4 @@
+import { webcrypto } from "node:crypto";
 import { ApiError } from "./api";
 import { groupAssetsV3API } from "./group-assets-v3-api";
 // Synthetic workspace integration: source-picker control is isolated, while the
@@ -14,12 +15,23 @@ vi.mock("./SavedSourcePicker", () => ({ default: ({ onResolved }: { onResolved: 
   dcHostName: "dc.synthetic.invalid", ldapAddr: "", port: "636", mode: "ldaps", credentialConfigured: true,
   connectionState: "unverified", source: "configured_connection", lastTest: null,
 }, checkedAt: "2026-10-13T00:00:00Z" })}>Select synthetic source</button> }));
-beforeEach(() => clearExportRecovery());
-afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); clearExportRecovery(); });
+beforeEach(() => {
+  clearExportRecovery(); localStorage.clear();
+  vi.stubGlobal("crypto", webcrypto); vi.stubGlobal("navigator", Object.create(navigator));
+  const held = new Set<string>();
+  Object.defineProperty(navigator, "locks", { configurable: true, value: { request: vi.fn(async (name: string, options: { mode: string; ifAvailable: boolean }, callback: (lock: { name: string; mode: "exclusive" } | null) => unknown) => {
+    expect(options).toEqual({ mode: "exclusive", ifAvailable: true });
+    if (held.has(name)) return callback(null);
+    held.add(name);
+    try { return await callback({ name, mode: "exclusive" }); } finally { held.delete(name); }
+  }) } });
+});
+afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); clearExportRecovery(); localStorage.clear(); });
 describe("unavailable observation export recovery", () => {
   it.each([[false, false], [true, false], [false, true], [true, true]])("keeps recovery reachable for unavailable-error=%s and cancellable=%s", async (errorResponse, cancellable) => {
     writeExportRecovery({ version: 1, kind: exportKind, actorID: 1, domainId: exportRequest.domainId, idempotencyKey: "original-key" });
     vi.stubGlobal("fetch", vi.fn(async (path: string, init?: RequestInit) => {
+      if (path === "/api/auth/me") return exportJSON(exportProfile);
       if (path === "/api/access/menu") return exportJSON({ menu: ["domains", "directory_assets", "tasks", "group_asset_exports"].map((mark) => ({ mark, auth: { readable: true, writeable: true } })) });
       if (path === "/api/access/check") return exportJSON({ results: JSON.parse(String(init?.body)).paths.map(() => true) });
       if (path.startsWith("/api/group-assets/v3?")) return errorResponse ? exportJSON({ error: "directory_observation_unavailable" }, 409) : exportJSON({ dictionaryVersion: 3, selection: { domainId: exportRequest.domainId, revision: exportRequest.expectedRevision, credentialRevision: exportRequest.expectedCredentialRevision }, available: false, observedGroupCount: null, list: [], page: { pageIdx: 1, pageSize: 10, total: 0, totalPage: 0 } });
@@ -27,7 +39,12 @@ describe("unavailable observation export recovery", () => {
     }));
     const receipt = vi.spyOn(groupAssetExportAPI, "receipt").mockResolvedValue(exportReceipt);
     const detail = vi.spyOn(groupAssetExportAPI, "detail").mockResolvedValue(cancellable ? { ...exportReceipt, downloadReady: false, downloadStatus: "pending" } : { ...readyExport, downloadReady: false, downloadStatus: "source_unavailable", artifact: undefined });
-    const cancel = vi.spyOn(groupAssetExportAPI, "cancel").mockResolvedValue({ ...exportReceipt.task, state: "cancelled" });
+    // Keep the real fresh authority path; change business state only at POST.
+    const recheck = vi.spyOn(groupAssetExportAPI, "recheckCancelAuthority");
+    const cancel = vi.spyOn(groupAssetExportAPI, "cancel").mockImplementation(async () => {
+      detail.mockResolvedValue({ ...exportReceipt, task: { ...exportReceipt.task, state: "cancelled" }, downloadReady: false, downloadStatus: "cancelled" });
+      return { ...exportReceipt.task, state: "cancelled" as const };
+    });
     render(<GroupAssetsV3Workspace profile={exportProfile} sessionChanged={vi.fn()} />);
     fireEvent.click(await screen.findByRole("button", { name: "Select synthetic source" }));
     const recover = await screen.findByRole("button", { name: "恢复组导出回执" });
@@ -37,16 +54,22 @@ describe("unavailable observation export recovery", () => {
     expect(receipt).toHaveBeenCalledWith(exportRequest.domainId, "original-key", 1, expect.any(AbortSignal));
     expect(screen.queryByRole("button", { name: "创建组导出" })).not.toBeInTheDocument();
     if (cancellable) {
-    await screen.findByRole("button", { name: "取消组导出任务" });
-    fireEvent.change(screen.getByLabelText("操作者当前密码"), { target: { value: "SyntheticPassword123!" } });
-    fireEvent.change(screen.getByLabelText("未使用的认证器验证码"), { target: { value: "123456" } });
-    detail.mockResolvedValue({ ...exportReceipt, task: { ...exportReceipt.task, state: "cancelled" }, downloadReady: false, downloadStatus: "cancelled" });
-    fireEvent.click(screen.getByRole("button", { name: "取消组导出任务" }));
-    await waitFor(() => expect(cancel).toHaveBeenCalledTimes(1));
-    await screen.findByText(/已取消 · 服务器已确认取消/);
+      await screen.findByRole("button", { name: "取消组导出任务" });
+      fireEvent.change(screen.getByLabelText("操作者当前密码"), { target: { value: "SyntheticPassword123!" } });
+      fireEvent.change(screen.getByLabelText("未使用的认证器验证码"), { target: { value: "123456" } });
+      fireEvent.click(screen.getByRole("button", { name: "取消组导出任务" }));
+      await waitFor(() => expect(cancel).toHaveBeenCalledTimes(1));
+      await screen.findByText(/已取消 · 服务器已确认取消/);
+      expect(recheck).toHaveBeenCalledTimes(1);
+      expect(recheck).toHaveBeenCalledWith(exportReceipt.taskID, exportRequest, exportProfile, expect.any(AbortSignal));
+      expect(vi.mocked(fetch).mock.calls.filter(([path]) => path === "/api/auth/me")).toHaveLength(2);
+      expect(localStorage.length).toBe(0);
     } else {
       await screen.findByText(/固定观测不可用，原文件不可下载/);
-      expect(cancel).not.toHaveBeenCalled();
+      expect(cancel).not.toHaveBeenCalled(); expect(recheck).not.toHaveBeenCalled();
+      expect(screen.queryByRole("button", { name: "取消组导出任务" })).not.toBeInTheDocument();
+      expect(screen.queryByLabelText("操作者当前密码")).not.toBeInTheDocument();
+      expect(screen.queryByLabelText("未使用的认证器验证码")).not.toBeInTheDocument();
     }
     expect(screen.queryByRole("button", { name: "下载组 XLSX" })).not.toBeInTheDocument();
   });
@@ -113,4 +136,33 @@ it("recovers a newly created locator after source invalidation in the same works
   await waitFor(() => expect(receipt).toHaveBeenCalledTimes(1));
   expect(receipt).toHaveBeenCalledWith(exportRequest.domainId, create.mock.calls[0][1], 1, expect.any(AbortSignal));
   expect(create).toHaveBeenCalledTimes(1);
+});
+
+it.each(["missing-lock", "missing-sha256", "storage-unavailable"])("unavailable source recovery remains readable when cancellation capability is %s", async (mode) => {
+  writeExportRecovery({ version: 1, kind: exportKind, actorID: 1, domainId: exportRequest.domainId, idempotencyKey: "original-key" });
+  if (mode === "missing-lock") Object.defineProperty(navigator, "locks", { configurable: true, value: undefined });
+  if (mode === "missing-sha256") vi.stubGlobal("crypto", { randomUUID: webcrypto.randomUUID.bind(webcrypto) });
+  if (mode === "storage-unavailable") {
+    const get = Storage.prototype.getItem;
+    vi.spyOn(Storage.prototype, "getItem").mockImplementation(function (this: Storage, key) {
+      if (this === localStorage) throw new Error("synthetic-storage-canary"); return get.call(this, key);
+    });
+  }
+  vi.stubGlobal("fetch", vi.fn(async (path: string, init?: RequestInit) => {
+    if (path === "/api/access/menu") return exportJSON({ menu: ["domains", "directory_assets", "tasks", "group_asset_exports"].map((mark) => ({ mark, auth: { readable: true, writeable: true } })) });
+    if (path === "/api/access/check") return exportJSON({ results: JSON.parse(String(init?.body)).paths.map(() => true) });
+    throw new Error("unexpected-workspace-source-request");
+  }));
+  const receipt = vi.spyOn(groupAssetExportAPI, "receipt").mockResolvedValue(exportReceipt);
+  const detail = vi.spyOn(groupAssetExportAPI, "detail").mockResolvedValue({ ...exportReceipt, downloadReady: false, downloadStatus: "pending" });
+  const cancel = vi.spyOn(groupAssetExportAPI, "cancel"), recheck = vi.spyOn(groupAssetExportAPI, "recheckCancelAuthority");
+  render(<GroupAssetsV3Workspace profile={exportProfile} sessionChanged={vi.fn()} />);
+  fireEvent.click(await screen.findByRole("button", { name: "恢复组导出回执" }));
+  await screen.findByText(/浏览器缺少可靠的本地存储或独占锁/);
+  expect(screen.getByRole("button", { name: "核对原导出回执" })).toBeEnabled();
+  expect(screen.queryByLabelText("操作者当前密码")).toBeNull();
+  expect(screen.queryByRole("button", { name: "取消组导出任务" })).toBeNull();
+  expect(receipt).toHaveBeenCalledOnce(); expect(detail).toHaveBeenCalledOnce();
+  expect(cancel).not.toHaveBeenCalled(); expect(recheck).not.toHaveBeenCalled();
+  expect(document.body.textContent).not.toContain("canary");
 });
