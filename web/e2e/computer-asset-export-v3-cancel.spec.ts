@@ -26,7 +26,9 @@ type QueuedCancelPhase =
   | "post-resume-download-events"
   | "old-panel-status-scroll"
   | "old-panel-status-viewport"
+  | "old-panel-task-id-scroll"
   | "old-panel-task-id-viewport"
+  | "old-panel-create-button-scroll"
   | "old-panel-create-button-viewport"
   | "new-entry-terminal-pixels"
   | "evidence";
@@ -263,8 +265,12 @@ test("queued export is cancelled from its original task without a tab locator an
     await cancelledStatus.scrollIntoViewIfNeeded();
     phase = "old-panel-status-viewport";
     await expect(cancelledStatus).toBeInViewport({ ratio: 1 });
+    phase = "old-panel-task-id-scroll";
+    await panel.getByText(`任务 ID：${originalTaskID}`, { exact: true }).scrollIntoViewIfNeeded();
     phase = "old-panel-task-id-viewport";
     await expect(panel.getByText(`任务 ID：${originalTaskID}`, { exact: true })).toBeInViewport({ ratio: 1 });
+    phase = "old-panel-create-button-scroll";
+    await panel.getByRole("button", { name: "按当前列表创建另一导出", exact: true }).scrollIntoViewIfNeeded();
     phase = "old-panel-create-button-viewport";
     await expect(panel.getByRole("button", { name: "按当前列表创建另一导出", exact: true })).toBeInViewport({ ratio: 1 });
 

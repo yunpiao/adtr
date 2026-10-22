@@ -125,7 +125,54 @@ QUEUED_CANCEL_ORIGINAL_POST_RESUME = '''    phase = "resume-owned-worker";
 '''
 
 
+# Each old-panel target has its own positioning precondition. This outer delta
+# restores the exact reviewed diagnostic-only source before the unchanged inner
+# inverse restores its own historical baseline. It is not a layout root-cause
+# assertion and does not replace the actual browser visibility checks.
+QUEUED_CANCEL_SCROLL_BASELINE_SHA256 = "f212d776058889294ace90bea5f2774cd0eceba45b2f6d257eaaaba1e0e2f80b"
+QUEUED_CANCEL_TASK_ID_SCROLL_ENUM = '  | "old-panel-task-id-scroll"\n'
+QUEUED_CANCEL_BUTTON_SCROLL_ENUM = '  | "old-panel-create-button-scroll"\n'
+QUEUED_CANCEL_TASK_ID_SCROLL = '''    phase = "old-panel-task-id-scroll";
+    await panel.getByText(`任务 ID：${originalTaskID}`, { exact: true }).scrollIntoViewIfNeeded();
+'''
+QUEUED_CANCEL_BUTTON_SCROLL = '''    phase = "old-panel-create-button-scroll";
+    await panel.getByRole("button", { name: "按当前列表创建另一导出", exact: true }).scrollIntoViewIfNeeded();
+'''
+QUEUED_CANCEL_CURRENT_PHASE_TYPE = QUEUED_CANCEL_PHASE_TYPE.replace(
+    '  | "old-panel-task-id-viewport"\n',
+    QUEUED_CANCEL_TASK_ID_SCROLL_ENUM + '  | "old-panel-task-id-viewport"\n', 1,
+).replace(
+    '  | "old-panel-create-button-viewport"\n',
+    QUEUED_CANCEL_BUTTON_SCROLL_ENUM + '  | "old-panel-create-button-viewport"\n', 1,
+)
+QUEUED_CANCEL_CURRENT_POST_RESUME_STAGES = QUEUED_CANCEL_POST_RESUME_STAGES.replace(
+    '    phase = "old-panel-task-id-viewport";\n',
+    QUEUED_CANCEL_TASK_ID_SCROLL + '    phase = "old-panel-task-id-viewport";\n', 1,
+).replace(
+    '    phase = "old-panel-create-button-viewport";\n',
+    QUEUED_CANCEL_BUTTON_SCROLL + '    phase = "old-panel-create-button-viewport";\n', 1,
+)
+
+
+def restore_queued_cancel_scrolls(source):
+    v.require(type(source) is str, 'queued individual-target source text')
+    # Deletion alone cannot distinguish a scroll moved after its assertion.
+    # Pin each complete current block before removing the four additions.
+    v.require(source.count(QUEUED_CANCEL_CURRENT_PHASE_TYPE) == 1, 'one exact current phase vocabulary')
+    v.require(source.count(QUEUED_CANCEL_CURRENT_POST_RESUME_STAGES) == 1, 'one exact ordered current positioning block')
+    for addition in (
+        QUEUED_CANCEL_TASK_ID_SCROLL_ENUM, QUEUED_CANCEL_BUTTON_SCROLL_ENUM,
+        QUEUED_CANCEL_TASK_ID_SCROLL, QUEUED_CANCEL_BUTTON_SCROLL,
+    ):
+        v.require(source.count(addition) == 1, 'one exact individual-target positioning delta')
+        source = source.replace(addition, '', 1)
+    v.require(hashlib.sha256(source.encode('utf-8')).hexdigest() == QUEUED_CANCEL_SCROLL_BASELINE_SHA256,
+              'scroll inverse preserves exact original diagnostic source')
+    return source
+
+
 def restore_queued_cancel_stages(source):
+    source = restore_queued_cancel_scrolls(source)
     v.require(type(source) is str, 'queued diagnostic source text')
     changes = (
         (QUEUED_CANCEL_PHASE_TYPE, ''),
@@ -427,6 +474,135 @@ class TerminalEvidenceContract(unittest.TestCase):
         self.assertGreaterEqual(cancel.count('toBeInViewport({ ratio: 1 })'), 3)
         self.assertLess(cancel.index('expect(postResume.database).toEqual(database)'), cancel.index('await screenshot(taskPage, info,'))
 
+    def test_queued_individual_scroll_inverse(self):
+        root = Path(__file__).resolve().parents[1]
+        source = (root / 'web/e2e/computer-asset-export-v3-cancel.spec.ts').read_bytes().decode('utf-8')
+        diagnostic = restore_queued_cancel_scrolls(source)
+        self.assertEqual(hashlib.sha256(diagnostic.encode('utf-8')).hexdigest(), QUEUED_CANCEL_SCROLL_BASELINE_SHA256)
+        self.assertEqual(diagnostic.count(QUEUED_CANCEL_PHASE_TYPE), 1)
+        self.assertEqual(diagnostic.count(QUEUED_CANCEL_POST_RESUME_STAGES), 1)
+        self.assertEqual(source.count(QUEUED_CANCEL_CURRENT_PHASE_TYPE), 1)
+        self.assertEqual(source.count(QUEUED_CANCEL_CURRENT_POST_RESUME_STAGES), 1)
+        phases = re.findall(r'^  \| "([a-z-]+)"', QUEUED_CANCEL_CURRENT_PHASE_TYPE, re.MULTILINE)
+        self.assertEqual(len(phases), 23)
+        self.assertEqual(len(set(phases)), 23)
+        historical = restore_queued_cancel_stages(source)
+        self.assertEqual(hashlib.sha256(historical.encode('utf-8')).hexdigest(), QUEUED_CANCEL_STAGE_BASELINE_SHA256)
+        # The four exact additions are the only source delta. Existing scrolls,
+        # all three original ratio1 assertions and their order remain intact.
+        ordered = (
+            '    await cancelledStatus.scrollIntoViewIfNeeded();',
+            '    await expect(cancelledStatus).toBeInViewport({ ratio: 1 });',
+            QUEUED_CANCEL_TASK_ID_SCROLL,
+            '    await expect(panel.getByText(`任务 ID：${originalTaskID}`, { exact: true })).toBeInViewport({ ratio: 1 });',
+            QUEUED_CANCEL_BUTTON_SCROLL,
+            '    await expect(panel.getByRole("button", { name: "按当前列表创建另一导出", exact: true })).toBeInViewport({ ratio: 1 });',
+            '    phase = "new-entry-terminal-pixels";',
+        )
+        for value in ordered:
+            self.assertEqual(source.count(value), 1)
+        positions = [source.index(value) for value in ordered]
+        self.assertEqual(positions, sorted(positions))
+        self.assertEqual(source.count('.scrollIntoViewIfNeeded()'), diagnostic.count('.scrollIntoViewIfNeeded()') + 2)
+        self.assertEqual(source.count('toBeInViewport({ ratio: 1 })'), diagnostic.count('toBeInViewport({ ratio: 1 })'))
+        queued_cancel_browser_contract(source)
+        for invalid in (None, b'', 0, {}, []):
+            with self.subTest(invalid_type=type(invalid).__name__):
+                with self.assertRaises(ValueError):
+                    restore_queued_cancel_scrolls(invalid)
+
+    def test_queued_individual_scroll_mutations(self):
+        root = Path(__file__).resolve().parents[1]
+        source = (root / 'web/e2e/computer-asset-export-v3-cancel.spec.ts').read_bytes().decode('utf-8')
+        queued_cancel_browser_contract(source)
+        task_locator = 'panel.getByText(`任务 ID：${originalTaskID}`, { exact: true })'
+        button_locator = 'panel.getByRole("button", { name: "按当前列表创建另一导出", exact: true })'
+        targets = (
+            ('old-panel-task-id', task_locator, QUEUED_CANCEL_TASK_ID_SCROLL_ENUM, QUEUED_CANCEL_TASK_ID_SCROLL),
+            ('old-panel-create-button', button_locator, QUEUED_CANCEL_BUTTON_SCROLL_ENUM, QUEUED_CANCEL_BUTTON_SCROLL),
+        )
+        for target, locator, enum, block in targets:
+            assignment = f'    phase = "{target}-scroll";\n'
+            scroll = f'    await {locator}.scrollIntoViewIfNeeded();\n'
+            assertion = f'    await expect({locator}).toBeInViewport({{ ratio: 1 }});\n'
+            viewport = f'    phase = "{target}-viewport";\n' + assertion
+            mutations = (
+                ('missing enum', enum, ''),
+                ('duplicate enum', enum, enum * 2),
+                ('comment-only enum', enum, '  // ' + enum.strip() + '\n'),
+                ('enum after viewport member', enum + f'  | "{target}-viewport"\n', f'  | "{target}-viewport"\n' + enum),
+                ('missing phase', assignment, ''),
+                ('duplicate phase', assignment, assignment * 2),
+                ('comment-only phase', assignment, '    // ' + assignment.strip() + '\n'),
+                ('dynamic phase', assignment, f'    phase = "{target}:" + originalTaskID;\n'),
+                ('wrong fixed phase', assignment, '    phase = "old-panel-status-scroll";\n'),
+                ('missing scroll', scroll, ''),
+                ('duplicate scroll', scroll, scroll * 2),
+                ('comment-only scroll', scroll, '    // ' + scroll.strip() + '\n'),
+                ('unawaited scroll', scroll, scroll.replace('await ', '', 1)),
+                ('duplicate whole positioning block', block, block * 2),
+                ('wrong page target', scroll, scroll.replace('panel.', 'taskPage.', 1)),
+                ('inexact target', scroll, scroll.replace('exact: true', 'exact: false', 1)),
+                ('first matching target', scroll, scroll.replace('.scrollIntoViewIfNeeded()', '.first().scrollIntoViewIfNeeded()', 1)),
+                ('nth matching target', scroll, scroll.replace('.scrollIntoViewIfNeeded()', '.nth(0).scrollIntoViewIfNeeded()', 1)),
+                ('phase after scroll', block, scroll + assignment),
+                ('scroll after viewport assertion', block + viewport, viewport + block),
+                ('removed original assertion', assertion, ''),
+                ('weaker original ratio', assertion, assertion.replace('ratio: 1', 'ratio: 0.5', 1)),
+                ('larger scroll timeout', scroll, scroll.replace('scrollIntoViewIfNeeded()', 'scrollIntoViewIfNeeded({ timeout: 120_000 })', 1)),
+                ('click after positioning', scroll, scroll + f'    await {locator}.click();\n'),
+                ('extra original receipt action', scroll, scroll + '    await observedReceiptAndDetail(page, setup.actorId, originalTaskID, request.domainId, operation.idempotencyKey);\n'),
+                ('extra proof action', scroll, scroll + '    await proof(taskPage);\n'),
+            )
+            for label, before, after in mutations:
+                with self.subTest(target=target, mutation=label):
+                    self.assertEqual(source.count(before), 1, 'mutation targets actual current positioning source')
+                    with self.assertRaises(ValueError):
+                        queued_cancel_browser_contract(source.replace(before, after, 1))
+        task_viewport = '    phase = "old-panel-task-id-viewport";\n' + f'    await expect({task_locator}).toBeInViewport({{ ratio: 1 }});\n'
+        button_viewport = '    phase = "old-panel-create-button-viewport";\n' + f'    await expect({button_locator}).toBeInViewport({{ ratio: 1 }});\n'
+        pair = QUEUED_CANCEL_TASK_ID_SCROLL + task_viewport + QUEUED_CANCEL_BUTTON_SCROLL + button_viewport
+        mutations = (
+            ('reversed target order', pair, QUEUED_CANCEL_BUTTON_SCROLL + button_viewport + QUEUED_CANCEL_TASK_ID_SCROLL + task_viewport),
+            ('parallel positioning', pair, f'    await Promise.all([{task_locator}.scrollIntoViewIfNeeded(), {button_locator}.scrollIntoViewIfNeeded()]);\n' + task_viewport + button_viewport),
+            ('wrong original UUID', QUEUED_CANCEL_TASK_ID_SCROLL, QUEUED_CANCEL_TASK_ID_SCROLL.replace('${originalTaskID}', '${taskID}', 1)),
+            ('wrong action name', QUEUED_CANCEL_BUTTON_SCROLL, QUEUED_CANCEL_BUTTON_SCROLL.replace('按当前列表创建另一导出', '创建导出', 1)),
+            ('changed existing status scroll', '    await cancelledStatus.scrollIntoViewIfNeeded();', ''),
+            ('weaker status ratio', '    await expect(cancelledStatus).toBeInViewport({ ratio: 1 });', '    await expect(cancelledStatus).toBeInViewport({ ratio: 0.5 });'),
+            ('larger viewport', QUEUED_CANCEL_TASK_ID_SCROLL, '    await page.setViewportSize({ width: 1440, height: 1800 });\n' + QUEUED_CANCEL_TASK_ID_SCROLL),
+            ('larger suite timeout', 'test.setTimeout(900_000);', 'test.setTimeout(1_800_000);'),
+            ('early new-tab focus', QUEUED_CANCEL_TASK_ID_SCROLL, '    await taskPage.bringToFront();\n' + QUEUED_CANCEL_TASK_ID_SCROLL),
+            ('extra delay', QUEUED_CANCEL_TASK_ID_SCROLL, QUEUED_CANCEL_TASK_ID_SCROLL + '    await page.waitForTimeout(1000);\n'),
+            ('raw failure cause', '  } catch { failure = phase; }', '  } catch (cause) { throw new Error("CANARY_PRIVATE", { cause }); }'),
+            ('raw source logging', QUEUED_CANCEL_BUTTON_SCROLL, QUEUED_CANCEL_BUTTON_SCROLL + '    console.error("CANARY_PRIVATE", originalTaskID);\n'),
+            ('cleanup failure swallowed', '      try { await restoreOwnedExportWorker(); } catch { cleanupFailed = true; }', '      try { await restoreOwnedExportWorker(); } catch {}'),
+            ('unrelated source bytes', '// No replay, body interception, synthetic response or cache change.', '// Unrelated source changed.'),
+        )
+        for label, before, after in mutations:
+            with self.subTest(mutation=label):
+                self.assertEqual(source.count(before), 1, 'mutation targets actual current source')
+                with self.assertRaises(ValueError):
+                    queued_cancel_browser_contract(source.replace(before, after, 1))
+        # Whole-block moves still contain all required names exactly once.
+        # They must be rejected by the pinned current shape plus exact inverse.
+        for label, block in (
+            ('moved entire current phase type', QUEUED_CANCEL_CURRENT_PHASE_TYPE),
+            ('moved entire current positioning block', QUEUED_CANCEL_CURRENT_POST_RESUME_STAGES),
+        ):
+            with self.subTest(mutation=label):
+                self.assertEqual(source.count(block), 1, 'move targets one actual current block')
+                changed = source.replace(block, '', 1) + block
+                with self.assertRaises(ValueError):
+                    queued_cancel_browser_contract(changed)
+
+        for label, changed in (
+            ('physical CRLF drift', source.replace('\n', '\r\n')),
+            ('extra final newline', source + '\n'),
+        ):
+            with self.subTest(mutation=label):
+                with self.assertRaises(ValueError):
+                    queued_cancel_browser_contract(changed)
+
     def test_queued_post_resume_diagnostic_inverse(self):
         root = Path(__file__).resolve().parents[1]
         source = (root / 'web/e2e/computer-asset-export-v3-cancel.spec.ts').read_bytes().decode('utf-8')
@@ -469,9 +645,9 @@ class TerminalEvidenceContract(unittest.TestCase):
         mutations = [
             ('untyped phase', QUEUED_CANCEL_PHASE_INIT, QUEUED_CANCEL_ORIGINAL_INIT),
             ('unknown phase vocabulary', '  | "evidence";', '  | "evidence" | "unknown";'),
-            ('duplicate phase vocabulary', QUEUED_CANCEL_PHASE_TYPE, QUEUED_CANCEL_PHASE_TYPE * 2),
-            ('missing phase vocabulary', QUEUED_CANCEL_PHASE_TYPE, ''),
-            ('duplicate diagnostic block', QUEUED_CANCEL_POST_RESUME_STAGES, QUEUED_CANCEL_POST_RESUME_STAGES * 2),
+            ('duplicate phase vocabulary', QUEUED_CANCEL_CURRENT_PHASE_TYPE, QUEUED_CANCEL_CURRENT_PHASE_TYPE * 2),
+            ('missing phase vocabulary', QUEUED_CANCEL_CURRENT_PHASE_TYPE, ''),
+            ('duplicate diagnostic block', QUEUED_CANCEL_CURRENT_POST_RESUME_STAGES, QUEUED_CANCEL_CURRENT_POST_RESUME_STAGES * 2),
             ('stage after await', receipt_step, receipt + '\n    phase = "post-resume-receipt-detail";'),
             ('wrong fixed stage', '    phase = "post-resume-database";', '    phase = "post-resume-receipt-detail";'),
             ('DB before receipt', receipt_step + '\n' + database_step, database_step + '\n' + receipt_step),
