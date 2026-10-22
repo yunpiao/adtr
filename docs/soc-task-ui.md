@@ -131,3 +131,53 @@ review before any merge claim. New-tab/copy-link task-list restoration and expir
 archived audit artifacts are not newly accepted by this slice; existing route and
 server contracts still apply. Real AD/Windows, full legacy equivalence and product
 acceptance remain open.
+
+## Immediate-parent task navigation (Issue #12, AD-F-189)
+
+A successfully read task with a canonical, non-self parent UUID offers
+`查看父任务` beside the unchanged parent identity. This follows the immediate
+parent recorded by recovery, not a root ancestor, the last task, or a list row.
+It reuses actor-bound task history and preserves the applied list/query return
+state. Back/Forward restore their actual task IDs and visibility modes.
+
+The current detail read, actor/session, read permissions and source visibility
+must still allow the action at click time. A refresh, reconcile, new poll or
+unmount invalidates the previous action's private read token without clearing
+ordinary task content, prepared proof, or existing result controls. Late reads
+cannot revive it. The destination always performs its own authorized detail
+GET. Current archive-read membership selects `visibility=all`; otherwise the
+request is active-only. `all` does not restore a task or bypass tenant, kind,
+domain or owner-scoped authorization. Health is not owner-scoped, so a currently
+authorized actor can read its old-epoch failed parent. Missing/forbidden/archived-
+out results retain the existing error behavior, with no fallback to restore or
+an unauthorized all-view read.
+
+Navigation neither submits, recovers, cancels nor downloads anything. A detail
+GET is not an operation receipt. Valid generic attempted intents and dedicated
+recovery records remain available for explicit original-key reconciliation;
+proof is not copied between task views. The pre-existing exception is unchanged:
+a successful current-actor detail for a dedicated-recovery kind clears only its
+matching invalid generic recover intent. It does not clear another task/actor's
+intent or dedicated export recovery storage, and the new action adds no cleanup.
+
+The real health recovery suite adds parent-button, Back and Forward observations
+using its existing failed parent (authorization_revoked, attempt 0) and successful
+child (attempt 1). Each probe locks the first host-observed detail Request before
+checking metadata, then parses that exact Response once; an invalid first request,
+status or JSON cannot be replaced by a later successful response. Action and
+response branches immediately handle rejections and are joined, including a
+synchronous action failure. The temporary listener remains through the DOM
+checks and requires zero task writes. The original database/history equality,
+one recovery and explicit same-key replay remain unchanged.
+
+This is host-window freshness and the original Playwright/CDP JSON evidence
+level, not proof of native-fetch start time or application adoption of the body.
+No request replay, browser hook, cache change or new independent JSON timeout is
+introduced. All probes stay inside the original 60-second lifecycle phase;
+seven sensitive actions out of ten, 600/660-second suite/runner limits, four
+desktop/mobile PNGs, artifact schema and owned cleanup remain unchanged. Child
+pictures include the whole parent-identity container and new button under the
+original fit/text/obscuration checks. Source tests and strict byte-preservation
+contracts are not execution evidence: exact-head CI, timing, four actual pictures
+and independent cleanup verification are required. This usability slice does
+not close product Issue #12 or change full-requirement acceptance.

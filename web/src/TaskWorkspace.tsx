@@ -31,6 +31,7 @@ import {
   taskStates,
   terminal,
   type Task,
+  type TaskDetail,
   type TaskKind,
 } from "./task-api";
 import { useTaskMutation, useTaskRead, type TaskContext } from "./task-common";
@@ -913,7 +914,25 @@ function KindSummary({ kind }: { kind: TaskKind }) {
     </dl>
   );
 }
-function TaskDetails({
+// This identity and the read token stay inside TaskDetails. They are never
+// persisted, sent to the API, or used as authority for the destination task.
+const detailIdentity = (profile: Profile) => [
+  profile.ID,
+  profile.username,
+  profile.csrfToken,
+  profile.role,
+  profile.priv,
+  profile.needChangePwd,
+  profile.isExpired,
+];
+type DetailReadToken = {
+  id: string;
+  archived: boolean;
+  identity: ReturnType<typeof detailIdentity>;
+};
+type ParentDetail = TaskDetail & { parentReadToken: DetailReadToken };
+
+export function TaskDetails({
   context,
   id,
   archived = false,
@@ -929,12 +948,102 @@ function TaskDetails({
     heading.current?.focus({ preventScroll: true });
     window.scrollTo?.(0, 0);
   }, []);
+  const currentRead = useRef<DetailReadToken | null>(null);
+  const mounted = useRef(false);
+  const latest = useRef<{
+    id: string;
+    archived: boolean;
+    identity: ReturnType<typeof detailIdentity>;
+    data: ParentDetail | null;
+    busy: boolean;
+    error: string;
+    context: TaskContext;
+    done: typeof done;
+  } | null>(null);
+  useLayoutEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      currentRead.current = null;
+      latest.current = null;
+    };
+  }, []);
   const read = useTaskRead(
     `${id}:${archived}`,
-    (signal) => taskAPI.detail(id, signal, archived ? "all" : "active"),
+    async (signal): Promise<ParentDetail> => {
+      const token = { id, archived, identity: detailIdentity(context.profile) };
+      // Invalidate synchronously at every request start, including automatic
+      // polls. A late completion must never become the current token again.
+      currentRead.current = token;
+      const detail = await taskAPI.detail(id, signal, archived ? "all" : "active");
+      return { ...detail, parentReadToken: token };
+    },
     context.sessionChanged,
     (data) => !terminal(data.task.state),
   );
+  const refresh = () => {
+    currentRead.current = null;
+    read.refresh();
+  };
+  useLayoutEffect(() => {
+    latest.current = {
+      id,
+      archived,
+      identity: detailIdentity(context.profile),
+      data: read.data,
+      busy: read.busy,
+      error: read.error,
+      context,
+      done,
+    };
+  });
+  const parent = read.data?.task.parentTaskUUID;
+  const parentAvailable =
+    !read.busy &&
+    !read.error &&
+    read.data?.task.taskUUID === id &&
+    validExportID(parent) &&
+    parent !== id &&
+    currentRead.current === read.data.parentReadToken &&
+    read.data.parentReadToken.identity.every(
+      (value, index) => value === detailIdentity(context.profile)[index],
+    ) &&
+    context.can("GET /api/tasks/detail") &&
+    (!archived || context.canArchiveView);
+  const openParent = () => {
+    const current = latest.current;
+    const captured = read.data;
+    if (
+      !mounted.current ||
+      !current ||
+      !captured ||
+      current.data !== captured ||
+      currentRead.current !== captured.parentReadToken ||
+      current.busy ||
+      current.error ||
+      current.id !== id ||
+      current.archived !== archived ||
+      captured.parentReadToken.id !== current.id ||
+      captured.parentReadToken.archived !== current.archived ||
+      captured.task.taskUUID !== current.id ||
+      captured.task.parentTaskUUID !== parent ||
+      !validExportID(parent) ||
+      parent === current.id ||
+      !current.identity.every(
+        (value, index) =>
+          value === captured.parentReadToken.identity[index] &&
+          value === detailIdentity(current.context.profile)[index],
+      ) ||
+      !current.context.can("GET /api/tasks/detail") ||
+      (current.archived && !current.context.canArchiveView)
+    )
+      return;
+    current.done({
+      type: "detail",
+      id: parent,
+      archived: current.context.canArchiveView,
+    });
+  };
   const old = getIntent(context.profile);
   const [action, setAction] = useState<"cancel" | "recover" | null>(
     old?.action === "recover" && old.taskUUID === id && old.attempted
@@ -962,7 +1071,7 @@ function TaskDetails({
           <button className="secondary" onClick={() => done({ type: "list" })}>
             返回任务列表
           </button>
-          <button className="secondary" onClick={read.refresh}>
+          <button className="secondary" onClick={refresh}>
             刷新任务详情
           </button>
         </div>
@@ -984,6 +1093,16 @@ function TaskDetails({
               {task.parentTaskUUID && (
                 <p className="task-parent-identity">
                   父任务 <span>{task.parentTaskUUID}</span>
+                  {parentAvailable && (
+                    <button
+                      type="button"
+                      className="secondary"
+                      aria-label={`查看父任务 ${parent}`}
+                      onClick={openParent}
+                    >
+                      查看父任务
+                    </button>
+                  )}
                 </p>
               )}
             </div>
@@ -1157,10 +1276,10 @@ function TaskDetails({
                 task={task}
                 closed={() => {
                   setAction(null);
-                  read.refresh();
+                  refresh();
                 }}
                 done={done}
-                reconcile={read.refresh}
+                reconcile={refresh}
               />
             )}
           <TaskTimeline events={read.data!.events} />
