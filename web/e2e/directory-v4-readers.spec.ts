@@ -2,7 +2,7 @@ import { test, expect, type Page, type APIResponse, type Route } from "@playwrig
 import { configureV4Deadlines, v4Phase } from "./directory-v4-diagnostics";
 import { randomUUID } from "node:crypto";
 import { setupV4, requireFixture, fillSecret, login, changePassword, enrollMfa, freshCode, readJSON } from "./directory-v4-fixture";
-import { V4, invariant, bounded, guardLeaks, evidenceDigest, originalEvidence, mutationEvidence, observeMutations, openCollection, prepareSync, enterProof, clickMutation, originalFrom, terminal, refreshOriginal, pinnedResults, safeScreenshots, proofEmpty, form, writeEvidence, actualJSON } from "./directory-v4-runtime";
+import { V4, invariant, bounded, guardLeaks, evidenceDigest, originalEvidence, mutationEvidence, observeMutations, openCollection, prepareSync, enterProof, clickMutation, originalFrom, terminal, refreshOriginal, pinnedResults, safeScreenshots, proofEmpty, form, writeEvidence, actualJSON, readNativeFocusIdentity } from "./directory-v4-runtime";
 import { readDirectoryV4ReaderCounts } from "./directory-v4-ledger-observer";
 import { navigateTo } from "./navigation";
 import { useNativeTabLifecycle, requireSameNativeWindow } from "./native-tab-lifecycle";
@@ -119,10 +119,8 @@ test("actual reader authority, native lifecycle and stale original reads never r
     release(); await bounded(delayedFinished, 15_000, "Genuine delayed read did not drain"); delayedFinished = undefined;
     invariant(genuineOldResponse && delivery.value !== "not_attempted", "Held genuine response was not drained");
     await privateCleared(page);
-    const currentMe = page.waitForResponse(r => new URL(r.url()).pathname === "/api/auth/me" && r.status() === 200);
-    await page.bringToFront();
-    const checked = await currentMe;
-    invariant((await bounded(checked.json(), 15_000, "Reader identity body deadline exceeded")).ID === reader.actorId, "Native focus did not recheck actual changed actor");
+    const checkedID = await readNativeFocusIdentity(page);
+    invariant(checkedID === reader.actorId, "Native focus did not recheck actual changed actor");
     await privateCleared(page);
     // The previous actor's genuine hint exists, but cannot authorize this reader.
     v4Phase("readers-authority"); await openCollection(page);
