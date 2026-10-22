@@ -148,6 +148,64 @@ safe error and timestamps. Internal tenant/creator/epoch, keys, hashes and
 cursor are omitted. List/detail always use arrays for empty results. Detail
 history uses the same page envelope and bounded 100-row maximum.
 
+## Occurrence history and original task navigation
+
+An admitted history row exposes **查看该次实际任务** for its own canonical task
+UUID. Its accessible name includes that exact UUID; the original ID text remains
+visible. The action never substitutes the plan's lastTaskUUID. The separate
+**查看最近实际任务** action retains its existing latest-task behavior. Skip,
+control, unknown-action, empty-ID and noncanonical-ID rows do not acquire a task
+navigation action.
+
+This is read-only integration of the existing health/platform/version-1
+producer, not a new schedule kind or executor. The source schedule detail still
+requires current schedule access and its original owner. A local read token
+binds the new action to the current actor/session, schedule ID, requested page
+and completed read object. Refresh, pagination, background polling/retry and
+unmount invalidate readiness; stale or abort-insensitive late responses cannot
+reactivate an old row. The returned page must match the requested page and page
+size 20, and duplicate event IDs are not valid navigation evidence. Activation
+rechecks the current token, row membership, exact UUID and existing GET gates,
+not merely the rendered button's disabled attribute.
+
+Navigation uses the existing actor-bound task history state and current task
+detail permission. The destination GET checks server authority again and must
+return the same task UUID. A visible history record is not a new authorization
+grant. Authorized archive visibility uses visibility=all; this does not assert
+that the task is archived. Other readers keep active-only behavior. A forbidden
+or missing destination remains an error, with no alternate task, automatic
+restore or permission change. Paused and authorization-blocked plans can retain
+readable original-task history.
+
+Unknown attempted maintenance operations do not disable this read-only action.
+Navigation does not clear, rewrite or confirm a maintenance intent or task
+recovery record. It does not fill authentication proof, submit recovery/cancel,
+download a result, or treat a detail GET as a mutation receipt. Existing
+destination controls retain their own explicit-action and permission rules.
+
+DOM tests distinguish multiple admitted rows from an unrelated latest task and
+cover invalid rows, read gates, archive visibility, refresh/page/session races,
+late responses and unchanged pending intent bytes. These tests establish UI
+contracts, not a real scheduler result.
+
+The real maintenance browser scenario reuses its existing admitted occurrence
+after the original latest-task and archive/restore/history assertions. It opens
+the history row's original task, binds the first newly observed exact Request
+to its same Response, and checks the returned UUID, health result and rendered
+identity. The selected response is parsed once; a body or identity failure is
+not replaced by a later response. Both click and response validation receive
+immediate rejection handlers and are joined before their listeners are removed
+on normal completion; failure cleanup also removes listeners and joins started
+work. This remains Playwright/CDP response evidence, not a claim about the
+application's native parser or a separate hard body-cancellation deadline.
+
+No second natural occurrence, TOTP, business write or download is added. The
+existing bootstrap 9-of-10 and producer 10-of-10 proof usage, 480-second browser
+test and 540-second runner budget remain unchanged. The archive summary schema,
+source-key set and its two PNGs remain unchanged; those PNGs document archive
+target observation, not pixels of the new history action. New navigation must
+pass on the final integrated head before it is accepted as real browser evidence.
+
 ## Verification and limits
 
 Local unit tests cover exact definition/UTC validation, integer grid boundaries,
