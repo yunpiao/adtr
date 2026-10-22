@@ -19,7 +19,17 @@ class DirectoryV4ControlsCI(unittest.TestCase):
         self.assertEqual(additions, [{'name': suite, 'command': 'python3 scripts/test_auth_e2e.py --suite ' + suite, 'specs': ['web/e2e/' + suite + '.spec.ts']} for suite in expected])
         self.assertEqual(len(inventory['browser']), 56)
         self.assertEqual(len(inventory['fixed']), 7)
-        self.assertEqual(len(inventory['frontend_roots']['web/src/TaskWorkspace.tsx']), 18)
+        consumers = inventory['frontend_roots']['web/src/TaskWorkspace.tsx']
+        self.assertEqual(len(consumers), 19)
+        self.assertEqual(consumers, [
+            'tasks', 'audit', 'messages', 'messages-isolation', 'maintenance', 'user-assets-v2',
+            'directory-v3', 'group-members-v4',
+            'user-asset-export-v3', 'user-asset-export-v3-failure', 'user-asset-export-v3-cancel',
+            'computer-asset-export-v3', 'computer-asset-export-v3-failure', 'computer-asset-export-v3-cancel',
+            'group-asset-export-v3', 'group-asset-export-v3-failure', 'group-asset-export-v3-cancel',
+            'tasks-health-recovery', 'operational-logs',
+        ])
+        self.assertEqual(consumers.count('operational-logs'), 1)
         self.assertIn('audit', inventory['frontend_roots']['web/src/TaskWorkspace.tsx'])
         legacy = restore_selection(Path('.github/workflows/ci.yml').read_text())
         matrix = legacy.split('  browser:\n', 1)[1].split('    steps:\n', 1)[0]

@@ -426,7 +426,8 @@
       "group-asset-export-v3",
       "group-asset-export-v3-failure",
       "group-asset-export-v3-cancel",
-      "tasks-health-recovery"
+      "tasks-health-recovery",
+      "operational-logs"
     ],
     "web/src/UserAssetsV3Workspace.tsx": [
       "user-assets-v3",
