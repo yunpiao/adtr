@@ -1,3 +1,4 @@
+import { classifyComputerViewportResult, computerViewportResultSuffix, type ComputerViewportRatioClass } from "./computer-asset-export-v3-viewport-result";
 import { test, expect, type Page, type Request as BrowserRequest, type Response } from "@playwright/test";
 import { expectSpecializedTaskReadOnly } from "./specialized-task-controls";
 import { proof } from "./computer-assets-v3-fixture";
@@ -26,7 +27,9 @@ type QueuedCancelPhase =
   | "post-resume-download-events"
   | "old-panel-status-scroll"
   | "old-panel-status-viewport"
+  | "old-panel-task-id-scroll"
   | "old-panel-task-id-viewport"
+  | "old-panel-create-button-scroll"
   | "old-panel-create-button-viewport"
   | "new-entry-terminal-pixels"
   | "evidence";
@@ -118,6 +121,7 @@ test.use({ trace: "off", screenshot: "off", video: "off" });
 test("queued export is cancelled from its original task without a tab locator and never executes after Worker resumes", async ({ page, context }, info) => {
   test.setTimeout(900_000);
   let phase: QueuedCancelPhase = "setup", failure: QueuedCancelPhase | "" = "", cleanupFailed = false, restoreWorker = false;
+  let viewportRatioClass: ComputerViewportRatioClass | "" = "";
   let taskPage: Page | undefined;
   let downloads = 0;
   const downloaded = () => { downloads++; };
@@ -263,8 +267,12 @@ test("queued export is cancelled from its original task without a tab locator an
     await cancelledStatus.scrollIntoViewIfNeeded();
     phase = "old-panel-status-viewport";
     await expect(cancelledStatus).toBeInViewport({ ratio: 1 });
+    phase = "old-panel-task-id-scroll";
+    await panel.getByText(`任务 ID：${originalTaskID}`, { exact: true }).scrollIntoViewIfNeeded();
     phase = "old-panel-task-id-viewport";
     await expect(panel.getByText(`任务 ID：${originalTaskID}`, { exact: true })).toBeInViewport({ ratio: 1 });
+    phase = "old-panel-create-button-scroll";
+    await panel.getByRole("button", { name: "按当前列表创建另一导出", exact: true }).scrollIntoViewIfNeeded();
     phase = "old-panel-create-button-viewport";
     await expect(panel.getByRole("button", { name: "按当前列表创建另一导出", exact: true })).toBeInViewport({ ratio: 1 });
 
@@ -301,7 +309,13 @@ test("queued export is cancelled from its original task without a tab locator an
     await writeTerminalEvidence(info, setup, "queuedCancel", [{ name: "cancelled", ...operation,
       request, queued, cancel, ...recovered, database, postResume, unavailableDownload: unavailable,
       ui: { downloadButtons: await panel.getByRole("button", { name: "下载计算机 XLSX", exact: true }).count(), downloadEvents: downloads }, screenshot: image }], { pause, resume });
-  } catch { failure = phase; }
+  } catch (error) {
+    failure = phase;
+    if (phase === "old-panel-create-button-viewport") {
+      try { viewportRatioClass = classifyComputerViewportResult(error); }
+      catch { viewportRatioClass = "unavailable"; }
+    }
+  }
   finally {
     page.off("download", downloaded);
     if (taskPage) {
@@ -313,5 +327,5 @@ test("queued export is cancelled from its original task without a tab locator an
     }
   }
   // Raw Playwright errors can contain Cookie call logs. Do not attach a cause.
-  if (failure || cleanupFailed) throw new Error(`Computer export task cancel checkpoint failed: ${failure || "cleanup"}${cleanupFailed ? "; cleanup_failed" : ""}`);
+  if (failure || cleanupFailed) throw new Error(`Computer export task cancel checkpoint failed: ${failure || "cleanup"}${cleanupFailed ? "; cleanup_failed" : ""}${computerViewportResultSuffix(viewportRatioClass)}`);
 });
