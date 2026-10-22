@@ -1,4 +1,4 @@
-import { expect, type Page, type Locator, type BrowserContext, type APIResponse, type Response, type TestInfo } from "@playwright/test";
+import { expect, type Page, type Locator, type BrowserContext, type APIResponse, type Request, type Response, type Frame, type TestInfo } from "@playwright/test";
 import { request as nodeRequest } from "node:http";
 import { createHash } from "node:crypto";
 import { writeV4ScenarioEvidence } from "./directory-v4-controls-evidence";
@@ -19,6 +19,144 @@ export async function bounded<T>(operation: Promise<T>, milliseconds: number, me
   let timer: ReturnType<typeof setTimeout> | undefined;
   try { return await Promise.race([operation, new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error(message)), milliseconds); })]); }
   finally { if (timer) clearTimeout(timer); }
+}
+// Read the first eligible original Playwright Response, not a replacement or
+// application-native JSON observation. FRESH means first host-observed after
+// arming; the bounded Page request snapshot cannot prove native initiation time.
+export async function readNativeFocusIdentity(page: Page): Promise<number> {
+  type Failure = "identity_prepare_failed" | "identity_request_ambiguous" | "identity_response_metadata" |
+    "identity_response_json_failed" | "identity_focus_failed" | "identity_deadline" | "identity_page_changed" |
+    "identity_invalid_id" | "identity_record_limit";
+  const state: { phase: "PREPARING" | "ARMED" | "SELECTED" | "SUCCESS" | "FAILURE"; failure?: Failure } = { phase: "PREPARING" };
+  const deadline = Date.now() + 15_000, old = new Set<Request>(), fresh = new Set<Request>();
+  const removers: (() => void)[] = [];
+  let active = true, pending = 0, focusDone = false, id: number | undefined;
+  let frame: Frame | undefined, origin = "", selectedRequest: Request | undefined, selectedResponse: Response | undefined;
+  let timer: ReturnType<typeof setTimeout> | undefined, cleanupFailed = false;
+  let complete!: () => void;
+  const completion = new Promise<void>(resolve => { complete = resolve; });
+  const finish = () => {
+    if (state.phase === "FAILURE") { if (pending === 0) complete(); }
+    else if (state.phase === "SELECTED" && focusDone && id !== undefined) { state.phase = "SUCCESS"; complete(); }
+  };
+  const fail = (failure: Failure) => {
+    if (!active || state.phase === "SUCCESS") return;
+    if (state.phase !== "FAILURE") { state.failure = failure; state.phase = "FAILURE"; }
+    finish();
+  };
+  const expire = () => { fail("identity_deadline"); complete(); };
+  const live = () => {
+    if (!active || state.phase === "SUCCESS" || state.phase === "FAILURE") return false;
+    if (Date.now() >= deadline) { expire(); return false; }
+    return true;
+  };
+  const record = (request: Request, beforeAction: boolean) => {
+    if (old.has(request)) return;
+    if (!fresh.has(request) && old.size + fresh.size >= 256) { fail("identity_record_limit"); return; }
+    if (beforeAction) { fresh.delete(request); old.add(request); }
+    else fresh.add(request);
+  };
+  const requestSeen = (request: Request) => {
+    if (!live()) return;
+    try { if (new URL(request.url()).pathname === "/api/auth/me") record(request, state.phase === "PREPARING"); }
+    catch { fail("identity_response_metadata"); }
+  };
+  const responseSeen = (response: Response) => {
+    if (!live()) return;
+    try {
+      if (new URL(response.url()).pathname !== "/api/auth/me") return;
+      const request = response.request();
+      if (state.phase === "PREPARING") { record(request, true); return; }
+      if (old.has(request)) return;
+      if (selectedResponse) {
+        if (request === selectedRequest && response !== selectedResponse) fail("identity_request_ambiguous");
+        return;
+      }
+      if (response.status() !== 200) return;
+      // The first non-OLD pathname/status candidate must pass these checks.
+      // Invalid metadata is terminal, never a filter for a later better body.
+      const canonical = origin + "/api/auth/me";
+      if (response.url() !== canonical || request.url() !== canonical || request.method() !== "GET" ||
+          request.resourceType() !== "fetch" || request.isNavigationRequest() || request.frame() !== frame ||
+          frame?.page() !== page || request.redirectedFrom() !== null || request.redirectedTo() !== null ||
+          request.serviceWorker() !== null || response.fromServiceWorker()) {
+        fail("identity_response_metadata"); return;
+      }
+      if (!fresh.has(request)) { fail("identity_request_ambiguous"); return; }
+      if (!live()) return;
+      selectedRequest = request; selectedResponse = response; state.phase = "SELECTED"; pending++;
+      try {
+        // Synchronous call in this response event, exactly once on this object.
+        // Playwright owns its original body implementation and any internal fallback.
+        void response.json().then(value => {
+          pending--;
+          if (live()) {
+            try {
+              const ownID = value && typeof value === "object" && !Array.isArray(value)
+                ? Object.getOwnPropertyDescriptor(value, "ID")?.value : undefined;
+              if (typeof ownID !== "number" || !Number.isSafeInteger(ownID) || ownID <= 0) fail("identity_invalid_id");
+              else id = ownID;
+            } catch { fail("identity_invalid_id"); }
+          }
+          finish();
+        }, () => { pending--; fail("identity_response_json_failed"); finish(); });
+      } catch { pending--; fail("identity_response_json_failed"); }
+    } catch { fail("identity_response_metadata"); }
+  };
+  const changed = () => { if (live()) fail("identity_page_changed"); };
+  const navigated = (current: Frame) => { if (current === frame) changed(); };
+  const install = (add: () => void, remove: () => void) => { add(); removers.push(remove); };
+  try {
+    try {
+      timer = setTimeout(expire, Math.max(0, deadline - Date.now()));
+      frame = page.mainFrame(); origin = new URL(page.url()).origin;
+      install(() => { page.on("request", requestSeen); }, () => { page.off("request", requestSeen); });
+      install(() => { page.on("response", responseSeen); }, () => { page.off("response", responseSeen); });
+      install(() => { page.on("close", changed); }, () => { page.off("close", changed); });
+      install(() => { page.on("crash", changed); }, () => { page.off("crash", changed); });
+      install(() => { page.on("framenavigated", navigated); }, () => { page.off("framenavigated", navigated); });
+      if (page.isClosed()) changed();
+      if (live()) {
+        pending++;
+        try {
+          // Metadata inspection only. The public API retains at most 100 Requests.
+          void page.requests().then(requests => {
+            pending--;
+            if (!live()) { finish(); return; }
+            try {
+              for (const request of requests) {
+                if (!live()) break;
+                if (new URL(request.url()).pathname === "/api/auth/me") record(request, true);
+              }
+              if (!live()) { finish(); return; }
+              // Arm and invoke the native action in the same synchronous segment.
+              state.phase = "ARMED"; pending++;
+              try {
+                void page.bringToFront().then(() => {
+                  pending--;
+                  if (live()) focusDone = true;
+                  finish();
+                }, () => { pending--; fail("identity_focus_failed"); finish(); });
+              } catch { pending--; fail("identity_focus_failed"); }
+            } catch { fail("identity_prepare_failed"); }
+            finish();
+          }, () => { pending--; fail("identity_prepare_failed"); finish(); });
+        } catch { pending--; fail("identity_prepare_failed"); }
+      }
+    } catch { fail("identity_prepare_failed"); }
+    await completion;
+  } finally {
+    // Pending original protocol commands are quarantined, not cancelled/joined.
+    // The existing Page/context fixture owns their eventual normal disposal.
+    active = false;
+    for (const remove of removers) { try { remove(); } catch { cleanupFailed = true; } }
+    removers.length = 0;
+    if (timer !== undefined) clearTimeout(timer);
+    old.clear(); fresh.clear(); selectedRequest = undefined; selectedResponse = undefined; frame = undefined;
+  }
+  if (state.failure || cleanupFailed) throw Object.assign(new Error(state.failure ?? "identity_cleanup_failed"),
+    cleanupFailed ? { cleanupFailure: "identity_cleanup_failed" } : {});
+  return id!;
 }
 export type Original = { domainId: string; expectedRevision: string; expectedCredentialGeneration: string; idempotencyKey: string; taskUUID: string };
 export type Actor = { username: string; password: string; auth: Authenticator; actorId: number };
