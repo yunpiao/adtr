@@ -22,6 +22,45 @@ from ci_workflow_contract import (restore_selection, restore_messages_isolation,
                                   restore_selection_predecessor)
 
 
+TASK_WORKSPACE_PRE_LOG_NAVIGATION = b'''    "web/src/TaskWorkspace.tsx": [
+      "tasks",
+      "audit",
+      "messages",
+      "messages-isolation",
+      "maintenance",
+      "user-assets-v2",
+      "directory-v3",
+      "group-members-v4",
+      "user-asset-export-v3",
+      "user-asset-export-v3-failure",
+      "user-asset-export-v3-cancel",
+      "computer-asset-export-v3",
+      "computer-asset-export-v3-failure",
+      "computer-asset-export-v3-cancel",
+      "group-asset-export-v3",
+      "group-asset-export-v3-failure",
+      "group-asset-export-v3-cancel",
+      "tasks-health-recovery"
+    ],
+'''
+TASK_WORKSPACE_LOG_NAVIGATION = TASK_WORKSPACE_PRE_LOG_NAVIGATION.replace(
+    b'      "tasks-health-recovery"\n',
+    b'      "tasks-health-recovery",\n      "operational-logs"\n',
+    1,
+)
+PRE_LOG_NAVIGATION_INVENTORY_SHA256 = '410601823ee66f9f84caa6847e46206b9c66c0fca1382edb6afcad22fb262ae4'
+
+
+def restore_log_navigation_inventory(raw):
+    """Test-only outer projection: accept exactly the frozen append-only bytes."""
+    if not isinstance(raw, bytes) or raw.count(TASK_WORKSPACE_LOG_NAVIGATION) != 1:
+        raise ValueError('original-log navigation consumer block differs')
+    predecessor = raw.replace(TASK_WORKSPACE_LOG_NAVIGATION, TASK_WORKSPACE_PRE_LOG_NAVIGATION, 1)
+    if hashlib.sha256(predecessor).hexdigest() != PRE_LOG_NAVIGATION_INVENTORY_SHA256:
+        raise ValueError('original-log navigation inventory predecessor differs')
+    return predecessor
+
+
 class SelectionContract(unittest.TestCase):
     def setUp(self):
         self.inventory=json.loads(Path('scripts/ci_inventory.json').read_text())
@@ -80,13 +119,13 @@ class SelectionContract(unittest.TestCase):
         src=dict(self.sources,**{dep:''});self.graph[root]={dep}
         self.assertEqual(self.names(self.choose([dep],src)),{'messages','messages-isolation'})
 
-    def test_task_workspace_only_keeps_original_audit_detail_consumer(self):
+    def test_task_workspace_only_keeps_original_audit_and_log_detail_consumers(self):
         # Browser navigation is not a TypeScript import edge. Keep this explicit
-        # consumer even when audit.spec.ts itself is absent from the changed set.
+        # mapping even when neither destination spec is in the changed set.
         root='web/src/TaskWorkspace.tsx'
         expected={
             'tasks', 'audit', 'messages', 'messages-isolation', 'maintenance', 'user-assets-v2',
-            'tasks-health-recovery',
+            'tasks-health-recovery', 'operational-logs',
             'directory-v3', 'group-members-v4',
             'user-asset-export-v3', 'user-asset-export-v3-failure',
             'user-asset-export-v3-cancel', 'computer-asset-export-v3',
@@ -95,6 +134,7 @@ class SelectionContract(unittest.TestCase):
             'group-asset-export-v3-cancel',
         }
         self.assertEqual(self.graph['web/e2e/audit.spec.ts'],set())
+        self.assertEqual(self.graph['web/e2e/operational-logs.spec.ts'],set())
         plan=self.choose([root])
         self.assertEqual(self.names(plan),expected)
         self.assertEqual(plan['fixed'],['user-assets-v2'])
@@ -105,6 +145,73 @@ class SelectionContract(unittest.TestCase):
         self.assertFalse(plan['groups']['native-no-store-fixed'])
         # The mapping edit itself must still receive full shared-CI validation.
         self.assertTrue(all(self.choose(['scripts/ci_inventory.json'])['groups'].values()))
+
+    def test_log_navigation_inventory_is_exact_byte_preserving_outer_addition(self):
+        raw = Path('scripts/ci_inventory.json').read_bytes()
+        predecessor = restore_log_navigation_inventory(raw)
+        self.assertEqual(hashlib.sha256(predecessor).hexdigest(), PRE_LOG_NAVIGATION_INVENTORY_SHA256)
+        self.assertEqual(predecessor.count(TASK_WORKSPACE_PRE_LOG_NAVIGATION), 1)
+        self.assertEqual(predecessor.replace(TASK_WORKSPACE_PRE_LOG_NAVIGATION, TASK_WORKSPACE_LOG_NAVIGATION, 1), raw)
+        old = json.loads(predecessor)
+        root = 'web/src/TaskWorkspace.tsx'
+        self.assertEqual(self.inventory['frontend_roots'][root], old['frontend_roots'][root] + ['operational-logs'])
+        self.assertEqual(len(old['frontend_roots'][root]), 18)
+        self.assertEqual(self.inventory['frontend_roots'][root].count('operational-logs'), 1)
+        self.assertEqual(self.inventory['browser'], old['browser'])
+        self.assertEqual(self.inventory['fixed'], old['fixed'])
+        self.assertEqual(len(self.inventory['browser']), 56)
+        self.assertEqual(len(self.inventory['fixed']), 7)
+
+    def test_log_navigation_outer_projection_rejects_consumer_and_unrelated_mutations(self):
+        raw = Path('scripts/ci_inventory.json').read_bytes()
+        root = 'web/src/TaskWorkspace.tsx'
+        added = 'operational-logs'
+        consumers = self.inventory['frontend_roots'][root]
+        self.assertEqual((json.dumps(self.inventory, indent=2) + '\n').encode(), raw)
+        variants = {
+            'missing addition': raw.replace(TASK_WORKSPACE_LOG_NAVIGATION, TASK_WORKSPACE_PRE_LOG_NAVIGATION, 1),
+            'duplicate root block': raw.replace(TASK_WORKSPACE_LOG_NAVIGATION, TASK_WORKSPACE_LOG_NAVIGATION * 2, 1),
+            'unrelated whitespace': raw.replace(b'  "browser": [', b'  "browser" : [', 1),
+            'missing final newline': raw[:-1],
+            'CRLF normalization': raw.replace(b'\n', b'\r\n'),
+        }
+
+        def changed(label, mutate):
+            candidate = copy.deepcopy(self.inventory)
+            mutate(candidate)
+            variants[label] = (json.dumps(candidate, indent=2) + '\n').encode()
+
+        changed('duplicate addition', lambda candidate: candidate['frontend_roots'][root].append(added))
+        for position in range(len(consumers) - 1):
+            changed('misplaced addition ' + str(position),
+                    lambda candidate, position=position: candidate['frontend_roots'][root].insert(
+                        position, candidate['frontend_roots'][root].pop()))
+        for position, consumer in enumerate(consumers[:-1]):
+            changed('deleted old consumer ' + consumer,
+                    lambda candidate, position=position: candidate['frontend_roots'][root].pop(position))
+            changed('renamed old consumer ' + consumer,
+                    lambda candidate, position=position: candidate['frontend_roots'][root].__setitem__(position, 'system'))
+        changed('additional old consumer', lambda candidate: candidate['frontend_roots'][root].insert(0, 'system'))
+        changed('reordered old consumers', lambda candidate: candidate['frontend_roots'][root].__setitem__(
+            slice(0, 2), list(reversed(candidate['frontend_roots'][root][:2]))))
+        for other_root in self.inventory['frontend_roots']:
+            if other_root == root:
+                continue
+            changed('addition at wrong root ' + other_root,
+                    lambda candidate, other_root=other_root: (
+                        candidate['frontend_roots'][root].pop(), candidate['frontend_roots'][other_root].append(added)))
+            changed('other root changed ' + other_root,
+                    lambda candidate, other_root=other_root: candidate['frontend_roots'][other_root].append('system'))
+        changed('browser command changed', lambda candidate: candidate['browser'][0].__setitem__('command', 'true'))
+        changed('browser spec changed', lambda candidate: candidate['browser'][0]['specs'].append('web/e2e/audit.spec.ts'))
+        changed('browser order changed', lambda candidate: candidate['browser'].reverse())
+        changed('fixed entries changed', lambda candidate: candidate['fixed'].pop())
+        changed('fixed order changed', lambda candidate: candidate['fixed'].reverse())
+        for label, variant in variants.items():
+            with self.subTest(mutation=label):
+                self.assertNotEqual(variant, raw)
+                with self.assertRaises(ValueError):
+                    restore_log_navigation_inventory(variant)
 
     def test_unmapped_production_consumer_widens_shared_dependency(self):
         dep='web/src/shared.ts';other='web/src/UnmappedPage.tsx'
@@ -716,7 +823,7 @@ class SelectionContract(unittest.TestCase):
         self.assertEqual([e for e in self.inventory['browser'] if e['name'] == name], [entry])
         self.assertNotIn(name, self.inventory['fixed'])
         self.assertIn(name, self.inventory['frontend_roots']['web/src/TaskWorkspace.tsx'])
-        predecessor = copy.deepcopy(self.inventory)
+        predecessor = json.loads(restore_log_navigation_inventory(Path('scripts/ci_inventory.json').read_bytes()))
         predecessor['browser'].remove(entry)
         predecessor['frontend_roots']['web/src/TaskWorkspace.tsx'].remove(name)
         self.assertEqual(hashlib.sha256((json.dumps(predecessor, indent=2) + '\n').encode()).hexdigest(),

@@ -899,6 +899,424 @@ describe("dedicated operational bundle guard", () => {
   );
 });
 
+// Synthetic entry/lifecycle contracts only. The original producer, dedicated
+// authorization, cross-page pending record and ZIP are covered by log suites.
+describe("original operational bundle task navigation", () => {
+  const linkName = "查看原运行日志诊断包";
+  const firstID = task().taskUUID;
+  const secondID = "00000000-0000-4000-8000-000000000002";
+  const bundleTask = (state: TaskState = "succeeded", id = firstID): Task => ({
+    ...task(state, id),
+    taskName: "system.logs_bundle",
+  });
+  const bundleDetail = (current = bundleTask()) => ({
+    task: current,
+    events: [],
+  });
+  function deferredResponse() {
+    let resolve!: (value: Response) => void;
+    const promise = new Promise<Response>((done) => {
+      resolve = done;
+    });
+    return { promise, resolve };
+  }
+  function expectNoLink() {
+    expect(screen.queryByRole("link", { name: linkName })).toBeNull();
+  }
+  function expectReadOnlyEntry() {
+    expect(
+      fetcher.mock.calls.filter(
+        ([url, init]) =>
+          url.startsWith("/api/system/logs") ||
+          (init.method === "POST" && url !== "/api/access/check"),
+      ),
+    ).toHaveLength(0);
+  }
+  function expectNoBundleAction() {
+    for (const name of [
+      "请求取消任务",
+      "创建恢复任务",
+      "确认请求取消",
+      "确认恢复任务",
+      "下载 ZIP",
+    ])
+      expect(screen.queryByRole("button", { name })).toBeNull();
+    expect(screen.queryByRole("link", { name: "下载 ZIP" })).toBeNull();
+    expect(screen.queryByLabelText("操作者当前密码")).toBeNull();
+    expect(screen.queryByLabelText("未使用的认证器验证码")).toBeNull();
+    expectReadOnlyEntry();
+  }
+
+  it.each(taskStates)(
+    "links only the original active %s task without fetching logs or offering generic mutations",
+    async (state) => {
+      override = (url) =>
+        url.startsWith("/api/tasks/detail")
+          ? response(bundleDetail(bundleTask(state)))
+          : undefined;
+      await detail();
+      expect(screen.getAllByRole("link", { name: linkName })).toHaveLength(1);
+      expect(screen.getByRole("link", { name: linkName })).toHaveAttribute(
+        "href",
+        `#operational-logs/detail/${firstID}`,
+      );
+      expect(
+        screen.getByText(
+          /此入口仅核对原任务对应的诊断包；能否查看或下载，以原页面的当前授权和文件校验为准。/,
+        ),
+      ).toBeVisible();
+      expect(screen.getByTestId("task-detail-identity")).toHaveTextContent(
+        firstID,
+      );
+      expect(
+        fetcher.mock.calls
+          .filter(([url]) => url === "/api/access/check")
+          .map(([, init]) => JSON.parse(init.body as string).paths),
+      ).toEqual([taskOperations]);
+      expectNoBundleAction();
+    },
+  );
+
+  it.each([
+    ["different kind", { taskName: "infrastructure.health" }],
+    ["near kind", { taskName: "system.logs_bundle.other" }],
+    ["case changed kind", { taskName: "System.logs_bundle" }],
+    ["different domain", { domainId: "synthetic-domain-id" }],
+    ["case changed domain", { domainId: "Platform" }],
+    ["archived task", { archived: true }],
+  ] as const)("does not link a %s", async (_label, change) => {
+    override = (url) =>
+      url.startsWith("/api/tasks/detail")
+        ? response(bundleDetail({ ...bundleTask(), ...change }))
+        : undefined;
+    await detail();
+    expectNoLink();
+    expectReadOnlyEntry();
+  });
+
+  it.each([
+    "not-a-uuid",
+    "../operational-logs/detail",
+    `${firstID}?download=1`,
+    `${firstID}/download`,
+    secondID,
+  ])("rejects a malformed or mismatched detail ID %s", async (id) => {
+    override = (url) =>
+      url.startsWith("/api/tasks/detail")
+        ? response(bundleDetail(bundleTask("succeeded", id)))
+        : undefined;
+    await start();
+    click(`详情 ${firstID}`);
+    await screen.findByRole("alert");
+    expectNoLink();
+    expect(screen.queryByTestId("task-detail-identity")).toBeNull();
+    expectNoBundleAction();
+  });
+
+  it("does not derive a link from the route while the first detail is pending or lacks a task", async () => {
+    const held = deferredResponse();
+    override = (url) =>
+      url.startsWith("/api/tasks/detail") ? held.promise : undefined;
+    await start();
+    click(`详情 ${firstID}`);
+    await screen.findByText("正在读取任务详情…");
+    expectNoLink();
+    expectNoBundleAction();
+    await act(async () =>
+      held.resolve(await response({ task: null, events: [] })),
+    );
+    await screen.findByRole("alert");
+    expectNoLink();
+    expectNoBundleAction();
+  });
+
+  it.each([
+    [403, "forbidden"],
+    [500, "internal"],
+  ] as const)(
+    "hides the old link throughout refresh and %s failure, then restores only a successful current read",
+    async (status, error) => {
+      override = (url) =>
+        url.startsWith("/api/tasks/detail")
+          ? response(bundleDetail())
+          : undefined;
+      await detail();
+      expect(screen.getByRole("link", { name: linkName })).toBeVisible();
+      const held = deferredResponse();
+      override = (url) =>
+        url.startsWith("/api/tasks/detail") ? held.promise : undefined;
+      click("刷新任务详情");
+      await screen.findByText("正在读取任务详情…");
+      expectNoLink();
+      await act(async () => held.resolve(await response({ error }, status)));
+      await screen.findByRole("alert");
+      expectNoLink();
+      override = (url) =>
+        url.startsWith("/api/tasks/detail")
+          ? response(bundleDetail())
+          : undefined;
+      click("刷新任务详情");
+      expect(
+        await screen.findByRole("link", { name: linkName }),
+      ).toHaveAttribute(
+        "href",
+        `#operational-logs/detail/${firstID}`,
+      );
+      expectNoBundleAction();
+    },
+  );
+
+  it.each([
+    "unauthenticated",
+    "password_change_required",
+    "credential_use_identity_changed",
+    "domain_source_identity_changed",
+  ])(
+    "clears the loaded entry when the current read reports %s",
+    async (error) => {
+      override = (url) =>
+        url.startsWith("/api/tasks/detail")
+          ? response(bundleDetail())
+          : undefined;
+      const sessionChanged = vi.fn();
+      render(
+        <TaskWorkspace profile={profile} sessionChanged={sessionChanged} />,
+      );
+      await screen.findByRole("table", { name: "任务列表" });
+      click(`详情 ${firstID}`);
+      await screen.findByRole("link", { name: linkName });
+      override = (url) =>
+        url.startsWith("/api/tasks/detail")
+          ? response({ error }, 401)
+          : undefined;
+      click("刷新任务详情");
+      await waitFor(() => expect(sessionChanged).toHaveBeenCalledTimes(1));
+      expectNoLink();
+      expect(screen.queryByTestId("task-detail-identity")).toBeNull();
+      expectNoBundleAction();
+    },
+  );
+
+  it.each(["/api/access/menu", "/api/access/check"])(
+    "waits for %s before reading or exposing a task entry",
+    async (path) => {
+      const held = deferredResponse();
+      override = (url) =>
+        url === path
+          ? held.promise
+          : url.startsWith("/api/tasks/detail")
+            ? response(bundleDetail())
+            : undefined;
+      render(<TaskWorkspace profile={profile} sessionChanged={vi.fn()} />);
+      await screen.findByText("正在确认任务权限…");
+      expectNoLink();
+      expect(calls("")).toHaveLength(0);
+      expect(calls("/detail")).toHaveLength(0);
+      expectReadOnlyEntry();
+      await act(async () =>
+        held.resolve(
+          await response(
+            path.endsWith("/menu")
+              ? { menu: metadata() }
+              : { results: taskOperations.map(() => true) },
+          ),
+        ),
+      );
+      await screen.findByRole("table", { name: "任务列表" });
+      click(`详情 ${firstID}`);
+      await screen.findByRole("link", { name: linkName });
+      expectNoBundleAction();
+    },
+  );
+
+  it.each([
+    ["non-array menu", "/api/access/menu", { menu: {} }],
+    ["non-array checks", "/api/access/check", { results: {} }],
+    ["short checks", "/api/access/check", { results: [true] }],
+    [
+      "non-boolean check",
+      "/api/access/check",
+      { results: taskOperations.map((_, index) => (index === 0 ? 1 : true)) },
+    ],
+  ] as const)(
+    "rejects %s without exposing the entry",
+    async (_label, path, body) => {
+      override = (url) => (url === path ? response(body) : undefined);
+      render(<TaskWorkspace profile={profile} sessionChanged={vi.fn()} />);
+      await screen.findByRole("alert");
+      expect(calls("")).toHaveLength(0);
+      expect(calls("/detail")).toHaveLength(0);
+      expectNoLink();
+      expectReadOnlyEntry();
+    },
+  );
+
+  it.each(["menu", "GET /api/tasks", "GET /api/tasks/detail"])(
+    "does not expose the entry when %s alone denies task access",
+    async (denied) => {
+      override = (url) => {
+        if (url === "/api/access/menu")
+          return response({
+            menu: metadata().map((node) =>
+              denied === "menu" && node.mark === "tasks"
+                ? { ...node, auth: { ...node.auth, readable: false } }
+                : node,
+            ),
+          });
+        if (url === "/api/access/check")
+          return response({
+            results: taskOperations.map((operation) => operation !== denied),
+          });
+        return undefined;
+      };
+      render(<TaskWorkspace profile={profile} sessionChanged={vi.fn()} />);
+      if (denied === "GET /api/tasks/detail") {
+        await screen.findByRole("table", { name: "任务列表" });
+        expect(
+          screen.queryByRole("button", { name: `详情 ${firstID}` }),
+        ).toBeNull();
+      } else {
+        await screen.findByText("当前账户没有后台任务读取权限。");
+        expect(calls("")).toHaveLength(0);
+      }
+      expect(calls("/detail")).toHaveLength(0);
+      expectNoLink();
+      expectReadOnlyEntry();
+    },
+  );
+
+  it("does not infer dedicated log access or add checks when that menu is denied", async () => {
+    override = (url) =>
+      url === "/api/access/menu"
+        ? response({
+            menu: metadata().map((node) =>
+              ["system", "system_logs"].includes(node.mark)
+                ? { ...node, auth: { readable: false, writeable: false } }
+                : node,
+            ),
+          })
+        : url.startsWith("/api/tasks/detail")
+          ? response(bundleDetail())
+          : undefined;
+    await detail();
+    expect(screen.getByRole("link", { name: linkName })).toBeVisible();
+    expect(
+      fetcher.mock.calls
+        .filter(([url]) => url === "/api/access/check")
+        .map(([, init]) => JSON.parse(init.body as string).paths),
+    ).toEqual([taskOperations]);
+    expectNoBundleAction();
+  });
+
+  it("ignores an aborted old bundle response after selecting another task", async () => {
+    const stale = deferredResponse();
+    override = (url) =>
+      url.startsWith("/api/tasks/detail")
+        ? url.includes(firstID)
+          ? stale.promise
+          : response(bundleDetail(bundleTask("succeeded", secondID)))
+        : url.split("?")[0] === "/api/tasks"
+          ? response(list([bundleTask(), bundleTask("succeeded", secondID)]))
+          : undefined;
+    await start();
+    click(`详情 ${firstID}`);
+    await waitFor(() => expect(calls("/detail")).toHaveLength(1));
+    const signal = calls("/detail")[0][1].signal;
+    expectNoLink();
+    click("返回任务列表");
+    await screen.findByRole("table", { name: "任务列表" });
+    click(`详情 ${secondID}`);
+    await screen.findByRole("link", { name: linkName });
+    expect(signal?.aborted).toBe(true);
+    // This mock deliberately ignores AbortSignal and still completes.
+    await act(async () => stale.resolve(await response(bundleDetail())));
+    expect(screen.getByTestId("task-detail-identity")).toHaveTextContent(
+      secondID,
+    );
+    expect(screen.getAllByRole("link", { name: linkName })).toHaveLength(1);
+    expect(screen.getByRole("link", { name: linkName })).toHaveAttribute(
+      "href",
+      `#operational-logs/detail/${secondID}`,
+    );
+    expectNoBundleAction();
+  });
+
+  it.each(["account change", "unmount"])(
+    "cannot restore the old entry after %s even if transport ignores abort",
+    async (transition) => {
+      override = (url) =>
+        url.startsWith("/api/tasks/detail")
+          ? response(bundleDetail())
+          : undefined;
+      const mounted = render(
+        <TaskWorkspace profile={profile} sessionChanged={vi.fn()} />,
+      );
+      await screen.findByRole("table", { name: "任务列表" });
+      click(`详情 ${firstID}`);
+      await screen.findByRole("link", { name: linkName });
+      const stale = deferredResponse();
+      override = (url) =>
+        url.startsWith("/api/tasks/detail") ? stale.promise : undefined;
+      click("刷新任务详情");
+      await waitFor(() => expect(calls("/detail")).toHaveLength(2));
+      const signal = calls("/detail")[1][1].signal;
+      expectNoLink();
+      if (transition === "account change") {
+        mounted.rerender(
+          <TaskWorkspace
+            profile={{
+              ...profile,
+              ID: 2,
+              username: "other_admin",
+              csrfToken: "other-session",
+            }}
+            sessionChanged={vi.fn()}
+          />,
+        );
+        await screen.findByRole("table", { name: "任务列表" });
+      } else mounted.unmount();
+      expect(signal?.aborted).toBe(true);
+      await act(async () => stale.resolve(await response(bundleDetail())));
+      expectNoLink();
+      expect(screen.queryByTestId("task-detail-identity")).toBeNull();
+      expectNoBundleAction();
+    },
+  );
+
+  it("preserves a valid actor-bound bundle intent byte for byte while rendering and refreshing details", async () => {
+    const key = `adtr.pending-operational-bundle.${profile.ID}.${encodeURIComponent(profile.username)}`;
+    const raw = JSON.stringify({
+      owner: profile.ID,
+      username: profile.username,
+      input: {
+        startTm: "2026-10-06T01:00:00.000001Z",
+        endTm: "2026-10-07T01:00:00.000001Z",
+        systemType: ["api", "worker"],
+        idempotencyKey: "00000000-0000-4000-8000-000000000039",
+      },
+    });
+    sessionStorage.setItem(key, raw);
+    override = (url) =>
+      url.startsWith("/api/tasks/detail")
+        ? response(bundleDetail())
+        : undefined;
+    await detail();
+    expect(screen.getByRole("link", { name: linkName })).toBeVisible();
+    expect(sessionStorage.getItem(key)).toBe(raw);
+    const held = deferredResponse();
+    override = (url) =>
+      url.startsWith("/api/tasks/detail") ? held.promise : undefined;
+    click("刷新任务详情");
+    await screen.findByText("正在读取任务详情…");
+    expectNoLink();
+    expect(sessionStorage.getItem(key)).toBe(raw);
+    await act(async () => held.resolve(await response(bundleDetail())));
+    await screen.findByRole("link", { name: linkName });
+    expect(sessionStorage.getItem(key)).toBe(raw);
+    expectNoBundleAction();
+  });
+});
+
 describe("dedicated dictionary task guards", () => {
   it.each([
     ["domain.directory_read", "running"],

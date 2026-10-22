@@ -1,5 +1,12 @@
 import { navigateTo } from "./navigation";
-import { test, expect, type BrowserContext, type Page } from "@playwright/test";
+import {
+  test,
+  expect,
+  type BrowserContext,
+  type Page,
+  type Request,
+  type Response,
+} from "@playwright/test";
 import { createHmac, randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
@@ -100,6 +107,266 @@ async function proof(page: Page, auth: Authenticator, password: string) {
   await page
     .getByLabel("未使用的认证器验证码", { exact: true })
     .fill(await freshCode(auth));
+}
+type PendingBundleExpectation = { key: string; bytes: string };
+async function pendingBundleMatches(
+  page: Page,
+  key: string,
+  expected: string | null,
+) {
+  try {
+    // Compare the complete original whitelist, but return only a boolean.
+    return await page.evaluate(
+      ({ key, expected }) => {
+        try {
+          return sessionStorage.getItem(key) === expected;
+        } catch {
+          return false;
+        }
+      },
+      { key, expected },
+    );
+  } catch {
+    throw new Error("original_bundle_pending_observation_failed");
+  }
+}
+function observeOriginalBundleDetail(
+  page: Page,
+  origin: string,
+  taskID: string,
+  actor: number,
+) {
+  const requests = new Set<Request>();
+  let armed = false,
+    settled = false,
+    timer: ReturnType<typeof setTimeout> | undefined,
+    resolve!: (matched: boolean) => void;
+  const completed = new Promise<boolean>((done) => {
+    resolve = done;
+  });
+  const finish = (matched: boolean) => {
+    if (settled) return;
+    settled = true;
+    if (timer) clearTimeout(timer);
+    resolve(matched);
+  };
+  const onRequest = (request: Request) => {
+    if (!armed || settled) return;
+    try {
+      const url = new URL(request.url());
+      if (
+        request.method() === "GET" &&
+        url.origin === origin &&
+        url.pathname === "/api/system/logs/bundles/detail" &&
+        [...url.searchParams].length === 1 &&
+        url.searchParams.get("taskUUID") === taskID
+      )
+        requests.add(request);
+    } catch {
+      finish(false);
+    }
+  };
+  const onResponse = (response: Response) => {
+    if (!requests.has(response.request()) || settled) return;
+    try {
+      const headers = response.headers();
+      finish(
+        response.status() === 200 &&
+          headers["x-adtr-user-id"] === String(actor) &&
+          headers["x-content-type-options"] === "nosniff" &&
+          headers["content-type"]?.split(";")[0].trim().toLowerCase() ===
+            "application/json" &&
+          (headers["cache-control"] ?? "")
+            .split(",")
+            .some((value) => value.trim().toLowerCase() === "no-store"),
+      );
+    } catch {
+      finish(false);
+    }
+  };
+  // An aborted mount cannot satisfy the witness. A later current mount can
+  // still produce its own new Request, within the same bounded click window.
+  const onFailed = (request: Request) => requests.delete(request);
+  const onClosed = () => finish(false);
+  page.on("request", onRequest);
+  page.on("response", onResponse);
+  page.on("requestfailed", onFailed);
+  page.on("close", onClosed);
+  return {
+    completed,
+    arm() {
+      armed = true;
+      timer = setTimeout(() => finish(false), 15000);
+    },
+    async stop() {
+      page.off("request", onRequest);
+      page.off("response", onResponse);
+      page.off("requestfailed", onFailed);
+      page.off("close", onClosed);
+      finish(false);
+      await completed;
+      requests.clear();
+    },
+  };
+}
+async function originalBundleFromTask(
+  page: Page,
+  taskID: string,
+  actor: number,
+  pending?: PendingBundleExpectation,
+) {
+  let phase:
+      | "pending_before"
+      | "task_list"
+      | "task_filter"
+      | "task_row"
+      | "task_detail"
+      | "original_link"
+      | "original_detail"
+      | "pending_after"
+      | "read_only" = "pending_before",
+    observer: ReturnType<typeof observeOriginalBundleDetail> | undefined,
+    writes = 0,
+    downloads = 0,
+    observationsValid = true;
+  const origin = new URL(page.url()).origin;
+  const countRequest = (request: Request) => {
+    try {
+      const url = new URL(request.url()),
+        method = request.method();
+      if (url.origin !== origin) return;
+      if (
+        ["POST", "PUT", "PATCH", "DELETE"].includes(method) &&
+        !(method === "POST" && url.pathname === "/api/access/check")
+      )
+        writes++;
+      if (
+        method === "GET" &&
+        url.pathname === "/api/system/logs/bundles/download"
+      )
+        downloads++;
+    } catch {
+      observationsValid = false;
+    }
+  };
+  page.on("request", countRequest);
+  try {
+    if (pending)
+      expect(await pendingBundleMatches(page, pending.key, pending.bytes)).toBe(
+        true,
+      );
+    phase = "task_list";
+    await navigateTo(page, "后台任务");
+    await expect(
+      page.getByRole("heading", { name: "执行队列", exact: true }),
+    ).toBeVisible({ timeout: 15000 });
+    await expect(
+      page.getByRole("table", { name: "任务列表", exact: true }),
+    ).toBeVisible({ timeout: 15000 });
+    phase = "task_filter";
+    const filters = page.getByRole("form", {
+      name: "任务筛选条件",
+      exact: true,
+    });
+    if (!(await filters.isVisible()))
+      await page
+        .locator("details.task-filter-panel > summary")
+        .click({ timeout: 15000 });
+    await filters
+      .getByLabel("任务种类筛选", { exact: true })
+      .fill("system.logs_bundle", { timeout: 15000 });
+    await filters
+      .getByLabel("域 ID 筛选", { exact: true })
+      .fill("platform", { timeout: 15000 });
+    await filters
+      .getByLabel("任务状态筛选", { exact: true })
+      .selectOption("", { timeout: 15000 });
+    const visibility = filters.getByLabel("任务可见性筛选", { exact: true });
+    if (await visibility.count())
+      await visibility.selectOption("", { timeout: 15000 });
+    await filters
+      .getByLabel("每页任务数", { exact: true })
+      .selectOption("100", { timeout: 15000 });
+    await filters
+      .getByRole("button", { name: "筛选任务", exact: true })
+      .click({ timeout: 15000 });
+    phase = "task_row";
+    const row = page.getByRole("row").filter({
+      has: page.getByRole("button", { name: `详情 ${taskID}`, exact: true }),
+    });
+    await expect(row).toHaveCount(1, { timeout: 15000 });
+    await expect(row).toContainText("system.logs_bundle");
+    await expect(row).toContainText("platform");
+    await expect(row).toContainText(taskID);
+    await row
+      .getByRole("button", { name: `详情 ${taskID}`, exact: true })
+      .click({ timeout: 15000 });
+    phase = "task_detail";
+    await expect(page.getByTestId("task-detail-identity")).toHaveText(taskID, {
+      timeout: 15000,
+    });
+    await expect(
+      page.getByRole("button", { name: "请求取消任务", exact: true }),
+    ).toHaveCount(0);
+    await expect(
+      page.getByRole("button", { name: "创建恢复任务", exact: true }),
+    ).toHaveCount(0);
+    const link = page.getByRole("link", {
+      name: "查看原运行日志诊断包",
+      exact: true,
+    });
+    await expect(link).toBeVisible({ timeout: 15000 });
+    await expect(link).toHaveAttribute(
+      "href",
+      `#operational-logs/detail/${taskID}`,
+    );
+    // No operational detail reader is mounted in this generic task view.
+    // Only a Request observed after arming can match the clicked destination.
+    observer = observeOriginalBundleDetail(page, origin, taskID, actor);
+    phase = "original_link";
+    observer.arm();
+    await link.click({ timeout: 15000 });
+    expect(await observer.completed).toBe(true);
+    phase = "original_detail";
+    await expect(page).toHaveURL(`${origin}/#operational-logs/detail/${taskID}`);
+    await expect(
+      page.getByRole("heading", { name: "诊断包详情", exact: true }),
+    ).toBeVisible({ timeout: 15000 });
+    await expect(
+      page.locator("dt").filter({ hasText: /^任务 ID$/ }).locator("+ dd"),
+    ).toHaveText(taskID, { timeout: 15000 });
+    await expect(
+      page.getByLabel("操作者当前密码", { exact: true }),
+    ).toHaveCount(0);
+    await expect(
+      page.getByLabel("未使用的认证器验证码", { exact: true }),
+    ).toHaveCount(0);
+    if (!pending) {
+      const download = page.getByRole("button", {
+        name: "下载 ZIP",
+        exact: true,
+      });
+      await expect(download).toBeVisible({ timeout: 15000 });
+      await expect(download).toBeEnabled({ timeout: 15000 });
+    }
+    phase = "pending_after";
+    if (pending) {
+      expect(await pendingBundleMatches(page, pending.key, pending.bytes)).toBe(
+        true,
+      );
+      await expect(page.getByText(/有一次打包提交尚未确认/)).toBeVisible();
+    }
+    phase = "read_only";
+    expect(observationsValid).toBe(true);
+    expect(writes).toBe(0);
+    expect(downloads).toBe(0);
+  } catch {
+    // Closed phases only: no raw transport, header, body, proof or cause.
+    throw new Error(`original_bundle_navigation_${phase}_failed`);
+  } finally {
+    page.off("request", countRequest);
+    if (observer) await observer.stop();
+  }
 }
 function inspectZip(
   bytes: Buffer,
@@ -327,6 +594,14 @@ test("real API/worker journal → lost-submit recovery → protected ZIP and own
       systemType: submittedBody!.systemType,
     } as Selection;
   expect(selected).toEqual(produced.selection);
+  const pending: PendingBundleExpectation = {
+    key: `adtr.pending-operational-bundle.${me.ID}.${encodeURIComponent(me.username)}`,
+    bytes: JSON.stringify({
+      owner: me.ID,
+      username: me.username,
+      input: { ...selected, idempotencyKey: submittedBody!.idempotencyKey },
+    }),
+  };
   await page.unroute("**/api/system/logs/bundles");
   await page.reload();
   await expect(
@@ -339,6 +614,9 @@ test("real API/worker journal → lost-submit recovery → protected ZIP and own
   await expect(
     page.getByRole("button", { name: `查看诊断包 ${taskID}`, exact: true }),
   ).toBeVisible();
+  // Viewing the original task/package is not a submission receipt. Keep the
+  // complete original pending intent until the existing explicit replay.
+  await originalBundleFromTask(page, taskID, me.ID, pending);
   await page
     .getByRole("button", { name: "核对未确认打包", exact: true })
     .click();
@@ -364,6 +642,7 @@ test("real API/worker journal → lost-submit recovery → protected ZIP and own
   await expect(
     page.getByRole("button", { name: "下载 ZIP", exact: true }),
   ).toBeVisible({ timeout: 30000 });
+  expect(await pendingBundleMatches(page, pending.key, null)).toBe(true);
   const persisted = await read(
     context,
     `/api/system/logs/bundles/detail?taskUUID=${taskID}`,
@@ -419,6 +698,9 @@ test("real API/worker journal → lost-submit recovery → protected ZIP and own
     body: producerEvidence,
     contentType: "application/json",
   });
+  // Re-enter through the same persisted task, then explicitly download its
+  // already verified ZIP. This navigation adds no proof or business write.
+  await originalBundleFromTask(page, taskID, me.ID);
   const [download] = await Promise.all([
     page.waitForEvent("download"),
     page.getByRole("button", { name: "下载 ZIP", exact: true }).click(),
