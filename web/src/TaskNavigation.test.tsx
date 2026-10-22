@@ -1284,14 +1284,14 @@ describe("current direct-parent detail action", () => {
     const view = setup();
     view.change({ context: { ...view.context, can: () => true } });
     await act(async () => {});
-    await ready();
+    screen.getByRole("button", { name: name() });
     click("请求取消任务");
     fill("操作者当前密码", "Synthetic Parent Navigation Password 123");
     fill("未使用的认证器验证码", "654321");
     const password = screen.getByLabelText("操作者当前密码");
     const form = password.closest("form");
     const result = screen.getByLabelText("任务实际结果");
-    const retained = capture(await ready());
+    const retained = capture(screen.getByRole("button", { name: name() }));
     const next = deferred();
     override = (url) => url.startsWith("/api/tasks/detail?") ? next.promise : undefined;
     await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
