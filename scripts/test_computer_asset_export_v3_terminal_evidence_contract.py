@@ -1,6 +1,7 @@
 """Pure-Python corruption tests. Generated unit specimens are NOT E2E artifacts."""
 import base64
 import copy
+import hashlib
 import json
 import re
 from pathlib import Path
@@ -55,7 +56,92 @@ async function observedReceiptAndDetail(page: Page, actor: number, taskID: strin
 '''
 
 
+# The diagnostic-only delta must reverse to the reviewed spec bytes. It does
+# not change any Worker/browser helper, timeout, request or assertion semantics.
+QUEUED_CANCEL_STAGE_BASELINE_SHA256 = "8f1acd105d4e35ff052efd14be88f8a4c5ea554f7c29e9fb6fd6050864473149"
+QUEUED_CANCEL_PHASE_TYPE = '''type QueuedCancelPhase =
+  | "setup"
+  | "pause"
+  | "create"
+  | "default-read-only"
+  | "new-tab"
+  | "dedicated-original-detail"
+  | "dedicated-cancel"
+  | "original-asset-receipt"
+  | "resume-owned-worker"
+  | "post-resume-receipt-detail"
+  | "post-resume-database"
+  | "post-resume-download-unavailable"
+  | "post-resume-database-invariant"
+  | "post-resume-detail-invariant"
+  | "post-resume-download-events"
+  | "old-panel-status-scroll"
+  | "old-panel-status-viewport"
+  | "old-panel-task-id-viewport"
+  | "old-panel-create-button-viewport"
+  | "new-entry-terminal-pixels"
+  | "evidence";
+'''
+QUEUED_CANCEL_PHASE_INIT = '''  let phase: QueuedCancelPhase = "setup", failure: QueuedCancelPhase | "" = "", cleanupFailed = false, restoreWorker = false;'''
+QUEUED_CANCEL_ORIGINAL_INIT = '''  let phase = "setup", failure = "", cleanupFailed = false, restoreWorker = false;'''
+QUEUED_CANCEL_POST_RESUME_STAGES = '''    phase = "resume-owned-worker";
+    const resume = await resumeOwnedExportWorker(context, pause);
+    phase = "post-resume-receipt-detail";
+    const postResumeReads = await observedReceiptAndDetail(page, setup.actorId, originalTaskID, request.domainId, operation.idempotencyKey);
+    phase = "post-resume-database";
+    const postResumeDatabase = await terminalExport(originalTaskID);
+    phase = "post-resume-download-unavailable";
+    const postResumeUnavailableDownload = await unavailableDownload(context, originalTaskID);
+    const postResume = { ...postResumeReads, database: postResumeDatabase, unavailableDownload: postResumeUnavailableDownload };
+    phase = "post-resume-database-invariant";
+    expect(postResume.database).toEqual(database);
+    phase = "post-resume-detail-invariant";
+    expect(postResume.detail).toMatchObject({ downloadReady: false, downloadStatus: "cancelled", task: { state: "cancelled" } });
+    phase = "post-resume-download-events";
+    expect(downloads).toBe(0);
+    // Keep the old asset-panel DOM and visibility checks after both queue cycles.
+    const cancelledStatus = panel.getByRole("status").filter({ hasText: "服务器已确认取消，没有可下载文件" });
+    phase = "old-panel-status-scroll";
+    await cancelledStatus.scrollIntoViewIfNeeded();
+    phase = "old-panel-status-viewport";
+    await expect(cancelledStatus).toBeInViewport({ ratio: 1 });
+    phase = "old-panel-task-id-viewport";
+    await expect(panel.getByText(`任务 ID：${originalTaskID}`, { exact: true })).toBeInViewport({ ratio: 1 });
+    phase = "old-panel-create-button-viewport";
+    await expect(panel.getByRole("button", { name: "按当前列表创建另一导出", exact: true })).toBeInViewport({ ratio: 1 });
+'''
+QUEUED_CANCEL_ORIGINAL_POST_RESUME = '''    phase = "resume-owned-worker";
+    const resume = await resumeOwnedExportWorker(context, pause);
+    const postResume = { ...await observedReceiptAndDetail(page, setup.actorId, originalTaskID, request.domainId, operation.idempotencyKey), database: await terminalExport(originalTaskID), unavailableDownload: await unavailableDownload(context, originalTaskID) };
+    expect(postResume.database).toEqual(database);
+    expect(postResume.detail).toMatchObject({ downloadReady: false, downloadStatus: "cancelled", task: { state: "cancelled" } });
+    expect(downloads).toBe(0);
+    // Keep the old asset-panel DOM and visibility checks after both queue cycles.
+    const cancelledStatus = panel.getByRole("status").filter({ hasText: "服务器已确认取消，没有可下载文件" });
+    await cancelledStatus.scrollIntoViewIfNeeded();
+    await expect(cancelledStatus).toBeInViewport({ ratio: 1 });
+    await expect(panel.getByText(`任务 ID：${originalTaskID}`, { exact: true })).toBeInViewport({ ratio: 1 });
+    await expect(panel.getByRole("button", { name: "按当前列表创建另一导出", exact: true })).toBeInViewport({ ratio: 1 });
+'''
+
+
+def restore_queued_cancel_stages(source):
+    v.require(type(source) is str, 'queued diagnostic source text')
+    changes = (
+        (QUEUED_CANCEL_PHASE_TYPE, ''),
+        (QUEUED_CANCEL_PHASE_INIT, QUEUED_CANCEL_ORIGINAL_INIT),
+        (QUEUED_CANCEL_POST_RESUME_STAGES, QUEUED_CANCEL_ORIGINAL_POST_RESUME),
+    )
+    for current, previous in changes:
+        v.require(source.count(current) == 1, 'one exact closed diagnostic delta')
+        source = source.replace(current, previous, 1)
+    v.require(hashlib.sha256(source.encode('utf-8')).hexdigest() == QUEUED_CANCEL_STAGE_BASELINE_SHA256,
+              'diagnostic inverse preserves exact original queued behavior')
+    return source
+
+
 def queued_cancel_browser_contract(source):
+    restore_queued_cancel_stages(source)
     v.require(type(source) is str and source.endswith(QUEUED_CANCEL_CLEANUP), 'closed queued cleanup and safe failure propagation')
     v.require(source.count('  finally {\n') == 1, 'one outer queued cleanup')
     v.require(source.count('await taskPage.close();') == 1 and source.count('await restoreOwnedExportWorker();') == 1, 'await each owned cleanup exactly once')
@@ -341,6 +427,91 @@ class TerminalEvidenceContract(unittest.TestCase):
         self.assertGreaterEqual(cancel.count('toBeInViewport({ ratio: 1 })'), 3)
         self.assertLess(cancel.index('expect(postResume.database).toEqual(database)'), cancel.index('await screenshot(taskPage, info,'))
 
+    def test_queued_post_resume_diagnostic_inverse(self):
+        root = Path(__file__).resolve().parents[1]
+        source = (root / 'web/e2e/computer-asset-export-v3-cancel.spec.ts').read_bytes().decode('utf-8')
+        restored = restore_queued_cancel_stages(source)
+        self.assertEqual(hashlib.sha256(restored.encode('utf-8')).hexdigest(), QUEUED_CANCEL_STAGE_BASELINE_SHA256)
+        self.assertEqual(restored.count(QUEUED_CANCEL_ORIGINAL_POST_RESUME), 1)
+        self.assertEqual(restored.count(QUEUED_CANCEL_ORIGINAL_INIT), 1)
+        self.assertNotIn(QUEUED_CANCEL_PHASE_TYPE, restored)
+        queued_cancel_browser_contract(source)
+
+    def test_queued_post_resume_diagnostic_mutations(self):
+        root = Path(__file__).resolve().parents[1]
+        source = (root / 'web/e2e/computer-asset-export-v3-cancel.spec.ts').read_bytes().decode('utf-8')
+        queued_cancel_browser_contract(source)
+        phases = (
+            'resume-owned-worker', 'post-resume-receipt-detail', 'post-resume-database',
+            'post-resume-download-unavailable', 'post-resume-database-invariant',
+            'post-resume-detail-invariant', 'post-resume-download-events',
+            'old-panel-status-scroll', 'old-panel-status-viewport',
+            'old-panel-task-id-viewport', 'old-panel-create-button-viewport',
+        )
+        for phase in phases:
+            before = f'    phase = "{phase}";'
+            self.assertEqual(source.count(before), 1, 'one actual diagnostic assignment')
+            for label, after in (
+                ('missing', ''), ('duplicate', before + '\n' + before),
+                ('comment only', '    // ' + before.strip()),
+                ('dynamic task data', f'    phase = "{phase}:" + originalTaskID;'),
+            ):
+                with self.subTest(phase=phase, mutation=label):
+                    with self.assertRaises(ValueError):
+                        queued_cancel_browser_contract(source.replace(before, after, 1))
+        receipt = '    const postResumeReads = await observedReceiptAndDetail(page, setup.actorId, originalTaskID, request.domainId, operation.idempotencyKey);'
+        database = '    const postResumeDatabase = await terminalExport(originalTaskID);'
+        download = '    const postResumeUnavailableDownload = await unavailableDownload(context, originalTaskID);'
+        combined = '    const postResume = { ...postResumeReads, database: postResumeDatabase, unavailableDownload: postResumeUnavailableDownload };'
+        receipt_step = '    phase = "post-resume-receipt-detail";\n' + receipt
+        database_step = '    phase = "post-resume-database";\n' + database
+        download_step = '    phase = "post-resume-download-unavailable";\n' + download
+        mutations = [
+            ('untyped phase', QUEUED_CANCEL_PHASE_INIT, QUEUED_CANCEL_ORIGINAL_INIT),
+            ('unknown phase vocabulary', '  | "evidence";', '  | "evidence" | "unknown";'),
+            ('duplicate phase vocabulary', QUEUED_CANCEL_PHASE_TYPE, QUEUED_CANCEL_PHASE_TYPE * 2),
+            ('missing phase vocabulary', QUEUED_CANCEL_PHASE_TYPE, ''),
+            ('duplicate diagnostic block', QUEUED_CANCEL_POST_RESUME_STAGES, QUEUED_CANCEL_POST_RESUME_STAGES * 2),
+            ('stage after await', receipt_step, receipt + '\n    phase = "post-resume-receipt-detail";'),
+            ('wrong fixed stage', '    phase = "post-resume-database";', '    phase = "post-resume-receipt-detail";'),
+            ('DB before receipt', receipt_step + '\n' + database_step, database_step + '\n' + receipt_step),
+            ('download before DB', database_step + '\n' + download_step, download_step + '\n' + database_step),
+            ('unjoined receipt', receipt, receipt.replace('await ', '')),
+            ('unjoined DB', database, database.replace('await ', '')),
+            ('unjoined download', download, download.replace('await ', '')),
+            ('extra receipt action', receipt, receipt + '\n    await observedReceiptAndDetail(page, setup.actorId, originalTaskID, request.domainId, operation.idempotencyKey);'),
+            ('extra DB read', database, database + '\n    await terminalExport(originalTaskID);'),
+            ('extra download request', download, download + '\n    await unavailableDownload(context, originalTaskID);'),
+            ('parallel reads', receipt, '    const postResumeReads = await Promise.all([observedReceiptAndDetail(page, setup.actorId, originalTaskID, request.domainId, operation.idempotencyKey), terminalExport(originalTaskID)]);'),
+            ('earlier receipt reused', receipt, '    const postResumeReads = recovered;'),
+            ('earlier DB reused', database, '    const postResumeDatabase = database;'),
+            ('earlier download reused', download, '    const postResumeUnavailableDownload = unavailable;'),
+            ('wrong data binding', combined, combined.replace('database: postResumeDatabase', 'database')),
+            ('changed schema key order', combined, '    const postResume = { database: postResumeDatabase, ...postResumeReads, unavailableDownload: postResumeUnavailableDownload };'),
+            ('removed DB invariant', '    expect(postResume.database).toEqual(database);', ''),
+            ('removed detail invariant', '    expect(postResume.detail).toMatchObject({ downloadReady: false, downloadStatus: "cancelled", task: { state: "cancelled" } });', ''),
+            ('removed scroll', '    await cancelledStatus.scrollIntoViewIfNeeded();', ''),
+            ('weaker status viewport', '    await expect(cancelledStatus).toBeInViewport({ ratio: 1 });', '    await expect(cancelledStatus).toBeInViewport({ ratio: 0.5 });'),
+            ('raw cause disclosure', '  } catch { failure = phase; }', '  } catch (cause) { throw new Error("CANARY_PRIVATE_ERROR", { cause }); }'),
+            ('raw diagnostic logging', database, database + '\n    console.error("CANARY_PRIVATE_BODY", postResumeDatabase);'),
+            ('unrelated source drift', '// No replay, body interception, synthetic response or cache change.', '// Unrelated source changed.'),
+        ]
+        for label, before, after in mutations:
+            with self.subTest(mutation=label):
+                self.assertEqual(source.count(before), 1, 'mutation must target one actual checkpoint')
+                with self.assertRaises(ValueError):
+                    queued_cancel_browser_contract(source.replace(before, after, 1))
+
+        # Decode the actual UTF-8 bytes without universal-newline translation.
+        # Physical newline drift must not be normalized into the baseline hash.
+        for label, changed in (
+            ('physical CRLF drift', source.replace('\n', '\r\n')),
+            ('extra final newline', source + '\n'),
+        ):
+            with self.subTest(mutation=label):
+                with self.assertRaises(ValueError):
+                    queued_cancel_browser_contract(changed)
+
     def test_queued_browser_cleanup_and_pixel_contract_mutations(self):
         root = Path(__file__).resolve().parents[1]
         source = (root / 'web/e2e/computer-asset-export-v3-cancel.spec.ts').read_text()
@@ -349,7 +520,7 @@ class TerminalEvidenceContract(unittest.TestCase):
         close = '      try { await taskPage.close(); } catch { cleanupFailed = true; }'
         proof_empty = 'await expect(taskPage.locator(screenshotProofInputs)).toHaveCount(0);'
         mutations = [
-            ('legacy unbound receipt helper', 'await observedReceiptAndDetail(page, setup.actorId, originalTaskID, request.domainId, operation.idempotencyKey);', 'await receiptAndDetail(page, setup.actorId, originalTaskID);'),
+            ('legacy unbound receipt helper', 'const recovered = await observedReceiptAndDetail(page, setup.actorId, originalTaskID, request.domainId, operation.idempotencyKey);', 'const recovered = await receiptAndDetail(page, setup.actorId, originalTaskID);'),
             ('receipt action replayed', '() => button.click()));', 'async () => { await button.click(); await button.click(); }));'),
             ('receipt witness not joined', 'receiptResponses.push(await observedAction(page,', 'receiptResponses.push(observedAction(page,'),
             ('receipt domain unbound', 'new URL(r.url()).searchParams.get("domainId") === domainId && ', ''),
