@@ -280,6 +280,430 @@ const proof = () => {
   fill("未使用的认证器验证码", "123456");
 };
 
+describe("system read-only route restoration", () => {
+  const routes = [
+    ["overview", "系统信息", "/info", "已登记节点"],
+    ["resources", "资源与历史", "/resources/current", ""],
+    ["storage", "存储管理", "/storage", "实际文件系统存储"],
+    ["services", "服务运行状态", "/services", "实际依赖检查"],
+    ["health", "平台依赖健康", "/health", "实际依赖检查"],
+  ] as const;
+  const businessCalls = () =>
+    fetcher.mock.calls.filter(([url]) => url.startsWith("/api/system/"));
+  const expectSelected = (label: string) => {
+    const navigation = screen.getByRole("navigation", {
+      name: "系统健康分类",
+    });
+    const selected = within(navigation).getByRole("button", { name: label });
+    expect(selected).toHaveAttribute("aria-current", "page");
+    const active = navigation.querySelectorAll('[aria-current="page"]');
+    expect(active).toHaveLength(1);
+  };
+  const expectNoProofOrWrite = () => {
+    expect(screen.queryByLabelText("操作者当前密码")).not.toBeInTheDocument();
+    expect(
+      screen.queryByLabelText("未使用的认证器验证码"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "保存告警阈值" }),
+    ).not.toBeInTheDocument();
+    expect(calls("/storage/settings")).toHaveLength(0);
+  };
+  const expectNoReader = () => {
+    expect(businessCalls()).toHaveLength(0);
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
+    expect(screen.queryByRole("img")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: "运行资源与历史" }),
+    ).not.toBeInTheDocument();
+    expectNoProofOrWrite();
+  };
+
+  it.each(routes)(
+    "directly restores #system/%s for a read-only user with fresh authorized reads",
+    async (tab, label, endpoint, table) => {
+      window.history.replaceState({}, "", `#system/${tab}`);
+      override = (url) =>
+        url === "/api/access/check"
+          ? response({
+              results: systemOperations.map((operation) =>
+                operation.startsWith("GET "),
+              ),
+            })
+          : undefined;
+      render(<App />);
+      if (table) await screen.findByRole("table", { name: table });
+      else await screen.findByRole("img", { name: /2 个实际样本/ });
+      expectSelected(label);
+      expect(window.location.hash).toBe(`#system/${tab}`);
+      expect(calls(endpoint)).toHaveLength(1);
+      if (tab === "overview") expect(calls("/nodes")).toHaveLength(1);
+      else expect(calls("/info")).toHaveLength(0);
+      if (tab === "resources")
+        expect(calls("/resources/history")).toHaveLength(1);
+      expect(
+        screen.queryByRole("button", { name: "调整阈值 runtime-root" }),
+      ).not.toBeInTheDocument();
+      expectNoProofOrWrite();
+    },
+  );
+
+  it.each([
+    "#system",
+    "#system/",
+    "#system//health",
+    "#system/%",
+    "#system/Health",
+    "#system/health/",
+    "#system/health?tab=storage",
+    "#system/health#storage",
+    "#system/%68ealth",
+    "#system/health/extra",
+    "#system/unknown",
+    "#system/storage/settings/runtime-root",
+    "#system/storage/settings",
+    "#system/storage/settings/unknown",
+    "#system/storage%2Fsettings%2Fruntime-root",
+  ])(
+    "keeps %s unchanged and safely opens overview without an editor",
+    async (hash) => {
+      window.history.replaceState({ tab: "storage", revision: 99 }, "", hash);
+      const historyLength = window.history.length;
+      render(<App />);
+      await screen.findByRole("table", { name: "已登记节点" });
+      expectSelected("系统信息");
+      expect(window.location.hash).toBe(hash);
+      expect(window.history.length).toBe(historyLength);
+      expect(window.history.state).toEqual({ tab: "storage", revision: 99 });
+      expect(calls("/info")).toHaveLength(1);
+      expect(calls("/nodes")).toHaveLength(1);
+      expect(calls("/storage")).toHaveLength(0);
+      expectNoProofOrWrite();
+    },
+  );
+
+  it.each(["", "#System/health", "#unrelated"])(
+    "preserves App account fallback for non-system hash %s",
+    async (hash) => {
+      window.history.replaceState({}, "", `${window.location.pathname}${hash}`);
+      render(<App />);
+      await screen.findByRole("heading", { name: "账户概览" });
+      expectNoReader();
+      expect(
+        screen.queryByRole("navigation", { name: "系统健康分类" }),
+      ).not.toBeInTheDocument();
+    },
+  );
+
+  it.each(["menu", "check"])(
+    "waits for current auth and for the still-pending %s before mounting a reader",
+    async (pending) => {
+      window.history.replaceState({}, "", "#system/health");
+      let releaseAuth!: (value: Response) => void,
+        releaseMenu!: (value: Response) => void,
+        releaseCheck!: (value: Response) => void;
+      override = (url) => {
+        if (url === "/api/auth/me")
+          return new Promise((resolve) => {
+            releaseAuth = resolve;
+          });
+        if (url === "/api/access/menu")
+          return new Promise((resolve) => {
+            releaseMenu = resolve;
+          });
+        if (url === "/api/access/check")
+          return new Promise((resolve) => {
+            releaseCheck = resolve;
+          });
+        return undefined;
+      };
+      render(<App />);
+      await waitFor(() => expect(releaseAuth).toBeTypeOf("function"));
+      expect(
+        fetcher.mock.calls.some(([url]) => url.startsWith("/api/access/")),
+      ).toBe(false);
+      expectNoReader();
+      await act(async () => releaseAuth(await response(profile)));
+      await screen.findByText("正在确认系统健康权限…");
+      await waitFor(() => {
+        expect(releaseMenu).toBeTypeOf("function");
+        expect(releaseCheck).toBeTypeOf("function");
+      });
+      expectNoReader();
+      await act(async () => {
+        if (pending === "menu")
+          releaseCheck(
+            await response({ results: systemOperations.map(() => true) }),
+          );
+        else releaseMenu(await response({ menu: metadata() }));
+      });
+      expect(screen.getByText("正在确认系统健康权限…")).toBeVisible();
+      expectNoReader();
+      await act(async () => {
+        if (pending === "menu")
+          releaseMenu(await response({ menu: metadata() }));
+        else
+          releaseCheck(
+            await response({ results: systemOperations.map(() => true) }),
+          );
+      });
+      await screen.findByRole("table", { name: "实际依赖检查" });
+      expectSelected("平台依赖健康");
+      expect(calls("/health")).toHaveLength(1);
+      expect(calls("/info")).toHaveLength(0);
+      expectNoProofOrWrite();
+    },
+  );
+
+  it.each(routes)(
+    "does not mount a manually addressed %s reader when just its operation is denied",
+    async (tab, label, endpoint) => {
+      window.history.replaceState({}, "", `#system/${tab}`);
+      override = (url) =>
+        url === "/api/access/check"
+          ? response({
+              results: systemOperations.map(
+                (operation) => operation !== `GET /api/system${endpoint}`,
+              ),
+            })
+          : undefined;
+      render(<App />);
+      await screen.findByText(
+        "当前账户没有此项读取权限，请选择已获授权的分类。",
+      );
+      expect(
+        within(
+          screen.getByRole("navigation", { name: "系统健康分类" }),
+        ).queryByRole("button", { name: label }),
+      ).not.toBeInTheDocument();
+      expectNoReader();
+    },
+  );
+
+  it.each([
+    "denied-menu",
+    "false-readable",
+    "non-array-menu",
+    "non-array-results",
+    "short-results",
+    "long-results",
+    "non-boolean-result",
+    "failed-menu",
+    "failed-check",
+  ])(
+    "does not let a canonical route bypass the existing %s gate",
+    async (failure) => {
+      window.history.replaceState({}, "", "#system/storage");
+      override = (url) => {
+        if (url === "/api/access/menu") {
+          if (failure === "denied-menu")
+            return response({
+              menu: metadata().filter((p) => p.mark !== "system"),
+            });
+          if (failure === "false-readable")
+            return response({
+              menu: metadata().map((p) => ({
+                ...p,
+                auth: { readable: p.mark !== "system", writeable: false },
+              })),
+            });
+          if (failure === "non-array-menu") return response({ menu: {} });
+          if (failure === "failed-menu")
+            return response({ error: "forbidden" }, 403);
+        }
+        if (url === "/api/access/check") {
+          if (failure === "non-array-results")
+            return response({ results: {} });
+          if (failure === "short-results")
+            return response({
+              results: systemOperations.slice(1).map(() => true),
+            });
+          if (failure === "long-results")
+            return response({
+              results: [...systemOperations.map(() => true), true],
+            });
+          if (failure === "non-boolean-result")
+            return response({
+              results: [1, ...systemOperations.slice(1).map(() => true)],
+            });
+          if (failure === "failed-check")
+            return response({ error: "database_unavailable" }, 503);
+        }
+        return undefined;
+      };
+      render(<App />);
+      const denied = ["denied-menu", "false-readable"].includes(failure);
+      if (denied)
+        await screen.findByText("当前账户没有系统健康读取权限。");
+      else await screen.findByRole("alert");
+      expectNoReader();
+      if (!denied) {
+        override = () => undefined;
+        click("重新读取系统权限");
+        await screen.findByRole("table", { name: "实际文件系统存储" });
+        expectSelected("存储管理");
+        expect(calls("/storage")).toHaveLength(1);
+        expect(calls("/info")).toHaveLength(0);
+        expectNoProofOrWrite();
+      }
+    },
+  );
+
+  it("preserves the existing truthy menu readable predicate", async () => {
+    window.history.replaceState({}, "", "#system/health");
+    override = (url) =>
+      url === "/api/access/menu"
+        ? response({
+            menu: metadata().map((p) => ({
+              ...p,
+              auth: {
+                ...p.auth,
+                readable: p.mark === "system" ? 1 : p.auth.readable,
+              },
+            })),
+          })
+        : undefined;
+    render(<App />);
+    await screen.findByRole("table", { name: "实际依赖检查" });
+    expectSelected("平台依赖健康");
+    expect(calls("/health")).toHaveLength(1);
+  });
+
+  it("restores read-only Back/Forward targets and fresh-mount reload without retaining filters", async () => {
+    window.history.replaceState({}, "", "#system/resources");
+    const view = render(<App />);
+    await screen.findByRole("img", { name: /2 个实际样本/ });
+    fill("历史指标", "ram_basic");
+    await screen.findByRole("heading", { name: "内存使用率历史" });
+    click("存储管理");
+    await screen.findByRole("table", { name: "实际文件系统存储" });
+    expectSelected("存储管理");
+    expect(window.history.state).toEqual({});
+    const currentCount = calls("/resources/current").length;
+    act(() => window.history.back());
+    await waitFor(() => expect(window.location.hash).toBe("#system/resources"));
+    await screen.findByRole("img", { name: /CPU 使用率：2 个实际样本/ });
+    expectSelected("资源与历史");
+    expect(screen.getByLabelText("历史指标")).toHaveValue("cpu_basic");
+    expect(calls("/resources/current").length).toBeGreaterThan(currentCount);
+    const storageCount = calls("/storage").length;
+    act(() => window.history.forward());
+    await waitFor(() => expect(window.location.hash).toBe("#system/storage"));
+    await screen.findByRole("table", { name: "实际文件系统存储" });
+    expectSelected("存储管理");
+    expect(calls("/storage").length).toBeGreaterThan(storageCount);
+    const reloadCount = calls("/storage").length;
+    view.unmount();
+    render(<App />);
+    await screen.findByRole("table", { name: "实际文件系统存储" });
+    expect(window.location.hash).toBe("#system/storage");
+    expectSelected("存储管理");
+    expect(calls("/storage").length).toBeGreaterThan(reloadCount);
+    expectNoProofOrWrite();
+  });
+
+  it("aborts a departed read and ignores its late value after external read-only navigation", async () => {
+    window.history.replaceState({}, "", "#system/services");
+    let release!: (value: Response) => void;
+    override = (url) =>
+      url.startsWith("/api/system/services?")
+        ? new Promise((resolve) => {
+            release = resolve;
+          })
+        : undefined;
+    render(<App />);
+    await waitFor(() => expect(release).toBeTypeOf("function"));
+    const signal = calls("/services")[0][1].signal as AbortSignal;
+    act(() => {
+      window.location.hash = "#system/storage";
+    });
+    await screen.findByRole("table", { name: "实际文件系统存储" });
+    expectSelected("存储管理");
+    expect(signal.aborted).toBe(true);
+    const old = health();
+    old.dependencies[0].name = "departed-private-dependency";
+    await act(async () => release(await response(old)));
+    expectSelected("存储管理");
+    expect(
+      screen.queryByText("departed-private-dependency"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("table", { name: "实际依赖检查" }),
+    ).not.toBeInTheDocument();
+    expect(calls("/storage").length).toBeGreaterThan(0);
+    expectNoProofOrWrite();
+  });
+
+  it.each(["logout", "other-actor", "password-change"])(
+    "discards a restored private read after an observed %s on history navigation",
+    async (change) => {
+      window.history.replaceState({}, "", "#system/health");
+      let release!: (value: Response) => void;
+      override = (url) =>
+        url === "/api/system/health"
+          ? new Promise((resolve) => {
+              release = resolve;
+            })
+          : undefined;
+      render(<App />);
+      await waitFor(() => expect(release).toBeTypeOf("function"));
+      const signal = calls("/health")[0][1].signal as AbortSignal;
+      override = (url) => {
+        if (url === "/api/auth/me")
+          return change === "logout"
+            ? response({ error: "unauthenticated" }, 401)
+            : response({
+                ...profile,
+                ID: change === "other-actor" ? 2 : profile.ID,
+                csrfToken: "next-system-csrf",
+                needChangePwd: change === "password-change",
+              });
+        if (url === "/api/access/menu") return response({ menu: [] });
+        return undefined;
+      };
+      act(() => {
+        window.location.hash = "#system/storage";
+      });
+      if (change === "logout")
+        await screen.findByRole("heading", { name: "安全登录" });
+      else if (change === "password-change")
+        await screen.findByText(/首次登录或管理员重置后，需要修改密码/);
+      else await screen.findByText("当前账户没有系统健康读取权限。");
+      expect(signal.aborted).toBe(true);
+      const old = health();
+      old.dependencies[0].name = "previous-actor-private-value";
+      await act(async () => release(await response(old)));
+      expect(
+        screen.queryByText("previous-actor-private-value"),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("table", { name: "实际依赖检查" }),
+      ).not.toBeInTheDocument();
+      expect(calls("/storage")).toHaveLength(0);
+      expect(calls("/health")).toHaveLength(1);
+      expectNoProofOrWrite();
+    },
+  );
+
+  it.each(["health", "storage"])(
+    "rechecks the session when the restored %s read returns 401",
+    async (tab) => {
+      window.history.replaceState({}, "", `#system/${tab}`);
+      const changed = vi.fn();
+      override = (url) =>
+        url.split("?")[0] === `/api/system/${tab}`
+          ? response({ error: "unauthenticated" }, 401)
+          : undefined;
+      render(<SystemWorkspace profile={profile} sessionChanged={changed} />);
+      await waitFor(() => expect(changed).toHaveBeenCalledTimes(1));
+      expect(calls(`/${tab}`)).toHaveLength(1);
+      expect(screen.queryByRole("table")).not.toBeInTheDocument();
+      expect(calls("/info")).toHaveLength(0);
+      expectNoProofOrWrite();
+    },
+  );
+});
+
 describe("system health contract", () => {
   it("preserves distinct observations recorded within the same Unix second", async () => {
     const query: HistoryInput = {
@@ -824,8 +1248,16 @@ describe("system health interface", () => {
       .signal as AbortSignal;
     act(() => window.history.back());
     await waitFor(() => expect(window.location.hash).toBe("#system/storage"));
-    await screen.findByRole("table", { name: "已登记节点" });
+    await screen.findByRole("table", { name: "实际文件系统存储" });
+    expect(screen.getByRole("button", { name: "存储管理" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
     expect(pendingSignal.aborted).toBe(true);
+    expect(screen.queryByLabelText("操作者当前密码")).not.toBeInTheDocument();
+    expect(
+      screen.queryByLabelText("未使用的认证器验证码"),
+    ).not.toBeInTheDocument();
     await act(async () =>
       release(
         await response({
@@ -849,8 +1281,16 @@ describe("system health interface", () => {
       ),
     );
     await screen.findByRole("table", { name: "已登记节点" });
+    expect(screen.getByRole("button", { name: "系统信息" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
     expect(screen.queryByLabelText("操作者当前密码")).not.toBeInTheDocument();
+    expect(
+      screen.queryByLabelText("未使用的认证器验证码"),
+    ).not.toBeInTheDocument();
     expect(screen.queryByText(/已由服务器保存/)).not.toBeInTheDocument();
+    expect(calls("/storage/settings")).toHaveLength(1);
   });
   it("returns to session check for 401 without retaining content", async () => {
     const changed = vi.fn();

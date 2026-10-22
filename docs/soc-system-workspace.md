@@ -33,3 +33,44 @@
 ## 首轮真实浏览器失败与恢复
 
 PR102 head `192638e4e04d80ab0d329a2c5ce48581c256625e` 的 CI 38108933102 / system job114380304944 首轮在健康截图的列标题核验失败：依赖表 th 未声明 scope，锁定 Playwright 1.56.1 将其识别为 cell，columnheader 为0。修复为所有系统列标题明确 `scope="col"`，保留行标题 `scope="row"`；新增DOM回归直接校验属性，并保留原E2E精确列标题断言。独立复核确认根因与修复，完整make check再次通过1344前端/98Python及全部Go/type/build/audit0。首次失败未产出完整8图，真实链与截图必须由修复后的精确head重新验证。
+
+## 2026-10-21 只读标签路由恢复候选
+
+工程 [Issue204](https://github.com/yunpiao/adtr/issues/204)，基线 main
+`a3fbca0cf93d31abb11456f946094537b287722c`。这是已有系统读能力的导航修正，
+不新增数据源、业务 API、授权、采样或配置写入。以上历史测试结果不继承为本候选通过。
+
+仅精确识别五个只读地址：`#system/overview`、`#system/resources`、
+`#system/storage`、`#system/services`、`#system/health`。
+它们分别恢复系统信息、资源与历史、存储管理、服务运行状态和平台依赖健康标签，
+适用于直接进入、刷新以及浏览器后退/前进。`#system` 保留系统信息根入口。
+hash 只用于选择标签；希望恢复具体标签时需要对应规范地址，不提供时仍按原顶层路由处理。
+它不携带身份、权限、观测数据、历史指标/时间窗、分页、编辑草稿、版本或密码/MFA。
+恢复后按当前权限重新读取，各标签内筛选使用原默认值，不承诺恢复旧视图快照。
+
+只有 App 已分派到系统工作区的地址适用 overview 回退。未知、大小写变化、编码、
+查询串、尾斜杠或多余段落的系统子路径不会被宽松解析；其他顶层地址仍由 App 原规则处理。
+尤其 `#system/storage/settings/runtime-root` 刷新或前进后只显示系统信息，
+不重建编辑表单、不恢复证明字段、不自动保存。未知路径不自动改写 URL 或追加历史。
+一次真实保存之后，原编辑 URL 仍保留；要恢复存储只读列表，须先显式点“存储管理”
+获得 `#system/storage`，不能把编辑 URL 的安全回退当成只读恢复失败。
+
+现有 App 仍负责认证重读、工作区 remount 和会话失效清理；菜单及操作检查完成并允许后
+才挂载相应读取面板。保留当前 readable truthiness 与现有数组、结果长度/布尔检查语义，
+不借路由调整增加或改变权限判定。离开页面沿原 hook abort/序列隔离清除私有结果和证明，
+迟到结果不得恢复旧面板或成功提示；取消等待并不证明服务器已撤销一个原先提交的写入。
+原有读取失败恢复、权限拒绝、CAS 冲突及必须显式提供新证明的规则不变。
+
+新增真实浏览器探针在原有 suite 内验证规范资源地址进入/刷新、资源与平台依赖健康后退/前进、
+编辑路径安全回退，以及保存后的 editor reload 与随后 canonical storage reload。
+每个探针观察本次导航后新发出的原生 Request 对象，匹配同源精确 GET 路径、200 响应
+和 requestfinished；reload 还要求实际文档导航请求和主 frame 导航，后退/前进使用完全不相交的
+页面读取端点集合，旧轮询回复不能满足新请求见证。不读取或保存请求体、证明、headers、cookies
+或原始传输错误，不创建额外 fetch/replay/mock。导航阶段统计实际 storage/settings POST
+为零，既有保存、冲突、只读拒绝及证明次数保持；监听器和有界观察等待在 finally 中清理。
+
+保持测试450秒、runner480秒、原精确 PID/start-tick Worker 暂停/恢复及最终清理。
+当前十张图仍为 healthy/history/container-memory/worker-stale/recovered 各桌面与移动两张，
+文件名、证据 schema、source/run/attempt 绑定不变；新增导航断言不冒充新截图类型。
+当前仅编写源码，未在本地执行项目。精确候选 CI、真实运行、十图独立像素/源码核验、
+清理证据及合并后 main 验证仍待完成。无新部署、真实 AD/Windows 或完整产品验收声明。

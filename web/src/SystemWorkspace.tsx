@@ -58,7 +58,12 @@ export default function SystemWorkspace({
   profile: Profile;
   sessionChanged: () => void;
 }) {
-  const [tab, setTab] = useState<Tab>("overview"),
+  // Restore only exact read-only routes; editors and unknown suffixes start safe.
+  const [tab, setTab] = useState<Tab>(
+      () =>
+        tabs.find((t) => window.location.hash === `#system/${t.id}`)?.id ??
+        "overview",
+    ),
     [revision, setRevision] = useState(0);
   const gate = useSystemRead(
     profile.csrfToken,
