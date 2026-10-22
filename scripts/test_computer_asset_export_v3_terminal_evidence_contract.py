@@ -154,7 +154,44 @@ QUEUED_CANCEL_CURRENT_POST_RESUME_STAGES = QUEUED_CANCEL_POST_RESUME_STAGES.repl
 )
 
 
+# This host-only diagnostic adds no browser work. Its outer inverse restores
+# the exact reviewed c023 source before the unchanged scroll/stage chain.
+QUEUED_CANCEL_RATIO_BASELINE_SHA256 = "c0235e779d4e174cbc4519b19c8a05221d46235a2b0aee7f454e0d9eacadec4a"
+QUEUED_CANCEL_RATIO_IMPORT = 'import { classifyComputerViewportResult, computerViewportResultSuffix, type ComputerViewportRatioClass } from "./computer-asset-export-v3-viewport-result";\n'
+QUEUED_CANCEL_RATIO_INIT = '  let viewportRatioClass: ComputerViewportRatioClass | "" = "";\n'
+QUEUED_CANCEL_RATIO_OLD_CATCH = '  } catch { failure = phase; }'
+QUEUED_CANCEL_RATIO_CATCH = '  } catch (error) {\n    failure = phase;\n    if (phase === "old-panel-create-button-viewport") {\n      try { viewportRatioClass = classifyComputerViewportResult(error); }\n      catch { viewportRatioClass = "unavailable"; }\n    }\n  }'
+QUEUED_CANCEL_RATIO_OLD_FAILURE = '  if (failure || cleanupFailed) throw new Error(`Computer export task cancel checkpoint failed: ${failure || "cleanup"}${cleanupFailed ? "; cleanup_failed" : ""}`);\n'
+QUEUED_CANCEL_RATIO_FAILURE = '  if (failure || cleanupFailed) throw new Error(`Computer export task cancel checkpoint failed: ${failure || "cleanup"}${cleanupFailed ? "; cleanup_failed" : ""}${computerViewportResultSuffix(viewportRatioClass)}`);\n'
+QUEUED_CANCEL_RATIO_FIRST_IMPORT = 'import { test, expect, type Page, type Request as BrowserRequest, type Response } from "@playwright/test";\n'
+
+QUEUED_CANCEL_RATIO_CLEANUP = QUEUED_CANCEL_CLEANUP.replace(
+    QUEUED_CANCEL_RATIO_OLD_CATCH, QUEUED_CANCEL_RATIO_CATCH, 1,
+).replace(QUEUED_CANCEL_RATIO_OLD_FAILURE, QUEUED_CANCEL_RATIO_FAILURE, 1)
+
+
+def restore_queued_cancel_viewport_result(source):
+    v.require(type(source) is str, 'queued host viewport source text')
+    v.require(source.startswith(QUEUED_CANCEL_RATIO_IMPORT + QUEUED_CANCEL_RATIO_FIRST_IMPORT), 'host import in exact original position')
+    v.require(source.count(QUEUED_CANCEL_PHASE_INIT + '\n' + QUEUED_CANCEL_RATIO_INIT) == 1, 'empty host result beside original phase initialization')
+    v.require(source.count(QUEUED_CANCEL_CURRENT_PHASE_TYPE) == 1, 'unchanged closed phase vocabulary')
+    v.require(source.count(QUEUED_CANCEL_CURRENT_POST_RESUME_STAGES) == 1, 'unchanged exact phase-to-assertion binding')
+    v.require(source.count(QUEUED_CANCEL_RATIO_CLEANUP) == 1 and source.endswith(QUEUED_CANCEL_RATIO_CLEANUP), 'host capture and safe suffix enclose original cleanup')
+    for current, previous in (
+        (QUEUED_CANCEL_RATIO_IMPORT, ''),
+        (QUEUED_CANCEL_RATIO_INIT, ''),
+        (QUEUED_CANCEL_RATIO_CATCH, QUEUED_CANCEL_RATIO_OLD_CATCH),
+        (QUEUED_CANCEL_RATIO_FAILURE, QUEUED_CANCEL_RATIO_OLD_FAILURE),
+    ):
+        v.require(source.count(current) == 1, 'one exact synchronous host-result delta')
+        source = source.replace(current, previous, 1)
+    v.require(hashlib.sha256(source.encode('utf-8')).hexdigest() == QUEUED_CANCEL_RATIO_BASELINE_SHA256,
+              'host inverse preserves exact original browser and cleanup bytes')
+    return source
+
+
 def restore_queued_cancel_scrolls(source):
+    source = restore_queued_cancel_viewport_result(source)
     v.require(type(source) is str, 'queued individual-target source text')
     # Deletion alone cannot distinguish a scroll moved after its assertion.
     # Pin each complete current block before removing the four additions.
@@ -189,7 +226,7 @@ def restore_queued_cancel_stages(source):
 
 def queued_cancel_browser_contract(source):
     restore_queued_cancel_stages(source)
-    v.require(type(source) is str and source.endswith(QUEUED_CANCEL_CLEANUP), 'closed queued cleanup and safe failure propagation')
+    v.require(type(source) is str and source.endswith(QUEUED_CANCEL_RATIO_CLEANUP), 'closed queued cleanup and safe failure propagation')
     v.require(source.count('  finally {\n') == 1, 'one outer queued cleanup')
     v.require(source.count('await taskPage.close();') == 1 and source.count('await restoreOwnedExportWorker();') == 1, 'await each owned cleanup exactly once')
     v.require(re.findall(r'\brestoreWorker\s*=\s*([^;,\n]+)', source) == ['false', 'true'], 'restore guard initialized once and never disarmed')
@@ -573,7 +610,7 @@ class TerminalEvidenceContract(unittest.TestCase):
             ('larger suite timeout', 'test.setTimeout(900_000);', 'test.setTimeout(1_800_000);'),
             ('early new-tab focus', QUEUED_CANCEL_TASK_ID_SCROLL, '    await taskPage.bringToFront();\n' + QUEUED_CANCEL_TASK_ID_SCROLL),
             ('extra delay', QUEUED_CANCEL_TASK_ID_SCROLL, QUEUED_CANCEL_TASK_ID_SCROLL + '    await page.waitForTimeout(1000);\n'),
-            ('raw failure cause', '  } catch { failure = phase; }', '  } catch (cause) { throw new Error("CANARY_PRIVATE", { cause }); }'),
+            ('raw failure cause', QUEUED_CANCEL_RATIO_CATCH, '  } catch (cause) { throw new Error("CANARY_PRIVATE", { cause }); }'),
             ('raw source logging', QUEUED_CANCEL_BUTTON_SCROLL, QUEUED_CANCEL_BUTTON_SCROLL + '    console.error("CANARY_PRIVATE", originalTaskID);\n'),
             ('cleanup failure swallowed', '      try { await restoreOwnedExportWorker(); } catch { cleanupFailed = true; }', '      try { await restoreOwnedExportWorker(); } catch {}'),
             ('unrelated source bytes', '// No replay, body interception, synthetic response or cache change.', '// Unrelated source changed.'),
@@ -668,7 +705,7 @@ class TerminalEvidenceContract(unittest.TestCase):
             ('removed detail invariant', '    expect(postResume.detail).toMatchObject({ downloadReady: false, downloadStatus: "cancelled", task: { state: "cancelled" } });', ''),
             ('removed scroll', '    await cancelledStatus.scrollIntoViewIfNeeded();', ''),
             ('weaker status viewport', '    await expect(cancelledStatus).toBeInViewport({ ratio: 1 });', '    await expect(cancelledStatus).toBeInViewport({ ratio: 0.5 });'),
-            ('raw cause disclosure', '  } catch { failure = phase; }', '  } catch (cause) { throw new Error("CANARY_PRIVATE_ERROR", { cause }); }'),
+            ('raw cause disclosure', QUEUED_CANCEL_RATIO_CATCH, '  } catch (cause) { throw new Error("CANARY_PRIVATE_ERROR", { cause }); }'),
             ('raw diagnostic logging', database, database + '\n    console.error("CANARY_PRIVATE_BODY", postResumeDatabase);'),
             ('unrelated source drift', '// No replay, body interception, synthetic response or cache change.', '// Unrelated source changed.'),
         ]
@@ -729,7 +766,7 @@ class TerminalEvidenceContract(unittest.TestCase):
             ('close failure swallowed', close, '      try { await taskPage.close(); } catch {}'),
             ('no finally protection', '  finally {\n', '  if (true) {\n'),
             ('cleanup failure treated as success', 'if (failure || cleanupFailed)', 'if (failure)'),
-            ('outer failure swallowed', '  } catch { failure = phase; }', '  } catch {}'),
+            ('outer failure swallowed', QUEUED_CANCEL_RATIO_CATCH, '  } catch {}'),
             ('old screenshot target', QUEUED_CANCEL_IMAGE, QUEUED_CANCEL_IMAGE.replace('screenshot(taskPage,', 'screenshot(page,')),
             ('wrong artifact name', QUEUED_CANCEL_IMAGE, QUEUED_CANCEL_IMAGE.replace('cancelled-terminal.png', 'other.png')),
             ('missing fresh terminal read', 'const fresh = await responseValue(freshResponse, setup.actorId);', 'const fresh = cancel;'),
@@ -749,6 +786,102 @@ class TerminalEvidenceContract(unittest.TestCase):
         early_image = source.replace(QUEUED_CANCEL_IMAGE, '', 1).replace(db_check, QUEUED_CANCEL_IMAGE + '\n    ' + db_check, 1)
         late_db_check = source.replace(db_check, '', 1).replace(QUEUED_CANCEL_IMAGE, QUEUED_CANCEL_IMAGE + '\n    ' + db_check, 1)
         for label, changed in [('restore outside finally', moved_restore), ('pixels before DB verification', early_image), ('DB verification after pixels', late_db_check)]:
+            with self.subTest(mutation=label):
+                with self.assertRaises(ValueError):
+                    queued_cancel_browser_contract(changed)
+
+
+    def test_queued_host_viewport_result_inverse(self):
+        root = Path(__file__).resolve().parents[1]
+        source = (root / 'web/e2e/computer-asset-export-v3-cancel.spec.ts').read_bytes().decode('utf-8')
+        restored = restore_queued_cancel_viewport_result(source)
+        self.assertEqual(len(restored.encode('utf-8')), 21760)
+        self.assertEqual(hashlib.sha256(restored.encode('utf-8')).hexdigest(), QUEUED_CANCEL_RATIO_BASELINE_SHA256)
+        self.assertEqual(hashlib.sha256(restore_queued_cancel_scrolls(source).encode('utf-8')).hexdigest(), QUEUED_CANCEL_SCROLL_BASELINE_SHA256)
+        self.assertEqual(hashlib.sha256(restore_queued_cancel_stages(source).encode('utf-8')).hexdigest(), QUEUED_CANCEL_STAGE_BASELINE_SHA256)
+        self.assertEqual(source.count(QUEUED_CANCEL_CURRENT_POST_RESUME_STAGES), 1)
+        self.assertEqual(source.count(QUEUED_CANCEL_CURRENT_PHASE_TYPE), 1)
+        original_finally = QUEUED_CANCEL_CLEANUP.split('  finally {\n', 1)[1].split('  // Raw Playwright errors', 1)[0]
+        actual_finally = source.split('  finally {\n', 1)[1].split('  // Raw Playwright errors', 1)[0]
+        self.assertEqual(actual_finally, original_finally)
+        self.assertEqual(source.count('computerViewportResultSuffix(viewportRatioClass)'), 1)
+        self.assertLess(source.index('await restoreOwnedExportWorker();'), source.index('computerViewportResultSuffix(viewportRatioClass)'))
+        self.assertNotIn('await', QUEUED_CANCEL_RATIO_CATCH)
+        self.assertLess(QUEUED_CANCEL_RATIO_CATCH.index('failure = phase;'), QUEUED_CANCEL_RATIO_CATCH.index('classifyComputerViewportResult(error)'))
+        queued_cancel_browser_contract(source)
+        for invalid in (None, b'', 0, {}, []):
+            with self.subTest(invalid_type=type(invalid).__name__):
+                with self.assertRaises(ValueError):
+                    restore_queued_cancel_viewport_result(invalid)
+
+    def test_queued_host_viewport_result_mutations(self):
+        root = Path(__file__).resolve().parents[1]
+        source = (root / 'web/e2e/computer-asset-export-v3-cancel.spec.ts').read_bytes().decode('utf-8')
+        queued_cancel_browser_contract(source)
+        guard = '    if (phase === "old-panel-create-button-viewport") {'
+        capture = '      try { viewportRatioClass = classifyComputerViewportResult(error); }'
+        fallback = '      catch { viewportRatioClass = "unavailable"; }'
+        button = '    phase = "old-panel-create-button-viewport";\n'
+        late_failure = QUEUED_CANCEL_RATIO_CATCH.replace('    failure = phase;\n', '', 1).replace('\n  }', '\n    failure = phase;\n  }', 1)
+        mutations = (
+            ('missing import', QUEUED_CANCEL_RATIO_IMPORT, ''),
+            ('duplicate import', QUEUED_CANCEL_RATIO_IMPORT, QUEUED_CANCEL_RATIO_IMPORT * 2),
+            ('wrong helper import', QUEUED_CANCEL_RATIO_IMPORT, QUEUED_CANCEL_RATIO_IMPORT.replace('computer-asset-export-v3-viewport-result', 'user-asset-export-v3-viewport-result')),
+            ('missing empty sentinel', QUEUED_CANCEL_RATIO_INIT, ''),
+            ('duplicate empty sentinel', QUEUED_CANCEL_RATIO_INIT, QUEUED_CANCEL_RATIO_INIT * 2),
+            ('pretend full ratio initially', QUEUED_CANCEL_RATIO_INIT, QUEUED_CANCEL_RATIO_INIT.replace('= "";', '= "exact_one";')),
+            ('untyped diagnostic input', QUEUED_CANCEL_RATIO_INIT, '  let viewportRatioClass: any = "";\n'),
+            ('original failure not recorded', QUEUED_CANCEL_RATIO_CATCH, QUEUED_CANCEL_RATIO_CATCH.replace('    failure = phase;\n', '')),
+            ('failure recorded after projection', QUEUED_CANCEL_RATIO_CATCH, late_failure),
+            ('unconditional capture', guard, '    if (true) {'),
+            ('wrong target phase', guard, guard.replace('old-panel-create-button-viewport', 'old-panel-task-id-viewport')),
+            ('broad phase capture', guard, '    if (phase.startsWith("old-panel")) {'),
+            ('missing projection', capture, '      try { viewportRatioClass = "unavailable"; }'),
+            ('different object projected', capture, capture.replace('(error)', '({})')),
+            ('asynchronous projection', capture, capture.replace('= classify', '= await classify')),
+            ('raw value projected', capture, capture.replace('classifyComputerViewportResult(error)', 'error.message')),
+            ('fallback missing', fallback, ''),
+            ('fallback swallowed', fallback, '      catch {}'),
+            ('fallback raw cause', fallback, '      catch (cause) { throw new Error("CANARY", { cause }); }'),
+            ('original error rethrown', capture, capture + '\n      throw error;'),
+            ('new browser observation', capture, capture + '\n      await page.evaluate(() => document.body);'),
+            ('new request', capture, capture + '\n      await context.request.get("/api/auth/me");'),
+            ('new timer', capture, capture + '\n      await page.waitForTimeout(1000);'),
+            ('new file write', capture, capture + '\n      writeFileSync("diagnostic.json", "CANARY");'),
+            ('raw console error', capture, capture + '\n      console.error(error);'),
+            ('intervening phase operation', button, button + '    await page.title();\n'),
+            ('suffix before cleanup', capture, capture + '\n      computerViewportResultSuffix(viewportRatioClass);'),
+            ('suffix removed', QUEUED_CANCEL_RATIO_FAILURE, QUEUED_CANCEL_RATIO_OLD_FAILURE),
+            ('raw diagnostic interpolation', QUEUED_CANCEL_RATIO_FAILURE, QUEUED_CANCEL_RATIO_FAILURE.replace('computerViewportResultSuffix(viewportRatioClass)', 'viewportRatioClass')),
+            ('raw error interpolation', QUEUED_CANCEL_RATIO_FAILURE, QUEUED_CANCEL_RATIO_FAILURE.replace('computerViewportResultSuffix(viewportRatioClass)', 'error.stack')),
+            ('cleanup failure no longer fails', QUEUED_CANCEL_RATIO_FAILURE, QUEUED_CANCEL_RATIO_FAILURE.replace('failure || cleanupFailed', 'failure')),
+            ('diagnostic replaces original phase', QUEUED_CANCEL_RATIO_FAILURE, QUEUED_CANCEL_RATIO_FAILURE.replace('failure || "cleanup"', 'viewportRatioClass')),
+            ('diagnostic treated as pass', QUEUED_CANCEL_RATIO_FAILURE, '  if (viewportRatioClass) return;\n' + QUEUED_CANCEL_RATIO_FAILURE),
+            ('unrelated source drift', '// No replay, body interception, synthetic response or cache change.', '// Unrelated source changed.'),
+        )
+        for label, before, after in mutations:
+            with self.subTest(mutation=label):
+                self.assertEqual(source.count(before), 1, 'mutation targets actual current host capture')
+                with self.assertRaises(ValueError):
+                    queued_cancel_browser_contract(source.replace(before, after, 1))
+        # These removals/reinsertions preserve names/counts and would survive
+        # deletion-only inverse logic; exact original positions must reject them.
+        for label, block in (
+            ('moved host import', QUEUED_CANCEL_RATIO_IMPORT),
+            ('moved diagnostic declaration', QUEUED_CANCEL_RATIO_INIT),
+            ('moved complete capture', QUEUED_CANCEL_RATIO_CATCH),
+            ('moved current cleanup suffix', QUEUED_CANCEL_RATIO_CLEANUP),
+        ):
+            with self.subTest(mutation=label):
+                self.assertEqual(source.count(block), 1, 'move targets one actual current block')
+                remainder = source.replace(block, '', 1)
+                changed = block + remainder if block == QUEUED_CANCEL_RATIO_CLEANUP else remainder + block
+                with self.assertRaises(ValueError):
+                    queued_cancel_browser_contract(changed)
+        for label, changed in (
+            ('physical CRLF drift', source.replace('\n', '\r\n')),
+            ('extra final newline', source + '\n'),
+        ):
             with self.subTest(mutation=label):
                 with self.assertRaises(ValueError):
                     queued_cancel_browser_contract(changed)
