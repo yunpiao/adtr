@@ -131,7 +131,7 @@ describe("bounded actual database readers, not exporter-provided expected bytes"
     const bytes = Buffer.alloc(524300, 97), metadata = sourceMetadata(bytes), calls: [string, number][] = [];
     const query: EvidenceQuery = async (sql, limit) => { calls.push([sql, limit]); const match = sql.match(/substring\(body FROM (\d+) FOR (\d+)\)/u); if (!match) return structuredClone(metadata); const offset = Number(match[1]) - 1, size = Number(match[2]); return { offset, byteCount: size, bodyBase64: bytes.subarray(offset, offset + size).toString("base64") }; };
     const path = await output(), value = await readSourceEvidence(task, 2, path, query);
-    expect(await readFile(path)).toEqual(bytes); expect(value.segments.map((part) => part.byteCount)).toEqual([524288, 12]); expect(value.file.sha256).toBe(sha(bytes));
+    expect(await readFile(path)).toEqual(bytes); expect(value.segments.map((part: { byteCount: number }) => part.byteCount)).toEqual([524288, 12]); expect(value.file.sha256).toBe(sha(bytes));
     expect(calls).toHaveLength(4); expect(calls.every((call) => call[1] === (1 << 20))).toBe(true); expect(calls[0][0]).toBe(calls[3][0]); expect("bodyBase64" in value).toBe(false);
   });
   it.each(["metadata_changed", "wrong_offset", "wrong_size", "bad_base64", "wrong_digest", "oversize", "wrong_actor", "opener_mismatch", "domain_id", "account_id"])('rejects source %s without exposing data', async (kind) => {
