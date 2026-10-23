@@ -9,8 +9,62 @@ import json
 from pathlib import Path
 
 
+def restore_access_role_bulk(text):
+    """Reverse exactly the reviewed access-only validated two-file upload."""
+    def unique(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError('access bulk workflow delta is invalid')
+            result[key] = value
+        return result
+    raw = Path('scripts/fixtures/access_role_bulk_ci_delta.json').read_bytes()
+    if not 0 < len(raw) <= 8192:
+        raise ValueError('access bulk workflow delta is invalid')
+    decoded = raw.decode('utf-8')
+    depth, quoted, escaped = 0, False, False
+    for char in decoded:
+        if quoted:
+            if escaped:
+                escaped = False
+            elif char == '\\':
+                escaped = True
+            elif char == '"':
+                quoted = False
+        elif char == '"':
+            quoted = True
+        elif char in '[{':
+            depth += 1
+            if depth > 3:
+                raise ValueError('access bulk workflow delta is invalid')
+        elif char in ']}':
+            depth -= 1
+            if depth < 0:
+                raise ValueError('access bulk workflow delta is invalid')
+    if quoted or depth != 0:
+        raise ValueError('access bulk workflow delta is invalid')
+    delta = json.loads(decoded, object_pairs_hook=unique)
+    baseline = 'adca3ced51556884f35c1603dbfc86713280ec01abc3c6a275d2d42a7b6e2a47'
+    if (type(delta) is not dict or set(delta) != {'baselineSHA256', 'replacements'}
+            or delta['baselineSHA256'] != baseline or type(delta['replacements']) is not list
+            or len(delta['replacements']) != 1):
+        raise ValueError('access bulk workflow delta is invalid')
+    change = delta['replacements'][0]
+    if (type(change) is not dict or set(change) != {'old', 'new'}
+            or change['old'] != '      - name: Validate exact maintenance target observation evidence\n'
+            or type(change['new']) is not str
+            or hashlib.sha256(change['new'].encode('utf-8')).hexdigest() != '559821546900e8a45ce73d7e487b25ae7c5c60eede6d95b31f8163c39e4bb928'
+            or type(text) is not str or text.count(change['new']) != 1):
+        raise ValueError('access bulk workflow block differs from reviewed delta')
+    text = text.replace(change['new'], change['old'], 1)
+    if hashlib.sha256(text.encode('utf-8')).hexdigest() != baseline:
+        raise ValueError('non-access-bulk workflow bytes changed')
+    return text
+
+
 def restore_archive_target_observation(text):
     """Reverse only the exact maintenance three-file validation/upload wiring."""
+    text = restore_access_role_bulk(text)
     delta = json.loads(Path('scripts/fixtures/archive_target_observation_ci_delta.json').read_text())
     if set(delta) != {'baselineSHA256', 'replacements'} or len(delta['replacements']) != 1:
         raise ValueError('archive observation workflow delta is invalid')

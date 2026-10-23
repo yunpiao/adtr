@@ -333,6 +333,22 @@ jobs:
             web/test-results/**/directory-v3-empty-assets-observed-empty-group-390.png
           if-no-files-found: error
           retention-days: 7
+      - name: Validate bulk access role assignment evidence
+        id: access-role-bulk-evidence
+        timeout-minutes: 1
+        if: ${{ success() && matrix.name == 'access' }}
+        run: python3 scripts/validate_access_role_bulk_evidence.py --source-root .
+      - name: Retain validated bulk access role assignment evidence
+        timeout-minutes: 1
+        if: ${{ success() && matrix.name == 'access' && steps.access-role-bulk-evidence.outcome == 'success' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: access-role-bulk-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            web/playwright-report/access-role-bulk-validated/access-role-bulk-evidence.json
+            web/playwright-report/access-role-bulk-validated/access-role-bulk-users-1440.png
+          if-no-files-found: error
+          retention-days: 7
       - name: Validate exact maintenance target observation evidence
         id: archive-target-observation-evidence
         timeout-minutes: 1

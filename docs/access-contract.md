@@ -121,3 +121,76 @@ The service uses tenant-scoped transaction locking for access mutations and
 rechecks the current session after the user lock. Extending the registry and
 introducing validated resource scopes is explicit future work; this document
 does not imply access isolation for nonexistent AD objects or data sources.
+
+## AD-F-176 isolated bulk-assignment browser evidence
+
+Issue 9's two-target bulk workflow is exercised in the existing `access` CI
+suite, using only its fresh owner-labelled disposable PostgreSQL database and
+loopback API. This is acceptance evidence for an existing API/UI capability,
+not a new production permission or account policy. Never point this case at
+real users, a persistent database, an external identity service, or a real AD.
+
+The existing `e2e.viewer` custom-role reader and one new synthetic
+`e2e.bulk-viewer` built-in viewer exchange two non-administrator roles. The
+bootstrap administrator stays unchanged. The actual user-list UI is filtered
+by the literal `e2e.` substring and creation-time ascending order. This is
+necessary because the UI constructs the assignment array from server list
+order, not checkbox click order.
+
+The first submission changes the original reader to viewer before reaching a
+syntactically valid, verified-absent second role. Its exact 404/not_found must
+roll back both role mappings, target-session deletions and successful
+user_role_assign audits. Both original target BrowserContexts must still
+authenticate without logging in again. A separate denied audit is allowed.
+The second submission uses fresh proof and succeeds with the two intended
+roles exchanged. Both original target sessions must return 401 before either
+re-login, while the administrator's ID/role remains unchanged against a real
+pre-mutation auth/me baseline. Both real UI logins then demonstrate the stored
+role permissions: the demoted viewer has no management menu and cannot read
+users; the promoted custom-role user can read users but cannot perform the
+original six other checked operations. The old password-reset, MFA, profile,
+forbidden-write, storage, logout and cleanup assertions remain intact.
+
+Each new privileged submission is observed through the first actual matching
+Playwright Request and its own Response, with one original click and one JSON
+read. Payload order is checked privately without exporting password/TOTP data.
+A bad first result is not replaced with a later success. Controlled click/body
+branches are handled and joined, listeners/timers removed, and late results
+discarded. The 15-second logical observation deadline does not cancel or prove
+completion of underlying CDP operations; the existing page fixture owns their
+lifecycle. No route mock, fetch wrapper, response replay or mutation retry is
+introduced. New errors contain only a fixed phase, not raw transport/body data.
+
+The three added administrator-sensitive mutations are new viewer creation,
+deliberate rejected batch and successful batch, making 9/10 total. The reader
+retains 3 sensitive operations and the new viewer uses 1 initial password change.
+The rejected batch still consumes its sensitive-rate entry. There are 24 explicit
+added verification GETs, including the administrator baseline; normal UI reads
+are additional. Five authentication POSTs and two read-only access/check POSTs
+are separate from the three administrator mutations. Preserve the 300-second
+test, 420-second browser-subprocess limit, one worker, and zero Playwright retries.
+No production rate, TOTP replay or clock rule is changed to fit the case.
+
+Spec-local automatic traces/screenshots/video are off so a failed proof-bearing
+form is not retained. Success evidence consists of exactly a closed safe JSON
+summary and one real 1440×900 PNG of the administrator's final filtered two-user
+list. Both target names/roles must be fully visible with no proof input or
+mutation form. The image does not claim pixels of both re-login menus; those
+are actual DOM/API checks. The summary is written only after original logout
+and successful awaited closure of both owned target contexts.
+
+`scripts/validate_access_role_bulk_evidence.py` independently validates the exact
+two-file pair, safe schema, PNG bytes/dimensions, 46 relevant source hashes, and
+the current tested commit/run/attempt. It also validates the existing runner's
+post-cleanup diagnostics before staging the success artifact. A normal API
+exit 0 and successful runner cleanup are required; the current owned-container
+helper trusts successful Docker removal, so this does not claim an independent
+post-removal container-absence witness. Only validated staged files are retained
+for 7 days. Raw requests, auth profiles, audit argument strings, credentials,
+traces and runtime logs are not success artifacts.
+
+Source review, validator fixtures and historical CI do not prove this added
+scenario passed. Its exact current-head browser/API/PostgreSQL result, retained
+artifact, independent PNG review and cleanup review are required. This narrow
+two-user result does not cover every single/bulk input combination, source-field
+compatibility, capacity, deployment, or full AD-F-176/product acceptance.
