@@ -29,6 +29,7 @@ type configuration struct {
 	userExportFailureV3                      bool
 	groupExportFailureV3                     bool
 	computerExportFailureV3                  bool
+	computerExportMultichunkV3               bool
 	directoryV4                              bool
 	groupMembersV4Pagination                 bool
 	groupMembersV4Refresh                    bool
@@ -52,6 +53,7 @@ func readConfiguration(args []string, getenv func(string) string) (configuration
 	flags.BoolVar(&cfg.directoryV4, "directory-v4", false, "select the fixed eleven-attribute dictionary; requires exclusive directory mode")
 	flags.BoolVar(&cfg.groupMembersV4Refresh, "group-members-v4-refresh", false, "enable private empty transition; requires exclusive nonempty fast dictionary4 mode")
 	flags.BoolVar(&cfg.groupMembersV4Pagination, "group-members-v4-pagination", false, "select 26 synthetic groups and four non-groups; requires exclusive nonempty fast dictionary4 mode")
+	flags.BoolVar(&cfg.computerExportMultichunkV3, "computer-export-multichunk-v3", false, "select fixed bounded multichunk rows; requires exclusive nonempty fast computer dictionary3 mode")
 	flags.BoolVar(&cfg.computerExportFailureV3, "computer-export-failure-v3", false, "select one XML-invalid synthetic computer SAM; requires exclusive computer dictionary3 mode")
 	flags.BoolVar(&cfg.groupExportFailureV3, "group-export-failure-v3", false, "select one XML-invalid synthetic group SAM; requires exclusive group dictionary3 mode")
 	flags.BoolVar(&cfg.userExportFailureV3, "user-export-failure-v3", false, "select one XML-invalid synthetic mail; requires exclusive nonempty fast dictionary3 mode")
@@ -70,6 +72,7 @@ func readConfiguration(args []string, getenv func(string) string) (configuration
 		(cfg.groupMembersV4Refresh && (!cfg.directoryMode || !cfg.directoryV4 || cfg.emptyTransitionDir == "" || cfg.directoryEmpty || cfg.directorySlow || cfg.groupMembersV4Pagination)) ||
 		(cfg.groupMembersV4Pagination && (!cfg.directoryMode || !cfg.directoryV4 || cfg.directoryEmpty || cfg.directorySlow)) ||
 		(cfg.directoryV3 && (cfg.directoryV2 || cfg.userAssetsV2)) ||
+		(cfg.computerExportMultichunkV3 && (!cfg.directoryMode || !cfg.directoryV3 || !cfg.computerAssetsV3 || cfg.directoryV2 || cfg.directoryV4 || cfg.userAssetsV2 || cfg.groupAssetsV3 || cfg.directoryEmpty || cfg.directorySlow || cfg.controlDir != "" || cfg.emptyTransitionDir != "" || cfg.groupMembersV4Pagination || cfg.groupMembersV4Refresh || cfg.userExportFailureV3 || cfg.groupExportFailureV3 || cfg.computerExportFailureV3)) ||
 		(cfg.computerExportFailureV3 && (!cfg.directoryMode || !cfg.directoryV3 || !cfg.computerAssetsV3 || cfg.groupExportFailureV3 || cfg.userExportFailureV3 || cfg.directoryV2 || cfg.directoryV4 || cfg.userAssetsV2 || cfg.groupAssetsV3 || cfg.groupMembersV4Pagination || cfg.groupMembersV4Refresh || cfg.directoryEmpty || cfg.directorySlow || cfg.controlDir != "" || cfg.emptyTransitionDir != "")) ||
 		(cfg.groupExportFailureV3 && (!cfg.directoryMode || !cfg.directoryV3 || !cfg.groupAssetsV3 || cfg.userExportFailureV3 || cfg.directoryV2 || cfg.directoryV4 || cfg.userAssetsV2 || cfg.computerAssetsV3 || cfg.groupMembersV4Pagination || cfg.groupMembersV4Refresh || cfg.directoryEmpty || cfg.directorySlow || cfg.controlDir != "" || cfg.emptyTransitionDir != "")) ||
 		(cfg.userExportFailureV3 && (!cfg.directoryMode || !cfg.directoryV3 || cfg.directoryV2 || cfg.directoryV4 || cfg.userAssetsV2 || cfg.computerAssetsV3 || cfg.groupAssetsV3 || cfg.groupMembersV4Pagination || cfg.groupMembersV4Refresh || cfg.directoryEmpty || cfg.directorySlow || cfg.controlDir != "" || cfg.emptyTransitionDir != "")) ||
@@ -143,24 +146,25 @@ func run(ctx context.Context, args []string, getenv func(string) string, output 
 	}
 	defer ldaps.Close()
 	fixture := server{
-		tlsConfig:                &tls.Config{MinVersion: tls.VersionTLS12, Certificates: []tls.Certificate{certificate}},
-		username:                 cfg.username,
-		password:                 cfg.password,
-		control:                  control,
-		emptyTransition:          emptyTransition,
-		directoryMode:            cfg.directoryMode,
-		directoryV2:              cfg.directoryV2,
-		directoryV3:              cfg.directoryV3,
-		userExportFailureV3:      cfg.userExportFailureV3,
-		groupExportFailureV3:     cfg.groupExportFailureV3,
-		computerExportFailureV3:  cfg.computerExportFailureV3,
-		directoryV4:              cfg.directoryV4,
-		groupMembersV4Pagination: cfg.groupMembersV4Pagination,
-		userAssetsV2:             cfg.userAssetsV2,
-		computerAssetsV3:         cfg.computerAssetsV3,
-		groupAssetsV3:            cfg.groupAssetsV3,
-		directoryEmpty:           cfg.directoryEmpty,
-		directorySlow:            cfg.directorySlow,
+		tlsConfig:                  &tls.Config{MinVersion: tls.VersionTLS12, Certificates: []tls.Certificate{certificate}},
+		username:                   cfg.username,
+		password:                   cfg.password,
+		control:                    control,
+		emptyTransition:            emptyTransition,
+		directoryMode:              cfg.directoryMode,
+		directoryV2:                cfg.directoryV2,
+		directoryV3:                cfg.directoryV3,
+		userExportFailureV3:        cfg.userExportFailureV3,
+		groupExportFailureV3:       cfg.groupExportFailureV3,
+		computerExportFailureV3:    cfg.computerExportFailureV3,
+		computerExportMultichunkV3: cfg.computerExportMultichunkV3,
+		directoryV4:                cfg.directoryV4,
+		groupMembersV4Pagination:   cfg.groupMembersV4Pagination,
+		userAssetsV2:               cfg.userAssetsV2,
+		computerAssetsV3:           cfg.computerAssetsV3,
+		groupAssetsV3:              cfg.groupAssetsV3,
+		directoryEmpty:             cfg.directoryEmpty,
+		directorySlow:              cfg.directorySlow,
 	}
 	if _, err := fmt.Fprintln(output, "synthetic LDAP fixture ready"); err != nil {
 		return errors.New("synthetic LDAP fixture readiness output unavailable")

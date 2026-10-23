@@ -7,10 +7,12 @@ step. Selection behavior is checked separately against the actual workflow.
 import hashlib
 import json
 from pathlib import Path
+from computer_asset_export_v3_multichunk_ci import restore_multichunk_source
 
 
 def restore_access_role_bulk(text):
     """Reverse exactly the reviewed access-only validated two-file upload."""
+    text = restore_multichunk_source(text, ".github/workflows/ci.yml")
     def unique(pairs):
         result = {}
         for key, value in pairs:

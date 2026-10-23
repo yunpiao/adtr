@@ -390,3 +390,53 @@ SHA/头部与当前checkout/run/source，独立review仍须实际看图，不能
 原running-cancel真实套件保留为旧入口/后端回归；新入口running/retry_wait/未知响应
 仅DOM/API覆盖，不声称新增running入口真实checkpoint或丢回复artifact。真实AD、
 Windows、容量及完整AD-F/EXP验收继续开放。
+
+### 隔离合成多块 XLSX 完整性与资源表征
+
+新增独立 `computer-asset-export-v3-multichunk` 验收套件，不替换既有小样本三场景。
+它通过原 LDAP、目录任务、普通 Worker 和 PostgreSQL 产生一个 1,024 对象的合成观测，
+其中 1,020 台计算机，另外各两用户和组；四页，每页 256 对象。固定五列与
+`computer-` 关键词、2026-01-01（含）到 2026-01-02（不含）、创建时间升序使用现有 API。
+每条长 DN 仍在既有 4,096 字节限制内；生产 10,000 行、32 MiB 文件、16 MiB 观测
+及 1 MiB 分块上限均不改变。固定夹具应产生的压缩大小不是实测结论。
+
+真实门禁要求：一次创建、实际文件大于 1 MiB、至少两条已提交数据库 chunk，
+每个非尾块恰为 1 MiB。任务、快照、manifest、所有块的原 task/actor/source/payload/fence
+必须一致；提交和租用事件的 resultVersion 可为 0，所有事件版本非递减，最终任务版本为正。
+完整原始观测由数据库分段读取，不重新序列化；独立从这些字段导出全体 1,020×5 单元格、
+表头、首末行和矩阵摘要。真实浏览器下载文件与只从数据库块组装的文件逐字节相等，
+还须通过各块及整文件摘要。不能复制浏览器文件冒充数据库文件。
+
+浏览器对每项动作先锁定本次 host 观察窗口的第一个原 Request，再验证身份、请求、
+响应元数据和正文；首个坏响应或 JSON 失败不能由下一条成功替代。原 native JSON
+读取观察器保持不变，不重放请求、不替换响应、不改缓存。文件来自明确点击后的实际
+Download 事件，不使用另一次 HTTP 请求或 CDP body 冒充下载。成功 ready.png 使用真实
+1440×900 页面，原任务、完成状态、行数、下载控件可见且密码/MFA 输入为空集合。
+图片结构检查不替代独立像素复审，也不声称 Windows Excel 已真实打开。
+
+新安全 validator 严格验证七个原名文件：source-observation.json、database-export.xlsx、
+download.xlsx、ready.png、evidence.json、provenance.json、resources.json。除了单元格，
+还检查 ZIP local/central/descriptor/EOCD 全字节覆盖、五个静态 XML 模板、完整规范
+worksheet，拒绝 XML 额外属性/注释/PI、ZIP 注释/extra/尾载荷。PNG 仅接纳当前真实
+RGB8 截图的 IHDR/连续 IDAT/IEND，逐 CRC、单完整有界 zlib 流及 scanline 检查，拒绝
+text/profile 等任何附加块。双方文件和全部摘要重算后的 canary 仍须被结构门禁拒绝。
+不通过清洗、改写或重编码来使证据过关；旧 validator 不变。这不是通用凭据扫描或
+对像素/压缩隐写的无秘密证明，合成数据边界、proof-free DOM 和独立像素复核仍必要。
+
+资源数据只由 runner 读取自己启动的 API/Worker 进程，窗口覆盖完整浏览器阶段，
+包括登录、MFA 等待、目录采集、导出和取证。CPU 为计数差；RSS 是近似端点值，
+HWM 是进程生命周期高水位，并非导出专属峰值，也不包含浏览器、数据库和整机资源。
+没有新增产品 SLO 或资源合格阈值。进程身份不符、不可读取或清理证据不合格均拒绝
+成功上传，不请求新权限。原 runner finally 保留；退出零且未强杀等证据不独立证明
+Docker 容器已不存在。
+
+套件使用独立一次性夹具，实际 proof 账本须 owner 7→8、producer 9→9，
+观测/use 各 1，导出任务 0→1。900 秒 spec、930 秒 runner、30 秒 validator、
+原 30 秒 source/ready 等待、单 worker、零重试及 20 分钟 job 不放宽。
+七文件仅在真实成功、严格验证、原清理结束后保存，14 天留存并绑定实际 tested commit、
+完整来源摘要和 run/attempt。未通过不得上传部分产物或自行增大夹具/重发任务。
+
+本小节描述待执行的工程验收门禁，不记录尚未发生的多块容量或资源测试结果。
+最终精确提交 CI、真实产物与独立审查完成前，不能宣称该套件通过。即使通过，
+它只覆盖一个既有上限内的合成多块数据点；真实 AD/Windows、目标规模压测、最大容量、
+超量行为和完整 AD-F-053 验收仍开放，产品账本保持 0/209。

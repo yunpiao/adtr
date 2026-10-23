@@ -28,6 +28,7 @@ from user_asset_export_v3_running_cancel_ci import SUITE as RUNNING_CANCEL_SUITE
 from group_asset_export_v3_running_cancel_ci import SUITE as GROUP_RUNNING_CANCEL_SUITE, configure as configure_group_running_cancel, capture as capture_group_running_cancel, validate as validate_group_running_cancel
 from computer_asset_export_v3_running_cancel_ci import SUITE as COMPUTER_RUNNING_CANCEL_SUITE, configure as configure_computer_running_cancel, capture as capture_computer_running_cancel, validate as validate_computer_running_cancel
 from computer_asset_export_v3_ci import configure as configure_computer_export, capture as capture_computer_export, validate as validate_computer_export
+from computer_asset_export_v3_multichunk_ci import SUITE as COMPUTER_MULTICHUNK_SUITE, configure as configure_computer_multichunk, capture as capture_computer_multichunk, start_samples as start_multichunk_samples, finish_samples as finish_multichunk_samples, validate_core as validate_computer_multichunk
 from computer_asset_export_v3_terminal_ci import SUITES as COMPUTER_EXPORT_TERMINAL_SUITES, configure as configure_computer_terminal, capture as capture_computer_terminal, validate as validate_computer_terminal
 from group_asset_export_v3_ci import configure as configure_group_export, capture as capture_group_export, validate as validate_group_export
 from group_asset_export_v3_terminal_ci import SUITES as GROUP_EXPORT_TERMINAL_SUITES, configure as configure_group_terminal, capture as capture_group_terminal, validate as validate_group_terminal
@@ -46,7 +47,7 @@ REAL_TAB_LIFECYCLE_SUITES = {"account-references", "session-invalidation", "dire
 USER_ASSETS_V2_SUITES = {"user-assets-v2", "user-assets-v2-readers"}
 DIRECTORY_V2_SUITES = {"directory-v2", "directory-v2-controls", "directory-v2-readers"} | USER_ASSETS_V2_SUITES
 COMPUTER_ASSETS_V3_SUITES = {"computer-assets-v3", "computer-assets-v3-readers"}
-COMPUTER_EXPORT_SUITES = COMPUTER_EXPORT_TERMINAL_SUITES | {"computer-asset-export-v3"}
+COMPUTER_EXPORT_SUITES = COMPUTER_EXPORT_TERMINAL_SUITES | {"computer-asset-export-v3", COMPUTER_MULTICHUNK_SUITE}
 GROUP_EXPORT_SUITES = GROUP_EXPORT_TERMINAL_SUITES | {"group-asset-export-v3"}
 GROUP_ASSETS_V3_SUITES = {"group-assets-v3", "group-assets-v3-readers"}
 EMPTY_TRANSITION_SUITES = {"group-assets-v3", "computer-assets-v3"}
@@ -517,7 +518,7 @@ def close_health_evidence(cleanup, build, env, deadline):
 
 def browser_command(suite):
     command = ["npm", "run", "test:e2e", "--prefix", "web", "--", f"e2e/{suite}.spec.ts"]
-    if suite in {"messages-bulk", "messages-isolation", "tasks-health-recovery"}:
+    if suite in {"messages-bulk", "messages-isolation", "tasks-health-recovery", COMPUTER_MULTICHUNK_SUITE}:
         command.extend(["--output", f"test-results/{suite}"])
     if suite in REAL_TAB_LIFECYCLE_SUITES:
         # These regressions require genuine background/foreground tab changes.
@@ -982,7 +983,7 @@ def validate_asset_refresh_evidence(suite):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--suite", choices=["tasks-health-recovery", "directory-v4-controls", "directory-v4-cancel", "directory-v4-readers", "group-asset-export-v3-running-cancel", "computer-asset-export-v3-running-cancel", "user-asset-export-v3-running-cancel", "computer-asset-export-v3", "computer-asset-export-v3-failure", "computer-asset-export-v3-cancel", "group-asset-export-v3", "group-asset-export-v3-failure", "group-asset-export-v3-cancel", "user-asset-export-v3-failure", "user-asset-export-v3-cancel", "user-asset-export-v3", "auth", "access", "resource", "tasks", "messages", "messages-bulk", "messages-isolation", "audit", "system", "maintenance", "domains", "operations", "profile", "credential-use", "account-references", "operational-logs", "session-invalidation", "account-reference-barrier", "directory", "directory-controls", "directory-readers", "directory-v2", "directory-v2-controls", "directory-v2-readers", "directory-v3-backend", "directory-v4-backend", "group-members-v4", "group-members-v4-empty", "group-members-v4-pagination", "group-members-v4-refresh", "user-assets-v3", "computer-assets-v3", "computer-assets-v3-readers", "group-assets-v3", "group-assets-v3-readers", "directory-v3", "directory-v3-controls", "directory-v3-readers", "user-assets-v2", "user-assets-v2-readers"], default="auth")
+    parser.add_argument("--suite", choices=["tasks-health-recovery", "directory-v4-controls", "directory-v4-cancel", "directory-v4-readers", "group-asset-export-v3-running-cancel", "computer-asset-export-v3-running-cancel", "user-asset-export-v3-running-cancel", "computer-asset-export-v3-multichunk", "computer-asset-export-v3", "computer-asset-export-v3-failure", "computer-asset-export-v3-cancel", "group-asset-export-v3", "group-asset-export-v3-failure", "group-asset-export-v3-cancel", "user-asset-export-v3-failure", "user-asset-export-v3-cancel", "user-asset-export-v3", "auth", "access", "resource", "tasks", "messages", "messages-bulk", "messages-isolation", "audit", "system", "maintenance", "domains", "operations", "profile", "credential-use", "account-references", "operational-logs", "session-invalidation", "account-reference-barrier", "directory", "directory-controls", "directory-readers", "directory-v2", "directory-v2-controls", "directory-v2-readers", "directory-v3-backend", "directory-v4-backend", "group-members-v4", "group-members-v4-empty", "group-members-v4-pagination", "group-members-v4-refresh", "user-assets-v3", "computer-assets-v3", "computer-assets-v3-readers", "group-assets-v3", "group-assets-v3-readers", "directory-v3", "directory-v3-controls", "directory-v3-readers", "user-assets-v2", "user-assets-v2-readers"], default="auth")
     parser.add_argument("--expired", action="store_true")
     args = parser.parse_args()
     if args.suite == "tasks-health-recovery" and args.expired:
@@ -1024,6 +1025,9 @@ def main():
         (diagnostic_dir / filename).unlink(missing_ok=True)
     env["ADTR_E2E_SAFE_DIAGNOSTICS"] = str((diagnostic_dir / "browser.json").resolve())
     diagnostics.phase("setup")
+    configure_computer_multichunk(env, args.suite)
+    if args.suite == COMPUTER_MULTICHUNK_SUITE:
+        capture_computer_multichunk()
     if args.suite == "user-asset-export-v3":
         configure_user_export(env)
         capture_user_export()
@@ -1130,7 +1134,8 @@ def main():
                                            user_assets_v2=args.suite in USER_ASSETS_V2_SUITES,
                                            user_export_failure_v3=args.suite == "user-asset-export-v3-failure",
                                            group_export_failure_v3=args.suite == "group-asset-export-v3-failure",
-                                           computer_export_failure_v3=args.suite == "computer-asset-export-v3-failure")
+                                           computer_export_failure_v3=args.suite == "computer-asset-export-v3-failure",
+                                           computer_export_multichunk_v3=args.suite == COMPUTER_MULTICHUNK_SUITE)
                 ldap_fixture.start(env)
                 if args.suite in DIRECTORY_SUITES:
                     env["ADTR_DIRECTORY_READ_ENABLED"] = "true"
@@ -1248,6 +1253,7 @@ def main():
         # DOM snapshot. Suppress that separate artifact so proof fields cannot
         # enter an error-context prompt; explicit safe screenshots remain intact.
         env["PLAYWRIGHT_NO_COPY_PROMPT"] = "1"
+        multichunk_samples = start_multichunk_samples(server, worker) if args.suite == COMPUTER_MULTICHUNK_SUITE else None
         diagnostics.phase("browser-start")
         if args.suite == "tasks-health-recovery":
             exit_code = health_build_process(command, env, health_timeout(660, health_run_deadline), capture=False)
@@ -1255,6 +1261,9 @@ def main():
                 raise RuntimeError("health_browser_failed")
         else:
             subprocess.run(command, env=env, check=True, timeout=720 if args.suite == "messages-isolation" else V4_CONTROLS_BUDGETS[args.suite] if args.suite in V4_CONTROLS_BUDGETS else 930 if args.suite in KIND_RUNNING_CANCEL_SUITES else 930 if args.suite == RUNNING_CANCEL_SUITE else 930 if args.suite in COMPUTER_EXPORT_SUITES else 930 if args.suite in GROUP_EXPORT_SUITES else 930 if args.suite in EXPORT_TERMINAL_SUITES else 930 if args.suite == "user-asset-export-v3" else 660 if args.suite == "account-references" else 930 if args.suite in EMPTY_DIRECTORY_SUITES | USER_ASSETS_V2_SUITES | {"user-assets-v3"} | COMPUTER_ASSETS_V3_SUITES | GROUP_ASSETS_V3_SUITES else 660 if args.suite in {"directory", "directory-v2", "directory-v3-backend", "directory-v4-backend", "group-members-v4", "group-members-v4-empty", "group-members-v4-pagination", "group-members-v4-refresh", "directory-v3"} else 600 if args.suite == "audit" else 540 if args.suite in {"maintenance", "domains", "operations", "credential-use", "account-references", "operational-logs", "account-reference-barrier"} else 480 if args.suite == "system" else 420)
+        if args.suite == COMPUTER_MULTICHUNK_SUITE:
+            finish_multichunk_samples(multichunk_samples, server, worker)
+            validate_computer_multichunk()
         if args.suite == "messages-isolation":
             validate_messages_isolation_evidence()
         if args.suite == "user-asset-export-v3":

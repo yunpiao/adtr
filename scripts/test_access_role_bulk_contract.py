@@ -17,6 +17,7 @@ import zlib
 
 import ci_workflow_contract as workflow
 import ci_selection as selection
+from computer_asset_export_v3_multichunk_ci import restore_multichunk_source
 import validate_access_role_bulk_evidence as evidence
 
 CANARY = 'SYNTHETIC_DO_NOT_EXPORT_CANARY'
@@ -532,6 +533,7 @@ HELPER_BLOCK_SHA256 = 'd4ae094998bb8aa183e965ce8352ab4ac56e4f4db09ea7f4e25e52756
 
 
 def restore_helper_source(text):
+    text = restore_multichunk_source(text, "scripts/ci_workflow_contract.py")
     start = 'def restore_access_role_bulk(text):\n'
     end = 'def restore_archive_target_observation(text):\n'
     evidence.require(text.count(start) == 1 and text.count(end) == 1)
@@ -723,7 +725,10 @@ class AccessRoleBulkWorkflowContract(unittest.TestCase):
                 '1d9ef348def9d9b55ee4d0f8bb7da340a3c9049f9e90b5826bd71f3a39c47f24',
         }
         for path, expected in frozen.items():
-            self.assertEqual(evidence.digest(Path(path).read_bytes()), expected)
+            raw = Path(path).read_bytes()
+            if path in {"scripts/test_auth_e2e.py", "scripts/ci_inventory.json"}:
+                raw = restore_multichunk_source(raw.decode("utf-8"), path).encode("utf-8")
+            self.assertEqual(evidence.digest(raw), expected)
 
 
     def test_standalone_validator_and_ci_changes_conservatively_select_full_matrix(self):

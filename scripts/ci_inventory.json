@@ -392,6 +392,13 @@
       "specs": [
         "web/e2e/tasks-health-recovery.spec.ts"
       ]
+    },
+    {
+      "name": "computer-asset-export-v3-multichunk",
+      "command": "python3 scripts/test_auth_e2e.py --suite computer-asset-export-v3-multichunk",
+      "specs": [
+        "web/e2e/computer-asset-export-v3-multichunk.spec.ts"
+      ]
     }
   ],
   "fixed": [
@@ -444,7 +451,8 @@
       "computer-asset-export-v3-failure",
       "computer-asset-export-v3-cancel",
       "computer-asset-export-v3-running-cancel",
-      "computer-assets-v3-readers"
+      "computer-assets-v3-readers",
+      "computer-asset-export-v3-multichunk"
     ],
     "web/src/GroupAssetsV3Workspace.tsx": [
       "group-assets-v3",
