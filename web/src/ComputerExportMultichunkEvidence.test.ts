@@ -5,7 +5,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Page, Request, Response } from "@playwright/test";
-import { observeAction, readSourceEvidence, readExportEvidence, isolatedQuery, sha, sourceCellSummary, type EvidenceQuery } from "../e2e/computer-asset-export-v3-multichunk-evidence";
+import { observeAction, readSourceEvidence, readExportEvidence, isolatedQuery, sha, sourceCellSummary, multichunkSetupFailureSuffix, type EvidenceQuery, type SetupDiagnosticCommand } from "../e2e/computer-asset-export-v3-multichunk-evidence";
 import type { ExportRequest } from "./computer-asset-export-v3-api";
 
 vi.mock("../e2e/directory-v2-response-observer", () => ({ directoryV2ResponseJSON: (response: Response) => response.json() }));
@@ -179,4 +179,94 @@ describe("bounded actual database readers, not exporter-provided expected bytes"
     expect(() => sourceCellSummary(Buffer.from(JSON.stringify({ dictionaryVersion: 3, objects })))).toThrow("Multichunk evidence rejected");
   });
   it("does not interpret arbitrary source JSON as a row summary", () => { expect(() => sourceCellSummary(Buffer.from('{"objects":[],"dictionaryVersion":3}'))).toThrow("Multichunk evidence rejected"); expect(() => sourceCellSummary(Buffer.from([0xff]))).toThrow("Multichunk evidence rejected"); });
+});
+
+// A fake command owns all diagnostic unit outcomes. No Docker, SQL or browser
+// runs here; actual failure-time snapshots remain an exact-head CI obligation.
+describe("closed failure-time setup snapshot", () => {
+  const unavailable = "; setup_db_snapshot=unavailable";
+  const container = "adtr-auth-e2e-012345abcdef";
+  const states = ["queued", "running", "retry_wait", "cancel_requested", "succeeded", "failed", "partial_failed", "dead_letter", "cancelled", "unknown"];
+  const reasons = ["none", "executor_unavailable", "invalid_input", "credential_key_unavailable", "credential_unavailable", "invalid_config", "destination_denied", "invalid_response", "cancelled", "authorization_revoked", "lease_lost", "connection_timeout", "checkpoint_failed", "domain_probe_disabled", "policy_revision_changed", "connection_revision_changed", "directory_read_disabled", "directory_use_changed", "connection_failed", "dns_failed", "connect_failed", "tls_untrusted", "tls_hostname", "tls_expired", "tls_failed", "starttls_required", "credentials_rejected", "ldap_access_denied", "ldap_timeout", "referral_rejected", "directory_limit_exceeded", "unsupported_directory_profile", "other"];
+  const enable = () => { vi.stubEnv("ADTR_E2E_COMPUTER_ASSET_EXPORT_V3_MULTICHUNK", "true"); vi.stubEnv("ADTR_E2E_DB_CONTAINER", container); };
+  afterEach(() => vi.unstubAllEnvs());
+
+  it.each(["fixture_guard", "provenance", "source", "owner", "create", "ready", "download", "evidence", "", "setup "])('performs zero diagnostic commands outside setup: %s', async (phase) => {
+    const command = vi.fn(async () => { throw new Error(canary); });
+    expect(await multichunkSetupFailureSuffix(phase, command)).toBe("");
+    expect(command).not.toHaveBeenCalled();
+  });
+  it.each(["disabled", "missing_container", "external_container", "long_container", "shell_container"])('rejects %s before dispatch', async (kind) => {
+    enable();
+    if (kind === "disabled") vi.stubEnv("ADTR_E2E_COMPUTER_ASSET_EXPORT_V3_MULTICHUNK", "TRUE");
+    if (kind === "missing_container") vi.stubEnv("ADTR_E2E_DB_CONTAINER", "");
+    if (kind === "external_container") vi.stubEnv("ADTR_E2E_DB_CONTAINER", "production-db");
+    if (kind === "long_container") vi.stubEnv("ADTR_E2E_DB_CONTAINER", container + "a");
+    if (kind === "shell_container") vi.stubEnv("ADTR_E2E_DB_CONTAINER", container + ";" + canary);
+    const command = vi.fn(async () => ({ stdout: "none|not_applicable|not_applicable\n" }));
+    expect(await multichunkSetupFailureSuffix("setup", command)).toBe(unavailable);
+    expect(command).not.toHaveBeenCalled();
+  });
+  it("uses one fixed read-only command with bounded rows, SQL time, process time and output", async () => {
+    enable();
+    const command = vi.fn<SetupDiagnosticCommand>(async () => ({ stdout: "none|not_applicable|not_applicable\n" }));
+    expect(await multichunkSetupFailureSuffix("setup", command)).toBe("; setup_db_snapshot=none");
+    const expectedSQL = "WITH sampled AS (SELECT state,error_code FROM adtr.tasks WHERE tenant_id='default' AND kind='domain.directory_read.v3' LIMIT 2), summary AS (SELECT count(*) AS n,min(CASE state " + states.filter((value) => value !== "unknown").map((value) => `WHEN '${value}' THEN '${value}'`).join(" ") + " ELSE 'unknown' END) AS state,min(CASE error_code WHEN '' THEN 'none' " + reasons.filter((value) => value !== "none" && value !== "other").map((value) => `WHEN '${value}' THEN '${value}'`).join(" ") + " ELSE 'other' END) AS reason FROM sampled) SELECT CASE WHEN n=0 THEN 'none|not_applicable|not_applicable' WHEN n=1 THEN 'one|'||state||'|'||reason ELSE 'multiple|not_applicable|not_applicable' END FROM summary";
+    expect(command).toHaveBeenCalledTimes(1);
+    expect(command).toHaveBeenCalledWith("docker", ["exec", "-e", "PGOPTIONS=-c statement_timeout=2000 -c default_transaction_read_only=on", container, "psql", "-U", "postgres", "-d", "adtr_e2e", "-X", "-A", "-t", "-v", "ON_ERROR_STOP=1", "-c", expectedSQL], { encoding: "utf8", timeout: 5000, maxBuffer: 4096 });
+  });
+  it.each(["none", "multiple"])('reports %s without choosing or exposing any row', async (count) => {
+    enable(); const command = vi.fn(async () => ({ stdout: `${count}|not_applicable|not_applicable\n` }));
+    expect(await multichunkSetupFailureSuffix("setup", command)).toBe(`; setup_db_snapshot=${count}`);
+    expect(command).toHaveBeenCalledTimes(1);
+  });
+  it.each(states)('preserves permitted state %s even with an unusual reason', async (state) => {
+    enable(); const command = vi.fn(async () => ({ stdout: `one|${state}|directory_limit_exceeded\n` }));
+    expect(await multichunkSetupFailureSuffix("setup", command)).toBe(`; setup_db_snapshot=one; state=${state}; reason=directory_limit_exceeded`);
+    expect(command).toHaveBeenCalledTimes(1);
+  });
+  it.each(reasons)('admits only fixed reason %s', async (reason) => {
+    enable(); const command = vi.fn(async () => ({ stdout: `one|failed|${reason}\n` }));
+    expect(await multichunkSetupFailureSuffix("setup", command)).toBe(`; setup_db_snapshot=one; state=failed; reason=${reason}`);
+    expect(command).toHaveBeenCalledTimes(1);
+  });
+  it.each([
+    ["empty", ""], ["count", "two|failed|none\n"], ["state", "one|not_applicable|none\n"],
+    ["raw_state", `one|${canary}|none\n`], ["raw_reason", `one|failed|${canary}\n`],
+    ["none_row", "none|failed|none\n"], ["multiple_row", "multiple|running|none\n"],
+    ["extra_token", "one|failed|none|extra\n"], ["missing_token", "one|failed\n"],
+    ["extra_row", "one|failed|none\none|succeeded|none\n"], ["missing_newline", "one|failed|none"],
+    ["double_newline", "one|failed|none\n\n"], ["crlf", "one|failed|none\r\n"],
+    ["leading_space", " one|failed|none\n"], ["trailing_space", "one|failed|none \n"],
+    ["nul", "one|failed|none\0\n"], ["non_ascii", "one|failed|非枚举\n"],
+    ["oversize", "x".repeat(257) + "\n"], ["non_string", null], ["object", { canary }],
+  ])('maps malformed %s to unavailable without leaking data', async (_label, stdout) => {
+    enable(); const command = vi.fn(async () => ({ stdout }));
+    expect(await multichunkSetupFailureSuffix("setup", command)).toBe(unavailable);
+    expect(command).toHaveBeenCalledTimes(1);
+  });
+  it.each(["synchronous", "rejected"])('does not inspect the %s original command error', async (mode) => {
+    enable(); const touched = vi.fn();
+    const error = Object.defineProperties({}, Object.fromEntries(["message", "stack", "cause", "headers", "stdout", "stderr"].map((key) => [key, { get: () => { touched(); throw new Error(canary); } }])));
+    const command = vi.fn(() => { if (mode === "synchronous") throw error; return Promise.reject(error); });
+    expect(await multichunkSetupFailureSuffix("setup", command)).toBe(unavailable);
+    expect(command).toHaveBeenCalledTimes(1); expect(touched).not.toHaveBeenCalled();
+  });
+  it("never reads or reports successful-command stderr", async () => {
+    enable(); const touched = vi.fn();
+    const result = Object.defineProperty({ stdout: "one|failed|other\n" }, "stderr", { get: () => { touched(); throw new Error(canary); } });
+    const command = vi.fn(async () => result);
+    expect(await multichunkSetupFailureSuffix("setup", command)).toBe("; setup_db_snapshot=one; state=failed; reason=other");
+    expect(touched).not.toHaveBeenCalled();
+  });
+  it.each(["resolve", "reject"])('waits for the original one-shot command to %s, without detached racing', async (ending) => {
+    enable(); const pending = deferred<{ stdout: unknown }>(), command = vi.fn(() => pending.promise);
+    let returned = false;
+    const result = multichunkSetupFailureSuffix("setup", command).then((value) => { returned = true; return value; });
+    await Promise.resolve(); expect(returned).toBe(false); expect(command).toHaveBeenCalledTimes(1);
+    if (ending === "resolve") pending.resolve({ stdout: "one|running|none\n" });
+    else pending.reject(new Error(canary));
+    expect(await result).toBe(ending === "resolve" ? "; setup_db_snapshot=one; state=running; reason=none" : unavailable);
+    expect(command).toHaveBeenCalledTimes(1);
+  });
 });

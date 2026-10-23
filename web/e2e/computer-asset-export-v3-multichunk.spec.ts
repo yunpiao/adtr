@@ -5,7 +5,7 @@ import { setupComputerFixture, proof, readJSON } from "./computer-assets-v3-fixt
 import { observeDirectoryV2Responses } from "./directory-v2-response-observer";
 import { sensitiveBudget, switchToExportOwner } from "./computer-asset-export-v3-helpers";
 import type { ExportRequest } from "../src/computer-asset-export-v3-api";
-import { suite, exportPath, columns, sha, downloadHeaders, requireEvidence, uuid, fileReference, captureProvenance, readSourceEvidence, readExportEvidence, sourceCellSummary, receiptProjection, observeAction } from "./computer-asset-export-v3-multichunk-evidence";
+import { suite, exportPath, columns, sha, downloadHeaders, requireEvidence, uuid, fileReference, captureProvenance, readSourceEvidence, readExportEvidence, sourceCellSummary, receiptProjection, observeAction, multichunkSetupFailureSuffix } from "./computer-asset-export-v3-multichunk-evidence";
 
 // One isolated real LDAP/Worker/PG export. The original small suite is unchanged.
 // No trace, video, automatic failure image, proof, body or raw error is uploaded.
@@ -129,6 +129,13 @@ test("computer XLSX actual multi-chunk persistence and full-file integrity", asy
     fixture.safe(evidence); requireEvidence(writes === 1 && !unsafeRequest);
     await writeFile(info.outputPath("evidence.json"), JSON.stringify(evidence, null, 2), { flag: "wx" });
     // No info.attach: only the runner's strict seven-file gate may stage uploads.
-  } catch { throw new Error(`Computer multichunk acceptance failed at ${phase}`); }
+  } catch {
+    let setupDiagnostic = "";
+    if (phase === "setup") {
+      try { setupDiagnostic = await multichunkSetupFailureSuffix(phase); }
+      catch { setupDiagnostic = "; setup_db_snapshot=unavailable"; }
+    }
+    throw new Error(`Computer multichunk acceptance failed at ${phase}${setupDiagnostic}`);
+  }
   finally { page.off("request", countWrites); }
 });

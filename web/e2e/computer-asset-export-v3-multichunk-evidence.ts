@@ -265,3 +265,33 @@ export async function readExportEvidence(...args: Parameters<typeof readExportEv
   try { return await readExportEvidenceInternal(...args); }
   catch { throw new Error("Multichunk export evidence failed"); }
 }
+
+// Failure-time snapshot only, never a witness of the failed HTTP poll. The SQL
+// maps every value to a literal before stdout; no row identity or raw code exits.
+const setupDiagnosticStates = ["queued", "running", "retry_wait", "cancel_requested", "succeeded", "failed", "partial_failed", "dead_letter", "cancelled", "unknown"] as const;
+const setupDiagnosticReasons = ["none", "executor_unavailable", "invalid_input", "credential_key_unavailable", "credential_unavailable", "invalid_config", "destination_denied", "invalid_response", "cancelled", "authorization_revoked", "lease_lost", "connection_timeout", "checkpoint_failed", "domain_probe_disabled", "policy_revision_changed", "connection_revision_changed", "directory_read_disabled", "directory_use_changed", "connection_failed", "dns_failed", "connect_failed", "tls_untrusted", "tls_hostname", "tls_expired", "tls_failed", "starttls_required", "credentials_rejected", "ldap_access_denied", "ldap_timeout", "referral_rejected", "directory_limit_exceeded", "unsupported_directory_profile", "other"] as const;
+const setupDiagnosticSQL = `WITH sampled AS (SELECT state,error_code FROM adtr.tasks WHERE tenant_id='default' AND kind='domain.directory_read.v3' LIMIT 2), summary AS (SELECT count(*) AS n,min(CASE state ${setupDiagnosticStates.filter((value) => value !== "unknown").map((value) => `WHEN '${value}' THEN '${value}'`).join(" ")} ELSE 'unknown' END) AS state,min(CASE error_code WHEN '' THEN 'none' ${setupDiagnosticReasons.filter((value) => value !== "none" && value !== "other").map((value) => `WHEN '${value}' THEN '${value}'`).join(" ")} ELSE 'other' END) AS reason FROM sampled) SELECT CASE WHEN n=0 THEN 'none|not_applicable|not_applicable' WHEN n=1 THEN 'one|'||state||'|'||reason ELSE 'multiple|not_applicable|not_applicable' END FROM summary`;
+export type SetupDiagnosticCommand = (file: string, args: string[], options: { encoding: "utf8"; timeout: number; maxBuffer: number }) => Promise<{ stdout: unknown }>;
+const setupUnavailable = "; setup_db_snapshot=unavailable";
+function setupDiagnosticSuffix(stdout: unknown): string {
+  if (typeof stdout !== "string" || stdout.length > 256 || !/^[\x20-\x7e]+\n$/u.test(stdout) || stdout.indexOf("\n") !== stdout.length - 1) return setupUnavailable;
+  const parts = stdout.slice(0, -1).split("|");
+  if (parts.length !== 3) return setupUnavailable;
+  if (parts[0] === "none" && parts[1] === "not_applicable" && parts[2] === "not_applicable") return "; setup_db_snapshot=none";
+  if (parts[0] === "multiple" && parts[1] === "not_applicable" && parts[2] === "not_applicable") return "; setup_db_snapshot=multiple";
+  if (parts[0] !== "one") return setupUnavailable;
+  const state = setupDiagnosticStates.find((value) => value === parts[1]);
+  const reason = setupDiagnosticReasons.find((value) => value === parts[2]);
+  if (!state || !reason) return setupUnavailable;
+  return `; setup_db_snapshot=one; state=${state}; reason=${reason}`;
+}
+export async function multichunkSetupFailureSuffix(phase: string, command: SetupDiagnosticCommand = (file, args, options) => run(file, args, options)): Promise<string> {
+  if (phase !== "setup") return "";
+  try {
+    if (process.env.ADTR_E2E_COMPUTER_ASSET_EXPORT_V3_MULTICHUNK !== "true") return setupUnavailable;
+    const container = process.env.ADTR_E2E_DB_CONTAINER ?? "";
+    if (!/^adtr-auth-e2e-[0-9a-f]{12}$/u.test(container)) return setupUnavailable;
+    const result = await command("docker", ["exec", "-e", "PGOPTIONS=-c statement_timeout=2000 -c default_transaction_read_only=on", container, "psql", "-U", "postgres", "-d", "adtr_e2e", "-X", "-A", "-t", "-v", "ON_ERROR_STOP=1", "-c", setupDiagnosticSQL], { encoding: "utf8", timeout: 5000, maxBuffer: 4096 });
+    return setupDiagnosticSuffix(result.stdout);
+  } catch { return setupUnavailable; }
+}
