@@ -728,19 +728,34 @@ class AccessRoleBulkWorkflowContract(unittest.TestCase):
 
     def test_standalone_validator_and_ci_changes_conservatively_select_full_matrix(self):
         inventory = json.loads(raw_source('scripts/ci_inventory.json'))
+        # This is a selector-policy contract, not a TypeScript parser test.
+        # make check runs Python contracts before web-build installs TypeScript.
+        # Follow SelectionContract.choose: keep select real and supply only its
+        # dependency-graph boundary, with an explicit ban on subprocess work.
+        def choose(path, sources):
+            snapshots = [sources, sources]
+            graphs = [({name: set() for name in snapshot}, set()) for snapshot in snapshots]
+            with patch.object(selection, 'dependency_graph', side_effect=graphs) as graph, \
+                 patch.object(selection.subprocess, 'run',
+                              side_effect=AssertionError('offline selector contract invoked a subprocess')) as process:
+                plan = selection.select([path], inventory, snapshots)
+            self.assertEqual([call.args for call in graph.call_args_list], [(sources,), (sources,)])
+            process.assert_not_called()
+            return plan
+
         for path in ('scripts/validate_access_role_bulk_evidence.py', '.github/workflows/ci.yml',
                      'scripts/ci_workflow_contract.py', DELTA):
-            plan = selection.select([path], inventory, [{}, {}])
+            plan = choose(path, {})
             with self.subTest(path=path):
                 self.assertEqual(plan['browser'], inventory['browser'])
                 self.assertEqual(plan['fixed'], inventory['fixed'])
                 self.assertEqual(plan['auth'], list(range(1, 9)))
                 self.assertTrue(all(plan['groups'].values()))
-        plan = selection.select(['scripts/test_access_role_bulk_contract.py'], inventory, [{}, {}])
+        plan = choose('scripts/test_access_role_bulk_contract.py', {})
         self.assertTrue(plan['groups']['contracts'])
         self.assertEqual(plan['browser'], [])
         path = 'web/e2e/access.spec.ts'
-        plan = selection.select([path], inventory, [{path: ''}, {path: ''}])
+        plan = choose(path, {path: ''})
         self.assertEqual([entry['name'] for entry in plan['browser']], ['access'])
 
 
