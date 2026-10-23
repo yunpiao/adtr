@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { parseWorkerControlState, workerControl, safeScreenshots, v4ScreenshotTargetVisible, v4ScreenshotTargetStatus, v4CancelUnknownUIReady, recover, readNativeFocusIdentity, invariant, type Actor, type Original } from "../e2e/directory-v4-runtime";
+import { parseWorkerControlState, workerControl, safeScreenshots, v4ScreenshotTargetVisible, v4ScreenshotTargetStatus, v4CancelUnknownUIReady, recover, readNativeFocusIdentity, classifyIdentityJSONFailure, identityJSONFailureMessage, invariant, type Actor, type Original } from "../e2e/directory-v4-runtime";
 import type { Page, Request, Response, TestInfo } from "@playwright/test";
 import { EventEmitter } from "node:events";
+import { runInNewContext } from "node:vm";
 
 describe("committed cancel query-only unknown UI barrier", () => {
   const notice = "结果尚未确认或响应未通过校验。请查询原操作；不会自动重新采集或取消。 请点击“重新核验并恢复”查询原回执。";
@@ -359,7 +360,7 @@ describe("eager original Playwright focus identity", () => {
     if (mode === "body-only") h.action.resolve();
     else if (mode === "focus-only") selected.body.resolve({ ID: 42, csrfToken: privateText });
     else if (bodyFirst) h.action.reject(rawError()); else selected.body.reject(rawError());
-    await expect(result).rejects.toThrow(bodyFirst ? /^identity_response_json_failed$/u : /^identity_focus_failed$/u); clean(h);
+    await expect(result).rejects.toThrow(bodyFirst ? /^identity_response_json_failed; json_failure_class=unknown$/u : /^identity_focus_failed$/u); clean(h);
   });
   it("fails an action rejection even after successful JSON, without exporting the ID", async () => {
     const h = harness(), req = request(h), selected = response(req), { result, settled } = h.start();
@@ -371,7 +372,7 @@ describe("eager original Playwright focus identity", () => {
     const h = harness(), req = request(h), selected = response(req), laterReq = request(h), later = response(laterReq), { result } = h.start();
     await arm(h); h.action.resolve(); await flush(); h.emitter.emit("request", req); h.emitter.emit("response", selected.value);
     selected.body.reject(rawError()); await flush(); h.emitter.emit("request", laterReq); h.emitter.emit("response", later.value);
-    await expect(result).rejects.toThrow(/^identity_response_json_failed$/u); expect(later.json).not.toHaveBeenCalled(); clean(h);
+    await expect(result).rejects.toThrow(/^identity_response_json_failed; json_failure_class=unknown$/u); expect(later.json).not.toHaveBeenCalled(); clean(h);
   });
   it.each(["focus", "json"])("catches a synchronous %s throw with no raw error/cause", async source => {
     const h = harness(), req = request(h), selected = response(req);
@@ -379,7 +380,7 @@ describe("eager original Playwright focus identity", () => {
     else selected.json.mockImplementation(() => { throw rawError(); });
     const { result } = h.start(); await arm(h);
     if (source === "json") { h.emitter.emit("request", req); h.emitter.emit("response", selected.value); h.action.resolve(); }
-    await expect(result).rejects.toThrow(source === "focus" ? /^identity_focus_failed$/u : /^identity_response_json_failed$/u); clean(h);
+    await expect(result).rejects.toThrow(source === "focus" ? /^identity_focus_failed$/u : /^identity_response_json_failed; json_failure_class=unknown$/u); clean(h);
   });
   it.each([0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1, NaN, Infinity, "42", null, undefined])("rejects a non-positive-safe-integer ID (%s)", async ID => {
     const h = harness(), req = request(h), selected = response(req), { result } = h.start(); await arm(h);
@@ -432,7 +433,7 @@ describe("eager original Playwright focus identity", () => {
     if (mode === "failed-body") selected.body.reject(rawError());
     if (mode === "failed-focus") h.action.reject(rawError());
     await vi.advanceTimersByTimeAsync(15_000);
-    const code = mode === "failed-body" ? "identity_response_json_failed" : mode === "failed-focus" ? "identity_focus_failed" : "identity_deadline";
+    const code = mode === "failed-body" ? "identity_response_json_failed; json_failure_class=unknown" : mode === "failed-focus" ? "identity_focus_failed" : "identity_deadline";
     await expect(result).rejects.toThrow(new RegExp("^" + code + "$", "u")); clean(h);
   });
   it.each(["resolve", "reject"])("quarantines late original %s after timeout without contaminating the next invocation", async mode => {
@@ -466,7 +467,7 @@ describe("eager original Playwright focus identity", () => {
       h.emitter.emit("request", req); h.emitter.emit("response", selected.value);
       if (source === "body") selected.body.reject(rawError()); h.action.resolve();
       const failure = await result.catch(value => value);
-      expect(failure).toBeInstanceOf(Error); expect(failure.message).toBe(source === "body" ? "identity_response_json_failed" : "identity_response_metadata");
+      expect(failure).toBeInstanceOf(Error); expect(failure.message).toBe(source === "body" ? "identity_response_json_failed; json_failure_class=unknown" : "identity_response_metadata");
       expect(failure.cause).toBeUndefined(); expect(String(failure.stack) + JSON.stringify(failure)).not.toContain(privateText); clean(h);
     }
     expect(log).not.toHaveBeenCalled(); expect(warn).not.toHaveBeenCalled(); expect(errorLog).not.toHaveBeenCalled();
@@ -480,9 +481,221 @@ describe("eager original Playwright focus identity", () => {
     h.emitter.emit("request", req); h.emitter.emit("response", selected.value); h.action.resolve();
     if (mode === "success") selected.body.resolve({ ID: 42 }); else selected.body.reject(rawError());
     const failure = await result.catch(value => value);
-    expect(failure.message).toBe(mode === "success" ? "identity_cleanup_failed" : "identity_response_json_failed");
+    expect(failure.message).toBe(mode === "success" ? "identity_cleanup_failed" : "identity_response_json_failed; json_failure_class=unknown");
     expect(failure.cleanupFailure).toBe("identity_cleanup_failed"); expect(failure.cause).toBeUndefined();
     expect(String(failure.stack) + JSON.stringify(failure)).not.toContain(privateText);
     expect(removed).toEqual(["request", "response", "close", "crash", "framenavigated"]); clean(h);
+  });
+
+  it.each(["sync", "async"])("projects each original JSON %s failure without changing the selected object", async mode => {
+    const cases = [
+      ["json_syntax_error", new SyntaxError(privateText)],
+      ["cdp_body_no_data", new Error("response.json: Protocol error (Network.getResponseBody): No data found for resource with given identifier")],
+      ["cdp_body_error", new Error("response.json: Protocol error (IO.read): " + privateText)],
+      ["playwright_api_wrapper", new Error("response.json: " + privateText)],
+      ["unknown", rawError()],
+    ] as const;
+    const log = vi.spyOn(console, "log").mockImplementation(() => {}), warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
+    for (const [kind, reason] of cases) {
+      const h = harness(), req = request(h), selected = response(req), laterReq = request(h), later = response(laterReq);
+      Object.defineProperty(reason, "cause", { value: privateText });
+      if (mode === "sync") selected.json.mockImplementation(() => { throw reason; });
+      const { result } = h.start(); await arm(h); h.action.resolve(); await flush();
+      h.emitter.emit("request", req); h.emitter.emit("response", selected.value);
+      if (mode === "async") selected.body.reject(reason);
+      await flush(); h.emitter.emit("request", laterReq); h.emitter.emit("response", later.value);
+      const failure = await result.catch(value => value);
+      expect(failure.message).toBe("identity_response_json_failed; json_failure_class=" + kind);
+      expect(failure.cause).toBeUndefined(); expect(String(failure.stack) + JSON.stringify(failure)).not.toContain(privateText);
+      expect(selected.json).toHaveBeenCalledTimes(1); expect(later.json).not.toHaveBeenCalled(); clean(h);
+    }
+    expect(log).not.toHaveBeenCalled(); expect(warn).not.toHaveBeenCalled(); expect(errorLog).not.toHaveBeenCalled();
+  });
+  it.each(["focus", "page", "metadata", "after-cleanup"])("does not inspect the late Error after %s, with a positive descriptor-read control", async mode => {
+    const reason = new Error("response.json: Protocol error (Network.getResponseBody): No data found for resource with given identifier");
+    const ownDescriptor = Object.getOwnPropertyDescriptor;
+    let reasonReads = 0;
+    vi.spyOn(Object, "getOwnPropertyDescriptor").mockImplementation((target, key) => {
+      if (target === reason && key === "message") reasonReads++;
+      return ownDescriptor(target, key);
+    });
+    // The same watched native Error must be read when it is the first failure.
+    const control = harness(), controlReq = request(control), controlBody = response(controlReq), first = control.start();
+    await arm(control); control.emitter.emit("request", controlReq); control.emitter.emit("response", controlBody.value);
+    controlBody.body.reject(reason); control.action.resolve();
+    await expect(first.result).rejects.toThrow(/^identity_response_json_failed; json_failure_class=cdp_body_no_data$/u);
+    expect(reasonReads).toBe(1); clean(control); reasonReads = 0;
+
+    const getter = vi.fn(() => { throw rawError(); });
+    Object.defineProperty(reason, "message", { configurable: true, get: getter });
+    const h = harness(), req = request(h), selected = response(req), { result, settled } = h.start();
+    await arm(h); h.emitter.emit("request", req); h.emitter.emit("response", selected.value);
+    if (mode === "after-cleanup") {
+      await vi.advanceTimersByTimeAsync(15_000); await expect(result).rejects.toThrow(/^identity_deadline$/u); clean(h);
+      h.focus.mockImplementation(() => Promise.resolve());
+      const next = h.start(); await flush(); const nextReq = request(h), nextBody = response(nextReq);
+      h.emitter.emit("request", nextReq); h.emitter.emit("response", nextBody.value);
+      selected.body.reject(reason); h.action.reject(rawError()); nextBody.body.resolve({ ID: 42 });
+      await expect(next.result).resolves.toBe(42); await flush();
+      expect(h.requests).toHaveBeenCalledTimes(2); expect(nextBody.json).toHaveBeenCalledTimes(1);
+      expect(h.emitter.eventNames()).toEqual([]); expect(vi.getTimerCount()).toBe(0);
+      for (const call of h.forbidden) expect(call).not.toHaveBeenCalled();
+    } else {
+      if (mode === "focus") h.action.reject(rawError());
+      else if (mode === "page") h.emitter.emit("close");
+      else h.emitter.emit("response", response(request(h), { url: () => { throw rawError(); } }).value);
+      await flush(); expect(settled).not.toHaveBeenCalled();
+      selected.body.reject(reason); if (mode !== "focus") h.action.resolve();
+      await expect(result).rejects.toThrow(mode === "focus" ? /^identity_focus_failed$/u : mode === "page" ? /^identity_page_changed$/u : /^identity_response_metadata$/u);
+      clean(h);
+    }
+    expect(reasonReads).toBe(0); expect(getter).not.toHaveBeenCalled();
+    expect(selected.json).toHaveBeenCalledTimes(1); expect(settled).toHaveBeenCalledTimes(1);
+  });
+  it("keeps the original JSON failure winner when the deadline time passed but its timer has not run", async () => {
+    const h = harness(), req = request(h), selected = response(req), { result } = h.start(); await arm(h);
+    h.emitter.emit("request", req); h.emitter.emit("response", selected.value);
+    vi.setSystemTime(Date.now() + 15_000); selected.body.reject(new SyntaxError(privateText)); await flush();
+    // The existing focus success handler observes an already committed failure.
+    h.action.resolve();
+    await expect(result).rejects.toThrow(/^identity_response_json_failed; json_failure_class=json_syntax_error$/u); clean(h);
+  });
+  it("preserves the classified primary failure through pending focus, deadline and cleanup failure", async () => {
+    const h = harness(), originalOff = h.emitter.off.bind(h.emitter);
+    vi.spyOn(h.emitter, "off").mockImplementation((event, listener) => {
+      const value = originalOff(event, listener); if (event === "response") throw rawError(); return value;
+    });
+    const req = request(h), selected = response(req), { result, settled } = h.start(); await arm(h);
+    h.emitter.emit("request", req); h.emitter.emit("response", selected.value); selected.body.reject(new SyntaxError(privateText));
+    await flush(); expect(settled).not.toHaveBeenCalled(); await vi.advanceTimersByTimeAsync(15_000);
+    const failure = await result.catch(value => value);
+    expect(failure.message).toBe("identity_response_json_failed; json_failure_class=json_syntax_error");
+    expect(failure.cleanupFailure).toBe("identity_cleanup_failed"); expect(failure.cause).toBeUndefined(); clean(h);
+    h.action.reject(rawError()); await flush(); expect(settled).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("closed identity JSON error projection", () => {
+  const secret = "synthetic-private-json-message-stack-cause-canary";
+  const noData = "response.json: Protocol error (Network.getResponseBody): No data found for resource with given identifier";
+  const bodyPrefixes = [
+    "response.json: Protocol error (Network.getResponseBody): ",
+    "response.json: Protocol error (Network.loadNetworkResource): ",
+    "response.json: Protocol error (IO.read): ",
+    "response.json: Protocol error (IO.close): ",
+  ];
+  afterEach(() => { vi.restoreAllMocks(); });
+  it("recognizes only exact no-data and the four nonempty body-protocol prefixes", () => {
+    expect(classifyIdentityJSONFailure(new Error(noData))).toBe("cdp_body_no_data");
+    for (const prefix of bodyPrefixes) {
+      expect(classifyIdentityJSONFailure(new Error(prefix + secret))).toBe("cdp_body_error");
+      expect(classifyIdentityJSONFailure(new Error(prefix))).toBe("playwright_api_wrapper");
+    }
+    for (const suffix of [" ", "\n", " " + secret, "\nCall log:\n" + secret + "\n"])
+      expect(classifyIdentityJSONFailure(new Error(noData + suffix))).toBe("cdp_body_error");
+    for (const value of [" " + noData, secret + noData, noData.replace("response.json", "response.body"), noData.replace("response.json", "response.text"), noData.replace("response.json", "Response.json"), noData.slice("response.json: ".length)])
+      expect(classifyIdentityJSONFailure(new Error(value))).toBe("unknown");
+    for (const value of [noData.replace("Network.getResponseBody", "Network.other"), noData.replace("Network.getResponseBody", "network.getResponseBody"), noData.replace("): ", "):")])
+      expect(classifyIdentityJSONFailure(new Error(value))).toBe("playwright_api_wrapper");
+  });
+  it("classifies wrapper shape without claiming the underlying transport reason", () => {
+    for (const value of ["response.json: " + secret, "response.json: Target page, context or browser has been closed", "response.json: Protocol error (Other.method): " + secret])
+      expect(classifyIdentityJSONFailure(new Error(value))).toBe("playwright_api_wrapper");
+    for (const value of ["", "response.json: ", "response.json:", secret, "other: response.json: " + secret])
+      expect(classifyIdentityJSONFailure(new Error(value))).toBe("unknown");
+  });
+  it("admits exactly 2048 UTF-16 units without exporting suffixes or normalizing strings", () => {
+    const prefix = bodyPrefixes[0];
+    const atLimit = (prefix + "\ud800\u0000\n" + secret).padEnd(2048, "x");
+    expect(atLimit.length).toBe(2048);
+    expect(classifyIdentityJSONFailure(new Error(atLimit))).toBe("cdp_body_error");
+    expect(classifyIdentityJSONFailure(new Error(atLimit + "x"))).toBe("unknown");
+    expect(classifyIdentityJSONFailure(new Error("response.json: ".padEnd(2048, "x")))).toBe("playwright_api_wrapper");
+    expect(classifyIdentityJSONFailure(new Error("response.json: ".padEnd(2049, "x")))).toBe("unknown");
+    expect(classifyIdentityJSONFailure(new SyntaxError(secret.repeat(2049)))).toBe("json_syntax_error");
+  });
+  it("recognizes local native SyntaxError without reading body-bearing message or name", () => {
+    let parsedError: unknown;
+    try { JSON.parse('{"' + secret + '":'); } catch (reason) { parsedError = reason; }
+    expect(classifyIdentityJSONFailure(parsedError)).toBe("json_syntax_error");
+    const reason = new SyntaxError(secret), descriptor = Object.getOwnPropertyDescriptor, getter = vi.fn(() => { throw new Error(secret); });
+    let reads = 0;
+    reason.stack = secret;
+    Object.defineProperties(reason, { message: { get: getter }, name: { get: getter }, stack: { get: getter }, cause: { get: getter } });
+    vi.spyOn(Object, "getOwnPropertyDescriptor").mockImplementation((target, key) => {
+      if (target === reason) reads++;
+      return descriptor(target, key);
+    });
+    expect(classifyIdentityJSONFailure(reason)).toBe("json_syntax_error");
+    expect(reads).toBe(0); expect(getter).not.toHaveBeenCalled();
+  });
+  it("does not authenticate a SyntaxError from an own name or foreign/altered prototype", () => {
+    const named = Object.assign(new Error(secret), { name: "SyntaxError" });
+    const foreign: unknown = runInNewContext("new SyntaxError('synthetic-foreign-error')");
+    const altered = Object.setPrototypeOf(new SyntaxError(secret), Error.prototype);
+    for (const value of [named, foreign, altered, { name: "SyntaxError", message: secret }, Object.create(SyntaxError.prototype)])
+      expect(classifyIdentityJSONFailure(value)).toBe("unknown");
+    // These are independent shapes, not a claim of unforgeable provenance.
+    expect(classifyIdentityJSONFailure(Object.setPrototypeOf(new Error(secret), SyntaxError.prototype))).toBe("json_syntax_error");
+    expect(classifyIdentityJSONFailure(Object.setPrototypeOf(new SyntaxError(noData), Error.prototype))).toBe("cdp_body_no_data");
+  });
+  it("requires native Error branding and an own primitive data message without conversions", () => {
+    const getter = vi.fn(() => { throw new Error(secret); });
+    const boxed = Object.assign(new String(noData), { toString: getter, valueOf: getter });
+    for (const value of [undefined, null, false, 1, NaN, Infinity, noData, Symbol(secret), () => {}, [], boxed, { message: noData }, Object.create(Error.prototype)])
+      expect(classifyIdentityJSONFailure(value)).toBe("unknown");
+    for (const value of [undefined, null, 1, Symbol(secret), boxed, { toString: getter, valueOf: getter }]) {
+      const reason = new Error(); Object.defineProperty(reason, "message", { value });
+      expect(classifyIdentityJSONFailure(reason)).toBe("unknown");
+    }
+    const accessor = new Error(); Object.defineProperty(accessor, "message", { get: getter });
+    const inherited = new Error(); Object.setPrototypeOf(inherited, Object.create(Error.prototype, { message: { get: getter } }));
+    for (const value of [new Error(), accessor, inherited]) expect(classifyIdentityJSONFailure(value)).toBe("unknown");
+    expect(getter).not.toHaveBeenCalled();
+  });
+  it("rejects live/revoked proxies before reflection and never traverses a proxy prototype", () => {
+    const trap = vi.fn(() => { throw new Error(secret); });
+    const traps = { get: trap, getOwnPropertyDescriptor: trap, getPrototypeOf: trap, ownKeys: trap, has: trap, set: trap, defineProperty: trap, deleteProperty: trap, isExtensible: trap, preventExtensions: trap, setPrototypeOf: trap };
+    for (const target of [new Error(noData), new SyntaxError(secret), {}]) {
+      const live = new Proxy(target, traps), revoked = Proxy.revocable(target, traps); revoked.revoke();
+      expect(classifyIdentityJSONFailure(live)).toBe("unknown"); expect(classifyIdentityJSONFailure(revoked.proxy)).toBe("unknown");
+      expect(identityJSONFailureMessage(live)).toBe("identity_response_json_failed; json_failure_class=unknown");
+      expect(identityJSONFailureMessage(revoked.proxy)).toBe("identity_response_json_failed; json_failure_class=unknown");
+    }
+    expect(classifyIdentityJSONFailure(Object.setPrototypeOf(new Error(secret), new Proxy({}, traps)))).toBe("unknown");
+    expect(trap).not.toHaveBeenCalled();
+  });
+  it("never reads ancillary private fields or emits a raw reason", () => {
+    const getter = vi.fn(() => { throw new Error(secret); }), reason = new Error(noData);
+    reason.stack = secret;
+    for (const field of ["name", "stack", "cause", "errors", "method", "type", "log", "body", "url", "headers", "cookies", "toJSON", "toString", "valueOf"])
+      Object.defineProperty(reason, field, { configurable: true, get: getter });
+    Object.defineProperty(reason, Symbol.toStringTag, { get: getter });
+    Object.defineProperty(reason, Symbol.for("nodejs.util.inspect.custom"), { get: getter });
+    const log = vi.spyOn(console, "log").mockImplementation(() => {}), warn = vi.spyOn(console, "warn").mockImplementation(() => {}), errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
+    const value = classifyIdentityJSONFailure(reason), message = identityJSONFailureMessage(value);
+    expect(value).toBe("cdp_body_no_data"); expect(message).toBe("identity_response_json_failed; json_failure_class=cdp_body_no_data");
+    expect(message).not.toContain(secret); expect(getter).not.toHaveBeenCalled();
+    expect(log).not.toHaveBeenCalled(); expect(warn).not.toHaveBeenCalled(); expect(errorLog).not.toHaveBeenCalled();
+  });
+  it.each(["prototype", "descriptor"])("closes an unexpected %s reflection failure to unknown", operation => {
+    const reason = new Error(noData);
+    if (operation === "prototype") {
+      const original = Object.getPrototypeOf;
+      vi.spyOn(Object, "getPrototypeOf").mockImplementation(value => { if (value === reason) throw new Error(secret); return original(value); });
+    } else {
+      const original = Object.getOwnPropertyDescriptor;
+      vi.spyOn(Object, "getOwnPropertyDescriptor").mockImplementation((value, key) => { if (value === reason) throw new Error(secret); return original(value, key); });
+    }
+    expect(classifyIdentityJSONFailure(reason)).toBe("unknown");
+  });
+  it("formats only complete closed literals and never converts an unknown input", () => {
+    const classes = ["json_syntax_error", "cdp_body_no_data", "cdp_body_error", "playwright_api_wrapper", "unknown"];
+    for (const value of classes) expect(identityJSONFailureMessage(value)).toBe("identity_response_json_failed; json_failure_class=" + value);
+    const convert = vi.fn(() => { throw new Error(secret); });
+    for (const value of [undefined, null, 1, Symbol(secret), secret, "__proto__", "toString", new String("cdp_body_no_data"), { toString: convert, valueOf: convert, [Symbol.toPrimitive]: convert }])
+      expect(identityJSONFailureMessage(value)).toBe("identity_response_json_failed; json_failure_class=unknown");
+    expect(convert).not.toHaveBeenCalled();
   });
 });

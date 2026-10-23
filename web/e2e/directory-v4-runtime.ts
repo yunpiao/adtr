@@ -1,6 +1,7 @@
 import { expect, type Page, type Locator, type BrowserContext, type APIResponse, type Request, type Response, type Frame, type TestInfo } from "@playwright/test";
 import { request as nodeRequest } from "node:http";
 import { createHash } from "node:crypto";
+import { types } from "node:util";
 import { writeV4ScenarioEvidence } from "./directory-v4-controls-evidence";
 import { parseDirectoryV4Task } from "../src/directory-v4-controls-api";
 import { parseDirectoryV4UniqueJSON } from "../src/directory-v4-controls-json";
@@ -20,6 +21,39 @@ export async function bounded<T>(operation: Promise<T>, milliseconds: number, me
   try { return await Promise.race([operation, new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error(message)), milliseconds); })]); }
   finally { if (timer) clearTimeout(timer); }
 }
+export type IdentityJSONFailureClass = "json_syntax_error" | "cdp_body_no_data" | "cdp_body_error" | "playwright_api_wrapper" | "unknown";
+const identitySyntaxErrorPrototype = SyntaxError.prototype;
+// This projects a native-error shape, not authenticated provenance or a cause.
+// In particular, do not read SyntaxError.message: it may quote the JSON body.
+export function classifyIdentityJSONFailure(reason: unknown): IdentityJSONFailureClass {
+  try {
+    if (typeof reason !== "object" || reason === null || types.isProxy(reason) || !types.isNativeError(reason)) return "unknown";
+    if (Object.getPrototypeOf(reason) === identitySyntaxErrorPrototype) return "json_syntax_error";
+    const descriptor = Object.getOwnPropertyDescriptor(reason, "message");
+    if (!descriptor || !Object.hasOwn(descriptor, "value") || typeof descriptor.value !== "string") return "unknown";
+    const message = descriptor.value;
+    // Diagnostic admission only, not a limit on the original response body.
+    if (message.length === 0 || message.length > 2048) return "unknown";
+    if (message === "response.json: Protocol error (Network.getResponseBody): No data found for resource with given identifier") return "cdp_body_no_data";
+    for (const prefix of [
+      "response.json: Protocol error (Network.getResponseBody): ",
+      "response.json: Protocol error (Network.loadNetworkResource): ",
+      "response.json: Protocol error (IO.read): ",
+      "response.json: Protocol error (IO.close): ",
+    ]) if (message.startsWith(prefix) && message.length > prefix.length) return "cdp_body_error";
+    const wrapper = "response.json: ";
+    return message.startsWith(wrapper) && message.length > wrapper.length ? "playwright_api_wrapper" : "unknown";
+  } catch { return "unknown"; }
+}
+export function identityJSONFailureMessage(value: unknown): string {
+  switch (value) {
+    case "json_syntax_error": return "identity_response_json_failed; json_failure_class=json_syntax_error";
+    case "cdp_body_no_data": return "identity_response_json_failed; json_failure_class=cdp_body_no_data";
+    case "cdp_body_error": return "identity_response_json_failed; json_failure_class=cdp_body_error";
+    case "playwright_api_wrapper": return "identity_response_json_failed; json_failure_class=playwright_api_wrapper";
+    default: return "identity_response_json_failed; json_failure_class=unknown";
+  }
+}
 // Read the first eligible original Playwright Response, not a replacement or
 // application-native JSON observation. FRESH means first host-observed after
 // arming; the bounded Page request snapshot cannot prove native initiation time.
@@ -31,6 +65,7 @@ export async function readNativeFocusIdentity(page: Page): Promise<number> {
   const deadline = Date.now() + 15_000, old = new Set<Request>(), fresh = new Set<Request>();
   const removers: (() => void)[] = [];
   let active = true, pending = 0, focusDone = false, id: number | undefined;
+  let jsonFailureClass: IdentityJSONFailureClass = "unknown";
   let frame: Frame | undefined, origin = "", selectedRequest: Request | undefined, selectedResponse: Response | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined, cleanupFailed = false;
   let complete!: () => void;
@@ -43,6 +78,11 @@ export async function readNativeFocusIdentity(page: Page): Promise<number> {
     if (!active || state.phase === "SUCCESS") return;
     if (state.phase !== "FAILURE") { state.failure = failure; state.phase = "FAILURE"; }
     finish();
+  };
+  const failJSON = (reason: unknown) => {
+    // Do not inspect a late reason or let a new deadline check change the winner.
+    if (active && state.phase === "SELECTED") jsonFailureClass = classifyIdentityJSONFailure(reason);
+    fail("identity_response_json_failed");
   };
   const expire = () => { fail("identity_deadline"); complete(); };
   const live = () => {
@@ -99,8 +139,8 @@ export async function readNativeFocusIdentity(page: Page): Promise<number> {
             } catch { fail("identity_invalid_id"); }
           }
           finish();
-        }, () => { pending--; fail("identity_response_json_failed"); finish(); });
-      } catch { pending--; fail("identity_response_json_failed"); }
+        }, reason => { pending--; failJSON(reason); finish(); });
+      } catch (reason) { pending--; failJSON(reason); }
     } catch { fail("identity_response_metadata"); }
   };
   const changed = () => { if (live()) fail("identity_page_changed"); };
@@ -154,7 +194,7 @@ export async function readNativeFocusIdentity(page: Page): Promise<number> {
     if (timer !== undefined) clearTimeout(timer);
     old.clear(); fresh.clear(); selectedRequest = undefined; selectedResponse = undefined; frame = undefined;
   }
-  if (state.failure || cleanupFailed) throw Object.assign(new Error(state.failure ?? "identity_cleanup_failed"),
+  if (state.failure || cleanupFailed) throw Object.assign(new Error(state.failure === "identity_response_json_failed" ? identityJSONFailureMessage(jsonFailureClass) : state.failure ?? "identity_cleanup_failed"),
     cleanupFailed ? { cleanupFailure: "identity_cleanup_failed" } : {});
   return id!;
 }
