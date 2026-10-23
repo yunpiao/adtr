@@ -270,20 +270,33 @@ export async function readExportEvidence(...args: Parameters<typeof readExportEv
 // maps every value to a literal before stdout; no row identity or raw code exits.
 const setupDiagnosticStates = ["queued", "running", "retry_wait", "cancel_requested", "succeeded", "failed", "partial_failed", "dead_letter", "cancelled", "unknown"] as const;
 const setupDiagnosticReasons = ["none", "executor_unavailable", "invalid_input", "credential_key_unavailable", "credential_unavailable", "invalid_config", "destination_denied", "invalid_response", "cancelled", "authorization_revoked", "lease_lost", "connection_timeout", "checkpoint_failed", "domain_probe_disabled", "policy_revision_changed", "connection_revision_changed", "directory_read_disabled", "directory_use_changed", "connection_failed", "dns_failed", "connect_failed", "tls_untrusted", "tls_hostname", "tls_expired", "tls_failed", "starttls_required", "credentials_rejected", "ldap_access_denied", "ldap_timeout", "referral_rejected", "directory_limit_exceeded", "unsupported_directory_profile", "other"] as const;
-const setupDiagnosticSQL = `WITH sampled AS (SELECT state,error_code FROM adtr.tasks WHERE tenant_id='default' AND kind='domain.directory_read.v3' LIMIT 2), summary AS (SELECT count(*) AS n,min(CASE state ${setupDiagnosticStates.filter((value) => value !== "unknown").map((value) => `WHEN '${value}' THEN '${value}'`).join(" ")} ELSE 'unknown' END) AS state,min(CASE error_code WHEN '' THEN 'none' ${setupDiagnosticReasons.filter((value) => value !== "none" && value !== "other").map((value) => `WHEN '${value}' THEN '${value}'`).join(" ")} ELSE 'other' END) AS reason FROM sampled) SELECT CASE WHEN n=0 THEN 'none|not_applicable|not_applicable' WHEN n=1 THEN 'one|'||state||'|'||reason ELSE 'multiple|not_applicable|not_applicable' END FROM summary`;
+const setupDiagnosticCheckpoints = ["p0", "p10", "p15", "p20", "p25", "p30", "p35", "p40", "p41", "p42", "p95", "p100", "other"] as const;
+const setupDiagnosticAttempts = ["zero", "one", "other"] as const;
+const setupDiagnosticLeases = ["absent", "unexpired", "expired", "inconsistent"] as const;
+const setupDiagnosticUses = ["missing", "reserved", "opened", "quiesced", "other"] as const;
+const setupDiagnosticOpeners = ["not_applicable", "matched", "mismatch"] as const;
+const setupDiagnosticObservations = ["absent", "present", "other"] as const;
+// One MVCC statement view; expiry is compared with its stable timestamp, not
+// the failed browser poll's time or a claim of current executor health.
+const setupDiagnosticSQL = `WITH sampled AS MATERIALIZED (SELECT task_id,tenant_id,domain_id,state,error_code,progress,attempt,lease_owner,lease_until,fencing_token FROM adtr.tasks WHERE tenant_id='default' AND kind='domain.directory_read.v3' LIMIT 2), counts AS (SELECT count(*) AS n FROM sampled), single AS MATERIALIZED (SELECT sampled.* FROM sampled CROSS JOIN counts WHERE counts.n=1), projected AS (SELECT CASE t.state ${setupDiagnosticStates.filter((value) => value !== "unknown").map((value) => `WHEN '${value}' THEN '${value}'`).join(" ")} ELSE 'unknown' END AS state,CASE t.error_code WHEN '' THEN 'none' ${setupDiagnosticReasons.filter((value) => value !== "none" && value !== "other").map((value) => `WHEN '${value}' THEN '${value}'`).join(" ")} ELSE 'other' END AS reason,CASE t.progress ${setupDiagnosticCheckpoints.filter((value) => value !== "other").map((value) => `WHEN ${value.slice(1)} THEN '${value}'`).join(" ")} ELSE 'other' END AS checkpoint,CASE t.attempt WHEN 0 THEN 'zero' WHEN 1 THEN 'one' ELSE 'other' END AS attempt,CASE WHEN t.lease_owner='' AND t.lease_until IS NULL THEN 'absent' WHEN t.lease_owner<>'' AND t.lease_until IS NOT NULL AND t.lease_until>statement_timestamp() THEN 'unexpired' WHEN t.lease_owner<>'' AND t.lease_until IS NOT NULL AND t.lease_until<=statement_timestamp() THEN 'expired' ELSE 'inconsistent' END AS lease,CASE WHEN u.task_id IS NULL THEN 'missing' WHEN u.tenant_id IS DISTINCT FROM t.tenant_id OR u.domain_id IS DISTINCT FROM t.domain_id OR u.purpose IS DISTINCT FROM 'domain.directory_read.v3' OR u.dictionary_version IS DISTINCT FROM 3 THEN 'other' ELSE CASE u.state WHEN 'reserved' THEN 'reserved' WHEN 'opened' THEN 'opened' WHEN 'quiesced' THEN 'quiesced' ELSE 'other' END END AS use_state,CASE WHEN u.task_id IS NULL OR u.state IS DISTINCT FROM 'opened' THEN 'not_applicable' WHEN u.tenant_id=t.tenant_id AND u.domain_id=t.domain_id AND u.purpose='domain.directory_read.v3' AND u.dictionary_version=3 AND t.lease_owner<>'' AND t.fencing_token>0 AND t.attempt=1 AND ROW(t.lease_owner,t.fencing_token,t.attempt) IS NOT DISTINCT FROM ROW(u.opener_owner,u.opener_fencing_token,u.opener_attempt) THEN 'matched' ELSE 'mismatch' END AS opener,CASE WHEN o.task_id IS NULL THEN 'absent' WHEN o.tenant_id=t.tenant_id AND o.domain_id=t.domain_id AND o.dictionary_version=3 THEN 'present' ELSE 'other' END AS observation FROM single t LEFT JOIN adtr.domain_directory_task_uses u ON u.task_id=t.task_id LEFT JOIN adtr.domain_directory_observations o ON o.task_id=t.task_id) SELECT CASE WHEN c.n=0 THEN 'none|not_applicable|not_applicable|not_applicable|not_applicable|not_applicable|not_applicable|not_applicable|not_applicable' WHEN c.n=1 THEN 'one|'||p.state||'|'||p.reason||'|'||p.checkpoint||'|'||p.attempt||'|'||p.lease||'|'||p.use_state||'|'||p.opener||'|'||p.observation ELSE 'multiple|not_applicable|not_applicable|not_applicable|not_applicable|not_applicable|not_applicable|not_applicable|not_applicable' END FROM counts c LEFT JOIN projected p ON true`;
 export type SetupDiagnosticCommand = (file: string, args: string[], options: { encoding: "utf8"; timeout: number; maxBuffer: number }) => Promise<{ stdout: unknown }>;
 const setupUnavailable = "; setup_db_snapshot=unavailable";
 function setupDiagnosticSuffix(stdout: unknown): string {
   if (typeof stdout !== "string" || stdout.length > 256 || !/^[\x20-\x7e]+\n$/u.test(stdout) || stdout.indexOf("\n") !== stdout.length - 1) return setupUnavailable;
   const parts = stdout.slice(0, -1).split("|");
-  if (parts.length !== 3) return setupUnavailable;
-  if (parts[0] === "none" && parts[1] === "not_applicable" && parts[2] === "not_applicable") return "; setup_db_snapshot=none";
-  if (parts[0] === "multiple" && parts[1] === "not_applicable" && parts[2] === "not_applicable") return "; setup_db_snapshot=multiple";
+  if (parts.length !== 9) return setupUnavailable;
+  if ((parts[0] === "none" || parts[0] === "multiple") && parts.slice(1).every((value) => value === "not_applicable")) return parts[0] === "none" ? "; setup_db_snapshot=none" : "; setup_db_snapshot=multiple";
   if (parts[0] !== "one") return setupUnavailable;
   const state = setupDiagnosticStates.find((value) => value === parts[1]);
   const reason = setupDiagnosticReasons.find((value) => value === parts[2]);
-  if (!state || !reason) return setupUnavailable;
-  return `; setup_db_snapshot=one; state=${state}; reason=${reason}`;
+  const checkpoint = setupDiagnosticCheckpoints.find((value) => value === parts[3]);
+  const attempt = setupDiagnosticAttempts.find((value) => value === parts[4]);
+  const lease = setupDiagnosticLeases.find((value) => value === parts[5]);
+  const use = setupDiagnosticUses.find((value) => value === parts[6]);
+  const opener = setupDiagnosticOpeners.find((value) => value === parts[7]);
+  const observation = setupDiagnosticObservations.find((value) => value === parts[8]);
+  if (!state || !reason || !checkpoint || !attempt || !lease || !use || !opener || !observation) return setupUnavailable;
+  return `; setup_db_snapshot=one; state=${state}; reason=${reason}; checkpoint=${checkpoint}; attempt=${attempt}; lease=${lease}; use=${use}; opener=${opener}; observation=${observation}`;
 }
 export async function multichunkSetupFailureSuffix(phase: string, command: SetupDiagnosticCommand = (file, args, options) => run(file, args, options)): Promise<string> {
   if (phase !== "setup") return "";

@@ -188,6 +188,13 @@ describe("closed failure-time setup snapshot", () => {
   const container = "adtr-auth-e2e-012345abcdef";
   const states = ["queued", "running", "retry_wait", "cancel_requested", "succeeded", "failed", "partial_failed", "dead_letter", "cancelled", "unknown"];
   const reasons = ["none", "executor_unavailable", "invalid_input", "credential_key_unavailable", "credential_unavailable", "invalid_config", "destination_denied", "invalid_response", "cancelled", "authorization_revoked", "lease_lost", "connection_timeout", "checkpoint_failed", "domain_probe_disabled", "policy_revision_changed", "connection_revision_changed", "directory_read_disabled", "directory_use_changed", "connection_failed", "dns_failed", "connect_failed", "tls_untrusted", "tls_hostname", "tls_expired", "tls_failed", "starttls_required", "credentials_rejected", "ldap_access_denied", "ldap_timeout", "referral_rejected", "directory_limit_exceeded", "unsupported_directory_profile", "other"];
+  const checkpoints = ["p0", "p10", "p15", "p20", "p25", "p30", "p35", "p40", "p41", "p42", "p95", "p100", "other"];
+  const attempts = ["zero", "one", "other"], leases = ["absent", "unexpired", "expired", "inconsistent"];
+  const uses = ["missing", "reserved", "opened", "quiesced", "other"], openers = ["not_applicable", "matched", "mismatch"], observations = ["absent", "present", "other"];
+  const validFields = ["one", "running", "none", "p95", "one", "unexpired", "opened", "matched", "absent"];
+  const emptyRow = (count: string) => [count, ...Array<string>(8).fill("not_applicable")].join("|") + "\n";
+  const diagnosticRow = (state: string, reason: string) => ["one", state, reason, ...validFields.slice(3)].join("|") + "\n";
+  const extraSuffix = "; checkpoint=p95; attempt=one; lease=unexpired; use=opened; opener=matched; observation=absent";
   const enable = () => { vi.stubEnv("ADTR_E2E_COMPUTER_ASSET_EXPORT_V3_MULTICHUNK", "true"); vi.stubEnv("ADTR_E2E_DB_CONTAINER", container); };
   afterEach(() => vi.unstubAllEnvs());
 
@@ -203,42 +210,42 @@ describe("closed failure-time setup snapshot", () => {
     if (kind === "external_container") vi.stubEnv("ADTR_E2E_DB_CONTAINER", "production-db");
     if (kind === "long_container") vi.stubEnv("ADTR_E2E_DB_CONTAINER", container + "a");
     if (kind === "shell_container") vi.stubEnv("ADTR_E2E_DB_CONTAINER", container + ";" + canary);
-    const command = vi.fn(async () => ({ stdout: "none|not_applicable|not_applicable\n" }));
+    const command = vi.fn(async () => ({ stdout: emptyRow("none") }));
     expect(await multichunkSetupFailureSuffix("setup", command)).toBe(unavailable);
     expect(command).not.toHaveBeenCalled();
   });
   it("uses one fixed read-only command with bounded rows, SQL time, process time and output", async () => {
     enable();
-    const command = vi.fn<SetupDiagnosticCommand>(async () => ({ stdout: "none|not_applicable|not_applicable\n" }));
+    const command = vi.fn<SetupDiagnosticCommand>(async () => ({ stdout: emptyRow("none") }));
     expect(await multichunkSetupFailureSuffix("setup", command)).toBe("; setup_db_snapshot=none");
-    const expectedSQL = "WITH sampled AS (SELECT state,error_code FROM adtr.tasks WHERE tenant_id='default' AND kind='domain.directory_read.v3' LIMIT 2), summary AS (SELECT count(*) AS n,min(CASE state " + states.filter((value) => value !== "unknown").map((value) => `WHEN '${value}' THEN '${value}'`).join(" ") + " ELSE 'unknown' END) AS state,min(CASE error_code WHEN '' THEN 'none' " + reasons.filter((value) => value !== "none" && value !== "other").map((value) => `WHEN '${value}' THEN '${value}'`).join(" ") + " ELSE 'other' END) AS reason FROM sampled) SELECT CASE WHEN n=0 THEN 'none|not_applicable|not_applicable' WHEN n=1 THEN 'one|'||state||'|'||reason ELSE 'multiple|not_applicable|not_applicable' END FROM summary";
+    const expectedSQL = `WITH sampled AS MATERIALIZED (SELECT task_id,tenant_id,domain_id,state,error_code,progress,attempt,lease_owner,lease_until,fencing_token FROM adtr.tasks WHERE tenant_id='default' AND kind='domain.directory_read.v3' LIMIT 2), counts AS (SELECT count(*) AS n FROM sampled), single AS MATERIALIZED (SELECT sampled.* FROM sampled CROSS JOIN counts WHERE counts.n=1), projected AS (SELECT CASE t.state ${states.filter((value) => value !== "unknown").map((value) => `WHEN '${value}' THEN '${value}'`).join(" ")} ELSE 'unknown' END AS state,CASE t.error_code WHEN '' THEN 'none' ${reasons.filter((value) => value !== "none" && value !== "other").map((value) => `WHEN '${value}' THEN '${value}'`).join(" ")} ELSE 'other' END AS reason,CASE t.progress ${checkpoints.filter((value) => value !== "other").map((value) => `WHEN ${value.slice(1)} THEN '${value}'`).join(" ")} ELSE 'other' END AS checkpoint,CASE t.attempt WHEN 0 THEN 'zero' WHEN 1 THEN 'one' ELSE 'other' END AS attempt,CASE WHEN t.lease_owner='' AND t.lease_until IS NULL THEN 'absent' WHEN t.lease_owner<>'' AND t.lease_until IS NOT NULL AND t.lease_until>statement_timestamp() THEN 'unexpired' WHEN t.lease_owner<>'' AND t.lease_until IS NOT NULL AND t.lease_until<=statement_timestamp() THEN 'expired' ELSE 'inconsistent' END AS lease,CASE WHEN u.task_id IS NULL THEN 'missing' WHEN u.tenant_id IS DISTINCT FROM t.tenant_id OR u.domain_id IS DISTINCT FROM t.domain_id OR u.purpose IS DISTINCT FROM 'domain.directory_read.v3' OR u.dictionary_version IS DISTINCT FROM 3 THEN 'other' ELSE CASE u.state WHEN 'reserved' THEN 'reserved' WHEN 'opened' THEN 'opened' WHEN 'quiesced' THEN 'quiesced' ELSE 'other' END END AS use_state,CASE WHEN u.task_id IS NULL OR u.state IS DISTINCT FROM 'opened' THEN 'not_applicable' WHEN u.tenant_id=t.tenant_id AND u.domain_id=t.domain_id AND u.purpose='domain.directory_read.v3' AND u.dictionary_version=3 AND t.lease_owner<>'' AND t.fencing_token>0 AND t.attempt=1 AND ROW(t.lease_owner,t.fencing_token,t.attempt) IS NOT DISTINCT FROM ROW(u.opener_owner,u.opener_fencing_token,u.opener_attempt) THEN 'matched' ELSE 'mismatch' END AS opener,CASE WHEN o.task_id IS NULL THEN 'absent' WHEN o.tenant_id=t.tenant_id AND o.domain_id=t.domain_id AND o.dictionary_version=3 THEN 'present' ELSE 'other' END AS observation FROM single t LEFT JOIN adtr.domain_directory_task_uses u ON u.task_id=t.task_id LEFT JOIN adtr.domain_directory_observations o ON o.task_id=t.task_id) SELECT CASE WHEN c.n=0 THEN 'none|not_applicable|not_applicable|not_applicable|not_applicable|not_applicable|not_applicable|not_applicable|not_applicable' WHEN c.n=1 THEN 'one|'||p.state||'|'||p.reason||'|'||p.checkpoint||'|'||p.attempt||'|'||p.lease||'|'||p.use_state||'|'||p.opener||'|'||p.observation ELSE 'multiple|not_applicable|not_applicable|not_applicable|not_applicable|not_applicable|not_applicable|not_applicable|not_applicable' END FROM counts c LEFT JOIN projected p ON true`;
     expect(command).toHaveBeenCalledTimes(1);
     expect(command).toHaveBeenCalledWith("docker", ["exec", "-e", "PGOPTIONS=-c statement_timeout=2000 -c default_transaction_read_only=on", container, "psql", "-U", "postgres", "-d", "adtr_e2e", "-X", "-A", "-t", "-v", "ON_ERROR_STOP=1", "-c", expectedSQL], { encoding: "utf8", timeout: 5000, maxBuffer: 4096 });
   });
   it.each(["none", "multiple"])('reports %s without choosing or exposing any row', async (count) => {
-    enable(); const command = vi.fn(async () => ({ stdout: `${count}|not_applicable|not_applicable\n` }));
+    enable(); const command = vi.fn(async () => ({ stdout: emptyRow(count) }));
     expect(await multichunkSetupFailureSuffix("setup", command)).toBe(`; setup_db_snapshot=${count}`);
     expect(command).toHaveBeenCalledTimes(1);
   });
   it.each(states)('preserves permitted state %s even with an unusual reason', async (state) => {
-    enable(); const command = vi.fn(async () => ({ stdout: `one|${state}|directory_limit_exceeded\n` }));
-    expect(await multichunkSetupFailureSuffix("setup", command)).toBe(`; setup_db_snapshot=one; state=${state}; reason=directory_limit_exceeded`);
+    enable(); const command = vi.fn(async () => ({ stdout: diagnosticRow(state, "directory_limit_exceeded") }));
+    expect(await multichunkSetupFailureSuffix("setup", command)).toBe(`; setup_db_snapshot=one; state=${state}; reason=directory_limit_exceeded${extraSuffix}`);
     expect(command).toHaveBeenCalledTimes(1);
   });
   it.each(reasons)('admits only fixed reason %s', async (reason) => {
-    enable(); const command = vi.fn(async () => ({ stdout: `one|failed|${reason}\n` }));
-    expect(await multichunkSetupFailureSuffix("setup", command)).toBe(`; setup_db_snapshot=one; state=failed; reason=${reason}`);
+    enable(); const command = vi.fn(async () => ({ stdout: diagnosticRow("failed", reason) }));
+    expect(await multichunkSetupFailureSuffix("setup", command)).toBe(`; setup_db_snapshot=one; state=failed; reason=${reason}${extraSuffix}`);
     expect(command).toHaveBeenCalledTimes(1);
   });
   it.each([
-    ["empty", ""], ["count", "two|failed|none\n"], ["state", "one|not_applicable|none\n"],
-    ["raw_state", `one|${canary}|none\n`], ["raw_reason", `one|failed|${canary}\n`],
-    ["none_row", "none|failed|none\n"], ["multiple_row", "multiple|running|none\n"],
-    ["extra_token", "one|failed|none|extra\n"], ["missing_token", "one|failed\n"],
-    ["extra_row", "one|failed|none\none|succeeded|none\n"], ["missing_newline", "one|failed|none"],
-    ["double_newline", "one|failed|none\n\n"], ["crlf", "one|failed|none\r\n"],
-    ["leading_space", " one|failed|none\n"], ["trailing_space", "one|failed|none \n"],
-    ["nul", "one|failed|none\0\n"], ["non_ascii", "one|failed|非枚举\n"],
+    ["empty", ""], ["count", "two|failed|none|p95|one|unexpired|opened|matched|absent\n"], ["state", diagnosticRow("not_applicable", "none")],
+    ["raw_state", diagnosticRow(canary, "none")], ["raw_reason", diagnosticRow("failed", canary)],
+    ["none_row", "none|failed|none|p95|one|unexpired|opened|matched|absent\n"], ["multiple_row", "multiple|running|none|p95|one|unexpired|opened|matched|absent\n"],
+    ["extra_token", diagnosticRow("failed", "none").slice(0, -1) + "|extra\n"], ["missing_token", "one|failed|p95|one|unexpired|opened|matched|absent\n"],
+    ["extra_row", diagnosticRow("failed", "none") + diagnosticRow("succeeded", "none")], ["missing_newline", diagnosticRow("failed", "none").slice(0, -1)],
+    ["double_newline", diagnosticRow("failed", "none") + "\n"], ["crlf", diagnosticRow("failed", "none").replace("\n", "\r\n")],
+    ["leading_space", " " + diagnosticRow("failed", "none")], ["trailing_space", diagnosticRow("failed", "none").slice(0, -1) + " \n"],
+    ["nul", diagnosticRow("failed", "none").slice(0, -1) + "\0\n"], ["non_ascii", diagnosticRow("failed", "非枚举")],
     ["oversize", "x".repeat(257) + "\n"], ["non_string", null], ["object", { canary }],
   ])('maps malformed %s to unavailable without leaking data', async (_label, stdout) => {
     enable(); const command = vi.fn(async () => ({ stdout }));
@@ -254,9 +261,9 @@ describe("closed failure-time setup snapshot", () => {
   });
   it("never reads or reports successful-command stderr", async () => {
     enable(); const touched = vi.fn();
-    const result = Object.defineProperty({ stdout: "one|failed|other\n" }, "stderr", { get: () => { touched(); throw new Error(canary); } });
+    const result = Object.defineProperty({ stdout: diagnosticRow("failed", "other") }, "stderr", { get: () => { touched(); throw new Error(canary); } });
     const command = vi.fn(async () => result);
-    expect(await multichunkSetupFailureSuffix("setup", command)).toBe("; setup_db_snapshot=one; state=failed; reason=other");
+    expect(await multichunkSetupFailureSuffix("setup", command)).toBe("; setup_db_snapshot=one; state=failed; reason=other" + extraSuffix);
     expect(touched).not.toHaveBeenCalled();
   });
   it.each(["resolve", "reject"])('waits for the original one-shot command to %s, without detached racing', async (ending) => {
@@ -264,9 +271,71 @@ describe("closed failure-time setup snapshot", () => {
     let returned = false;
     const result = multichunkSetupFailureSuffix("setup", command).then((value) => { returned = true; return value; });
     await Promise.resolve(); expect(returned).toBe(false); expect(command).toHaveBeenCalledTimes(1);
-    if (ending === "resolve") pending.resolve({ stdout: "one|running|none\n" });
+    if (ending === "resolve") pending.resolve({ stdout: diagnosticRow("running", "none") });
     else pending.reject(new Error(canary));
-    expect(await result).toBe(ending === "resolve" ? "; setup_db_snapshot=one; state=running; reason=none" : unavailable);
+    expect(await result).toBe(ending === "resolve" ? "; setup_db_snapshot=one; state=running; reason=none" + extraSuffix : unavailable);
+    expect(command).toHaveBeenCalledTimes(1);
+  });
+
+  // These fake rows exercise the closed host grammar, not PostgreSQL execution.
+  for (const [index, values] of [[3, checkpoints], [4, attempts], [5, leases], [6, uses], [7, openers], [8, observations]] as const) {
+    it.each(values)('admits the closed token at field ' + index + ': %s', async (value) => {
+      enable(); const fields = [...validFields]; fields[index] = value;
+      const command = vi.fn(async () => ({ stdout: fields.join("|") + "\n" }));
+      expect(await multichunkSetupFailureSuffix("setup", command)).toBe(`; setup_db_snapshot=one; state=${fields[1]}; reason=${fields[2]}; checkpoint=${fields[3]}; attempt=${fields[4]}; lease=${fields[5]}; use=${fields[6]}; opener=${fields[7]}; observation=${fields[8]}`);
+      expect(command).toHaveBeenCalledTimes(1);
+    });
+  }
+  it.each([
+    ["unknown", "other", "other", "other", "inconsistent", "other", "mismatch", "other"],
+    ["succeeded", "none", "p100", "one", "absent", "quiesced", "not_applicable", "present"],
+    ["running", "none", "p95", "one", "expired", "opened", "matched", "absent"],
+    ["queued", "other", "p0", "zero", "unexpired", "missing", "not_applicable", "present"],
+  ])('preserves admitted surprising combinations: %s/%s/%s/%s/%s/%s/%s/%s', async (state, reason, checkpoint, attempt, lease, use, opener, observation) => {
+    enable(); const command = vi.fn(async () => ({ stdout: ["one", state, reason, checkpoint, attempt, lease, use, opener, observation].join("|") + "\n" }));
+    expect(await multichunkSetupFailureSuffix("setup", command)).toBe(`; setup_db_snapshot=one; state=${state}; reason=${reason}; checkpoint=${checkpoint}; attempt=${attempt}; lease=${lease}; use=${use}; opener=${opener}; observation=${observation}`);
+    expect(command).toHaveBeenCalledTimes(1);
+  });
+  for (const count of ["none", "multiple"]) {
+    it.each([1, 2, 3, 4, 5, 6, 7, 8])('suppresses every row field for ' + count + ': %s', async (index) => {
+      enable(); const fields = [count, ...Array<string>(8).fill("not_applicable")]; fields[index] = validFields[index];
+      const command = vi.fn(async () => ({ stdout: fields.join("|") + "\n" }));
+      expect(await multichunkSetupFailureSuffix("setup", command)).toBe(unavailable);
+      expect(command).toHaveBeenCalledTimes(1);
+    });
+  }
+  for (const mutation of ["canary", "missing", "duplicate", "uppercase"] as const) {
+    it.each([0, 1, 2, 3, 4, 5, 6, 7, 8])('rejects an actual ' + mutation + ' change at field %s', async (index) => {
+      enable(); const fields = [...validFields];
+      if (mutation === "canary") fields[index] = canary;
+      if (mutation === "missing") fields.splice(index, 1);
+      if (mutation === "duplicate") fields.splice(index, 0, fields[index]);
+      if (mutation === "uppercase") fields[index] = fields[index].toUpperCase();
+      const raw = fields.join("|") + "\n";
+      expect(raw).not.toBe(validFields.join("|") + "\n");
+      const command = vi.fn(async () => ({ stdout: raw }));
+      expect(await multichunkSetupFailureSuffix("setup", command)).toBe(unavailable);
+      expect(command).toHaveBeenCalledTimes(1);
+    });
+  }
+  it.each([0, 1, 2, 3, 4, 5, 6, 7])('rejects the actual invalid adjacent field shift at %s', async (index) => {
+    enable(); const fields = [...validFields];
+    [fields[index], fields[index + 1]] = [fields[index + 1], fields[index]];
+    const raw = fields.join("|") + "\n";
+    expect(raw).not.toBe(validFields.join("|") + "\n");
+    const command = vi.fn(async () => ({ stdout: raw }));
+    expect(await multichunkSetupFailureSuffix("setup", command)).toBe(unavailable);
+    expect(command).toHaveBeenCalledTimes(1);
+  });
+  it.each(["none|not_applicable|not_applicable\n", "multiple|not_applicable|not_applicable\n", "one|running|none\n"])('rejects an obsolete three-field row without fabricating evidence: %s', async (stdout) => {
+    enable(); const command = vi.fn(async () => ({ stdout }));
+    expect(await multichunkSetupFailureSuffix("setup", command)).toBe(unavailable);
+    expect(command).toHaveBeenCalledTimes(1);
+  });
+  it.each([[3, "95"], [4, "1"], [5, "true"], [6, "OPENED"], [7, "true"], [8, "1"]] as const)('rejects a raw nonliteral value at field %s', async (index, value) => {
+    enable(); const fields = [...validFields]; fields[index] = value;
+    const command = vi.fn(async () => ({ stdout: fields.join("|") + "\n" }));
+    expect(await multichunkSetupFailureSuffix("setup", command)).toBe(unavailable);
     expect(command).toHaveBeenCalledTimes(1);
   });
 });
