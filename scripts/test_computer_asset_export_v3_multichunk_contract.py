@@ -229,8 +229,21 @@ class EvidenceContracts(unittest.TestCase):
 
     def assert_rejected(self, blobs, data):
         blobs['evidence.json'] = evidence.encoded(data)
-        with self.assertRaises((ValueError, TypeError, KeyError, UnicodeError, zlib.error)):
-            evidence.validate_core(blobs, data['provenance'])
+        # Observe the same real core inside the complete disk/publish chain.
+        # Do not repeat a full immutable-source scan before that identical call.
+        real_core = evidence.validate_core
+        calls = []
+        rejection_types = (ValueError, TypeError, KeyError, UnicodeError, zlib.error)
+        def observed_core(actual_blobs, actual_provenance):
+            call = {'blobs': dict(actual_blobs), 'provenance': copy.deepcopy(actual_provenance),
+                    'entered': False, 'error': None}
+            calls.append(call)
+            try:
+                call['entered'] = True
+                return real_core(actual_blobs, actual_provenance)
+            except rejection_types as error:
+                call['error'] = error
+                raise
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary); inputs = root / 'input'; inputs.mkdir()
             for name, raw in blobs.items():
@@ -240,9 +253,17 @@ class EvidenceContracts(unittest.TestCase):
             target = root / 'stage'
             with patch.object(gate, 'OUTPUT', target), patch.object(gate, 'PROVENANCE', reference), \
                  patch.object(gate, 'PRE_RESOURCES', pre), patch.object(gate, 'discover', return_value=inputs), \
-                 patch.object(evidence, 'capture_provenance', return_value=data['provenance']):
-                with self.assertRaises(Exception):
+                 patch.object(evidence, 'capture_provenance', return_value=data['provenance']), \
+                 patch.object(evidence, 'validate_core', side_effect=observed_core):
+                with self.assertRaisesRegex(ValueError, '^multichunk_gate_rejected$'):
                     gate.publish()
+            # Check outside the observer so its own assertion cannot masquerade
+            # as rejection, nor can an earlier bundle or later runtime failure.
+            self.assertEqual(len(calls), 1)
+            self.assertEqual(calls[0]['blobs'], blobs)
+            self.assertEqual(calls[0]['provenance'], data['provenance'])
+            self.assertTrue(calls[0]['entered'])
+            self.assertIsInstance(calls[0]['error'], rejection_types)
             self.assertFalse(target.exists())
             for name, raw in blobs.items():
                 self.assertEqual((inputs / name).read_bytes(), raw)
@@ -280,14 +301,19 @@ class EvidenceContracts(unittest.TestCase):
                 parts = [*self.parts[:-1], (name, variant)]
                 blobs, data = dict(self.blobs), copy.deepcopy(self.data)
                 raw = zip_specimen(parts); rebind_workbook(blobs, data, raw)
-                with self.subTest(tag=tag, payload=payload[:10]): self.assert_rejected(blobs, data)
+                with self.subTest(tag=tag, payload=payload[:10]):
+                    with self.assertRaises(ValueError): evidence.validate_zip(raw, self.matrix)
+                    self.assert_rejected(blobs, data)
             variant = original[:opening] + b' canary="' + CANARY.encode() + b'"' + original[opening:]
             blobs, data = dict(self.blobs), copy.deepcopy(self.data)
-            rebind_workbook(blobs, data, zip_specimen([*self.parts[:-1], (name, variant)]))
+            raw = zip_specimen([*self.parts[:-1], (name, variant)])
+            rebind_workbook(blobs, data, raw)
+            with self.assertRaises(ValueError): evidence.validate_zip(raw, self.matrix)
             self.assert_rejected(blobs, data)
         for old, new in [(b'<row r="2">', b'<row r="3">'), (b'r="A2"', b'r="B2"'), (b'computer-capacity-0001$', b'computer-capacity-0002$')]:
             raw = zip_specimen([*self.parts[:-1], (name, original.replace(old, new, 1))])
             blobs, data = dict(self.blobs), copy.deepcopy(self.data); rebind_workbook(blobs, data, raw)
+            with self.assertRaises(ValueError): evidence.validate_zip(raw, self.matrix)
             self.assert_rejected(blobs, data)
 
     def test_zip_non_cell_envelope_channels_reject_with_all_hashes_rebuilt(self):
@@ -311,11 +337,14 @@ class EvidenceContracts(unittest.TestCase):
             blobs, data = dict(self.blobs), copy.deepcopy(self.data)
             raw = zip_specimen(self.parts, envelope=variant); rebind_workbook(blobs, data, raw)
             with self.subTest(envelope=repr(variant)):
+                with self.assertRaises((ValueError, zlib.error)): evidence.validate_zip(raw, self.matrix)
                 self.assert_rejected(blobs, data)
         for parts in (self.parts[:-1], [*self.parts, self.parts[0]], self.parts[::-1],
                       [*self.parts[:-1], ('extra.xml', canary), self.parts[-1]]):
             blobs, data = dict(self.blobs), copy.deepcopy(self.data)
-            rebind_workbook(blobs, data, zip_specimen(parts)); self.assert_rejected(blobs, data)
+            raw = zip_specimen(parts); rebind_workbook(blobs, data, raw)
+            with self.assertRaises((ValueError, zlib.error)): evidence.validate_zip(raw, self.matrix)
+            self.assert_rejected(blobs, data)
 
     def test_bounded_inflate_does_not_accept_overexpansion_or_partial_streams(self):
         body=b'a'*4096
