@@ -1,0 +1,9 @@
+{
+  "baselineSHA256": "adca3ced51556884f35c1603dbfc86713280ec01abc3c6a275d2d42a7b6e2a47",
+  "replacements": [
+    {
+      "old": "      - name: Validate exact maintenance target observation evidence\n",
+      "new": "      - name: Validate bulk access role assignment evidence\n        id: access-role-bulk-evidence\n        timeout-minutes: 1\n        if: ${{ success() && matrix.name == 'access' }}\n        run: python3 scripts/validate_access_role_bulk_evidence.py --source-root .\n      - name: Retain validated bulk access role assignment evidence\n        timeout-minutes: 1\n        if: ${{ success() && matrix.name == 'access' && steps.access-role-bulk-evidence.outcome == 'success' }}\n        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2\n        with:\n          name: access-role-bulk-${{ github.run_id }}-${{ github.run_attempt }}\n          path: |\n            web/playwright-report/access-role-bulk-validated/access-role-bulk-evidence.json\n            web/playwright-report/access-role-bulk-validated/access-role-bulk-users-1440.png\n          if-no-files-found: error\n          retention-days: 7\n      - name: Validate exact maintenance target observation evidence\n"
+    }
+  ]
+}
