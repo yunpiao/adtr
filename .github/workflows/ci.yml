@@ -215,7 +215,7 @@ jobs:
     if: ${{ needs.plan.outputs.browser == 'true' }}
     needs: [plan, prepare-postgres]
     env:
-      ADTR_E2E_NATIVE_STREAM_MODE: ${{ (matrix.name == 'group-asset-export-v3-running-cancel' || matrix.name == 'computer-asset-export-v3-running-cancel' || matrix.name == 'user-asset-export-v3-running-cancel' || matrix.name == 'computer-asset-export-v3' || matrix.name == 'computer-asset-export-v3-failure' || matrix.name == 'computer-asset-export-v3-cancel' || matrix.name == 'group-asset-export-v3' || matrix.name == 'group-asset-export-v3-failure' || matrix.name == 'group-asset-export-v3-cancel' || matrix.name == 'user-asset-export-v3-failure' || matrix.name == 'user-asset-export-v3-cancel' || matrix.name == 'user-asset-export-v3' || matrix.name == 'user-assets-v2' || matrix.name == 'user-assets-v2-readers' || matrix.name == 'user-assets-v3' || matrix.name == 'computer-assets-v3' || matrix.name == 'computer-assets-v3-readers' || matrix.name == 'group-assets-v3' || matrix.name == 'group-assets-v3-readers') && 'stable-body' || 'native-finish' }}
+      ADTR_E2E_NATIVE_STREAM_MODE: ${{ (matrix.name == 'group-asset-export-v3-running-cancel' || matrix.name == 'computer-asset-export-v3-running-cancel' || matrix.name == 'user-asset-export-v3-running-cancel' || matrix.name == 'computer-asset-export-v3-multichunk' || matrix.name == 'computer-asset-export-v3' || matrix.name == 'computer-asset-export-v3-failure' || matrix.name == 'computer-asset-export-v3-cancel' || matrix.name == 'group-asset-export-v3' || matrix.name == 'group-asset-export-v3-failure' || matrix.name == 'group-asset-export-v3-cancel' || matrix.name == 'user-asset-export-v3-failure' || matrix.name == 'user-asset-export-v3-cancel' || matrix.name == 'user-asset-export-v3' || matrix.name == 'user-assets-v2' || matrix.name == 'user-assets-v2-readers' || matrix.name == 'user-assets-v3' || matrix.name == 'computer-assets-v3' || matrix.name == 'computer-assets-v3-readers' || matrix.name == 'group-assets-v3' || matrix.name == 'group-assets-v3-readers') && 'stable-body' || 'native-finish' }}
     runs-on: ubuntu-24.04
     timeout-minutes: ${{ matrix.name == 'tasks-health-recovery' && 30 || 20 }}
     permissions:
@@ -457,6 +457,27 @@ jobs:
             web/playwright-report/computer-asset-export-v3-cancel-validated/computer-asset-export-v3-cancel-evidence.json
             web/playwright-report/computer-asset-export-v3-cancel-validated/cancelled-terminal.png
           # Only validated synthetic JSON, explicit safe PNGs and actual recovery XLSX.
+          if-no-files-found: error
+          retention-days: 14
+      - name: Validate multi-chunk computer export seven-file evidence
+        id: computer-multichunk-evidence
+        timeout-minutes: 1
+        if: ${{ success() && matrix.name == 'computer-asset-export-v3-multichunk' }}
+        run: python3 scripts/computer_asset_export_v3_multichunk_ci.py validate
+      - name: Upload validated multi-chunk computer export evidence
+        timeout-minutes: 1
+        if: ${{ success() && matrix.name == 'computer-asset-export-v3-multichunk' && steps.computer-multichunk-evidence.outcome == 'success' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: computer-asset-export-v3-multichunk-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            web/playwright-report/computer-export-multichunk-validated/source-observation.json
+            web/playwright-report/computer-export-multichunk-validated/database-export.xlsx
+            web/playwright-report/computer-export-multichunk-validated/download.xlsx
+            web/playwright-report/computer-export-multichunk-validated/ready.png
+            web/playwright-report/computer-export-multichunk-validated/evidence.json
+            web/playwright-report/computer-export-multichunk-validated/provenance.json
+            web/playwright-report/computer-export-multichunk-validated/resources.json
           if-no-files-found: error
           retention-days: 14
       - name: Validate computer asset export dictionary3 browser evidence

@@ -16,6 +16,7 @@ import uuid
 from unittest.mock import patch
 
 import ci_selection as selection
+from computer_asset_export_v3_multichunk_ci import restore_multichunk_source
 import ci_selection_summary as summary
 from ci_workflow_contract import (restore_selection, restore_messages_isolation,
                                   restore_messages_isolation_predecessor, restore_health_recovery,
@@ -53,6 +54,9 @@ PRE_LOG_NAVIGATION_INVENTORY_SHA256 = '410601823ee66f9f84caa6847e46206b9c66c0fca
 
 def restore_log_navigation_inventory(raw):
     """Test-only outer projection: accept exactly the frozen append-only bytes."""
+    if type(raw) is not bytes:
+        raise ValueError("multi-chunk inventory bytes required")
+    raw = restore_multichunk_source(raw.decode("utf-8"), "scripts/ci_inventory.json").encode("utf-8")
     if not isinstance(raw, bytes) or raw.count(TASK_WORKSPACE_LOG_NAVIGATION) != 1:
         raise ValueError('original-log navigation consumer block differs')
     predecessor = raw.replace(TASK_WORKSPACE_LOG_NAVIGATION, TASK_WORKSPACE_PRE_LOG_NAVIGATION, 1)
@@ -151,15 +155,16 @@ class SelectionContract(unittest.TestCase):
         predecessor = restore_log_navigation_inventory(raw)
         self.assertEqual(hashlib.sha256(predecessor).hexdigest(), PRE_LOG_NAVIGATION_INVENTORY_SHA256)
         self.assertEqual(predecessor.count(TASK_WORKSPACE_PRE_LOG_NAVIGATION), 1)
-        self.assertEqual(predecessor.replace(TASK_WORKSPACE_PRE_LOG_NAVIGATION, TASK_WORKSPACE_LOG_NAVIGATION, 1), raw)
+        self.assertEqual(predecessor.replace(TASK_WORKSPACE_PRE_LOG_NAVIGATION, TASK_WORKSPACE_LOG_NAVIGATION, 1), restore_multichunk_source(raw.decode('utf-8'), 'scripts/ci_inventory.json').encode('utf-8'))
         old = json.loads(predecessor)
         root = 'web/src/TaskWorkspace.tsx'
         self.assertEqual(self.inventory['frontend_roots'][root], old['frontend_roots'][root] + ['operational-logs'])
         self.assertEqual(len(old['frontend_roots'][root]), 18)
         self.assertEqual(self.inventory['frontend_roots'][root].count('operational-logs'), 1)
-        self.assertEqual(self.inventory['browser'], old['browser'])
+        self.assertEqual(json.loads(restore_multichunk_source(raw.decode('utf-8'), 'scripts/ci_inventory.json'))['browser'], old['browser'])
+        self.assertEqual(len(old['browser']), 56)
         self.assertEqual(self.inventory['fixed'], old['fixed'])
-        self.assertEqual(len(self.inventory['browser']), 56)
+        self.assertEqual(len(self.inventory['browser']), 57)
         self.assertEqual(len(self.inventory['fixed']), 7)
 
     def test_log_navigation_outer_projection_rejects_consumer_and_unrelated_mutations(self):
@@ -217,7 +222,7 @@ class SelectionContract(unittest.TestCase):
         dep='web/src/shared.ts';other='web/src/UnmappedPage.tsx'
         src=dict(self.sources,**{dep:'',other:''})
         self.graph['web/src/MessagesWorkspace.tsx']={dep};self.graph[other]={dep}
-        self.assertEqual(len(self.choose([dep],src)['browser']),56)
+        self.assertEqual(len(self.choose([dep],src)['browser']),57)
 
     def helper_graph(self):
         api='web/src/messages-api.ts'; helper='web/src/sample-data.ts'
@@ -244,7 +249,7 @@ class SelectionContract(unittest.TestCase):
             src[consumer]='';self.graph[consumer]={helper}
             with self.subTest(consumer=consumer):
                 self.assertNotIn(helper,selection.test_only_dependencies(self.graph,set(),self.inventory))
-                self.assertEqual(len(self.choose([api],src)['browser']),56)
+                self.assertEqual(len(self.choose([api],src)['browser']),57)
             self.graph.pop(consumer)
 
     def test_unknown_edges_or_cycles_or_orphans_never_prove_helpers(self):
@@ -252,12 +257,12 @@ class SelectionContract(unittest.TestCase):
         self.assertEqual(self.names(self.choose([api],src,uncertain={test})),{'messages','messages-isolation'})
         for unknown in (helper, 'web/src/MessagesWorkspace.tsx', 'web/e2e/messages.spec.ts'):
             with self.subTest(unknown=unknown):
-                self.assertEqual(len(self.choose([api],src,uncertain={unknown})['browser']),56)
+                self.assertEqual(len(self.choose([api],src,uncertain={unknown})['browser']),57)
         self.graph[helper].add(bridge)
-        self.assertEqual(len(self.choose([api],src)['browser']),56)
+        self.assertEqual(len(self.choose([api],src)['browser']),57)
         self.graph[helper].remove(bridge)
         self.graph[test]=set()
-        self.assertEqual(len(self.choose([api],src)['browser']),56)
+        self.assertEqual(len(self.choose([api],src)['browser']),57)
 
     def test_uncertain_test_imported_by_runtime_is_not_a_test_only_seed(self):
         for consumer in ('web/src/MessagesWorkspace.tsx', 'web/e2e/messages.spec.ts'):
@@ -265,7 +270,7 @@ class SelectionContract(unittest.TestCase):
             self.graph[consumer]={test,api}
             with self.subTest(consumer=consumer):
                 self.assertEqual(selection.test_only_dependencies(self.graph,{test},self.inventory),set())
-                self.assertEqual(len(self.choose([api],src,uncertain={test})['browser']),56)
+                self.assertEqual(len(self.choose([api],src,uncertain={test})['browser']),57)
             self.graph[consumer]=set()
 
     def test_old_or_base_runtime_consumer_cannot_be_erased_by_new_test_only_graph(self):
@@ -287,7 +292,7 @@ class SelectionContract(unittest.TestCase):
         path='web/src/Example.test.tsx';src=dict(self.sources,**{path:''})
         self.assertFalse(self.choose([path],src)['groups']['browser'])
         self.graph['web/src/MessagesWorkspace.tsx']={path}
-        self.assertEqual(len(self.choose([path],src)['browser']),56)
+        self.assertEqual(len(self.choose([path],src)['browser']),57)
 
     def test_native_both_engines_and_order_independence(self):
         native='web/e2e/native-no-store-completion.spec.ts';unknown='web/src/NewPage.tsx'
@@ -295,7 +300,7 @@ class SelectionContract(unittest.TestCase):
         plans=[self.choose(list(paths),src) for paths in itertools.permutations([native,unknown])]
         self.assertEqual(plans[0]['groups'],plans[1]['groups'])
         self.assertEqual(plans[0]['browser'],plans[1]['browser'])
-        self.assertEqual(len(plans[0]['browser']),56)
+        self.assertEqual(len(plans[0]['browser']),57)
         native_plan=self.choose([native])
         self.assertTrue(native_plan['groups']['native-no-store'])
         self.assertTrue(native_plan['groups']['native-no-store-fixed'])
@@ -305,11 +310,11 @@ class SelectionContract(unittest.TestCase):
         dep='web/src/messages-api.ts';root='web/src/MessagesWorkspace.tsx'
         other='web/src/UnknownPage.tsx';src=dict(self.sources,**{dep:'',other:''})
         self.graph[root]={dep}
-        self.assertEqual(len(self.choose([dep],src,uncertain={other})['browser']),56)
+        self.assertEqual(len(self.choose([dep],src,uncertain={other})['browser']),57)
 
     def test_uncertain_graph_fails_safe(self):
         p='web/e2e/messages.spec.ts'
-        self.assertEqual(len(self.choose([p],uncertain={p})['browser']),56)
+        self.assertEqual(len(self.choose([p],uncertain={p})['browser']),57)
 
     def test_docs_only_is_explicit_without_fake_test(self):
         p=self.choose(['docs/design.md','README.md'])
@@ -396,12 +401,12 @@ class SelectionContract(unittest.TestCase):
         expected={str(p) for p in Path('web/e2e').glob('*.spec.ts')}
         actual={p for e in self.inventory['browser'] for p in e['specs']}|{'web/e2e/native-no-store-completion.spec.ts'}
         self.assertEqual(actual,expected)
-        self.assertEqual(len(self.inventory['browser']),56)
+        self.assertEqual(len(self.inventory['browser']),57)
         self.assertEqual(len(self.inventory['fixed']),7)
         self.assertEqual(summary.INVENTORY,self.inventory)
         old=restore_selection(Path('.github/workflows/ci.yml').read_text())
         matrix=old.split('  browser:\n',1)[1].split('    steps:\n',1)[0]
-        self.assertEqual([(e['name'],e['command']) for e in self.inventory['browser'] if e['name'] not in {'tasks-health-recovery', 'messages-isolation', 'directory-v4-controls', 'directory-v4-cancel', 'directory-v4-readers'}], re.findall(r'          - name: ([^\n]+)\n            command: ([^\n]+)',matrix))
+        self.assertEqual([(e['name'],e['command']) for e in json.loads(restore_multichunk_source(Path('scripts/ci_inventory.json').read_bytes().decode('utf-8'), 'scripts/ci_inventory.json'))['browser'] if e['name'] not in {'tasks-health-recovery', 'messages-isolation', 'directory-v4-controls', 'directory-v4-cancel', 'directory-v4-readers'}], re.findall(r'          - name: ([^\n]+)\n            command: ([^\n]+)',matrix))
         for command in ('true','python3 scripts/test_auth_e2e.py; true','python3 scripts/test_auth_e2e.py --suite messages || true'):
             bad=copy.deepcopy(self.inventory);bad['browser'][0]['command']=command
             with self.assertRaises(ValueError):selection.inventory_checked(bad)
@@ -452,7 +457,7 @@ class SelectionContract(unittest.TestCase):
             p=selection.make_plan(event,'a'*40,'b'*40,self.inventory,loader=lambda _:self.fail('no PR snapshots'))
             n={g:{'result':'success'} for g in selection.GROUPS};n['plan']={'result':'success'}
             summary.verify(p,n,event,'a'*40,'b'*40,p)
-            self.assertEqual(len(p['browser']),56)
+            self.assertEqual(len(p['browser']),57)
             self.assertEqual(p['auth'],list(range(1,9)))
             self.assertEqual(p['fixed'],self.inventory['fixed'])
 
@@ -715,7 +720,7 @@ class SelectionContract(unittest.TestCase):
         projected = [{k: v for k, v in entry.items() if k != 'specs'} for entry in expected]
         actual = selection.browser_matrix_entries(entries)
         self.assertEqual(actual, projected)
-        self.assertEqual(len(actual), 56)
+        self.assertEqual(len(actual), 57)
         self.assertEqual(sorted((entry['name'], entry['command']) for entry in actual),
                          sorted((entry['name'], entry['command']) for entry in entries))
         self.assertEqual([entry for entry in actual if entry['name'] not in {health['name'], group['name']}],
@@ -904,12 +909,22 @@ class SelectionContract(unittest.TestCase):
         self.assertEqual(hashlib.sha256(predecessor.encode()).hexdigest(), delta['baselineSHA256'])
         self.assertEqual(restore_selection(text), restore_selection_predecessor(predecessor))
         variants = [predecessor]
+        outer = json.loads(Path('scripts/fixtures/computer_asset_export_v3_multichunk_delta.json').read_bytes())['paths']['.github/workflows/ci.yml']['replacements']
+        baseline = restore_multichunk_source(text, '.github/workflows/ci.yml')
+        def current_window(window):
+            for addition in outer:
+                if addition['old'] in window:
+                    self.assertEqual(window.count(addition['old']), 1)
+                    window = window.replace(addition['old'], addition['new'], 1)
+            return window
         for change in delta['replacements']:
-            self.assertEqual(text.count(change['new']), 1)
-            variants.extend([text.replace(change['new'], '', 1),
-                             text.replace(change['new'], change['new'] * 2, 1),
-                             text.replace(change['new'], change['old'], 1),
-                             text.replace(change['new'], change['new'] + ' tampered\n', 1)])
+            self.assertEqual(baseline.count(change['new']), 1)
+            actual_new, actual_old = current_window(change['new']), current_window(change['old'])
+            self.assertEqual(text.count(actual_new), 1)
+            variants.extend([text.replace(actual_new, '', 1),
+                             text.replace(actual_new, actual_new * 2, 1),
+                             text.replace(actual_new, actual_old, 1),
+                             text.replace(actual_new, actual_new + ' tampered\n', 1)])
         for old, new in [('contents: read', 'contents: write'), ('run: make check', 'run: true'),
                          ('max-parallel: 8', 'max-parallel: 9'),
                          ('ADTR_E2E_HEALTH_JOB_DEADLINE=', 'VITE_HEALTH_JOB_DEADLINE='),

@@ -21,23 +21,24 @@ const (
 )
 
 type server struct {
-	tlsConfig                *tls.Config
-	username, password       []byte
-	control                  *fixtureControl
-	emptyTransition          *fixtureEmptyTransition
-	directoryMode            bool
-	directoryV3              bool
-	userExportFailureV3      bool
-	groupExportFailureV3     bool
-	computerExportFailureV3  bool
-	directoryV4              bool
-	groupMembersV4Pagination bool
-	directoryV2              bool
-	userAssetsV2             bool
-	computerAssetsV3         bool
-	groupAssetsV3            bool
-	directoryEmpty           bool
-	directorySlow            bool
+	tlsConfig                  *tls.Config
+	username, password         []byte
+	control                    *fixtureControl
+	emptyTransition            *fixtureEmptyTransition
+	directoryMode              bool
+	directoryV3                bool
+	userExportFailureV3        bool
+	groupExportFailureV3       bool
+	computerExportFailureV3    bool
+	computerExportMultichunkV3 bool
+	directoryV4                bool
+	groupMembersV4Pagination   bool
+	directoryV2                bool
+	userAssetsV2               bool
+	computerAssetsV3           bool
+	groupAssetsV3              bool
+	directoryEmpty             bool
+	directorySlow              bool
 }
 
 type endpoint struct {
@@ -127,7 +128,7 @@ func (s *server) handle(ctx context.Context, raw net.Conn, ldaps bool) {
 	conn := raw
 	secure, bound := false, false
 	rootRead := false
-	directory := directorySession{v2: s.directoryV2, v3: s.directoryV3, userExportFailureV3: s.userExportFailureV3, groupExportFailureV3: s.groupExportFailureV3, computerExportFailureV3: s.computerExportFailureV3, v4: s.directoryV4, groupMembersV4Pagination: s.groupMembersV4Pagination, userAssetsV2: s.userAssetsV2, computerAssetsV3: s.computerAssetsV3, groupAssetsV3: s.groupAssetsV3, empty: s.directoryEmpty, slow: s.directorySlow, emptyTransition: s.emptyTransition}
+	directory := directorySession{v2: s.directoryV2, v3: s.directoryV3, userExportFailureV3: s.userExportFailureV3, groupExportFailureV3: s.groupExportFailureV3, computerExportFailureV3: s.computerExportFailureV3, computerExportMultichunkV3: s.computerExportMultichunkV3, v4: s.directoryV4, groupMembersV4Pagination: s.groupMembersV4Pagination, userAssetsV2: s.userAssetsV2, computerAssetsV3: s.computerAssetsV3, groupAssetsV3: s.groupAssetsV3, empty: s.directoryEmpty, slow: s.directorySlow, emptyTransition: s.emptyTransition}
 	defer directory.reset()
 	upgrade := func() bool {
 		tlsConn := tls.Server(raw, s.tlsConfig)

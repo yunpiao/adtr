@@ -19,7 +19,9 @@ import unittest
 import uuid
 from unittest.mock import Mock, patch
 
-from test_directory_v4_runner_contract import restore_health_runner, restore_v4_runner
+from test_directory_v4_runner_contract import (restore_health_runner,
+    restore_health_runner_predecessor, restore_v4_runner)
+from computer_asset_export_v3_multichunk_ci import restore_multichunk_source
 
 ROOT = Path(__file__).resolve().parent.parent
 SOURCE = ROOT / "scripts/test_auth_e2e.py"
@@ -41,25 +43,67 @@ def function(name, **overrides):
 class HealthActualRunner(unittest.TestCase):
     def test_frozen_predecessor_and_outer_mutation_rejection(self):
         source = SOURCE.read_text()
+        baseline = restore_multichunk_source(source, 'scripts/test_auth_e2e.py')
         delta = json.loads((ROOT / 'scripts/fixtures/tasks_health_recovery_runner_delta.json').read_text())
         self.assertEqual(delta['baselineSHA256'], '1a90e44c24886a7815efb724dadbe694d07f49da7c89136e0f875ab101aeba2c')
         predecessor = restore_health_runner(source)
         self.assertEqual(hashlib.sha256(predecessor.encode()).hexdigest(), delta['baselineSHA256'])
+        self.assertEqual(restore_health_runner_predecessor(baseline), predecessor)
         restore_v4_runner(source)  # All prior hashes remain authoritative.
         with self.assertRaises(ValueError):
             restore_health_runner(predecessor)
+        with self.assertRaises(ValueError):
+            restore_health_runner_predecessor(predecessor)
+        outer = json.loads((ROOT / 'scripts/fixtures/computer_asset_export_v3_multichunk_delta.json').read_text())['paths']['scripts/test_auth_e2e.py']['replacements']
+
+        def current_window(window):
+            # The real positive full projection above binds every literal and
+            # offset. Lift only contained reviewed edits, never normalize text.
+            for edit in outer:
+                window = window.replace(edit['old'], edit['new'])
+            return window
+
         for before, after in [('"--suite", choices=', '"--other", choices='),
                               ('timeout=30', 'timeout=31'),
                               ('health_timeout(660, health_run_deadline)', '660'),
                               ('start_new_session=True', 'start_new_session=False')]:
+            self.assertIn(before, baseline)
             self.assertIn(before, source)
-            with self.subTest(before=before), self.assertRaises(ValueError):
+            with self.subTest(before=before, boundary='predecessor'), self.assertRaises(ValueError):
+                restore_health_runner_predecessor(baseline.replace(before, after, 1))
+            with self.subTest(before=before, boundary='current'), self.assertRaises(ValueError):
                 restore_health_runner(source.replace(before, after, 1))
-        for change in delta['replacements']:
-            self.assertEqual(source.count(change['new']), 1)
+        for index, change in enumerate(delta['replacements']):
+            self.assertEqual(baseline.count(change['new']), 1)
+            actual = current_window(change['new'])
+            self.assertEqual(source.count(actual), 1)
             for replacement in ('', change['new'] * 2, change['old'], change['new'] + '# drift\n'):
-                with self.assertRaises(ValueError):
-                    restore_health_runner(source.replace(change['new'], replacement, 1))
+                # Preserve every historical negative at its own exact boundary.
+                # Also inject that same legacy mutation into the current source
+                # window with all unaffected multichunk edits left in place.
+                with self.subTest(index=index, boundary='predecessor'), self.assertRaises(ValueError):
+                    restore_health_runner_predecessor(baseline.replace(change['new'], replacement, 1))
+                changed = source.replace(actual, current_window(replacement), 1)
+                self.assertNotEqual(changed, source)
+                with self.subTest(index=index, boundary='current'), self.assertRaises(ValueError):
+                    restore_health_runner(changed)
+            moved = actual + source.replace(actual, '', 1)
+            self.assertNotEqual(moved, source)
+            with self.subTest(index=index, boundary='current-moved'), self.assertRaises(ValueError):
+                restore_health_runner(moved)
+        # Every newly introduced runner gate is checked against the actual
+        # outer boundary too, including relocation with identical byte counts.
+        for index, edit in enumerate(outer):
+            self.assertEqual(source.count(edit['new']), 1)
+            for replacement in ('', edit['new'] * 2, edit['old'], edit['new'] + '# drift\n'):
+                with self.subTest(gate=index), self.assertRaises(ValueError):
+                    restore_health_runner(source.replace(edit['new'], replacement, 1))
+            moved = edit['new'] + source.replace(edit['new'], '', 1)
+            self.assertNotEqual(moved, source)
+            with self.subTest(gate=index, moved=True), self.assertRaises(ValueError):
+                restore_health_runner(moved)
+        with self.assertRaises(ValueError):
+            restore_health_runner_predecessor(baseline + '# unrelated legacy drift\n')
         with self.assertRaises(ValueError):
             restore_health_runner(source + '# unrelated legacy drift\n')
 

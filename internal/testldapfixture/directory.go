@@ -34,25 +34,29 @@ var directorySearchBody = bytes.Join([][]byte{
 }, nil)
 
 type directorySession struct {
-	v3                       bool
-	userExportFailureV3      bool
-	groupExportFailureV3     bool
-	computerExportFailureV3  bool
-	v4                       bool
-	groupMembersV4Pagination bool
-	v2                       bool
-	userAssetsV2             bool
-	computerAssetsV3         bool
-	groupAssetsV3            bool
-	empty                    bool
-	slow                     bool
-	page                     int
-	cookie                   []byte
-	emptyTransition          *fixtureEmptyTransition
-	transitionSampled        bool
+	v3                         bool
+	userExportFailureV3        bool
+	groupExportFailureV3       bool
+	computerExportFailureV3    bool
+	computerExportMultichunkV3 bool
+	v4                         bool
+	groupMembersV4Pagination   bool
+	v2                         bool
+	userAssetsV2               bool
+	computerAssetsV3           bool
+	groupAssetsV3              bool
+	empty                      bool
+	slow                       bool
+	page                       int
+	cookie                     []byte
+	emptyTransition            *fixtureEmptyTransition
+	transitionSampled          bool
 }
 
 func (d *directorySession) pages() int {
+	if d.computerExportMultichunkV3 {
+		return computerExportMultichunkV3ObjectCount / computerExportMultichunkV3PageEntries
+	}
 	if d.slow {
 		return directorySlowPages
 	}
@@ -63,6 +67,9 @@ func (d *directorySession) pages() int {
 }
 
 func (d *directorySession) objects() int {
+	if d.computerExportMultichunkV3 {
+		return computerExportMultichunkV3ObjectCount
+	}
 	if d.empty {
 		return 0
 	}
@@ -160,7 +167,11 @@ func (d *directorySession) writePage(ctx context.Context, conn io.Writer, id int
 			entry = groupMembersV4PaginationEntry(id, row)
 		}
 		if d.computerAssetsV3 {
-			entry = computerAssetsV3EntryWithExportFailure(id, row, d.computerExportFailureV3)
+			if d.computerExportMultichunkV3 {
+				entry = computerExportMultichunkV3Entry(id, row)
+			} else {
+				entry = computerAssetsV3EntryWithExportFailure(id, row, d.computerExportFailureV3)
+			}
 		}
 		if d.groupAssetsV3 {
 			entry = groupAssetsV3EntryWithExportFailure(id, row, d.groupExportFailureV3)

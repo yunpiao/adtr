@@ -9,6 +9,7 @@ import threading
 import urllib.error
 import unittest
 from unittest.mock import Mock
+from computer_asset_export_v3_multichunk_ci import restore_multichunk_source
 
 
 BASE_RUNNER_SHA256 = "4dba719fa8f92273bf1eddf272d26cca18b5ebf2cc06ff92c752e4943babbe15"
@@ -16,6 +17,10 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 def restore_health_runner(text):
+    return restore_health_runner_predecessor(restore_multichunk_source(text, "scripts/test_auth_e2e.py"))
+
+
+def restore_health_runner_predecessor(text):
     delta = json.loads((ROOT / "scripts/fixtures/tasks_health_recovery_runner_delta.json").read_text())
     for change in reversed(delta["replacements"]):
         if not change["new"] or text.count(change["new"]) != 1:

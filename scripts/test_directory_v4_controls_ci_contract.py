@@ -9,6 +9,7 @@ import unittest
 from ci_workflow_contract import (restore_directory_v4, restore_selection,
                                   restore_health_recovery, restore_directory_v4_predecessor)
 import validate_directory_v4_controls_evidence as evidence
+from computer_asset_export_v3_multichunk_ci import restore_multichunk_source
 
 
 class DirectoryV4ControlsCI(unittest.TestCase):
@@ -17,7 +18,7 @@ class DirectoryV4ControlsCI(unittest.TestCase):
         expected = ['directory-v4-controls', 'directory-v4-cancel', 'directory-v4-readers']
         additions = [entry for entry in inventory['browser'] if entry['name'] in expected]
         self.assertEqual(additions, [{'name': suite, 'command': 'python3 scripts/test_auth_e2e.py --suite ' + suite, 'specs': ['web/e2e/' + suite + '.spec.ts']} for suite in expected])
-        self.assertEqual(len(inventory['browser']), 56)
+        self.assertEqual(len(inventory['browser']), 57)
         self.assertEqual(len(inventory['fixed']), 7)
         consumers = inventory['frontend_roots']['web/src/TaskWorkspace.tsx']
         self.assertEqual(len(consumers), 19)
@@ -33,8 +34,8 @@ class DirectoryV4ControlsCI(unittest.TestCase):
         self.assertIn('audit', inventory['frontend_roots']['web/src/TaskWorkspace.tsx'])
         legacy = restore_selection(Path('.github/workflows/ci.yml').read_text())
         matrix = legacy.split('  browser:\n', 1)[1].split('    steps:\n', 1)[0]
-        self.assertEqual([(entry['name'], entry['command']) for entry in inventory['browser'] if entry['name'] not in expected + ['messages-isolation', 'tasks-health-recovery']], re.findall(r'          - name: ([^\n]+)\n            command: ([^\n]+)', matrix))
-        self.assertEqual(56 + 7 + 8 + 6, 77)  # plan, prepare, contracts, two native, verify.
+        self.assertEqual([(entry['name'], entry['command']) for entry in json.loads(restore_multichunk_source(Path('scripts/ci_inventory.json').read_bytes().decode('utf-8'), 'scripts/ci_inventory.json'))['browser'] if entry['name'] not in expected + ['messages-isolation', 'tasks-health-recovery']], re.findall(r'          - name: ([^\n]+)\n            command: ([^\n]+)', matrix))
+        self.assertEqual(57 + 7 + 8 + 6, 78)  # plan, prepare, contracts, two native, verify.
 
     def test_runtime_commands_budgets_and_real_discovery(self):
         runner = Path('scripts/test_auth_e2e.py').read_text()

@@ -1,0 +1,99 @@
+{
+  "format": 1,
+  "paths": {
+    "scripts/test_auth_e2e.py": {
+      "baselineSHA256": "6d55979bcaff97f5ab23b4c3d8eafbb65a080a3c49555eb2e17823750f6aa2a9",
+      "candidateSHA256": "ce8b3e65281273f9f667a7ffd6bf4af3e14cdb921c21137562b440ab316ceadc",
+      "replacements": [
+        {
+          "old": "from computer_asset_export_v3_ci import configure as configure_computer_export, capture as capture_computer_export, validate as validate_computer_export\n",
+          "new": "from computer_asset_export_v3_ci import configure as configure_computer_export, capture as capture_computer_export, validate as validate_computer_export\nfrom computer_asset_export_v3_multichunk_ci import SUITE as COMPUTER_MULTICHUNK_SUITE, configure as configure_computer_multichunk, capture as capture_computer_multichunk, start_samples as start_multichunk_samples, finish_samples as finish_multichunk_samples, validate_core as validate_computer_multichunk\n",
+          "offset": 1553
+        },
+        {
+          "old": "COMPUTER_EXPORT_SUITES = COMPUTER_EXPORT_TERMINAL_SUITES | {\"computer-asset-export-v3\"}",
+          "new": "COMPUTER_EXPORT_SUITES = COMPUTER_EXPORT_TERMINAL_SUITES | {\"computer-asset-export-v3\", COMPUTER_MULTICHUNK_SUITE}",
+          "offset": 3630
+        },
+        {
+          "old": "if suite in {\"messages-bulk\", \"messages-isolation\", \"tasks-health-recovery\"}:",
+          "new": "if suite in {\"messages-bulk\", \"messages-isolation\", \"tasks-health-recovery\", COMPUTER_MULTICHUNK_SUITE}:",
+          "offset": 26341
+        },
+        {
+          "old": "\"computer-asset-export-v3-running-cancel\", \"user-asset-export-v3-running-cancel\", \"computer-asset-export-v3\",",
+          "new": "\"computer-asset-export-v3-running-cancel\", \"user-asset-export-v3-running-cancel\", \"computer-asset-export-v3-multichunk\", \"computer-asset-export-v3\",",
+          "offset": 57601
+        },
+        {
+          "old": "    diagnostics.phase(\"setup\")\n",
+          "new": "    diagnostics.phase(\"setup\")\n    configure_computer_multichunk(env, args.suite)\n    if args.suite == COMPUTER_MULTICHUNK_SUITE:\n        capture_computer_multichunk()\n",
+          "offset": 60948
+        },
+        {
+          "old": "                                           computer_export_failure_v3=args.suite == \"computer-asset-export-v3-failure\")",
+          "new": "                                           computer_export_failure_v3=args.suite == \"computer-asset-export-v3-failure\",\n                                           computer_export_multichunk_v3=args.suite == COMPUTER_MULTICHUNK_SUITE)",
+          "offset": 69589
+        },
+        {
+          "old": "        diagnostics.phase(\"browser-start\")\n",
+          "new": "        multichunk_samples = start_multichunk_samples(server, worker) if args.suite == COMPUTER_MULTICHUNK_SUITE else None\n        diagnostics.phase(\"browser-start\")\n",
+          "offset": 78367
+        },
+        {
+          "old": "        if args.suite == \"messages-isolation\":\n            validate_messages_isolation_evidence()",
+          "new": "        if args.suite == COMPUTER_MULTICHUNK_SUITE:\n            finish_multichunk_samples(multichunk_samples, server, worker)\n            validate_computer_multichunk()\n        if args.suite == \"messages-isolation\":\n            validate_messages_isolation_evidence()",
+          "offset": 79932
+        }
+      ]
+    },
+    "scripts/ci_inventory.json": {
+      "baselineSHA256": "1d9ef348def9d9b55ee4d0f8bb7da340a3c9049f9e90b5826bd71f3a39c47f24",
+      "candidateSHA256": "ae36e967ae3a28f06cdbe6341dfde3394d1ac0c64f81bdb460106d26195806e6",
+      "replacements": [
+        {
+          "old": "      \"name\": \"tasks-health-recovery\",\n      \"command\": \"python3 scripts/test_auth_e2e.py --suite tasks-health-recovery\",\n      \"specs\": [\n        \"web/e2e/tasks-health-recovery.spec.ts\"\n      ]\n    }\n",
+          "new": "      \"name\": \"tasks-health-recovery\",\n      \"command\": \"python3 scripts/test_auth_e2e.py --suite tasks-health-recovery\",\n      \"specs\": [\n        \"web/e2e/tasks-health-recovery.spec.ts\"\n      ]\n    },\n    {\n      \"name\": \"computer-asset-export-v3-multichunk\",\n      \"command\": \"python3 scripts/test_auth_e2e.py --suite computer-asset-export-v3-multichunk\",\n      \"specs\": [\n        \"web/e2e/computer-asset-export-v3-multichunk.spec.ts\"\n      ]\n    }\n",
+          "offset": 11085
+        },
+        {
+          "old": "      \"computer-assets-v3-readers\"\n    ],",
+          "new": "      \"computer-assets-v3-readers\",\n      \"computer-asset-export-v3-multichunk\"\n    ],",
+          "offset": 12982
+        }
+      ]
+    },
+    ".github/workflows/ci.yml": {
+      "baselineSHA256": "80c650cfd2184e2c9604d1a222843b64c642cb300ba63e2b1ffe9df20a899e61",
+      "candidateSHA256": "963e8cb5d300e42eaffd0e00ce93fe986c2b49ee90497f99dc57acc8bb4fe0fb",
+      "replacements": [
+        {
+          "old": "matrix.name == 'computer-asset-export-v3' ||",
+          "new": "matrix.name == 'computer-asset-export-v3-multichunk' || matrix.name == 'computer-asset-export-v3' ||",
+          "offset": 9872
+        },
+        {
+          "old": "      - name: Validate computer asset export dictionary3 browser evidence\n",
+          "new": "      - name: Validate multi-chunk computer export seven-file evidence\n        id: computer-multichunk-evidence\n        timeout-minutes: 1\n        if: ${{ success() && matrix.name == 'computer-asset-export-v3-multichunk' }}\n        run: python3 scripts/computer_asset_export_v3_multichunk_ci.py validate\n      - name: Upload validated multi-chunk computer export evidence\n        timeout-minutes: 1\n        if: ${{ success() && matrix.name == 'computer-asset-export-v3-multichunk' && steps.computer-multichunk-evidence.outcome == 'success' }}\n        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2\n        with:\n          name: computer-asset-export-v3-multichunk-${{ github.run_id }}-${{ github.run_attempt }}\n          path: |\n            web/playwright-report/computer-export-multichunk-validated/source-observation.json\n            web/playwright-report/computer-export-multichunk-validated/database-export.xlsx\n            web/playwright-report/computer-export-multichunk-validated/download.xlsx\n            web/playwright-report/computer-export-multichunk-validated/ready.png\n            web/playwright-report/computer-export-multichunk-validated/evidence.json\n            web/playwright-report/computer-export-multichunk-validated/provenance.json\n            web/playwright-report/computer-export-multichunk-validated/resources.json\n          if-no-files-found: error\n          retention-days: 14\n      - name: Validate computer asset export dictionary3 browser evidence\n",
+          "offset": 26096
+        }
+      ]
+    },
+    "scripts/ci_workflow_contract.py": {
+      "baselineSHA256": "2b08139edc5c0613a62976ddfb6de8cb816c5610bc43c327db83f92f602a2542",
+      "candidateSHA256": "69e340590221474981eb6092c8fe737679ff6aa3a99dfa4ffe83b1244dd934d5",
+      "replacements": [
+        {
+          "old": "from pathlib import Path\n",
+          "new": "from pathlib import Path\nfrom computer_asset_export_v3_multichunk_ci import restore_multichunk_source\n",
+          "offset": 336
+        },
+        {
+          "old": "def restore_access_role_bulk(text):\n    \"\"\"Reverse exactly the reviewed access-only validated two-file upload.\"\"\"\n",
+          "new": "def restore_access_role_bulk(text):\n    \"\"\"Reverse exactly the reviewed access-only validated two-file upload.\"\"\"\n    text = restore_multichunk_source(text, \".github/workflows/ci.yml\")\n",
+          "offset": 440
+        }
+      ]
+    }
+  }
+}
