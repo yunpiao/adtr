@@ -11,6 +11,7 @@ import {
   type Locator,
   type Page,
   type Request,
+  type Response,
 } from "@playwright/test";
 import { createHmac, createHash } from "node:crypto";
 import { isIP } from "node:net";
@@ -342,6 +343,16 @@ async function assetAction(
     ),
     action(),
   ]);
+  return recordAssetResponse(response, detail, status);
+}
+async function recordAssetResponse(
+  response: Response,
+  detail = false,
+  status = 200,
+) {
+  const path = detail ? "/api/user-assets/v3/detail" : "/api/user-assets/v3";
+  expect(new URL(response.url()).pathname).toBe(path);
+  expect(response.request().method()).toBe("GET");
   expect(
     response.status(),
     "V3 workspace must reach the actual authenticated API",
@@ -1313,6 +1324,186 @@ test("UserAssetsV3 real workspace, pins, identity facts and native reader invali
       expect(resized.query.get("observationId")).toBe(taskUUID);
       expect(resized.value.list).toEqual(users.slice(0, size));
     }
+  });
+
+  await test.step("UAC disabled-bit draft, real filtered reads, reset and late original response keep the pin", async () => {
+    const control = page.getByLabel("本次观测的禁用位", { exact: true });
+    const apply = () =>
+      page.getByRole("button", { name: "搜索用户", exact: true }).click();
+    const clear = () =>
+      page.getByRole("button", { name: "清除用户筛选", exact: true }).click();
+    const next = () =>
+      page.getByRole("button", { name: "用户资产下一页", exact: true }).click();
+    const originalUsers = [...observed.list, ...second.list].filter(
+      (object) => object.kind === "user",
+    );
+    type Bit = "" | "clear" | "set" | "not_returned";
+    const assertRead = (
+      actual: Awaited<ReturnType<typeof assetAction>>,
+      bit: Bit,
+      pageIdx = 1,
+    ) => {
+      const query = {
+        domainId,
+        expectedRevision: selection.revision,
+        expectedCredentialRevision: selection.credentialRevision,
+        observationId: taskUUID,
+        search: "",
+        pageIdx: String(pageIdx),
+        pageSize: "10",
+        ...(bit ? { uacDisableBit: bit } : {}),
+      };
+      // Compare all original query entries: neither duplicate parameters nor
+      // an unexpected filter can hide behind Object.fromEntries().
+      expect([...actual.query].sort()).toEqual(Object.entries(query).sort());
+      expect(actual.query.getAll("uacDisableBit")).toEqual(bit ? [bit] : []);
+      expect(actual.actorId).toBe(String(actorId));
+      const empty = bit === "set" || bit === "not_returned";
+      expect(actual.value).toEqual({
+        ...first.value,
+        list: empty
+          ? []
+          : originalUsers.slice((pageIdx - 1) * 10, pageIdx * 10),
+        page: {
+          pageIdx,
+          pageSize: 10,
+          total: empty ? 0 : 12,
+          totalPage: empty ? 0 : 2,
+        },
+      });
+    };
+    const assertEmpty = async (label: string) => {
+      await expect(
+        page.getByText(`已应用禁用位：${label}`, { exact: true }),
+      ).toBeVisible();
+      await expect(
+        page.getByText("此观测在当前筛选下没有匹配用户。", { exact: true }),
+      ).toBeVisible();
+      await expect(table).toHaveCount(0);
+      await expect(page.locator(".asset-page-count")).toHaveText(
+        "第 1 页 · 共 0 页 · 匹配用户 0 个",
+      );
+      await expect(
+        page.getByText(`观测来源 · ${taskUUID}`, { exact: true }),
+      ).toBeVisible();
+      await expect(
+        page.getByRole("button", { name: "用户资产上一页", exact: true }),
+      ).toBeDisabled();
+      await expect(
+        page.getByText(
+          "当前数据源没有可用的字典 3 观测；尚不能确认用户数量。",
+          { exact: true },
+        ),
+      ).toHaveCount(0);
+      await expect(
+        page.getByRole("button", { name: "用户资产下一页", exact: true }),
+      ).toBeDisabled();
+    };
+    // The actual producer fixture has UAC 0/512 for all 12 users. It proves
+    // nonempty clear and empty set/not_returned only, not nonempty set/null LDAP.
+    expect(users.map((user) => user.userAccountControl)).toEqual([
+      0,
+      ...Array(11).fill(512),
+    ]);
+    assertRead(await assetAction(page, next), "", 2);
+    let draftReads = 0;
+    const recordDraftRead = (request: Request) => {
+      if (new URL(request.url()).pathname === "/api/user-assets/v3")
+        draftReads++;
+    };
+    page.on("request", recordDraftRead);
+    try {
+      await control.selectOption("clear");
+      await expect(
+        page.getByText("筛选已编辑，尚未应用；请提交搜索后查看详情或翻页。", {
+          exact: true,
+        }),
+      ).toBeVisible();
+      await expect(
+        page.getByRole("button", { name: "用户资产上一页", exact: true }),
+      ).toBeDisabled();
+      await expect(
+        page.getByRole("button", { name: "用户资产下一页", exact: true }),
+      ).toBeDisabled();
+      expect(draftReads).toBe(0);
+    } finally {
+      page.off("request", recordDraftRead);
+    }
+    const clearFirst = await assetAction(page, apply);
+    assertRead(clearFirst, "clear");
+    await expect(table.locator("tbody tr")).toHaveCount(10);
+    await expect(
+      page.getByText("已应用禁用位：禁用位未设置", { exact: true }),
+    ).toBeVisible();
+    await capture("user-assets-v3-desktop-uac-clear.png", clearFirst.value);
+    const clearLast = await assetAction(page, next);
+    assertRead(clearLast, "clear", 2);
+    expect([...clearFirst.value.list, ...clearLast.value.list]).toEqual(
+      originalUsers,
+    );
+    await expect(table.locator("tbody tr")).toHaveCount(2);
+    assertRead(await assetAction(page, clear), "");
+    await expect(control).toHaveValue("");
+    await expect(table.locator("tbody tr")).toHaveCount(10);
+
+    for (const [bit, label] of [
+      ["set", "禁用位已设置"],
+      ["not_returned", "UAC未返回"],
+    ] as const) {
+      await control.selectOption(bit);
+      const empty = await assetAction(page, apply);
+      assertRead(empty, bit);
+      await assertEmpty(label);
+      await capture(`user-assets-v3-desktop-uac-${bit}.png`, empty.value);
+    }
+    // Choosing unrestricted must omit the parameter, not send an empty value.
+    await control.selectOption("");
+    assertRead(await assetAction(page, apply), "");
+    await expect(table.locator("tbody tr")).toHaveCount(10);
+
+    const held = await holdAssetResponse(
+      page,
+      "/api/user-assets/v3",
+      actorId,
+      users[0],
+    );
+    try {
+      await control.selectOption("clear");
+      const [heldRequest] = await Promise.all([
+        page.waitForRequest(
+          (request) =>
+            new URL(request.url()).pathname === "/api/user-assets/v3" &&
+            request.method() === "GET",
+        ),
+        apply(),
+      ]);
+      await held.fetched();
+      await control.selectOption("set");
+      const current = await assetAction(page, apply);
+      assertRead(current, "set");
+      await assertEmpty("禁用位已设置");
+      // Bind to the old browser Request, never let the newer same-path GET
+      // satisfy its waiter. The helper replays only genuine upstream bytes.
+      const [originalResponse, outcome] = await Promise.all([
+        page.waitForResponse((response) => response.request() === heldRequest),
+        held.release(),
+      ]);
+      assertRead(await recordAssetResponse(originalResponse), "clear");
+      expect(outcome.application).toBe("complete-consumed");
+      transport.push({ scenario: "uac-clear-superseded-by-set", ...outcome });
+      await expect(control).toHaveValue("set");
+      await assertEmpty("禁用位已设置");
+    } finally {
+      await held.release();
+    }
+    const restored = await assetAction(page, clear);
+    assertRead(restored, "");
+    expect(restored.value).toEqual(first.value);
+    await expect(control).toHaveValue("");
+    await expect(table.locator("tbody tr")).toHaveCount(10);
+    await expect(
+      page.getByText("已应用禁用位：不限", { exact: true }),
+    ).toBeVisible();
   });
 
   await test.step("native clipboard and Chromium drag events reject keyword CR/LF without a transformed query", async () => {
