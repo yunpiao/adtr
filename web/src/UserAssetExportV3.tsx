@@ -1,3 +1,4 @@
+import { uacDisableBitLabels } from "./user-assets-v3-filters";
 import { useLayoutEffect, useRef, useState, type FormEvent } from "react";
 import { ApiError, type Profile } from "./api";
 import { accessRequest, type Permission } from "./access-api";
@@ -213,6 +214,7 @@ function Export({ profile, query, disabled, failure, request }: Props & { reques
       <dt>配置版本 / 凭据版本</dt><dd>{capturedRequest.expectedRevision} / {capturedRequest.expectedCredentialRevision}</dd>
       <dt>固定观测</dt><dd>{display(capturedRequest.observationId)}</dd>
       <dt>关键词 / 精确 SAM</dt><dd>{display(capturedRequest.search) || "不限"} / {display(capturedRequest.sAMAccountName) || "不限"}</dd>
+      <dt>本次观测的禁用位</dt><dd>{capturedRequest.uacDisableBit === undefined ? "不限" : uacDisableBitLabels[capturedRequest.uacDisableBit]}</dd>
       <dt>创建时间范围 / 排序</dt><dd>{display(capturedRequest.startTm) || "不限"} 至 {display(capturedRequest.endTm) || "不限"} / {capturedRequest.creatTm || "GUID 升序"}</dd>
     </dl>}
     {!request && <p role="status">当前没有可用固定观测，不能新建导出；仍可核对原回执和取消原任务。</p>}

@@ -19,7 +19,8 @@ const eligible = (detail: ExportDetail) => ["queued", "running", "retry_wait"].i
 export const copyCancelRequest = (r: ExportRequest): ExportRequest => ({ domainId: r.domainId,
   expectedRevision: r.expectedRevision, expectedCredentialRevision: r.expectedCredentialRevision,
   observationId: r.observationId, search: r.search, sAMAccountName: r.sAMAccountName,
-  startTm: r.startTm, endTm: r.endTm, creatTm: r.creatTm, screenColumns: [...r.screenColumns] });
+  startTm: r.startTm, endTm: r.endTm, creatTm: r.creatTm, screenColumns: [...r.screenColumns],
+  ...(Object.hasOwn(r, "uacDisableBit") ? { uacDisableBit: r.uacDisableBit } : {}) });
 export function cancelStorageKey(actorID: number, taskID: string): string {
   if (!Number.isSafeInteger(actorID) || actorID < 1 || !validExportID(taskID)) throw new ApiError("invalid_input");
   return `adtr.user-export-cancel.v1.${actorID}.${taskID}`;

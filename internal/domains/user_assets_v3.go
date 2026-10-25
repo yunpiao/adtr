@@ -22,8 +22,8 @@ type UserAssetsV3List struct {
 	Page              Page                             `json:"page"`
 }
 
-func (s *Store) UserAssetsV3ListTx(ctx context.Context, tx pgx.Tx, tenant string, allowed []string, f UserAssetsV2Filter) (UserAssetsV3List, error) {
-	if err := ValidateUserAssetsV2Filter(f); err != nil {
+func (s *Store) UserAssetsV3ListTx(ctx context.Context, tx pgx.Tx, tenant string, allowed []string, f UserAssetsV3Filter) (UserAssetsV3List, error) {
+	if err := ValidateUserAssetsV3Filter(f); err != nil {
 		return UserAssetsV3List{}, err
 	}
 	selection, err := s.userAssetsV2SelectionTx(ctx, tx, tenant, allowed, f.DomainID, f.ExpectedRevision, f.ExpectedCredentialRevision)
@@ -45,7 +45,7 @@ func (s *Store) UserAssetsV3ListTx(ctx context.Context, tx pgx.Tx, tenant string
 	return userAssetsV3Page(ctx, selection, id, observation, f)
 }
 
-func userAssetsV3Page(ctx context.Context, selection UserAssetsV2Selection, id string, o ldapconnection.DirectoryV3Observation, f UserAssetsV2Filter) (UserAssetsV3List, error) {
+func userAssetsV3Page(ctx context.Context, selection UserAssetsV2Selection, id string, o ldapconnection.DirectoryV3Observation, f UserAssetsV3Filter) (UserAssetsV3List, error) {
 	rows, err := userAssetsV3Rows(ctx, o, f)
 	if err != nil {
 		return UserAssetsV3List{}, err
@@ -66,10 +66,10 @@ func userAssetsV3Page(ctx context.Context, selection UserAssetsV2Selection, id s
 
 // One predicate and ordering implementation for pages and whole-observation exports.
 // The caller has already validated every stored object, including excluded ones.
-func userAssetsV3Rows(ctx context.Context, o ldapconnection.DirectoryV3Observation, f UserAssetsV2Filter) ([]directoryassets.PublicObjectV3, error) {
+func userAssetsV3Rows(ctx context.Context, o ldapconnection.DirectoryV3Observation, f UserAssetsV3Filter) ([]directoryassets.PublicObjectV3, error) {
 	rows := make([]directoryassets.PublicObjectV3, 0)
 	search := strings.ToLower(f.Search)
-	rangeStart, rangeEnd, err := userAssetsV2TimeRange(f)
+	rangeStart, rangeEnd, err := userAssetsV2TimeRange(f.UserAssetsV2Filter)
 	if err != nil {
 		return nil, err
 	}
@@ -83,6 +83,9 @@ func userAssetsV3Rows(ctx context.Context, o ldapconnection.DirectoryV3Observati
 		object, err := directoryassets.ProjectV3(stored)
 		if err != nil {
 			return nil, problem(409, "directory_observation_unavailable")
+		}
+		if !userAssetsV3UACDisableBitMatches(object.UserAccountControl, f.UACDisableBit) {
+			continue
 		}
 		if !userAssetsV2Match(object.PublicObjectV2, search) || f.SAMAccountName != "" && (object.SAMAccountName == nil || *object.SAMAccountName != f.SAMAccountName) {
 			continue

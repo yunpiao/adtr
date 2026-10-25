@@ -23,7 +23,7 @@ import (
 const userAssetExportV3Path = "/api/user-assets/v3/exports"
 
 var userAssetExportV3Routes = map[string]taskRoute{
-	"":         {"POST", "domainId expectedRevision expectedCredentialRevision observationId search sAMAccountName startTm endTm creatTm screenColumns idempotencyKey actorPassword totpCode", true},
+	"":         {"POST", "domainId expectedRevision expectedCredentialRevision observationId search sAMAccountName startTm endTm creatTm screenColumns uacDisableBit idempotencyKey actorPassword totpCode", true},
 	"/receipt": {"GET", "", false}, "/detail": {"GET", "", false}, "/download": {"GET", "", false},
 	"/cancel": {"POST", "taskID actorPassword totpCode", true},
 }

@@ -12,11 +12,13 @@ import {
 } from "./directory-v2-api";
 import { readDirectoryV2JSON } from "./directory-v2-json";
 import { integer, object } from "./task-api";
+import { userAssetsV2Time } from "./user-assets-v2-filters";
+
 import {
-  userAssetsV2Time,
-  validUserAssetsV2Filters,
-  type UserAssetsV2Filters,
-} from "./user-assets-v2-filters";
+  matchesUserUACDisableBit,
+  validUserAssetsV3Filters,
+  type UserAssetsV3Filters,
+} from "./user-assets-v3-filters";
 
 export const userAssetsV3Operations = [
   "GET /api/user-assets/v3",
@@ -33,7 +35,7 @@ interface SourceRequest {
   expectedRevision: string;
   expectedCredentialRevision: string;
 }
-export interface UserAssetsV3Query extends SourceRequest, UserAssetsV2Filters {
+export interface UserAssetsV3Query extends SourceRequest, UserAssetsV3Filters {
   observationId?: string;
   search: string;
   pageIdx: number;
@@ -81,13 +83,16 @@ const validRequest = (q: SourceRequest) =>
 const validListQuery = (q: UserAssetsV3Query) =>
   validRequest(q) &&
   validUserAssetsV3Search(q.search) &&
-  validUserAssetsV2Filters(q) &&
+  validUserAssetsV3Filters(q) &&
   integer(q.pageIdx, 1, 10000) &&
   userAssetsV3PageSizes.some((size) => size === q.pageSize) &&
   (q.observationId === undefined || validDomainID(q.observationId)) &&
   (q.pageIdx === 1 || !!q.observationId);
 const validDetailQuery = (q: UserAssetV3Query) =>
-  validRequest(q) && validDomainID(q.observationId) && validGUID(q.objectGUID);
+  validRequest(q) &&
+  validDomainID(q.observationId) &&
+  validGUID(q.objectGUID) &&
+  !Object.hasOwn(q, "uacDisableBit");
 const validSelection = (value: unknown, q: SourceRequest) =>
   object(value) &&
   exact(value, ["domainId", "revision", "credentialRevision"]) &&
@@ -171,6 +176,7 @@ export function parseUserAssetsV3List(
     const created = userAssetsV2Time(row.whenCreated);
     if (
       seen.has(row.objectGUID) ||
+      !matchesUserUACDisableBit(row.userAccountControl, q.uacDisableBit) ||
       !directoryLiteralSearchMatches(
         [row.samAccountName, row.objectSid, row.mail, row.distinguishedName],
         q.search,
@@ -274,6 +280,9 @@ export const userAssetsV3API = {
             ? {}
             : { startTm: q.startTm, endTm: q.endTm }),
           ...(q.creatTm === undefined ? {} : { creatTm: q.creatTm }),
+          ...(Object.hasOwn(q, "uacDisableBit")
+            ? { uacDisableBit: q.uacDisableBit }
+            : {}),
           ...(q.observationId === undefined
             ? {}
             : { observationId: q.observationId }),

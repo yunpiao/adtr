@@ -1,8 +1,11 @@
 package domains
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -55,5 +58,74 @@ func TestUserAssetArtifactResultRejectsMalformedMetadata(t *testing.T) {
 		if _, err := decodeUserAssetExportResult([]byte(bad)); err == nil {
 			t.Fatal("malformed metadata accepted")
 		}
+	}
+}
+
+func TestUserAssetExportV3UACOmissionPreservesCanonicalBytesAndHash(t *testing.T) {
+	// Exact pre-change field order/defaults: do not replace this with marshaling
+	// the new struct, which would conceal a backwards-incompatible encoding.
+	const old = `{"domainId":"one","expectedRevision":"1","expectedCredentialRevision":"2","observationId":"observed","search":"","sAMAccountName":"","startTm":"","endTm":"","creatTm":"","screenColumns":["guid","sAMAccountName","sid","mail","dn","whenCreated"]}`
+	raw, err := ValidateUserAssetExportV3Payload([]byte(validUserExportPayload()))
+	if err != nil || string(raw) != old || sha256.Sum256(raw) != sha256.Sum256([]byte(old)) {
+		t.Fatal("old payload bytes/hash changed", err, string(raw))
+	}
+	// The existing engine sorts object keys and prefixes version/parent before
+	// hashing. Pin the historical engine hash too, without adding a new codec.
+	var taskPayload map[string]any
+	if json.Unmarshal(raw, &taskPayload) != nil {
+		t.Fatal("canonical task payload")
+	}
+	sorted, err := json.Marshal(taskPayload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	taskHash := sha256.Sum256(append([]byte("1::"), sorted...))
+	if fmt.Sprintf("%x", taskHash) != "4b8cedc2869648ea1538f46219bb6de6a239e243236fbb1196a2ffb35b6708d6" {
+		t.Fatal("historical task hash changed")
+	}
+	oldAgain, err := ValidateUserAssetExportV3Payload([]byte(old))
+	if err != nil || !bytes.Equal(raw, oldAgain) {
+		t.Fatal("old canonical receipt no longer readable", err)
+	}
+	hashes := map[[32]byte]bool{sha256.Sum256(raw): true}
+	for _, filter := range []string{"set", "clear", "not_returned"} {
+		input := strings.TrimSuffix(validUserExportPayload(), "}") + `,"uacDisableBit":"` + filter + `"}`
+		canonical, err := ValidateUserAssetExportV3Payload([]byte(input))
+		if err != nil {
+			t.Fatal(filter, err)
+		}
+		var p UserAssetExportV3Payload
+		if json.Unmarshal(canonical, &p) != nil || p.UACDisableBit == nil || *p.UACDisableBit != filter || p.Filter().UACDisableBit != filter {
+			t.Fatal("filter lost from canonical request")
+		}
+		hash := sha256.Sum256(canonical)
+		if hashes[hash] {
+			t.Fatal("distinct filters share payload hash")
+		}
+		hashes[hash] = true
+		again, err := ValidateUserAssetExportV3Payload(canonical)
+		if err != nil || !bytes.Equal(canonical, again) {
+			t.Fatal("new canonical request is not stable", err)
+		}
+	}
+}
+
+func TestUserAssetExportV3UACExplicitInvalidValuesNeverBecomeOmitted(t *testing.T) {
+	for _, value := range []string{`""`, `null`, `0`, `2`, `true`, `[]`, `{}`, `["set"]`, `"SET"`, `" clear"`, `"not-returned"`, `"disabled"`} {
+		t.Run(value, func(t *testing.T) {
+			raw := strings.TrimSuffix(validUserExportPayload(), "}") + `,"uacDisableBit":` + value + `}`
+			_, err := ValidateUserAssetExportV3Payload([]byte(raw))
+			requireUserAssetsV2Error(t, err, 400, "invalid_input")
+		})
+	}
+	for _, suffix := range []string{`,"uacDisableBit":"set","uacDisableBit":"set"}`, `,"uacDisableBit":"set","uacDisableBit":"clear"}`, `,"uacDisableBit":"set","unknown":"x"}`} {
+		_, err := ValidateUserAssetExportV3Payload([]byte(strings.TrimSuffix(validUserExportPayload(), "}") + suffix))
+		requireUserAssetsV2Error(t, err, 400, "invalid_input")
+	}
+	empty := ""
+	p := UserAssetExportV3Payload{UACDisableBit: &empty}
+	encoded, err := json.Marshal(p)
+	if err != nil || !bytes.Contains(encoded, []byte(`"uacDisableBit":""`)) {
+		t.Fatal(fmt.Sprintf("present-empty erased: %s", encoded), err)
 	}
 }

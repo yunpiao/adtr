@@ -4,6 +4,7 @@ import { validDomainID, validRevision } from "./domain-api";
 import { integer, object, validTask, type Task } from "./task-api";
 import { validUserAssetsV3Search, type UserAssetsV3Query } from "./user-assets-v3-api";
 import { validUserAssetsV2Filters } from "./user-assets-v2-filters";
+import { validUACDisableBit, type UACDisableBit } from "./user-assets-v3-filters";
 
 export const exportColumns = ["guid", "sAMAccountName", "sid", "mail", "dn", "whenCreated"] as const;
 export type ExportColumn = (typeof exportColumns)[number];
@@ -25,6 +26,7 @@ export interface ExportRequest {
   endTm: string;
   creatTm: "" | "asc" | "desc";
   screenColumns: ExportColumn[];
+  uacDisableBit?: UACDisableBit;
 }
 export interface ExportReceipt { taskID: string; task: Task; request: ExportRequest }
 export interface ExportArtifact { rowCount: number; byteCount: number; sha256: string; filename: string }
@@ -39,7 +41,8 @@ export const validExportID = (value: unknown): value is string =>
   typeof value === "string" && /^[A-Za-z0-9_.-]{1,128}$/u.test(value);
 export const exportFilename = (id: string) => `user-assets-v3-${id}.xlsx`;
 export function validExportRequest(value: unknown): value is ExportRequest {
-  return object(value) && exact(value, requestKeys) &&
+  return object(value) && exact(value, [...requestKeys, ...(Object.hasOwn(value, "uacDisableBit") ? ["uacDisableBit"] : [])]) &&
+    (!Object.hasOwn(value, "uacDisableBit") || validUACDisableBit(value.uacDisableBit)) &&
     validDomainID(value.domainId) && validRevision(value.expectedRevision) &&
     validRevision(value.expectedCredentialRevision) && validDomainID(value.observationId) &&
     validUserAssetsV3Search(value.search) &&
@@ -53,15 +56,18 @@ export function validExportRequest(value: unknown): value is ExportRequest {
     new Set(value.screenColumns).size === value.screenColumns.length;
 }
 export function requestFromQuery(q: UserAssetsV3Query, columns: ExportColumn[] = [...exportColumns]): ExportRequest {
+  if (Object.hasOwn(q, "uacDisableBit") && !validUACDisableBit(q.uacDisableBit)) throw new ApiError("invalid_input");
   const request: ExportRequest = { domainId: q.domainId, expectedRevision: q.expectedRevision,
     expectedCredentialRevision: q.expectedCredentialRevision, observationId: q.observationId ?? "",
     search: q.search, sAMAccountName: q.sAMAccountName ?? "", startTm: q.startTm ?? "",
-    endTm: q.endTm ?? "", creatTm: q.creatTm ?? "", screenColumns: [...columns] };
+    endTm: q.endTm ?? "", creatTm: q.creatTm ?? "", screenColumns: [...columns],
+    ...(Object.hasOwn(q, "uacDisableBit") ? { uacDisableBit: q.uacDisableBit } : {}) };
   if (!validExportRequest(request)) throw new ApiError("invalid_input");
   return request;
 }
 export function sameExportRequest(a: ExportRequest, b: ExportRequest) {
-  return requestKeys.every((key) => key === "screenColumns"
+  return Object.hasOwn(a, "uacDisableBit") === Object.hasOwn(b, "uacDisableBit") &&
+    a.uacDisableBit === b.uacDisableBit && requestKeys.every((key) => key === "screenColumns"
     ? a.screenColumns.length === b.screenColumns.length && a.screenColumns.every((v, i) => b.screenColumns[i] === v)
     : a[key as keyof ExportRequest] === b[key as keyof ExportRequest]);
 }
@@ -72,7 +78,8 @@ function copyCancelRequest(request: ExportRequest): ExportRequest {
   const copy: ExportRequest = { domainId: request.domainId, expectedRevision: request.expectedRevision,
     expectedCredentialRevision: request.expectedCredentialRevision, observationId: request.observationId,
     search: request.search, sAMAccountName: request.sAMAccountName, startTm: request.startTm,
-    endTm: request.endTm, creatTm: request.creatTm, screenColumns: [...request.screenColumns] };
+    endTm: request.endTm, creatTm: request.creatTm, screenColumns: [...request.screenColumns],
+    ...(Object.hasOwn(request, "uacDisableBit") ? { uacDisableBit: request.uacDisableBit } : {}) };
   Object.freeze(copy.screenColumns);
   return Object.freeze(copy);
 }

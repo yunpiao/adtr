@@ -26,10 +26,15 @@ type UserAssetExportV3Payload struct {
 	EndTm                      string   `json:"endTm"`
 	CreatTm                    string   `json:"creatTm"`
 	ScreenColumns              []string `json:"screenColumns"`
+	UACDisableBit              *string  `json:"uacDisableBit,omitempty"`
 }
 
-func (p UserAssetExportV3Payload) Filter() UserAssetsV2Filter {
-	return UserAssetsV2Filter{DomainID: p.DomainID, ExpectedRevision: p.ExpectedRevision, ExpectedCredentialRevision: p.ExpectedCredentialRevision, ObservationID: p.ObservationID, Search: p.Search, SAMAccountName: p.SAMAccountName, StartTm: p.StartTm, EndTm: p.EndTm, CreatTm: p.CreatTm, PageIdx: 1, PageSize: 10}
+func (p UserAssetExportV3Payload) Filter() UserAssetsV3Filter {
+	f := UserAssetsV3Filter{UserAssetsV2Filter: UserAssetsV2Filter{DomainID: p.DomainID, ExpectedRevision: p.ExpectedRevision, ExpectedCredentialRevision: p.ExpectedCredentialRevision, ObservationID: p.ObservationID, Search: p.Search, SAMAccountName: p.SAMAccountName, StartTm: p.StartTm, EndTm: p.EndTm, CreatTm: p.CreatTm, PageIdx: 1, PageSize: 10}}
+	if p.UACDisableBit != nil {
+		f.UACDisableBit = *p.UACDisableBit
+	}
+	return f
 }
 
 var userAssetExportColumns = []string{"guid", "sAMAccountName", "sid", "mail", "dn", "whenCreated"}
@@ -115,7 +120,12 @@ func ValidateUserAssetExportV3Payload(raw json.RawMessage) (json.RawMessage, err
 	if p.ObservationID == "" || p.ScreenColumns == nil {
 		return nil, problem(400, "invalid_input")
 	}
-	if err := ValidateUserAssetsV2Filter(p.Filter()); err != nil {
+	// A pointer preserves present-empty through HTTP decode/re-encoding. Only
+	// omission is unrestricted; empty must not normalize to an old request.
+	if p.UACDisableBit != nil && *p.UACDisableBit == "" {
+		return nil, problem(400, "invalid_input")
+	}
+	if err := ValidateUserAssetsV3Filter(p.Filter()); err != nil {
 		return nil, err
 	}
 	if len(p.ScreenColumns) == 0 {

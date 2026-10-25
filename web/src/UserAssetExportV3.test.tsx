@@ -284,3 +284,32 @@ describe("shared old-panel cancellation barrier", () => {
     view(); await open(); expect(screen.getByRole("button", { name: "创建用户导出" })).toBeEnabled();
   });
 });
+
+describe("frozen UAC export summary", () => {
+  it.each(["set", "clear", "not_returned"] as const)("shows and submits the original %s filter, not a later list query", async (uacDisableBit) => {
+    const request = { ...exportRequest, uacDisableBit };
+    const receipt = { ...exportReceipt, request }, ready = { ...readyExport, request };
+    const create = vi.spyOn(userAssetExportAPI, "create").mockResolvedValue(receipt);
+    const read = vi.spyOn(userAssetExportAPI, "receipt").mockResolvedValue(receipt);
+    const detail = vi.spyOn(userAssetExportAPI, "detail").mockResolvedValue(ready);
+    const rendered = view({ query: { ...query, uacDisableBit } }); await open();
+    const label = uacDisableBit === "set" ? "禁用位已设置" : uacDisableBit === "clear" ? "禁用位未设置" : "UAC未返回";
+    expect(screen.getByText(label)).toBeVisible();
+    proof(); fireEvent.click(screen.getByRole("button", { name: "创建用户导出" }));
+    await screen.findByRole("button", { name: "下载用户 XLSX" });
+    expect(create.mock.calls[0][0]).toEqual(request);
+    rendered.rerender(<UserAssetExportV3 profile={exportProfile} query={query} disabled={false} failure={vi.fn()} />);
+    await open();
+    await screen.findByText(/正在恢复原操作/);
+    expect(read).toHaveBeenCalledWith(query.domainId, create.mock.calls[0][1], 1, expect.any(AbortSignal));
+    expect(screen.getByText(label)).toBeVisible();
+    expect(detail.mock.calls.every(([, expected]) => expected?.uacDisableBit === uacDisableBit)).toBe(true);
+    expect(create).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("button", { name: "按当前列表创建另一导出" }));
+    expect(screen.queryByText(label)).not.toBeInTheDocument();
+    proof(); fireEvent.click(screen.getByRole("button", { name: "创建用户导出" }));
+    expect(create).toHaveBeenCalledTimes(2);
+    expect(create.mock.calls[1][0]).not.toHaveProperty("uacDisableBit");
+    expect(create.mock.calls[1][1]).not.toBe(create.mock.calls[0][1]);
+  });
+});

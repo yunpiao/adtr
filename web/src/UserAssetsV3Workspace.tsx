@@ -19,11 +19,7 @@ import type { ResolvedSource } from "./domain-selection-api";
 import { directoryV2DisplayText as display } from "./directory-v2-json";
 import type { DirectoryV2Source } from "./directory-v2-api";
 import { sessionError, useTaskRead } from "./task-common";
-import {
-  validUserAssetsV2SAM,
-  validUserAssetsV2Filters,
-  type UserAssetsV2Filters,
-} from "./user-assets-v2-filters";
+import { validUserAssetsV2SAM } from "./user-assets-v2-filters";
 import {
   retryUserAssetsV3Read,
   userAssetsV3API,
@@ -38,12 +34,22 @@ import {
   type UserAssetsV3Query,
 } from "./user-assets-v3-api";
 
+import {
+  uacDisableBits,
+  uacDisableBitLabels,
+  userUACDisableBit,
+  validUserAssetsV3Filters,
+  type UACDisableBit,
+  type UserAssetsV3Filters,
+} from "./user-assets-v3-filters";
+
 type Props = { profile: Profile; sessionChanged: () => void };
 const emptyFilters = {
   sAMAccountName: "",
   startTm: "",
   endTm: "",
   creatTm: "" as "" | "asc" | "desc",
+  uacDisableBit: "" as "" | UACDisableBit,
 };
 const rawFilterLabels = {
   search: "用户资产关键词",
@@ -208,7 +214,9 @@ function Workspace({ profile, sessionChanged }: Props) {
                 profile={profile}
                 source={source}
                 canDetail={gate.data?.checks[1] === true}
-                canExport={!!readable("user_asset_exports") && !!readable("tasks")}
+                canExport={
+                  !!readable("user_asset_exports") && !!readable("tasks")
+                }
                 failure={(error) => {
                   clearSource();
                   setNotice(userAssetsV3Error(error));
@@ -289,6 +297,10 @@ function Facts({ object }: { object: UserAssetV3Object }) {
       </dd>
       <dt>账户名（SAM）</dt>
       <dd>{nullable(object.samAccountName)}</dd>
+      <dt>本次观测的禁用位</dt>
+      <dd>
+        {uacDisableBitLabels[userUACDisableBit(object.userAccountControl)]}
+      </dd>
       <dt>账户控制值（原始整数）</dt>
       <dd>{nullable(object.userAccountControl)}</dd>
       <dt>安全标识（SID）</dt>
@@ -543,19 +555,23 @@ function Assets({
       );
       return;
     }
-    const filters: UserAssetsV2Filters = {
+    const filters: UserAssetsV3Filters = {
       sAMAccountName: filterDraft.sAMAccountName || undefined,
       startTm: filterDraft.startTm || undefined,
       endTm: filterDraft.endTm || undefined,
       creatTm: filterDraft.creatTm || undefined,
+      ...(filterDraft.uacDisableBit === ""
+        ? {}
+        : { uacDisableBit: filterDraft.uacDisableBit }),
     };
-    if (!validUserAssetsV2Filters(filters)) {
+    if (!validUserAssetsV3Filters(filters)) {
       setInputError(
         "创建时间须同时填写起止值，使用含 T 和 Z 或时区偏移的 RFC3339 时间（可含 1–9 位小数秒），年份及换算后 UTC 年份为 0001–9999，且开始必须早于结束；不填写则不限制时间。",
       );
       return;
     }
-    loadList({ ...queryRef.current, ...filters, search: draft, pageIdx: 1 });
+    const { uacDisableBit: _bit, ...previous } = queryRef.current;
+    loadList({ ...previous, ...filters, search: draft, pageIdx: 1 });
   };
   const transferError = Object.values(filterTransferErrors).join(" ");
   const dirty =
@@ -665,6 +681,22 @@ function Assets({
             ))}
           </select>
         </label>
+        <Field label="本次观测的禁用位">
+          <select
+            aria-describedby="asset-uac-disable-help"
+            value={filterDraft.uacDisableBit}
+            onChange={(event) =>
+              changeFilter("uacDisableBit", event.target.value)
+            }
+          >
+            <option value="">不限禁用位</option>
+            {uacDisableBits.map((bit) => (
+              <option key={bit} value={bit}>
+                {uacDisableBitLabels[bit]}
+              </option>
+            ))}
+          </select>
+        </Field>
         <button disabled={stale || !!transferError || (busy && !dirty)}>
           搜索用户
         </button>
@@ -676,8 +708,9 @@ function Assets({
             setDraft("");
             setFilterDraft(emptyFilters);
             setFilterTransferErrors({});
+            const { uacDisableBit: _bit, ...previous } = queryRef.current;
             loadList({
-              ...queryRef.current,
+              ...previous,
               search: "",
               pageIdx: 1,
               sAMAccountName: undefined,
@@ -749,6 +782,17 @@ function Assets({
           </p>
         </details>
       </form>
+      <p id="asset-uac-disable-help">
+        禁用位仅解释本次保存的 UAC 的
+        ACCOUNTDISABLE（0x2）位。未设置不能证明账户活跃、可登录或未锁定；UAC未返回不等于
+        0。
+      </p>
+      <p className="asset-applied-search">
+        已应用禁用位：
+        {query.uacDisableBit === undefined
+          ? "不限"
+          : uacDisableBitLabels[query.uacDisableBit]}
+      </p>
       <p
         className="asset-applied-search"
         style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}
@@ -779,7 +823,12 @@ function Assets({
         <p role="status">筛选已编辑，尚未应用；请提交搜索后查看详情或翻页。</p>
       )}
       {canExport && (
-        <UserAssetExportV3 profile={profile} query={query} disabled={dirty || busy || stale || !list?.available} failure={failure} />
+        <UserAssetExportV3
+          profile={profile}
+          query={query}
+          disabled={dirty || busy || stale || !list?.available}
+          failure={failure}
+        />
       )}
       <ErrorNotice error={transferError || inputError || error} />
       {error && !stale && (
@@ -832,6 +881,14 @@ function Assets({
                     <tr key={row.objectGUID}>
                       <td data-label="SAM" className="asset-name">
                         {nullable(row.samAccountName)}
+                        <small style={{ display: "block", fontWeight: 400 }}>
+                          {
+                            uacDisableBitLabels[
+                              userUACDisableBit(row.userAccountControl)
+                            ]
+                          }{" "}
+                          / 原始 UAC：{nullable(row.userAccountControl)}
+                        </small>
                       </td>
                       <td data-label="GUID" className="asset-identifier">
                         {display(row.objectGUID)}
