@@ -115,6 +115,25 @@ Synthetic unit or PostgreSQL producer tests are not that LDAP/browser proof or
 real AD acceptance. Exact-head checks and independent review remain required;
 AD-F-038/039, full userStatus semantics and product acceptance0/209 remain open.
 
+### Filtered-export evidence consumer candidate
+
+The separately scoped [success export evidence profile](user-asset-export-v3-contract.md#filtered-success-browser-evidence-profile-2026-10-25-candidate)
+keeps the unfiltered12-row export and keyword-only unmatched GET, then applies
+`user-` plus UI-selected `set` for its second and final export. Duplicate-preserving
+GET query pairs and an independently constructed canonical request bind the same
+actor/observation/source pins through receipt/detail and the stored workbook.
+A dirty selector cannot fetch or create; applying Search restores the explicit
+new-export transition. No production list, fixture or permission changes are part
+of this consumer slice.
+
+The former unmatched-keyword-to-XLSX browser transaction is replaced, not equivalent
+coverage. Default LDAP user UAC0/512 establishes only filtered-set zero matches;
+nonempty set, null/not_returned LDAP users and positive filtered-clear downloads
+remain unverified here. Mixed offline fixture cells and synthetic-producer PG
+partition coverage are separate layers, not those missing browser/LDAP chains.
+Format2 artifacts, exact-head CI, independent pixel/content review and runner cleanup
+are still required; offline preparation does not change product acceptance0/209.
+
 ## Versioned UI and safe facts
 
 The existing default `#user-assets-v2` remains v2. New `#user-assets-v3` is explicit.
