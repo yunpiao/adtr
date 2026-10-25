@@ -729,6 +729,12 @@ class ContractTests(unittest.TestCase):
         tuple_original = "                require(kind == 'activity' and lock['relation'] == 'adtr.system_worker_activity'\n                        and mode in ('ExclusiveLock', 'AccessExclusiveLock') and\n                        session['pid'] in reachable, 'unsafe tuple lock')"
         self.assertEqual(source.count(tuple_wrapper), 1)
         source = source.replace(tuple_wrapper, tuple_original, 1)
+        # Exact diagnostic wrapper removal preserves the same original hash;
+        # any predicate/body or wrapper edit still fails the source contract.
+        transaction_wrapper = "                try:\n                    require((mode == 'ExclusiveLock' and lock['granted']) or\n                            (kind == 'activity' and mode == 'ShareLock' and not lock['granted'] and\n                             session['pid'] in reachable), 'unsafe transaction lock')\n                except RuntimeError as error:\n                    # Only the exact rejected lock and existing graph/sample.\n                    # Projection must not replace the original strict exception.\n                    try:\n                        if (type(error) is RuntimeError and error.args == ('unsafe transaction lock',)\n                                and type(lock['granted']) is bool):\n                            wait = session['waitType']\n                            error.transaction_lock_diagnostic = {\n                                'modeCategory': mode if type(mode) is str and mode in TRANSACTION_LOCK_FAILURE_VALUES['modeCategory'] else 'other',\n                                'queryKind': kind if type(kind) is str and kind in TRANSACTION_LOCK_FAILURE_VALUES['queryKind'] else 'unclassified',\n                                'waitTypeCategory': ('none' if wait is None else wait if type(wait) is str and wait in TRANSACTION_LOCK_FAILURE_VALUES['waitTypeCategory'] else 'other'),\n                                'granted': lock['granted'],\n                                'directBarrier': lock_pid in session['blockers'],\n                                'otherBlockers': any(pid != lock_pid for pid in session['blockers']),\n                                'barrierReachable': session['pid'] in reachable,\n                            }\n                    except Exception:\n                        pass  # Diagnostic failure cannot replace strict rejection.\n                    raise"
+        transaction_original = "                require((mode == 'ExclusiveLock' and lock['granted']) or\n                        (kind == 'activity' and mode == 'ShareLock' and not lock['granted'] and\n                         session['pid'] in reachable), 'unsafe transaction lock')"
+        self.assertEqual(source.count(transaction_wrapper), 1)
+        source = source.replace(transaction_wrapper, transaction_original, 1)
         expected = {
             'validate_sessions': '4efb9b60ec57914d43c55c695e0916b07d71fbcd3f3cdac8c3cd06b630bbd092',
             'validate_checkpoint': '83ff1b7a711627ec7ee4e28761dde75f5e18ae3e81abb39927b8057022a06e74',
@@ -1347,6 +1353,138 @@ class ContractTests(unittest.TestCase):
             self.assertEqual(observer.query.call_count, 5)
             guard.owned.process.send_signal.assert_called_once_with(signal.SIGSTOP)
             observer.close.assert_called_once(); barrier.close.assert_called_once()
+
+    def transaction_lock_rejection(self, row):
+        before = copy.deepcopy(row)
+        with self.assertRaisesRegex(RuntimeError, '^unsafe transaction lock$') as caught:
+            g.validate_candidate_strict(row, 99)
+        self.assertEqual(row, before)
+        self.assertEqual(caught.exception.args, ('unsafe transaction lock',))
+        return caught.exception, g.failure_event('candidate_strict', caught.exception)
+
+    def test_transaction_lock_same_sample_categories_distinguish_rejected_clauses(self):
+        cases = [
+            ('ExclusiveLock', False, 'Lock', [99], g.ACTIVITY_SQL, True, 'activity'),
+            ('ShareLock', True, 'Lock', [99], g.ACTIVITY_SQL, True, 'activity'),
+            ('RowExclusiveLock', False, 'Lock', [99], g.ACTIVITY_SQL, True, 'activity'),
+            ('ShareLock', False, None, [99], g.ACTIVITY_SQL, False, 'activity'),
+            ('ShareLock', False, 'IO', [99], g.ACTIVITY_SQL, False, 'activity'),
+            ('ShareLock', False, 'Lock', [], g.ACTIVITY_SQL, False, 'activity'),
+            ('ShareLock', False, 'Lock', [99, 101], g.ACTIVITY_SQL, False, 'activity'),
+            ('ShareLock', False, 'Lock', [99], g.SCHEMA_SQL, False, 'schema'),
+        ]
+        for mode, granted, wait, blockers, query, reachable, query_kind in cases:
+            with self.subTest(mode=mode, granted=granted, wait=wait, blockers=blockers, query_kind=query_kind):
+                row = session() | {'waitType': wait, 'blockers': blockers, 'query': query,
+                                   'locks': [lock('transactionid', mode, granted)]}
+                error, event = self.transaction_lock_rejection(row)
+                self.assertEqual(event, {'event': 'running_cancel_guard_failure',
+                    'stage': 'candidate_strict', 'reason': 'unsafe_transaction_lock',
+                    'modeCategory': mode, 'queryKind': query_kind,
+                    'waitTypeCategory': 'none' if wait is None else wait, 'granted': granted,
+                    'directBarrier': 99 in blockers, 'otherBlockers': any(pid != 99 for pid in blockers),
+                    'barrierReachable': reachable})
+                self.assertEqual(set(error.transaction_lock_diagnostic),
+                    set(g.TRANSACTION_LOCK_FAILURE_VALUES) | set(g.TRANSACTION_LOCK_FAILURE_FLAGS))
+
+    def test_transaction_lock_success_controls_preserve_exact_results(self):
+        for locks in ([lock('transactionid', 'ExclusiveLock')],
+                      [lock('transactionid', 'ShareLock', False)],
+                      [lock('transactionid', 'ExclusiveLock'), lock('transactionid', 'ShareLock', False)]):
+            row = session() | {'locks': locks}
+            before = copy.deepcopy(row)
+            self.assertEqual(g.validate_candidate_strict(row, 99), g.validate_sessions([row], 99))
+            self.assertEqual(row, before)
+
+    def test_transaction_lock_reports_first_rejected_lock_not_later_sample(self):
+        row = session() | {'waitType': 'PRIVATE_WAIT', 'blockers': [99, 987654321],
+                          'locks': [lock('transactionid', 'PRIVATE_MODE', False),
+                                    lock('transactionid', 'ShareLock', True)]}
+        _, event = self.transaction_lock_rejection(row)
+        self.assertEqual((event['modeCategory'], event['waitTypeCategory'], event['granted']),
+                         ('other', 'other', False))
+        encoded = json.dumps(event)
+        for private in ('PRIVATE', '987654321', 'ACTIVITY_SQL', '99'):
+            self.assertNotIn(private, encoded)
+
+    def test_transaction_lock_preserves_original_exception_identity_and_other_first_failures(self):
+        row = session() | {'locks': [lock('transactionid', 'ShareLock', True)]}
+        original = RuntimeError('unsafe transaction lock')
+        prior_require = g.require
+        def require(ok, message):
+            if not ok and message == 'unsafe transaction lock': raise original
+            return prior_require(ok, message)
+        with patch.object(g, 'require', side_effect=require):
+            error, _ = self.transaction_lock_rejection(row)
+        self.assertIs(error, original)
+        earlier = row | {'locks': [lock('relation', 'ShareLock', relation='PRIVATE_RELATION'), *row['locks']]}
+        with self.assertRaisesRegex(RuntimeError, '^unsafe owned relation lock$') as caught:
+            g.validate_candidate_strict(earlier, 99)
+        self.assertFalse(hasattr(caught.exception, 'transaction_lock_diagnostic'))
+        self.assertNotIn('barrierReachable', g.failure_event('candidate_strict', caught.exception))
+
+    def test_transaction_lock_diagnostic_failure_never_replaces_strict_rejection(self):
+        row = session() | {'locks': [lock('transactionid', 'ShareLock', True)]}
+        with patch.object(g, 'TRANSACTION_LOCK_FAILURE_VALUES', None):
+            with self.assertRaisesRegex(RuntimeError, '^unsafe transaction lock$') as caught:
+                g.validate_candidate_strict(row, 99)
+        self.assertFalse(hasattr(caught.exception, 'transaction_lock_diagnostic'))
+        class ForeignError(RuntimeError): pass
+        for original in (ForeignError('unsafe transaction lock'), RuntimeError('PRIVATE_EXCEPTION')):
+            prior_require = g.require
+            def require(ok, message):
+                if not ok and message == 'unsafe transaction lock': raise original
+                return prior_require(ok, message)
+            with patch.object(g, 'require', side_effect=require):
+                with self.assertRaises(RuntimeError) as caught:
+                    g.validate_candidate_strict(row, 99)
+            self.assertIs(caught.exception, original)
+            self.assertFalse(hasattr(original, 'transaction_lock_diagnostic'))
+
+    def test_transaction_lock_closed_projection_rejects_bad_details_and_wrong_scope(self):
+        row = session() | {'locks': [lock('transactionid', 'ShareLock', True)]}
+        error, _ = self.transaction_lock_rejection(row)
+        valid = error.transaction_lock_diagnostic.copy()
+        malformed = [None, [], {}, valid | {'private': 'SECRET'}]
+        for key in valid:
+            for value in ('SECRET', '', 1, None, [], {}):
+                malformed.append(valid | {key: value})
+            malformed.append({k: v for k, v in valid.items() if k != key})
+        for key in g.TRANSACTION_LOCK_FAILURE_VALUES:
+            malformed.append(valid | {key: True})
+        for detail in malformed:
+            error.transaction_lock_diagnostic = detail
+            self.assertEqual(set(g.failure_event('candidate_strict', error)), {'event', 'stage', 'reason'})
+        error.transaction_lock_diagnostic = valid
+        for stage in g.FAILURE_STAGES - {'candidate_strict'}:
+            self.assertEqual(set(g.failure_event(stage, error)), {'event', 'stage', 'reason'})
+        for other in (RuntimeError('unsafe tuple lock'), ValueError('unsafe transaction lock'),
+                      RuntimeError('unsafe transaction lock', 'PRIVATE')):
+            other.transaction_lock_diagnostic = valid
+            self.assertEqual(set(g.failure_event('candidate_strict', other)), {'event', 'stage', 'reason'})
+
+    def test_transaction_lock_candidate_failure_never_resamples_pins_stops_or_waits(self):
+        for kind in g.EXPORT_KINDS:
+            with self.subTest(kind=kind):
+                guard = self.guard(asset_kind=kind); guard.threads = Mock(return_value=['T'])
+                running = task() | {'kind': g.export_kind(kind)[0]}
+                queued = running | {'state': 'queued', 'attempt': 0, 'snapshotCount': 0}
+                observer, barrier = Mock(), Mock(pid=99)
+                row = session() | {'locks': [lock('transactionid', 'ShareLock', True)]}
+                observer.query.side_effect = [{'otherNonterminal': 0, 'journalCount': 0, 'task': queued, 'sessions': []},
+                    {'task': running, 'sessions': [row]}]
+                barrier.query.return_value = {'count': 1}
+                with patch.object(g, 'Psql', side_effect=[observer, barrier]), patch.object(g.time, 'sleep') as sleep:
+                    with self.assertRaisesRegex(RuntimeError, '^running checkpoint guard failed closed$'):
+                        guard.checkpoint('task-one', 'worker')
+                guard.controller.pin.assert_not_called(); guard.owned.process.send_signal.assert_not_called()
+                sleep.assert_not_called(); self.assertEqual(observer.query.call_count, 2)
+                self.assertEqual(guard.failure_diagnostic['stage'], 'candidate_strict')
+                self.assertEqual(guard.failure_diagnostic['reason'], 'unsafe_transaction_lock')
+                self.assertEqual(guard.failure_diagnostic['modeCategory'], 'ShareLock')
+                self.assertTrue(guard.failure_diagnostic['granted']); self.assertTrue(guard.failed)
+                self.assertEqual(guard.owned.resume.call_count, 2)
+                observer.close.assert_called_once(); barrier.close.assert_called_once()
 
     def test_candidate_strict_same_sample_wait_none_rejects_lock_control_passes(self):
         target = session() | {'waitType': None, 'locks': []}
