@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { parseWorkerControlState, workerControl, safeScreenshots, v4ScreenshotTargetVisible, v4ScreenshotTargetStatus, v4CancelUnknownUIReady, recover, readNativeFocusIdentity, classifyIdentityJSONFailure, identityJSONFailureMessage, invariant, type Actor, type Original } from "../e2e/directory-v4-runtime";
+import { parseWorkerControlState, workerControl, safeScreenshots, v4ScreenshotTargetVisible, v4ScreenshotTargetStatus, v4CancelUnknownUIReady, recover, readNativeFocusIdentity, classifyIdentityJSONFailure, classifyIdentityRequestFailure, identityJSONFailureMessage, invariant, type Actor, type Original } from "../e2e/directory-v4-runtime";
 import type { Page, Request, Response, TestInfo } from "@playwright/test";
 import { EventEmitter } from "node:events";
 import { runInNewContext } from "node:vm";
@@ -215,8 +215,101 @@ describe("eager original Playwright focus identity", () => {
     expect(h.requests).toHaveBeenCalledTimes(1);
     for (const call of h.forbidden) expect(call).not.toHaveBeenCalled();
   }
-  beforeEach(() => { vi.useFakeTimers(); });
+  beforeEach(() => { vi.useFakeTimers(); vi.spyOn(console, "log").mockImplementation(() => {}); });
   afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
+
+  function diagnostic() {
+    const calls = vi.mocked(console.log).mock.calls;
+    expect(calls).toHaveLength(1); expect(calls[0]).toHaveLength(1);
+    const text = String(calls[0][0]); expect(text).toMatch(/^\[v4-focus-identity\] /u);
+    expect(text).not.toContain(privateText); expect(text.length).toBeLessThan(4096);
+    const value = JSON.parse(text.slice("[v4-focus-identity] ".length));
+    expect(Object.keys(value).sort()).toEqual(["schema", "phase", "failure", "jsonFailureClass", "events", "eventsDropped", "diagnosticFault", "cleanupFailed", "selected", "selectedStatus", "selectedRequest", "focusSettledWhenJSONRejected", "laterMatchingResponses", "repeatedSelectedResponses", "observedRequests", "counterWindow", "requestTerminalWindow", "eventWindow"].sort());
+    expect(value.counterWindow).toBe("selected_until_first_terminal_state");
+    expect(value.requestTerminalWindow).toBe("observed_request_until_first_terminal_state");
+    expect(value.eventWindow).toBe("prepare_until_cleanup");
+    expect(value.selected).toBe(value.selectedRequest !== null);
+    expect(value.selectedStatus).toBe(value.selected ? 200 : null);
+    expect(value.events.length).toBeLessThanOrEqual(32);
+    for (const event of value.events) {
+      expect(Object.keys(event).sort()).toEqual(["atMs", "event"]);
+      expect(Number.isInteger(event.atMs)).toBe(true); expect(event.atMs).toBeGreaterThanOrEqual(0); expect(event.atMs).toBeLessThanOrEqual(15_000);
+      expect(["prepare", "armed", "focus_call", "focus_resolved", "focus_rejected", "selected", "json_call", "json_resolved", "json_rejected", "request_finished", "request_failed", "first_failure", "success", "cleanup", "old_request", "fresh_request"]).toContain(event.event);
+    }
+    return value;
+  }
+  it.each([false, true])("records exact selected terminal and JSON order without awaiting finish (focus first=%s)", async focusFirst => {
+    const h = harness(), failure = vi.fn(() => ({ errorText: "net::ERR_ABORTED", private: privateText }));
+    const req = request(h, { failure }), other = request(h), selected = response(req), { result } = h.start(); await arm(h);
+    if (focusFirst) { h.action.resolve(); await flush(); }
+    h.emitter.emit("request", req); h.emitter.emit("response", selected.value);
+    expect(selected.json).toHaveBeenCalledTimes(1); expect(console.log).not.toHaveBeenCalled();
+    h.emitter.emit("requestfailed", other); expect(failure).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(7); h.emitter.emit("requestfinished", req);
+    selected.body.reject(new Error("response.json: Protocol error (Network.getResponseBody): No data found for resource with given identifier")); await flush();
+    h.emitter.emit("requestfailed", req); if (!focusFirst) h.action.resolve();
+    await expect(result).rejects.toThrow("json_failure_class=cdp_body_no_data");
+    const report = diagnostic(); expect(report.selectedRequest).toEqual({ finishedAtMs: 7, failedAtMs: null, failureClass: "not_observed" });
+    expect(report.focusSettledWhenJSONRejected).toBe(focusFirst); expect(report.observedRequests).toEqual({ old: 0, fresh: 1 });
+    const order = report.events.map((event: { event: string }) => event.event);
+    expect(order.indexOf("armed")).toBeLessThan(order.indexOf("focus_call"));
+    expect(order.indexOf("fresh_request")).toBeLessThan(order.indexOf("selected"));
+    expect(order.indexOf("selected") + 1).toBe(order.indexOf("json_call"));
+    expect(order.indexOf("request_finished")).toBeLessThan(order.indexOf("json_rejected"));
+    expect(failure).not.toHaveBeenCalled(); clean(h);
+  });
+  it("observes exact Request failure safely without changing a successful original body", async () => {
+    const h = harness(), failure = vi.fn(() => ({ errorText: "net::ERR_ABORTED" })), req = request(h, { failure });
+    const selected = response(req), { result } = h.start(); await arm(h);
+    h.emitter.emit("request", req); h.emitter.emit("response", selected.value); h.emitter.emit("requestfailed", req);
+    selected.body.resolve({ ID: 42, profile: privateText }); h.action.resolve(); await expect(result).resolves.toBe(42);
+    expect(diagnostic().selectedRequest).toEqual({ finishedAtMs: null, failedAtMs: 0, failureClass: "aborted" });
+    expect(failure).toHaveBeenCalledTimes(1); clean(h);
+  });
+  it("counts only live matching responses and never reads a later body or post-failure metadata", async () => {
+    const h = harness(), req = request(h), selected = response(req), laterReq = request(h), later = response(laterReq), { result } = h.start(); await arm(h);
+    h.emitter.emit("request", req); h.emitter.emit("response", selected.value);
+    h.emitter.emit("response", selected.value); h.emitter.emit("request", laterReq); h.emitter.emit("response", later.value);
+    selected.body.reject(rawError()); await flush();
+    const url = vi.fn(() => { throw rawError(); }); h.emitter.emit("response", response(laterReq, { url }).value);
+    h.action.resolve(); await expect(result).rejects.toThrow("identity_response_json_failed");
+    const report = diagnostic(); expect(report.laterMatchingResponses).toBe(2); expect(report.repeatedSelectedResponses).toBe(1);
+    expect(report.observedRequests).toEqual({ old: 0, fresh: 2 }); expect(later.json).not.toHaveBeenCalled(); expect(url).not.toHaveBeenCalled(); clean(h);
+  });
+  it("leaves absent host terminal events explicitly unobserved and never waits for them", async () => {
+    const h = harness(), req = request(h), selected = response(req), { result } = h.start(); await arm(h);
+    h.emitter.emit("request", req); h.emitter.emit("response", selected.value); selected.body.resolve({ ID: 42 }); h.action.resolve();
+    await expect(result).resolves.toBe(42); expect(diagnostic().selectedRequest).toEqual({ finishedAtMs: null, failedAtMs: null, failureClass: "not_observed" }); clean(h);
+  });
+  it("reports no selected status when preparation fails before a candidate", async () => {
+    const h = harness(), { result } = h.start(); h.snapshot.reject(rawError());
+    await expect(result).rejects.toThrow("identity_prepare_failed");
+    const report = diagnostic(); expect(report.selected).toBe(false); expect(report.selectedStatus).toBeNull(); clean(h);
+  });
+  it("bounds event floods while keeping counts and the original single body read", async () => {
+    const h = harness(), req = request(h), selected = response(req), { result } = h.start(); await arm(h);
+    h.emitter.emit("request", req); h.emitter.emit("response", selected.value);
+    for (let i = 0; i < 100; i++) h.emitter.emit("requestfinished", req);
+    selected.body.resolve({ ID: 42 }); h.action.resolve(); await expect(result).resolves.toBe(42);
+    const report = diagnostic(); expect(report.events).toHaveLength(32); expect(report.eventsDropped).toBeGreaterThan(0);
+    expect(selected.json).toHaveBeenCalledTimes(1); clean(h);
+  });
+  it.each(["projection", "install", "remove", "log"])("diagnostic %s failure cannot change the original result", async source => {
+    const h = harness(), req = request(h, { failure: () => { throw rawError(); } }), selected = response(req);
+    if (source === "install") {
+      const on = h.emitter.on.bind(h.emitter); vi.spyOn(h.emitter, "on").mockImplementation((event, listener) => { if (event === "requestfailed") throw rawError(); return on(event, listener); });
+    }
+    if (source === "remove") {
+      const off = h.emitter.off.bind(h.emitter); vi.spyOn(h.emitter, "off").mockImplementation((event, listener) => { const value = off(event, listener); if (event === "requestfailed") throw rawError(); return value; });
+    }
+    if (source === "log") vi.mocked(console.log).mockImplementation(() => { throw rawError(); });
+    const { result } = h.start(); await arm(h); h.emitter.emit("request", req); h.emitter.emit("response", selected.value);
+    if (source === "projection") h.emitter.emit("requestfailed", req);
+    selected.body.reject(new SyntaxError(privateText)); h.action.resolve();
+    await expect(result).rejects.toThrow(/^identity_response_json_failed; json_failure_class=json_syntax_error$/u);
+    if (source !== "log") expect(diagnostic().diagnosticFault).toBe(true);
+    expect(selected.json).toHaveBeenCalledTimes(1); clean(h);
+  });
 
   it("calls exactly the selected json synchronously during dispatch before pending focus completes", async () => {
     const h = harness(), req = request(h), selected = response(req), { result, settled } = h.start();
@@ -470,7 +563,11 @@ describe("eager original Playwright focus identity", () => {
       expect(failure).toBeInstanceOf(Error); expect(failure.message).toBe(source === "body" ? "identity_response_json_failed; json_failure_class=unknown" : "identity_response_metadata");
       expect(failure.cause).toBeUndefined(); expect(String(failure.stack) + JSON.stringify(failure)).not.toContain(privateText); clean(h);
     }
-    expect(log).not.toHaveBeenCalled(); expect(warn).not.toHaveBeenCalled(); expect(errorLog).not.toHaveBeenCalled();
+    for (const args of log.mock.calls) {
+      expect(args).toHaveLength(1); expect(args[0]).toMatch(/^\[v4-focus-identity\] /u);
+      expect(args[0]).not.toContain(privateText);
+    }
+    expect(warn).not.toHaveBeenCalled(); expect(errorLog).not.toHaveBeenCalled();
   });
   it.each(["success", "failure"])("reports cleanup failure separately and preserves the primary %s outcome", async mode => {
     const h = harness(), originalOff = h.emitter.off.bind(h.emitter), removed: (string | symbol)[] = [];
@@ -484,7 +581,7 @@ describe("eager original Playwright focus identity", () => {
     expect(failure.message).toBe(mode === "success" ? "identity_cleanup_failed" : "identity_response_json_failed; json_failure_class=unknown");
     expect(failure.cleanupFailure).toBe("identity_cleanup_failed"); expect(failure.cause).toBeUndefined();
     expect(String(failure.stack) + JSON.stringify(failure)).not.toContain(privateText);
-    expect(removed).toEqual(["request", "response", "close", "crash", "framenavigated"]); clean(h);
+    expect(removed).toEqual(["request", "response", "close", "crash", "framenavigated", "requestfinished", "requestfailed"]); clean(h);
   });
 
   it.each(["sync", "async"])("projects each original JSON %s failure without changing the selected object", async mode => {
@@ -510,7 +607,11 @@ describe("eager original Playwright focus identity", () => {
       expect(failure.cause).toBeUndefined(); expect(String(failure.stack) + JSON.stringify(failure)).not.toContain(privateText);
       expect(selected.json).toHaveBeenCalledTimes(1); expect(later.json).not.toHaveBeenCalled(); clean(h);
     }
-    expect(log).not.toHaveBeenCalled(); expect(warn).not.toHaveBeenCalled(); expect(errorLog).not.toHaveBeenCalled();
+    for (const args of log.mock.calls) {
+      expect(args).toHaveLength(1); expect(args[0]).toMatch(/^\[v4-focus-identity\] /u);
+      expect(args[0]).not.toContain(privateText);
+    }
+    expect(warn).not.toHaveBeenCalled(); expect(errorLog).not.toHaveBeenCalled();
   });
   it.each(["focus", "page", "metadata", "after-cleanup"])("does not inspect the late Error after %s, with a positive descriptor-read control", async mode => {
     const reason = new Error("response.json: Protocol error (Network.getResponseBody): No data found for resource with given identifier");
@@ -697,5 +798,19 @@ describe("closed identity JSON error projection", () => {
     for (const value of [undefined, null, 1, Symbol(secret), secret, "__proto__", "toString", new String("cdp_body_no_data"), { toString: convert, valueOf: convert, [Symbol.toPrimitive]: convert }])
       expect(identityJSONFailureMessage(value)).toBe("identity_response_json_failed; json_failure_class=unknown");
     expect(convert).not.toHaveBeenCalled();
+  });
+});
+
+
+describe("closed identity request failure projection", () => {
+  it("accepts only exact allowlisted strings, without exporting arbitrary text", () => {
+    const values = { ABORTED: "aborted", CONNECTION_RESET: "connection_reset", CONNECTION_CLOSED: "connection_closed", CONNECTION_REFUSED: "connection_refused", TIMED_OUT: "timed_out", FAILED: "failed" };
+    for (const [code, kind] of Object.entries(values)) expect(classifyIdentityRequestFailure({ errorText: "net::ERR_" + code })).toBe(kind);
+    for (const value of [null, undefined, "net::ERR_ABORTED", { errorText: "private-url-proof" }, { errorText: "net::ERR_ABORTED private" }, { errorText: 7 }, Object.create({ errorText: "net::ERR_ABORTED" })]) expect(classifyIdentityRequestFailure(value)).toBe("unknown");
+  });
+  it("does not invoke accessors, proxies or coercion", () => {
+    const access = vi.fn(() => { throw new Error("private"); });
+    for (const value of [Object.defineProperty({}, "errorText", { get: access }), new Proxy({}, { getOwnPropertyDescriptor: access }), { errorText: { toString: access } }]) expect(classifyIdentityRequestFailure(value)).toBe("unknown");
+    expect(access).not.toHaveBeenCalled();
   });
 });

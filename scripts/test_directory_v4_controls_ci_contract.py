@@ -53,6 +53,37 @@ class DirectoryV4ControlsCI(unittest.TestCase):
         for filename in ['directory-v4-ledger-observer.test.ts', 'directory-v4-runtime-contract.test.ts']:
             self.assertTrue(Path('web/src', filename).is_file())
 
+    def test_identity_diagnostics_leave_original_body_and_deadline_authority_unchanged(self):
+        source = Path('web/e2e/directory-v4-runtime.ts').read_text()
+        identity = source.split('export async function readNativeFocusIdentity(', 1)[1].split('export type Original =', 1)[0]
+        self.assertEqual(identity.count('response.json()'), 1)
+        self.assertIn('const deadline = Date.now() + 15_000', identity)
+        self.assertIn('selectedRequest = request; selectedResponse = response; state.phase = "SELECTED"; pending++;', identity)
+        self.assertIn('if (active && state.phase === "SELECTED") jsonFailureClass = classifyIdentityJSONFailure(reason);', identity)
+        self.assertIn('if (state.phase !== "FAILURE") { state.failure = failure; state.phase = "FAILURE";', identity)
+        self.assertEqual(identity.count('await '), 1)
+        self.assertIn('await completion;', identity)
+        self.assertNotIn('response.finished(', identity)
+        for forbidden in ['response.body(', 'response.text(', 'page.evaluate(', 'page.request.', 'page.route(', 'newCDPSession', 'fetch(']:
+            self.assertNotIn(forbidden, identity)
+        passive = identity.split('const observeTerminal =', 1)[1].split('note("prepare");', 1)[0]
+        for forbidden in ['live()', 'fail(', 'finish()', 'deadline', '.url()', '.headers(', '.body(', '.json(']:
+            self.assertNotIn(forbidden, passive)
+        self.assertIn('requestObservations.get(request)', passive)
+        self.assertIn('classifyIdentityRequestFailure(request.failure())', passive)
+        self.assertIn('events.length < 32', identity)
+        self.assertIn('Math.min(65_535, eventsDropped + 1)', identity)
+        self.assertIn('counterWindow: "selected_until_first_terminal_state"', identity)
+        self.assertIn('requestTerminalWindow: "observed_request_until_first_terminal_state"', identity)
+        self.assertIn('eventWindow: "prepare_until_cleanup"', identity)
+        emission = identity.split('console.log("[v4-focus-identity] "', 1)[1].split('      }));', 1)[0]
+        for forbidden in ['origin', 'request.url', 'response.url', 'headers', 'body', 'actorId', 'reason', 'stack']:
+            self.assertNotIn(forbidden, emission)
+        self.assertLess(identity.index('active = false;'), identity.index('console.log("[v4-focus-identity] "'))
+        self.assertLess(identity.index('requestObservations.clear();'), identity.index('console.log("[v4-focus-identity] "'))
+        readers = Path('web/e2e/directory-v4-readers.spec.ts').read_text()
+        self.assertIn('invariant(checkedID === reader.actorId, "Native focus did not recheck actual changed actor")', readers)
+
     def test_post_runner_validation_and_only_validated_allowlist(self):
         text = Path('.github/workflows/ci.yml').read_text()
         rules = evidence.contract(Path('.'))
