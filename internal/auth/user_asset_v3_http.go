@@ -16,6 +16,30 @@ import (
 const userAssetsV3Path = "/api/user-assets/v3"
 const userAssetV3Path = userAssetsV3Path + "/detail"
 
+// Clone the query before removing the v3-only key; v2 and detail keep their
+// original closed input contracts, and callers retain the original values.
+func userAssetsV3Query(detail bool, q url.Values) (domains.UserAssetsV3Filter, domains.UserAssetV2Input, error) {
+	copyQuery := make(url.Values, len(q))
+	for key, values := range q {
+		copyQuery[key] = append([]string(nil), values...)
+	}
+	bit := ""
+	if values, present := copyQuery["uacDisableBit"]; present {
+		if detail || len(values) != 1 {
+			return domains.UserAssetsV3Filter{}, domains.UserAssetV2Input{}, fail(400, "invalid_input")
+		}
+		switch values[0] {
+		case "set", "clear", "not_returned":
+			bit = values[0]
+		default:
+			return domains.UserAssetsV3Filter{}, domains.UserAssetV2Input{}, fail(400, "invalid_input")
+		}
+		delete(copyQuery, "uacDisableBit")
+	}
+	base, in, err := userAssetsV2Query(detail, copyQuery)
+	return domains.UserAssetsV3Filter{UserAssetsV2Filter: base, UACDisableBit: bit}, in, err
+}
+
 func userAssetV3PathAllowed(method, path string, grants map[string]AccessAuth) bool {
 	return method == http.MethodGet && (path == userAssetV3Path || path == userAssetsV3Path) && grants["domains"].Readable && grants["directory_assets"].Readable
 }
@@ -41,7 +65,7 @@ func (s *Service) UserAssetV3Handler(store *domains.Store) http.Handler {
 			return
 		}
 		detail := r.URL.Path == userAssetV3Path
-		f, in, err := userAssetsV2Query(detail, q)
+		f, in, err := userAssetsV3Query(detail, q)
 		if err != nil {
 			status, code := domainHTTPError(err)
 			write(w, status, map[string]string{"error": code})
@@ -95,7 +119,7 @@ func (s *Service) writeUserAssetV3Error(w http.ResponseWriter, ctx context.Conte
 	write(w, status, map[string]string{"error": code})
 }
 
-func (s *Service) handleUserAssetV3(ctx context.Context, r *http.Request, store *domains.Store, detail bool, f domains.UserAssetsV2Filter, in domains.UserAssetV2Input) (*credentialUseResult, error) {
+func (s *Service) handleUserAssetV3(ctx context.Context, r *http.Request, store *domains.Store, detail bool, f domains.UserAssetsV3Filter, in domains.UserAssetV2Input) (*credentialUseResult, error) {
 	conn, err := dbadmission.ConnectConfig(ctx, s.database.Copy())
 	if err != nil {
 		return nil, directorySchemaError(err)

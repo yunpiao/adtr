@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { webcrypto } from "node:crypto";
 import { ApiError, type Profile } from "./api";
 import { exportJSON, exportProfile, exportReceipt, exportRequest, exportTask, readyExport } from "./user-asset-export-v3-fixtures";
-import { downloadStatuses, exportColumns, isUserExportCancelProofRejected, parseExportReceipt, requestFromQuery, userAssetExportAPI, validExportRequest,
+import { downloadStatuses, exportColumns, sameExportRequest, isUserExportCancelProofRejected, parseExportReceipt, requestFromQuery, userAssetExportAPI, validExportRequest,
   type ExportRequest, type UserExportCancelBinding } from "./user-asset-export-v3-api";
 const signal = () => new AbortController().signal;
 afterEach(() => vi.unstubAllGlobals());
@@ -460,5 +460,60 @@ describe("cancel-specific current authority recheck", () => {
     for (const patch of [{ hasMfa: false }, { needChangePwd: true }, { isExpired: true }])
       await expect(userAssetExportAPI.recheckCancelAuthority(exportTask.taskUUID, copyRequest(), { ...exportProfile, ...patch }, signal())).rejects.toMatchObject({ status: 401 });
     expect(fetcher).not.toHaveBeenCalled();
+  });
+});
+
+describe("optional UAC filter export binding", () => {
+  it("preserves exact legacy request bytes and accepts old receipts", () => {
+    const request = requestFromQuery({ ...exportRequest, creatTm: undefined, pageIdx: 1, pageSize: 10 });
+    expect(JSON.stringify(request)).toBe('{"domainId":"synthetic-domain","expectedRevision":"9007199254740993","expectedCredentialRevision":"9007199254740995","observationId":"observation-one","search":"","sAMAccountName":"","startTm":"","endTm":"","creatTm":"","screenColumns":["guid","sAMAccountName","sid","mail","dn","whenCreated"]}');
+    expect(Object.hasOwn(request, "uacDisableBit")).toBe(false);
+    expect(parseExportReceipt(exportReceipt, request.domainId, request)).toEqual(exportReceipt);
+  });
+  it.each(["set", "clear", "not_returned"] as const)("projects, submits and restores the exact %s filter", async (uacDisableBit) => {
+    const request = requestFromQuery({ ...exportRequest, creatTm: undefined, uacDisableBit, pageIdx: 3, pageSize: 10 });
+    const receipt = { ...exportReceipt, request };
+    expect(validExportRequest(request)).toBe(true);
+    expect(sameExportRequest(request, { ...request })).toBe(true);
+    expect(sameExportRequest(request, exportRequest)).toBe(false);
+    expect(sameExportRequest(exportRequest, request)).toBe(false);
+    expect(parseExportReceipt(receipt, request.domainId, request)).toEqual(receipt);
+    for (const other of [exportRequest, ...(["set", "clear", "not_returned"] as const).filter((v) => v !== uacDisableBit).map((bit) => ({ ...request, uacDisableBit: bit }))]) {
+      expect(sameExportRequest(request, other)).toBe(false);
+      expect(() => parseExportReceipt(receipt, request.domainId, other)).toThrow();
+      expect(() => parseExportReceipt({ ...receipt, request: other }, request.domainId, request)).toThrow();
+    }
+    const fetcher = vi.fn().mockResolvedValue(exportJSON({ ...receipt, replayed: false })); vi.stubGlobal("fetch", fetcher);
+    await userAssetExportAPI.create(request, "same-key", cancelProof, 1, exportProfile.csrfToken, signal());
+    expect(JSON.parse(fetcher.mock.calls[0][1].body)).toEqual({ ...request, idempotencyKey: "same-key", ...cancelProof });
+  });
+  it.each([undefined, null, "", "SET", "clear ", 0, false, [], ["set"]])("rejects explicit invalid optional request field %j", (uacDisableBit) => {
+    const request = { ...exportRequest, uacDisableBit };
+    expect(validExportRequest(request)).toBe(false);
+    expect(() => parseExportReceipt({ ...exportReceipt, request }, exportRequest.domainId)).toThrow();
+    expect(() => requestFromQuery({ ...request, creatTm: undefined, pageIdx: 1, pageSize: 10 } as Parameters<typeof requestFromQuery>[0])).toThrow();
+  });
+  it("keeps nested receipt keys closed and rejects duplicate filter keys", async () => {
+    expect(validExportRequest({ ...exportRequest, uacDisableBit: "set", extra: true })).toBe(false);
+    const body = JSON.stringify({ ...exportReceipt, request: { ...exportRequest, uacDisableBit: "set" } });
+    for (const duplicate of ['"uacDisableBit":"set","uacDisableBit":"clear"', '"uacDisableBit":"set","\\u0075acDisableBit":"set"']) {
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(body.replace('"uacDisableBit":"set"', duplicate), { status: 200, headers: { "Content-Type": "application/json", "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff", "X-ADTR-User-ID": "1" } })));
+      await expect(userAssetExportAPI.receipt(exportRequest.domainId, "key", 1, signal())).rejects.toMatchObject({ code: "invalid_response" });
+    }
+  });
+  it("freezes the optional filter in the API cancel proof-rejection copy", async () => {
+    const binding = { ...cancelBinding(), request: { ...copyRequest(), uacDisableBit: "set" as const } };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(proofResponse()));
+    const error = await rejectedCancel(binding);
+    expect(isUserExportCancelProofRejected(error, { ...binding, request: { ...binding.request, uacDisableBit: "clear" } })).toBe(false);
+    expect(isUserExportCancelProofRejected(error, { ...binding, request: copyRequest() })).toBe(false);
+    expect(isUserExportCancelProofRejected(error, binding)).toBe(true);
+  });
+  it("rejects optional-filter mutation during cancel authority recheck", async () => {
+    const request: ExportRequest = { ...copyRequest(), uacDisableBit: "set" };
+    const fetcher = vi.fn().mockImplementation(async () => { request.uacDisableBit = "clear"; return authorityJSON(exportProfile); });
+    vi.stubGlobal("fetch", fetcher);
+    await expect(userAssetExportAPI.recheckCancelAuthority(exportTask.taskUUID, request, exportProfile, signal())).rejects.toMatchObject({ code: "invalid_response" });
+    expect(fetcher).toHaveBeenCalledTimes(1);
   });
 });

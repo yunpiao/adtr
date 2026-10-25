@@ -1,3 +1,7 @@
+import {
+  matchesUserUACDisableBit,
+  type UACDisableBit,
+} from "./user-assets-v3-filters";
 // Synthetic parser/DOM contracts, not real API/Worker/LDAP browser evidence.
 import {
   act,
@@ -213,6 +217,9 @@ function queryFrom(url: string): UserAssetsV3Query {
     ...(p.has("creatTm")
       ? { creatTm: p.get("creatTm")! as "asc" | "desc" }
       : {}),
+    ...(p.has("uacDisableBit")
+      ? { uacDisableBit: p.get("uacDisableBit")! as UACDisableBit }
+      : {}),
     ...(p.has("observationId")
       ? { observationId: p.get("observationId")! }
       : {}),
@@ -257,6 +264,9 @@ beforeEach(() => {
       let filtered = query.search
         ? all.filter((r) => r.samAccountName!.includes(query.search))
         : all;
+      filtered = filtered.filter((r) =>
+        matchesUserUACDisableBit(r.userAccountControl, query.uacDisableBit),
+      );
       if (query.sAMAccountName)
         filtered = filtered.filter(
           (r) => r.samAccountName === query.sAMAccountName,
@@ -1853,4 +1863,257 @@ it("renders literal backslash-u and actual controls as distinct inspectable SPNs
   ]);
   expect(new Set(values).size).toBe(spns.length);
   expect(screen.getByText(/原反斜线显示为双反斜线/)).toBeVisible();
+});
+
+describe("v3 observed UAC disabled-bit filter", () => {
+  it.each([
+    ["clear", 0],
+    ["clear", 512],
+    ["clear", 2147483648],
+    ["set", 2],
+    ["set", 4294967295],
+    ["not_returned", null],
+  ] as const)(
+    "validates %s rows and preserves raw %s",
+    async (uacDisableBit, userAccountControl) => {
+      const query = { ...q, uacDisableBit };
+      const value = list(query, [{ ...row(), userAccountControl }]);
+      expect(parseUserAssetsV3List(value, query)).toEqual(value);
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(() => response(value)),
+      );
+      await expect(userAssetsV3API.list(query, 1, signal())).resolves.toEqual(
+        value,
+      );
+      const sent = new URL(
+        vi.mocked(fetch).mock.calls[0][0] as string,
+        "https://local.invalid",
+      ).searchParams;
+      expect(sent.getAll("uacDisableBit")).toEqual([uacDisableBit]);
+    },
+  );
+  it("rejects the entire page for a mismatching or missing UAC fact, including null versus clear", () => {
+    for (const uacDisableBit of ["set", "clear", "not_returned"] as const) {
+      for (const userAccountControl of [null, 0, 2, 4294967295]) {
+        if (matchesUserUACDisableBit(userAccountControl, uacDisableBit))
+          continue;
+        expect(() =>
+          parseUserAssetsV3List(list(q, [{ ...row(), userAccountControl }]), {
+            ...q,
+            uacDisableBit,
+          }),
+        ).toThrow();
+      }
+      const missing = { ...row() } as Record<string, unknown>;
+      delete missing.userAccountControl;
+      expect(() =>
+        parseUserAssetsV3List(
+          list(q, [missing as unknown as UserAssetV3Object]),
+          { ...q, uacDisableBit },
+        ),
+      ).toThrow();
+    }
+    expect(() =>
+      parseUserAssetsV3List(
+        list(q, [row(), { ...row(2), userAccountControl: 2 }]),
+        { ...q, uacDisableBit: "clear" },
+      ),
+    ).toThrow();
+  });
+  it.each([undefined, null, "", "SET", "clear ", 0, ["set"]])(
+    "rejects invalid own filter %j without dispatch",
+    async (uacDisableBit) => {
+      const before = fetcher.mock.calls.length;
+      await expect(
+        userAssetsV3API.list(
+          { ...q, uacDisableBit } as UserAssetsV3Query,
+          1,
+          signal(),
+        ),
+      ).rejects.toMatchObject({ code: "invalid_input" });
+      expect(fetcher.mock.calls).toHaveLength(before);
+    },
+  );
+  it("rejects disabled-bit filtering on detail before transport", async () => {
+    await expect(
+      userAssetsV3API.detail(
+        { ...detailQuery, uacDisableBit: "set" } as typeof detailQuery,
+        1,
+        signal(),
+      ),
+    ).rejects.toMatchObject({ code: "invalid_input" });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+  it("applies the server filter before count/page, resets page, preserves pin and explicitly removes the field", async () => {
+    const all = Array.from({ length: 25 }, (_, i) => ({
+      ...row(i + 1),
+      userAccountControl:
+        i < 23 ? (i === 0 ? 4294967295 : 514) : i === 23 ? 0 : null,
+    }));
+    override = (url) => {
+      if (!url.startsWith("/api/user-assets/v3?")) return;
+      const query = queryFrom(url),
+        filtered = all.filter((r) =>
+          matchesUserUACDisableBit(r.userAccountControl, query.uacDisableBit),
+        );
+      return response(
+        list(
+          query,
+          filtered.slice(
+            (query.pageIdx - 1) * query.pageSize,
+            query.pageIdx * query.pageSize,
+          ),
+          filtered.length,
+        ),
+      );
+    };
+    await start();
+    click("用户资产下一页");
+    await screen.findByText("observed-11");
+    const before = calls().length;
+    fill("本次观测的禁用位", "set");
+    expect(calls()).toHaveLength(before);
+    expect(
+      screen.getByRole("button", { name: "用户资产下一页" }),
+    ).toBeDisabled();
+    click("搜索用户");
+    await screen.findByText("observed-1");
+    expect(params()).toMatchObject({
+      uacDisableBit: "set",
+      pageIdx: "1",
+      observationId: "observation-one",
+    });
+    expect(screen.getByText("23 个匹配用户")).toBeVisible();
+    expect(
+      screen.getByText("禁用位已设置 / 原始 UAC：4294967295"),
+    ).toBeVisible();
+    expect(
+      within(screen.getByRole("table", { name: "用户资产列表" })).getAllByRole(
+        "columnheader",
+      ),
+    ).toHaveLength(6);
+    expect(screen.getByLabelText("用户资产每页条数").closest("label")).toBe(
+      screen.getByLabelText("用户资产关键词").closest("form")!.children[1],
+    );
+    click("用户资产下一页");
+    await screen.findByText("observed-11");
+    click("用户资产下一页");
+    await screen.findByText("observed-23");
+    expect(params()).toMatchObject({ pageIdx: "3", uacDisableBit: "set" });
+    fill("本次观测的禁用位", "not_returned");
+    click("搜索用户");
+    await screen.findByText("observed-25");
+    expect(screen.getByText("1 个匹配用户")).toBeVisible();
+    expect(screen.getByText("UAC未返回 / 原始 UAC：未返回")).toBeVisible();
+    expect(params()).toMatchObject({
+      pageIdx: "1",
+      uacDisableBit: "not_returned",
+      observationId: "observation-one",
+    });
+    fill("本次观测的禁用位", "clear");
+    click("搜索用户");
+    await screen.findByText("observed-24");
+    expect(screen.getByText("禁用位未设置 / 原始 UAC：0")).toBeVisible();
+    fill("本次观测的禁用位", "");
+    click("搜索用户");
+    await screen.findByText("observed-1");
+    expect(params()).not.toHaveProperty("uacDisableBit");
+    expect(screen.getByText("25 个匹配用户")).toBeVisible();
+    fill("本次观测的禁用位", "set");
+    click("搜索用户");
+    await screen.findByText("23 个匹配用户");
+    click("清除用户筛选");
+    await screen.findByText("25 个匹配用户");
+    expect(params()).not.toHaveProperty("uacDisableBit");
+    expect(params()).toMatchObject({
+      observationId: "observation-one",
+      pageIdx: "1",
+    });
+    expect(screen.getByLabelText("本次观测的禁用位")).toHaveValue("");
+  });
+  it("supersedes an aborted disabled-bit response and clears the draft on source/session changes", async () => {
+    const view = await start(),
+      held = deferred();
+    override = (url) =>
+      url.startsWith("/api/user-assets/v3?") &&
+      queryFrom(url).uacDisableBit === "set"
+        ? held.promise
+        : undefined;
+    fill("本次观测的禁用位", "set");
+    click("搜索用户");
+    fill("本次观测的禁用位", "clear");
+    click("搜索用户");
+    await screen.findByText("observed-1");
+    await held.resolve(
+      list({ ...q, uacDisableBit: "set" }, [
+        { ...row(90), userAccountControl: 2 },
+      ]),
+    );
+    expect(screen.queryByText("observed-90")).not.toBeInTheDocument();
+    expect(screen.getByText("已应用禁用位：禁用位未设置")).toBeVisible();
+    click("更换数据源");
+    await select("other.invalid");
+    await screen.findByText("observed-1");
+    expect(params()).not.toHaveProperty("uacDisableBit");
+    expect(screen.getByLabelText("本次观测的禁用位")).toHaveValue("");
+    fill("本次观测的禁用位", "not_returned");
+    view.rerender(
+      <UserAssetsV3Workspace
+        profile={{ ...profile, csrfToken: "new-session" }}
+        sessionChanged={vi.fn()}
+      />,
+    );
+    expect(screen.queryByText("observed-1")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("本次观测的禁用位")).not.toBeInTheDocument();
+  });
+});
+
+describe("v3 UAC compact layout structure", () => {
+  it("keeps applied filters visible in one compact summary and SAM facts in one mobile value item", async () => {
+    await start();
+    const searchSummary = screen.getByText("已应用搜索：无文本筛选", {
+      exact: true,
+    });
+    const bitSummary = screen.getByText("已应用禁用位：不限", { exact: true });
+    expect(searchSummary).toBeVisible();
+    expect(bitSummary).toBeVisible();
+    expect(searchSummary.parentElement).toBe(bitSummary.parentElement);
+    expect(searchSummary.parentElement).toHaveClass("asset-applied-search");
+    expect(searchSummary.parentElement?.tagName).toBe("P");
+    expect(
+      screen.getByLabelText("本次观测的禁用位"),
+    ).toHaveAccessibleDescription(/ACCOUNTDISABLE（0x2）位/);
+    const help = document.getElementById("asset-uac-disable-help")!;
+    expect(help).toBeVisible();
+    expect(help.closest("details")).toBeNull();
+    expect(help).toHaveTextContent("未设置不能证明账户活跃、可登录或未锁定");
+    const name = screen.getByText("observed-1", { exact: true });
+    const cell = name.closest("td")!;
+    expect(cell).toHaveAttribute("data-label", "SAM");
+    expect(cell.childElementCount).toBe(1);
+    expect(cell.firstElementChild).toBe(name);
+    expect(
+      within(name).getByText("禁用位未设置 / 原始 UAC：0", { exact: true }),
+    ).toBeVisible();
+    expect(
+      Array.from(cell.childNodes).filter(
+        (node) => node.nodeType === Node.TEXT_NODE && node.textContent?.trim(),
+      ),
+    ).toHaveLength(0);
+    fill("本次观测的禁用位", "clear");
+    click("搜索用户");
+    await screen.findByText("已应用禁用位：禁用位未设置", { exact: true });
+    expect(
+      screen.getByText("已应用搜索：无文本筛选", { exact: true }).parentElement,
+    ).toBe(
+      screen.getByText("已应用禁用位：禁用位未设置", { exact: true })
+        .parentElement,
+    );
+    expect(params()).toMatchObject({
+      uacDisableBit: "clear",
+      observationId: "observation-one",
+      pageIdx: "1",
+    });
+  });
 });

@@ -1,11 +1,11 @@
 // Synthetic DOM contracts, not real API/Worker/LDAP/browser evidence.
 import { webcrypto } from "node:crypto";
 import { cancelMarkerBytes, cancelStorageKey } from "./user-export-cancel-intent";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import UserAssetExportV3 from "./UserAssetExportV3";
 import { ApiError } from "./api";
-import { userAssetExportAPI, exportColumns, exportKind } from "./user-asset-export-v3-api";
+import { userAssetExportAPI, exportColumns, exportKind, type ExportDetail } from "./user-asset-export-v3-api";
 import { clearExportRecovery, exportRecoveryStorage, readExportRecovery, writeExportRecovery } from "./user-asset-export-v3-recovery";
 import { exportJSON, exportProfile, exportReceipt, exportRequest, exportTask, readyExport } from "./user-asset-export-v3-fixtures";
 const query = { ...exportRequest, creatTm: undefined, pageIdx: 2, pageSize: 10 };
@@ -282,5 +282,85 @@ describe("shared old-panel cancellation barrier", () => {
   it("unsupported locks do not disable existing creation and receipt capability", async () => {
     Object.defineProperty(navigator, "locks", { configurable: true, value: undefined });
     view(); await open(); expect(screen.getByRole("button", { name: "创建用户导出" })).toBeEnabled();
+  });
+});
+
+describe("frozen UAC export summary", () => {
+  it.each(["set", "clear", "not_returned"] as const)("shows and submits the original %s filter, not a later list query", async (uacDisableBit) => {
+    const request = { ...exportRequest, uacDisableBit };
+    const receipt = { ...exportReceipt, request }, ready = { ...readyExport, request };
+    const create = vi.spyOn(userAssetExportAPI, "create").mockResolvedValue(receipt);
+    const read = vi.spyOn(userAssetExportAPI, "receipt").mockResolvedValue(receipt);
+    const detail = vi.spyOn(userAssetExportAPI, "detail").mockResolvedValue(ready);
+    const rendered = view({ query: { ...query, uacDisableBit } }); await open();
+    const label = uacDisableBit === "set" ? "禁用位已设置" : uacDisableBit === "clear" ? "禁用位未设置" : "UAC未返回";
+    expect(screen.getByText(label)).toBeVisible();
+    proof(); fireEvent.click(screen.getByRole("button", { name: "创建用户导出" }));
+    await screen.findByRole("button", { name: "下载用户 XLSX" });
+    expect(create.mock.calls[0][0]).toEqual(request);
+    rendered.rerender(<UserAssetExportV3 profile={exportProfile} query={query} disabled={false} failure={vi.fn()} />);
+    await open();
+    await screen.findByText(/正在恢复原操作/);
+    expect(read).toHaveBeenCalledWith(query.domainId, create.mock.calls[0][1], 1, expect.any(AbortSignal));
+    expect(screen.getByText(label)).toBeVisible();
+    expect(detail.mock.calls.every(([, expected]) => expected?.uacDisableBit === uacDisableBit)).toBe(true);
+    expect(create).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("button", { name: "按当前列表创建另一导出" }));
+    expect(screen.queryByText(label)).not.toBeInTheDocument();
+    proof(); fireEvent.click(screen.getByRole("button", { name: "创建用户导出" }));
+    expect(create).toHaveBeenCalledTimes(2);
+    expect(create.mock.calls[1][0]).not.toHaveProperty("uacDisableBit");
+    expect(create.mock.calls[1][1]).not.toBe(create.mock.calls[0][1]);
+  });
+});
+
+
+describe("terminal export outcome and next action grouping", () => {
+  it.each(["cancelled", "failed", "succeeded"] as const)("groups %s identity/status/restart while preserving visible progress and evidence", async (state) => {
+    const terminalDetail: ExportDetail = {
+      ...readyExport,
+      task: { ...readyExport.task, state, error: state === "cancelled" ? "cancelled" : state === "failed" ? "export_invalid_text" : "" },
+      downloadReady: state === "succeeded", downloadStatus: state === "succeeded" ? "ready" : state,
+      artifact: state === "succeeded" ? readyExport.artifact : undefined,
+    };
+    const create = vi.spyOn(userAssetExportAPI, "create").mockResolvedValue(exportReceipt);
+    vi.spyOn(userAssetExportAPI, "detail").mockResolvedValue(terminalDetail);
+    const cancel = vi.spyOn(userAssetExportAPI, "cancel");
+    view(); await open(); proof(); fireEvent.click(screen.getByRole("button", { name: "创建用户导出" }));
+    const group = await screen.findByRole("group", { name: "导出终态与后续操作" });
+    const status = within(group).getByRole("status");
+    expect(within(group).getByText(`任务 ID：${exportTask.taskUUID}`, { exact: true })).toBeVisible();
+    const restart = within(group).getByRole("button", { name: "按当前列表创建另一导出" });
+    expect(restart).toBeVisible(); expect(restart).toBeEnabled();
+    expect(group).toHaveStyle({ display: "flex", flexWrap: "wrap", alignItems: "flex-end" });
+    expect(status).toHaveStyle({ margin: "8px 0 0" });
+    expect(status).not.toContainElement(restart);
+    expect(screen.getByLabelText("用户导出持久化进度")).toBeVisible();
+    expect(group).not.toContainElement(screen.getByLabelText("用户导出持久化进度"));
+    if (state !== "succeeded") expect(screen.getByText(/^任务错误代码：/)).toBeVisible();
+    else expect(screen.getByText(/实际导出 0 行/)).toBeVisible();
+    expect(create).toHaveBeenCalledTimes(1); expect(cancel).not.toHaveBeenCalled();
+  });
+  it.each(["queued", "cancel_requested"] as const)("keeps %s status unchanged and does not offer a terminal restart", async (state) => {
+    vi.spyOn(userAssetExportAPI, "create").mockResolvedValue(exportReceipt);
+    vi.spyOn(userAssetExportAPI, "detail").mockResolvedValue({ ...pending, task: { ...exportTask, state } });
+    view(); await open(); proof(); fireEvent.click(screen.getByRole("button", { name: "创建用户导出" }));
+    await screen.findByText(`任务 ID：${exportTask.taskUUID}`, { exact: true });
+    expect(screen.queryByRole("group", { name: "导出终态与后续操作" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "按当前列表创建另一导出" })).not.toBeInTheDocument();
+    expect(screen.getByLabelText("用户导出持久化进度")).toBeVisible();
+  });
+  it("keeps terminal identity/status readable without granting the restart action", async () => {
+    gate(false);
+    writeExportRecovery({ version: 1, kind: exportKind, actorID: 1, domainId: query.domainId, idempotencyKey: "original-key" });
+    vi.spyOn(userAssetExportAPI, "receipt").mockResolvedValue(exportReceipt);
+    vi.spyOn(userAssetExportAPI, "detail").mockResolvedValue(readyExport);
+    const create = vi.spyOn(userAssetExportAPI, "create");
+    view(); await open();
+    const group = await screen.findByRole("group", { name: "导出终态与后续操作" });
+    expect(within(group).getByText(`任务 ID：${exportTask.taskUUID}`, { exact: true })).toBeVisible();
+    expect(within(group).getByRole("status")).toHaveTextContent("完整文件已就绪");
+    expect(screen.queryByRole("button", { name: "按当前列表创建另一导出" })).not.toBeInTheDocument();
+    expect(create).not.toHaveBeenCalled();
   });
 });

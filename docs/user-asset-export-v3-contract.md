@@ -18,8 +18,9 @@ Each pin is required: without it export could silently move away from the displa
 source. All matching users are exported, not only the current page. Pagination input
 is rejected. Filters and ordering use the very same helper as the existing v3 list:
 search (SAM/SID/mail/DN, Go simple lowercase literal contains), exact sAMAccountName,
-paired startTm/endTm half-open whenCreated range, creatTm asc/desc with null-last and
-GUID tie-breaking. Omitted optional predicates broaden the match; omitted creatTm
+paired startTm/endTm half-open whenCreated range, optional uacDisableBit
+set/clear/not_returned, creatTm asc/desc with null-last and GUID tie-breaking.
+Omitted optional predicates broaden the match; omitted creatTm
 uses GUID order. Unsupported status/overviewType/updateTm and other legacy filters
 are rejected, never silently ignored.
 
@@ -64,7 +65,8 @@ unpaired JSON surrogates or unknown values. GET metadata cap: 65536 bytes.
 
 1. POST prefix (create): required domainId, expectedRevision,
    expectedCredentialRevision, observationId, screenColumns, idempotencyKey,
-   actorPassword, totpCode. Optional search, sAMAccountName, startTm, endTm, creatTm.
+   actorPassword, totpCode. Optional search, sAMAccountName, startTm, endTm, creatTm,
+   uacDisableBit (exactly set, clear or not_returned when present).
    All pins/filter fields are strings; screenColumns is a string array.
    Password/proof never enter task payload, fingerprint, logs or storage.
    Response 200: `{taskID, task, request, replayed}`. `taskID` equals task.taskUUID.
@@ -104,9 +106,12 @@ an obsolete task remains safe. Generic task result/cursor must be sanitized for 
 new kind too. This slice does not expand F49 archive kinds; anomalously archived task
 rows are inaccessible (404).
 
-Canonical request shape: `{domainId,expectedRevision,expectedCredentialRevision,
-observationId,search,sAMAccountName,startTm,endTm,creatTm,screenColumns}`. Optional
-strings canonicalize to empty strings. Allowed columns, preserving caller order:
+Canonical request shape without the UAC filter remains
+`{domainId,expectedRevision,expectedCredentialRevision,
+observationId,search,sAMAccountName,startTm,endTm,creatTm,screenColumns}`.
+When present, `uacDisableBit` is appended after screenColumns. Only the original
+optional filter strings canonicalize to empty strings; the new key must be omitted
+or contain a valid nonempty enum. Allowed columns, preserving caller order:
 `guid`, `sAMAccountName`, `sid`, `mail`, `dn`, `whenCreated`. Empty array chooses all
 six in that order; absent/null/duplicates/unknown columns are invalid. Headings:
 `GUID`, `SAM`, `SID`, `mail`, `DN`, `whenCreated`. Unavailable scalar values become
@@ -128,6 +133,55 @@ show fixed observation, selected columns, persistent progress and pending/failed
 cancelled/ready states. Download requires current session validation, bounded body,
 exact actor/kind/task metadata, byte length and SHA256 validation before a Blob URL.
 Revoke object URLs immediately after use and discard data after authority loss.
+
+## UAC filter binding and compatibility (2026-10-25)
+
+Optional `uacDisableBit=set|clear|not_returned` selects the saved ACCOUNTDISABLE
+mask `0x00000002`, with exactly the [v3 list semantics](user-assets-v3-contract.md#observed-uac-disabled-bit-filter-2026-10-25).
+It is needed only to request this filter; omission preserves unrestricted exports.
+Removing it broadens a new request, never changes a previously submitted task.
+`not_returned` means a genuinely absent UAC, not corrupt or invalid input. No
+activity, lockout or login conclusion follows, and the six export columns remain
+unchanged. Full source validation precedes filtering, so excluded-object corruption
+still fails; zero matches produce a header-only workbook.
+
+Explicit null, empty, duplicate, wrong-type or unknown values are invalid400, not
+normalized to omission. Create, payload validation and receipt/detail parsing retain
+closed fields: canonical request is exactly the original ten keys, or those ten
+plus this valid key. TypeScript also rejects an own-property undefined/null/empty;
+request constructors conditionally omit the field rather than insert undefined.
+Legacy `userStatus` remains unsupported422. No v2 or asset-detail filter is added.
+
+Request/receipt JSON and client cancellation copies retain the original ten-key
+order and bytes when the new key is omitted. Separately, the task engine's existing
+`canonicalObject` sorts keys before hashing its version/parent-prefixed payload;
+that serialization is not the client marker's fixed-order request JSON. Omission
+preserves both identities: task payload hash and cancellation-marker request digest.
+When present, the value participates in both digests and immutable request comparison;
+same actor/key with a different filter conflicts instead of reusing or creating
+another task. Task kind, payload version, limits, retry policy, schema, permissions
+and storage remain unchanged.
+
+List-to-export capture, expected receipt/detail binding, both client-side
+cancellation-request copies and cancellation reauthorization carry the filter.
+The dedicated cancel POST body remains taskID plus proof, not new filter fields.
+A restored task displays
+its frozen request, including its saved filter, rather than the current list draft.
+Clearing/changing list filters does not rewrite that task or its recovery locator;
+only an explicit new export captures new applied filters. The existing marker
+format stores the bound request digest, not new filter plaintext. Historical
+receipts and markers without the key retain their original identity.
+
+New API/Worker code accepts old omitted-key payloads; an old Worker rejects a new
+payload carrying this field. Future rollout must coordinate API/Worker versions
+before accepting filtered exports; mixed-version support is not established here.
+This change introduces no deployment action or permission/schema change.
+
+New-filter runtime checks and independent review are separate from the historical
+evidence below. The unchanged TLS LDAP browser fixture has only UAC0/512 users,
+not nonempty set/null user cases. Synthetic unit or PostgreSQL producer coverage
+cannot establish that missing LDAP/browser chain or real AD acceptance. Full
+EXP-006/AD-F-053 and product acceptance0/209 remain open.
 
 ## Idempotency, execution and lifecycle
 

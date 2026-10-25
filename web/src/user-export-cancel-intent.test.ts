@@ -4,7 +4,7 @@ import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "./api";
 import * as api from "./user-asset-export-v3-api";
 import { exportProfile, exportRequest, exportReceipt, exportTask } from "./user-asset-export-v3-fixtures";
-import { cancelMarkerBytes, cancelStorageKey, inspectCancelMarker, observeUserExportCancel,
+import { copyCancelRequest, cancelMarkerBytes, cancelStorageKey, inspectCancelMarker, observeUserExportCancel,
   submitUserExportCancel, cancelUnknown, type CancelBinding } from "./user-export-cancel-intent";
 const pending = { ...exportReceipt, downloadReady: false, downloadStatus: "pending" as const };
 const ended = { ...pending, task: { ...exportTask, state: "cancelled" as const }, downloadStatus: "cancelled" as const };
@@ -194,5 +194,38 @@ describe("durable original user export cancellation", () => {
     const b = binding(), control = new AbortController(); b.signal = control.signal;
     vi.mocked(api.userAssetExportAPI.cancel).mockImplementation(async () => { control.abort(); return ended.task; });
     await expect(submitUserExportCancel(b, proof, vi.fn())).rejects.toBeDefined(); expect(localStorage.length).toBe(1);
+  });
+});
+
+describe("UAC-bound durable cancellation", () => {
+  it("keeps the legacy canonical request and marker digest unchanged", async () => {
+    const b = binding(), copy = copyCancelRequest(b.request);
+    expect(Object.hasOwn(copy, "uacDisableBit")).toBe(false);
+    expect(JSON.stringify(copy)).toBe(JSON.stringify(exportRequest));
+    const oldDigest = await webcrypto.subtle.digest("SHA-256", new TextEncoder().encode('{"domainId":"synthetic-domain","expectedRevision":"9007199254740993","expectedCredentialRevision":"9007199254740995","observationId":"observation-one","search":"","sAMAccountName":"","startTm":"","endTm":"","creatTm":"","screenColumns":["guid","sAMAccountName","sid","mail","dn","whenCreated"]}'));
+    const bytes = await cancelMarkerBytes(b);
+    expect(JSON.parse(bytes).requestSHA256).toBe(Buffer.from(oldDigest).toString("hex"));
+    expect(bytes).toBe('{"version":1,"kind":"user_assets.v3.export","actorID":1,"taskID":"00000000-0000-0000-0000-000000000001","domainId":"synthetic-domain","requestSHA256":"44c40053c58a78619a2bea68e07bbae8656d9af0f8d19f464fe14669c471fc35"}');
+  });
+  it.each(["set", "clear", "not_returned"] as const)("copies and binds %s through marker, preflight, cancellation and observation", async (uacDisableBit) => {
+    const b = binding(); b.request.uacDisableBit = uacDisableBit;
+    expect(copyCancelRequest(b.request)).toEqual(b.request);
+    const current = { ...pending, request: { ...b.request } };
+    vi.mocked(api.userAssetExportAPI.recheckCancelAuthority).mockResolvedValue(current);
+    vi.mocked(api.userAssetExportAPI.detail).mockResolvedValue(current);
+    const marker = await cancelMarkerBytes(b);
+    for (const other of [exportRequest, ...(["set", "clear", "not_returned"] as const).filter((v) => v !== uacDisableBit).map((bit) => ({ ...b.request, uacDisableBit: bit }))]) {
+      expect(await cancelMarkerBytes({ ...b, request: other })).not.toBe(marker);
+    }
+    await submitUserExportCancel(b, proof, vi.fn());
+    expect(api.userAssetExportAPI.recheckCancelAuthority).toHaveBeenCalledWith(b.taskID, b.request, b.profile, b.signal);
+    expect(api.userAssetExportAPI.cancel).toHaveBeenCalledWith(b.taskID, b.request, proof, b.profile.ID, b.profile.csrfToken, b.signal);
+    expect(localStorage.getItem(cancelStorageKey(b.profile.ID, b.taskID))).toBe(marker);
+  });
+  it("refuses a restored receipt for a different filter before writing or sending cancellation", async () => {
+    const b = binding(); b.request.uacDisableBit = "set";
+    vi.mocked(api.userAssetExportAPI.recheckCancelAuthority).mockResolvedValue({ ...pending, request: { ...exportRequest, uacDisableBit: "clear" } });
+    await expect(submitUserExportCancel(b, proof, vi.fn())).rejects.toMatchObject({ code: "invalid_response" });
+    expect(localStorage.length).toBe(0); expect(api.userAssetExportAPI.cancel).not.toHaveBeenCalled();
   });
 });

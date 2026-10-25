@@ -36,6 +36,31 @@ class UserAssetsV3BrowserContract(unittest.TestCase):
         self.assertIn('if-no-files-found: error', workflow)
         self.assertNotIn('continue-on-error', workflow)
 
+    def test_uac_filter_uses_original_gets_and_restores_unrestricted_state(self):
+        code = Path('web/e2e/user-assets-v3.spec.ts').read_text()
+        block = code.split('await test.step("UAC disabled-bit draft,', 1)[1].split(
+            'await test.step("native clipboard', 1)[0]
+        for required in ['getByLabel("本次观测的禁用位"', 'control.selectOption("clear")',
+                         '["set", "禁用位已设置"]', '["not_returned", "UAC未返回"]',
+                         'expect(draftReads).toBe(0)', 'expect([...actual.query].sort())',
+                         'expectedRevision: selection.revision',
+                         'expectedCredentialRevision: selection.credentialRevision',
+                         'observationId: taskUUID', 'uacDisableBit: bit',
+                         'assertRead(clearLast, "clear", 2)',
+                         'expect([...clearFirst.value.list, ...clearLast.value.list]).toEqual(',
+                         'originalUsers', 'actual.query.getAll("uacDisableBit")',
+                         '第 1 页 · 共 0 页 · 匹配用户 0 个',
+                         'response.request() === heldRequest',
+                         'recordAssetResponse(originalResponse)', '"complete-consumed"',
+                         'uac-clear-superseded-by-set', 'expect(restored.value).toEqual(first.value)',
+                         'not nonempty set/null LDAP']:
+            self.assertIn(required, block)
+        for forbidden in ['.fulfill(', 'context.request', 'fixtureGET(', 'setTimeout(',
+                          'waitForTimeout(', 'test.setTimeout(', '"POST"']:
+            self.assertNotIn(forbidden, block)
+        self.assertIn('return recordAssetResponse(response, detail, status)', code)
+        self.assertIn('expect(response.request().method()).toBe("GET")', code)
+
     def test_producer_provenance_and_browser_evidence_are_explicit(self):
         code = Path('web/e2e/user-assets-v3.spec.ts').read_text()
         for required in ['storedEvidence(taskUUID)', 'storedEvidence(newerId)',

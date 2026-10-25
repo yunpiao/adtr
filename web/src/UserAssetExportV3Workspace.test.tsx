@@ -1,3 +1,4 @@
+import { userAssetsV3API } from "./user-assets-v3-api";
 // Synthetic workspace integration: source-picker control is isolated, while the
 // real workspace list availability gate and export recovery UI are exercised.
 import { webcrypto } from "node:crypto";
@@ -111,5 +112,50 @@ describe("unavailable observation export recovery", () => {
     expect(screen.queryByLabelText("操作者当前密码")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "下载用户 XLSX" })).not.toBeInTheDocument();
     expect(cancel).not.toHaveBeenCalled(); expect(create).not.toHaveBeenCalled(); expect(authority).not.toHaveBeenCalled();
+  });
+});
+
+describe("workspace UAC filter export snapshot", () => {
+  it("blocks export for dirty draft and restores the submitted filter after clearing the list", async () => {
+    clearExportRecovery();
+    vi.stubGlobal("fetch", vi.fn(async (path: string, init?: RequestInit) => {
+      if (path === "/api/access/menu") return exportJSON({ menu: ["domains", "directory_assets", "tasks", "user_asset_exports"].map((mark) => ({ mark, auth: { readable: true, writeable: true } })) });
+      if (path === "/api/access/check") return exportJSON({ results: JSON.parse(String(init?.body)).paths.map(() => true) });
+      throw new Error(`Unexpected URL ${path}`);
+    }));
+    const lists = vi.spyOn(userAssetsV3API, "list").mockImplementation(async (q) => ({
+      dictionaryVersion: 3, selection: { domainId: q.domainId, revision: q.expectedRevision, credentialRevision: q.expectedCredentialRevision }, available: true, observationId: "observation-one",
+      source: { server_name: "dc.synthetic.invalid", dc_host_name: "dc.synthetic.invalid", domain: "synthetic.invalid", naming_context: "DC=synthetic,DC=invalid", started_at: "2026-10-10T00:00:00Z", completed_at: "2026-10-10T00:00:01Z", elapsed_milliseconds: 1000, pages: 1 },
+      list: [], page: { pageIdx: 1, pageSize: 10, total: 0, totalPage: 0 },
+    }));
+    const request = { ...exportRequest, uacDisableBit: "set" as const };
+    const create = vi.spyOn(userAssetExportAPI, "create").mockResolvedValue({ ...exportReceipt, request });
+    const receipt = vi.spyOn(userAssetExportAPI, "receipt").mockResolvedValue({ ...exportReceipt, request });
+    const detail = vi.spyOn(userAssetExportAPI, "detail").mockResolvedValue({ ...readyExport, request });
+    render(<UserAssetsV3Workspace profile={exportProfile} sessionChanged={vi.fn()} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Select synthetic source" }));
+    await screen.findByText("此观测在当前筛选下没有匹配用户。");
+    fireEvent.change(screen.getByLabelText("本次观测的禁用位"), { target: { value: "set" } });
+    expect(screen.getByRole("button", { name: "导出匹配用户 XLSX" })).toBeDisabled(); expect(lists).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("button", { name: "搜索用户" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "导出匹配用户 XLSX" })).toBeEnabled());
+    expect(lists.mock.calls.at(-1)![0]).toMatchObject({ uacDisableBit: "set", observationId: "observation-one", pageIdx: 1 });
+    fireEvent.click(screen.getByRole("button", { name: "导出匹配用户 XLSX" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "创建用户导出" })).toBeEnabled());
+    fireEvent.change(screen.getByLabelText("操作者当前密码"), { target: { value: "SyntheticPassword123!" } });
+    fireEvent.change(screen.getByLabelText("未使用的认证器验证码"), { target: { value: "123456" } });
+    fireEvent.click(screen.getByRole("button", { name: "创建用户导出" }));
+    await screen.findByRole("button", { name: "下载用户 XLSX" });
+    expect(create.mock.calls[0][0]).toEqual(request);
+    fireEvent.click(screen.getByRole("button", { name: "清除用户筛选" }));
+    await waitFor(() => expect(lists).toHaveBeenCalledTimes(3));
+    expect(lists.mock.calls[2][0]).not.toHaveProperty("uacDisableBit");
+    expect(screen.getByText("已应用禁用位：不限")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "导出匹配用户 XLSX" }));
+    await screen.findByText(/正在恢复原操作/);
+    expect(receipt).toHaveBeenCalledTimes(1);
+    expect(detail.mock.calls.every(([, expected]) => expected?.uacDisableBit === "set")).toBe(true);
+    expect(screen.getAllByText("禁用位已设置").some((node) => node.tagName === "DD")).toBe(true);
+    expect(create).toHaveBeenCalledTimes(1);
   });
 });

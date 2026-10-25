@@ -37,7 +37,8 @@ GET `/api/user-assets/v3` adds the version-3 user-only list. Existing GET
 Existing v2 routes and representations are unchanged. Version is selected only
 by the fixed route; caller `dictionaryVersion` parameters are rejected.
 
-The list reuses v2 structural/query validation and filtering: required domainId,
+The list reuses v2 structural/query validation and filtering, with the v3-only
+`uacDisableBit` extension below: required domainId,
 expectedRevision and expectedCredentialRevision; optional exact observationId;
 search is bounded case-mapped literal contains independently across SAM/SID/mail/DN;
 sAMAccountName is case-sensitive exact raw equality; paired startTm/endTm are
@@ -69,6 +70,50 @@ directory_observation_unavailable, not_found and dependency semantics. Lost
 current authority discards protected views; stale exact pin never changes to
 latest. A temporary failure allows retry with exactly the same source/query/pin.
 Only explicit refresh may discard an established observation pin.
+
+## Observed UAC disabled-bit filter (2026-10-25)
+
+GET `/api/user-assets/v3` accepts optional, single-valued
+`uacDisableBit=set|clear|not_returned`. It filters the saved nullable uint32
+`userAccountControl` fact, without adding a response field or collection attribute:
+
+- `set`: UAC is present and its ACCOUNTDISABLE mask `0x00000002` is set.
+- `clear`: UAC is present and that mask is clear, including UAC zero.
+- `not_returned`: UAC is genuinely absent, represented by valid JSON null.
+  A missing response key, malformed number or corrupt observation is an error,
+  never a member of this category.
+
+Omission means unrestricted and preserves the old query. This parameter is needed
+only when this filter is requested; removing it broadens the result. Empty values,
+duplicate values (even equal ones), `null`, numeric aliases, arrays, unknown values,
+whitespace and case variants return400 `invalid_input`. Detail and v2 routes
+reject the new key. Legacy `userStatus` remains unsupported with422; this is not
+an alias for its active/disabled/locked business states.
+
+The new predicate is ANDed with search, exact SAM and time bounds, after complete
+source validation and user-only projection, before stable ordering/count/paging.
+Excluded or off-page corruption still fails the whole read. Zero matching rows
+retain the available observation and its pin. The export uses the same predicate
+and ordering across all matches, not only the current page.
+
+The UI labels the saved fact as `本次观测的禁用位`, with `禁用位已设置`,
+`禁用位未设置` or `UAC未返回`, alongside raw UAC and source provenance. A clear bit
+does not establish activity, login ability or absence of lockout; a set bit does
+not mean this platform performed a disable operation. Null is not zero. The
+client first validates uint32/null, then rejects an entire list response if a row
+contradicts the requested bit filter; this cannot prove omitted rows or totals.
+Draft/apply separation, page reset with retained pin, clear-to-unrestricted,
+dirty-filter export blocking and stale-response invalidation remain required.
+The visible side effect is another filter dimension, which can produce zero
+matches; it does not imply that the directory has no users.
+
+This extension changes no schema, permission, producer gate or deployment.
+Its validation is tracked separately from the historical results below. The
+existing TLS LDAP browser fixture has only UAC0/512 users, so it can exercise
+clear and empty set/not_returned results, not nonempty set/null user ingestion.
+Synthetic unit or PostgreSQL producer tests are not that LDAP/browser proof or
+real AD acceptance. Exact-head checks and independent review remain required;
+AD-F-038/039, full userStatus semantics and product acceptance0/209 remain open.
 
 ## Versioned UI and safe facts
 

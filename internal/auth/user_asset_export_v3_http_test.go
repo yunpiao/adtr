@@ -2,6 +2,7 @@ package auth
 
 import (
 	"bytes"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -73,5 +74,44 @@ func TestUserAssetExportV3DecoderExpandsColumnsAndRedactsProof(t *testing.T) {
 	safe, _ := in.MarshalJSON()
 	if strings.Contains(string(safe), "secret") {
 		t.Fatal("proof exposed")
+	}
+}
+
+func TestUserAssetExportV3HTTPUACPresenceAndClosedEnum(t *testing.T) {
+	const base = `{"domainId":"one","expectedRevision":"1","expectedCredentialRevision":"1","observationId":"obs","screenColumns":[],"idempotencyKey":"key","actorPassword":"secret","totpCode":"123456"}`
+	s := &Service{origin: "https://synthetic.invalid"}
+	for _, value := range []string{`"set"`, `"clear"`, `"not_returned"`, `""`, `null`, `2`, `true`, `[]`, `["set"]`, `{}`, `"SET"`, `"clear "`, `"disabled"`} {
+		t.Run(value, func(t *testing.T) {
+			raw := strings.TrimSuffix(base, "}") + `,"uacDisableBit":` + value + `}`
+			r := httptest.NewRequest("POST", userAssetExportV3Path, strings.NewReader(raw))
+			r.Header.Set("Origin", s.origin)
+			r.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+			s.UserAssetExportV3Handler(nil, nil).ServeHTTP(w, r)
+			want := 400
+			if value == `"set"` || value == `"clear"` || value == `"not_returned"` {
+				want = 503
+			}
+			if w.Code != want {
+				t.Fatalf("HTTP %d want %d; explicit invalid filter must not disappear", w.Code, want)
+			}
+			if want == 503 {
+				in, err := decodeUserAssetExportV3Request(httptest.NewRecorder(), httptest.NewRequest("POST", userAssetExportV3Path, strings.NewReader(raw)), "")
+				encoded, _ := json.Marshal(in.UserAssetExportV3Payload)
+				if err != nil || in.UACDisableBit == nil || !bytes.Contains(encoded, []byte(`"uacDisableBit":`+value)) {
+					t.Fatal("filter erased during HTTP canonicalization", err)
+				}
+			}
+		})
+	}
+	for _, tail := range []string{`,"uacDisableBit":"set","uacDisableBit":"set"}`, `,"uacDisableBit":"set","uacDisableBit":"clear"}`} {
+		_, err := decodeUserAssetExportV3Request(httptest.NewRecorder(), httptest.NewRequest("POST", userAssetExportV3Path, strings.NewReader(strings.TrimSuffix(base, "}")+tail)), "")
+		if status, code := domainHTTPError(err); status != 400 || code != "invalid_input" {
+			t.Fatal("duplicate filter accepted", err)
+		}
+	}
+	cancel := `{"taskID":"one","actorPassword":"x","totpCode":"123456","uacDisableBit":"set"}`
+	if _, err := decodeUserAssetExportV3Request(httptest.NewRecorder(), httptest.NewRequest("POST", userAssetExportV3Path+"/cancel", strings.NewReader(cancel)), "/cancel"); err == nil {
+		t.Fatal("cancel accepted submission-only field")
 	}
 }

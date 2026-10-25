@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"encoding/xml"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -25,7 +26,9 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/yunpiao/adtr/internal/auth"
+	"github.com/yunpiao/adtr/internal/directoryassets"
 	"github.com/yunpiao/adtr/internal/domains"
+	"github.com/yunpiao/adtr/internal/ldapconnection"
 	"github.com/yunpiao/adtr/internal/store"
 	"github.com/yunpiao/adtr/internal/tasks"
 )
@@ -40,7 +43,7 @@ type userExportHTTPFixture struct {
 // The observation producer alone is synthetic, through the existing guarded
 // publication fixture. Export generation, task engine, HTTP, proofs and PostgreSQL
 // are real; a separate browser suite supplies real synthetic-TLS-LDAP provenance.
-func newUserExportHTTPFixture(t *testing.T, invalidText bool) *userExportHTTPFixture {
+func newUserExportHTTPFixture(t *testing.T, invalidText bool, mutate ...func(*ldapconnection.DirectoryV3Observation)) *userExportHTTPFixture {
 	f := newDirectoryV3HTTPFixture(t)
 	f.bind()
 	f.grantV3("directory-grant", "platform_admin", "export-producer-grant")
@@ -50,12 +53,18 @@ func newUserExportHTTPFixture(t *testing.T, invalidText bool) *userExportHTTPFix
 	if !invalidText {
 		observation.Objects[len(observation.Objects)-1].Supplemental.MailBytes = []byte(`=HYPERLINK("https://example.invalid/?a=<tag>&b=1")`)
 	}
+	for _, change := range mutate {
+		change(&observation)
+	}
 	f.finishV3(f.stageV3(observation), source, tasks.Succeeded)
 	engine, err := tasks.New(f.conn.Config(), tasks.ProductionRegistry(f.store.UserAssetExportV3Kind()), auth.NewTaskAuthorizer(), store.SchemaVersion)
 	if err != nil {
 		t.Fatal(err)
 	}
 	mux := http.NewServeMux()
+	// Exact list/detail routes must not shadow the longer export route prefix.
+	mux.Handle(userAssetsV3HTTPPath, f.service.UserAssetV3Handler(f.store))
+	mux.Handle(userAssetsV3HTTPPath+"/detail", f.service.UserAssetV3Handler(f.store))
 	mux.Handle(assetExportPath, f.service.UserAssetExportV3Handler(f.store, engine))
 	mux.Handle(assetExportPath+"/", f.service.UserAssetExportV3Handler(f.store, engine))
 	mux.Handle("/api/tasks", f.service.TasksHandler(engine))
@@ -98,6 +107,10 @@ func (f *userExportHTTPFixture) submit(actor, key string, edit func(map[string]a
 		columns = []string{"guid", "sAMAccountName", "sid", "mail", "dn", "whenCreated"}
 	}
 	want := domains.UserAssetExportV3Payload{DomainID: "domain-one", ExpectedRevision: "2", ExpectedCredentialRevision: "2", ObservationID: f.observation, Search: optional("search"), SAMAccountName: optional("sAMAccountName"), StartTm: optional("startTm"), EndTm: optional("endTm"), CreatTm: optional("creatTm"), ScreenColumns: columns}
+	if value, present := body["uacDisableBit"]; present {
+		text := value.(string)
+		want.UACDisableBit = &text
+	}
 	if !reflect.DeepEqual(out.Request, want) {
 		f.t.Fatal("submission canonical request changed")
 	}
@@ -480,6 +493,16 @@ func TestUserAssetExportV3ConcurrentOriginalKeyIsolation(t *testing.T) {
 	if _, err = submit(other, input); err == nil {
 		t.Fatal("another actor adopted original key")
 	}
+	for _, bit := range []string{"set", "clear", "not_returned"} {
+		payload.UACDisableBit = &bit
+		input.Payload, _ = json.Marshal(payload)
+		_, err = submit(principal, input)
+		var failure *tasks.Error
+		if !errors.As(err, &failure) || failure.Status != 409 || failure.Code != "idempotency_conflict" {
+			t.Fatal("same key changed omitted filter instead of conflicting", err)
+		}
+	}
+	payload.UACDisableBit = nil
 	payload.ScreenColumns = []string{"dn"}
 	input.Payload, _ = json.Marshal(payload)
 	if _, err = submit(principal, input); err == nil {
@@ -566,4 +589,140 @@ func TestUserAssetExportV3NaturalEntitlementExpiryWithoutEpochChange(t *testing.
 	}
 	f.request("directory-admin", assetExportPath+"/detail?taskID="+id, nil, 403)
 	f.request("directory-admin", assetExportPath+"/download?taskID="+id, nil, 403)
+}
+
+// Keep the strict receipt DTO shared with the no-database shape regression.
+// The real endpoint returns all three fields, including its public task.
+type userExportHTTPReceipt struct {
+	TaskID  string                           `json:"taskID"`
+	Task    tasks.Task                       `json:"task"`
+	Request domains.UserAssetExportV3Payload `json:"request"`
+}
+
+func TestUserAssetExportV3UACReceiptDTOAcceptsCompleteShape(t *testing.T) {
+	for _, bit := range []string{"", "set", "clear", "not_returned"} {
+		t.Run("filter="+bit, func(t *testing.T) {
+			payload := `{"domainId":"domain-one","expectedRevision":"2","expectedCredentialRevision":"2","observationId":"observed","search":"synthetic","sAMAccountName":"","startTm":"","endTm":"","creatTm":"desc","screenColumns":["guid"]}`
+			want := domains.UserAssetExportV3Payload{DomainID: "domain-one", ExpectedRevision: "2", ExpectedCredentialRevision: "2", ObservationID: "observed", Search: "synthetic", CreatTm: "desc", ScreenColumns: []string{"guid"}}
+			if bit != "" {
+				payload = strings.TrimSuffix(payload, "}") + `,"uacDisableBit":"` + bit + `"}`
+				want.UACDisableBit = &bit
+			}
+			// Independent JSON mirrors the real receipt envelope, not a marshal
+			// of the DTO that could hide a missing field in both directions.
+			raw := `{"taskID":"export-one","task":{"taskUUID":"export-one","taskName":"user_assets.v3.export","domainId":"domain-one","state":"succeeded"},"request":` + payload + `}`
+			receipt := operationalDecode[userExportHTTPReceipt](t, []byte(raw))
+			if receipt.TaskID != "export-one" || receipt.Task.ID != receipt.TaskID || receipt.Task.Kind != domains.UserAssetExportV3KindName || receipt.Task.State != tasks.Succeeded || receipt.Task.DomainID != want.DomainID || !reflect.DeepEqual(receipt.Request, want) {
+				t.Fatal("complete receipt lost task identity, state or request binding")
+			}
+		})
+	}
+}
+
+func TestUserAssetExportV3UACFilteredPagesEqualWorkbookAndBoundReceipt(t *testing.T) {
+	// Real PostgreSQL, HTTP and export Worker; only the directory producer's
+	// Execute is synthetic. This does not claim TLS LDAP/real-AD set/null coverage.
+	for _, bit := range []string{"", "set", "clear", "not_returned"} {
+		t.Run("filter="+bit, func(t *testing.T) {
+			f := newUserExportHTTPFixture(t, false, func(o *ldapconnection.DirectoryV3Observation) {
+				o.Discard()
+				*o = directoryV3HTTPObservation(36)
+				for i := range o.Objects {
+					row := &o.Objects[i]
+					name := fmt.Sprintf("synthetic-%02d", i)
+					row.Base.SAMAccountName = &name
+					row.Supplemental.WhenCreatedBytes = []byte("20260101000000.0Z")
+					switch i % 3 {
+					case 0:
+						row.Base.UserAccountControl = nil
+					case 1:
+						value := uint32(4294967295)
+						row.Base.UserAccountControl = &value
+					case 2:
+						value := uint32(2147483648)
+						row.Base.UserAccountControl = &value
+					}
+				}
+				o.Objects = append(o.Objects, directoryassets.StoredObjectV3{Base: directoryassets.Object{GUID: "10000000-0000-0000-0000-000000000001", DN: "CN=group,DC=one,DC=invalid", Kind: directoryassets.Group, Classes: []string{"group", "top"}}})
+			})
+			query := userAssetsV3HTTPPath + "?" + userAssetsV3HTTPQuery("2") + "&observationId=" + f.observation + "&search=synthetic&startTm=2026-01-01T00:00:00Z&endTm=2026-01-02T00:00:00Z&creatTm=desc"
+			if bit != "" {
+				query += "&uacDisableBit=" + bit
+			}
+			wantTotal := 12
+			if bit == "" {
+				wantTotal = 36
+			}
+			wantRows := [][]string{{"GUID", "SAM", "whenCreated"}}
+			for index := 1; index <= (wantTotal+9)/10; index++ {
+				page := operationalDecode[domains.UserAssetsV3List](t, f.request("directory-http-reader", query+"&pageIdx="+strconv.Itoa(index), nil, 200).Body.Bytes())
+				if !page.Available || page.ObservationID != f.observation || page.Page.Total != wantTotal || page.Page.Pages != (wantTotal+9)/10 {
+					t.Fatal("filter count/pin", page.Page)
+				}
+				for _, row := range page.List {
+					if bit == "set" && (row.UserAccountControl == nil || *row.UserAccountControl&2 == 0) || bit == "clear" && (row.UserAccountControl == nil || *row.UserAccountControl&2 != 0) || bit == "not_returned" && row.UserAccountControl != nil {
+						t.Fatal("wrong persisted UAC partition")
+					}
+					wantRows = append(wantRows, []string{row.GUID, *row.SAMAccountName, *row.WhenCreated})
+				}
+			}
+			edit := func(b map[string]any) {
+				b["screenColumns"] = []string{"guid", "sAMAccountName", "whenCreated"}
+				b["search"], b["startTm"], b["endTm"], b["creatTm"] = "synthetic", "2026-01-01T00:00:00Z", "2026-01-02T00:00:00Z", "desc"
+				if bit != "" {
+					b["uacDisableBit"] = bit
+				}
+			}
+			id := f.submit("directory-admin", "uac-filtered", edit)
+			// Conflicts roll back the proof update; exercise them before consuming
+			// the actor's second successful current/next TOTP step on replay.
+			proofStep := f.count(`SELECT mfa_last_step FROM adtr.users WHERE id=$1`, f.clients["directory-admin"].id)
+			for _, different := range []string{"", "set", "clear", "not_returned"} {
+				if different == bit {
+					continue
+				}
+				body := f.body("uac-filtered")
+				edit(body)
+				delete(body, "uacDisableBit")
+				if different != "" {
+					body["uacDisableBit"] = different
+				}
+				f.error(f.request("directory-admin", assetExportPath, f.proof("directory-admin", body), 409), "idempotency_conflict")
+				if f.count(`SELECT mfa_last_step FROM adtr.users WHERE id=$1`, f.clients["directory-admin"].id) != proofStep {
+					t.Fatal("rejected payload committed a proof update")
+				}
+			}
+			if replay := f.submit("directory-admin", "uac-filtered", edit); replay != id {
+				t.Fatal("same key/filter made second task")
+			}
+			if f.count(`SELECT count(*) FROM adtr.tasks WHERE kind='user_assets.v3.export'`) != 1 {
+				t.Fatal("changed filter created a second task")
+			}
+			lease, out := f.execute()
+			if f.finish(lease, out).State != tasks.Succeeded {
+				t.Fatal(out)
+			}
+			detail := f.detail("directory-admin", id)
+			if detail.Artifact == nil || detail.Artifact.RowCount != wantTotal || detail.Request.Filter().UACDisableBit != bit {
+				t.Fatal("artifact/receipt filter binding lost")
+			}
+			download := f.request("directory-admin", assetExportPath+"/download?taskID="+id, nil, 200)
+			if got := workbookRows(t, download.Body.Bytes()); !reflect.DeepEqual(got, wantRows) {
+				t.Fatal("whole filtered XLSX differs from paged list", got, wantRows)
+			}
+			receipt := operationalDecode[userExportHTTPReceipt](t, f.request("directory-admin", assetExportPath+"/receipt?domainId=domain-one&idempotencyKey=uac-filtered", nil, 200).Body.Bytes())
+			if receipt.TaskID != id || receipt.Task.ID != id || receipt.Task.Kind != domains.UserAssetExportV3KindName || receipt.Task.State != tasks.Succeeded || receipt.Task.DomainID != detail.Request.DomainID || !reflect.DeepEqual(receipt.Request, detail.Request) {
+				t.Fatal("recovered receipt did not preserve task identity, state or frozen request")
+			}
+			// A new empty export uses its own key and still yields a real header-only workbook.
+			empty := f.submit("directory-admin-other", "uac-empty", func(b map[string]any) { edit(b); b["search"] = "does-not-exist" })
+			lease, out = f.execute()
+			if f.finish(lease, out).State != tasks.Succeeded {
+				t.Fatal(out)
+			}
+			if rows := workbookRows(t, f.request("directory-admin-other", assetExportPath+"/download?taskID="+empty, nil, 200).Body.Bytes()); !reflect.DeepEqual(rows, wantRows[:1]) {
+				t.Fatal("zero-row filter did not preserve headers")
+			}
+		})
+	}
 }

@@ -9,6 +9,29 @@ const locatorKey = "adtr.user-assets-v3.export-recovery";
 type MarkerWitness = { calls: number; matched: boolean; observationErrors: number };
 type WitnessWindow = Window & { __adtrUserCancelMarkerWitness?: MarkerWitness };
 
+type QueuedCancelPhase =
+  | "setup"
+  | "pause"
+  | "create"
+  | "default-read-only"
+  | "new-tab"
+  | "dedicated-original-detail"
+  | "dedicated-cancel"
+  | "original-asset-receipt"
+  | "resume-owned-worker"
+  | "post-resume-receipt-detail"
+  | "post-resume-database"
+  | "post-resume-download-unavailable"
+  | "post-resume-database-invariant"
+  | "post-resume-detail-invariant"
+  | "post-resume-download-events"
+  | "old-panel-status-scroll"
+  | "old-panel-status-viewport"
+  | "old-panel-task-id-viewport"
+  | "old-panel-create-button-viewport"
+  | "new-entry-terminal-pixels"
+  | "evidence";
+
 // Join both owned branches before reporting failure or closing the tab. Never
 // retry the requested action or replace the original browser request.
 async function observedAction(page: Page, predicate: (response: Response) => boolean, action: () => Promise<unknown>) {
@@ -46,7 +69,7 @@ async function observeMarkerBeforeCancel(page: Page, key: string, expected: stri
 test.use({ trace: "off", screenshot: "off", video: "off" });
 test("queued export is cancelled from its original task without a tab locator and never executes after Worker resumes", async ({ page, context }, info) => {
   test.setTimeout(900_000);
-  let phase = "setup", failure = "", cleanupFailed = false, restoreWorker = false;
+  let phase: QueuedCancelPhase = "setup", failure: QueuedCancelPhase | "" = "", cleanupFailed = false, restoreWorker = false;
   let taskPage: Page | undefined;
   let downloads = 0;
   const downloaded = () => { downloads++; };
@@ -171,16 +194,65 @@ test("queued export is cancelled from its original task without a tab locator an
     const unavailable = await unavailableDownload(context, originalTaskID);
     phase = "resume-owned-worker";
     const resume = await resumeOwnedExportWorker(context, pause);
-    const postResume = { ...await receiptAndDetail(page, setup.actorId, originalTaskID), database: await terminalExport(originalTaskID), unavailableDownload: await unavailableDownload(context, originalTaskID) };
+    phase = "post-resume-receipt-detail";
+    const postResumeReads = await receiptAndDetail(page, setup.actorId, originalTaskID);
+    phase = "post-resume-database";
+    const postResumeDatabase = await terminalExport(originalTaskID);
+    phase = "post-resume-download-unavailable";
+    const postResumeUnavailableDownload = await unavailableDownload(context, originalTaskID);
+    const postResume = { ...postResumeReads, database: postResumeDatabase, unavailableDownload: postResumeUnavailableDownload };
+    phase = "post-resume-database-invariant";
     expect(postResume.database).toEqual(database);
+    phase = "post-resume-detail-invariant";
     expect(postResume.detail).toMatchObject({ downloadReady: false, downloadStatus: "cancelled", task: { state: "cancelled" } });
+    phase = "post-resume-download-events";
     expect(downloads).toBe(0);
     // Keep the old asset-panel DOM and visibility checks after both queue cycles.
     const cancelledStatus = panel.getByRole("status").filter({ hasText: "服务器已确认取消，没有可下载文件" });
+    phase = "old-panel-status-scroll";
     await cancelledStatus.scrollIntoViewIfNeeded();
+    phase = "old-panel-status-viewport";
     await expect(cancelledStatus).toBeInViewport({ ratio: 1 });
+    phase = "old-panel-task-id-viewport";
     await expect(panel.getByText(`任务 ID：${originalTaskID}`, { exact: true })).toBeInViewport({ ratio: 1 });
-    await expect(panel.getByRole("button", { name: "按当前列表创建另一导出", exact: true })).toBeInViewport({ ratio: 1 });
+    phase = "old-panel-create-button-viewport";
+    try {
+      await expect(panel.getByRole("button", { name: "按当前列表创建另一导出", exact: true })).toBeInViewport({ ratio: 1 });
+    } catch (originalFailure) {
+      let diagnosticTimer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        // Failure-only, one-shot DOM reads; count 2 means two or more matches.
+        // Never emit text, identity, DOM, requests, or the original exception.
+        const measure = (elements: Element[]) => {
+          const count = elements.length === 0 ? 0 : elements.length === 1 ? 1 : 2;
+          const box = elements.length === 1 ? elements[0].getBoundingClientRect() : null;
+          const rect = box && [box.x, box.y, box.width, box.height].every((value) => Number.isFinite(value) && Math.abs(value) <= 1_000_000)
+            && box.width >= 0 && box.height >= 0
+            ? { x: box.x, y: box.y, width: box.width, height: box.height } : null;
+          return { count, rect };
+        };
+        const size = page.viewportSize();
+        const viewport = size && [size.width, size.height].every((value) => Number.isFinite(value) && value >= 0 && value <= 1_000_000)
+          ? { width: size.width, height: size.height } : null;
+        const deadline = new Promise<never>((_, reject) => {
+          diagnosticTimer = setTimeout(() => reject(new Error("Viewport diagnostic deadline")), 1_000);
+        });
+        const [status, taskIdentity, nextExport] = await Promise.race([
+          Promise.all([
+            cancelledStatus.evaluateAll(measure),
+            panel.getByText(`任务 ID：${originalTaskID}`, { exact: true }).evaluateAll(measure),
+            panel.getByRole("button", { name: "按当前列表创建另一导出", exact: true }).evaluateAll(measure),
+          ]),
+          deadline,
+        ]);
+        console.log("User export terminal viewport diagnostic: " + JSON.stringify({ viewport, status, taskIdentity, nextExport }));
+      } catch {
+        console.log("User export terminal viewport diagnostic unavailable");
+      } finally {
+        if (diagnosticTimer !== undefined) clearTimeout(diagnosticTimer);
+      }
+      throw originalFailure;
+    }
 
     phase = "new-entry-terminal-pixels";
     await taskPage.bringToFront();

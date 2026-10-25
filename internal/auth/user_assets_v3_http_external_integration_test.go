@@ -235,7 +235,7 @@ func TestUserAssetsV3MigratedHTTPLiveReaderRevocation(t *testing.T) {
 			list := userAssetsV3HTTPPath + "?" + userAssetsV3HTTPQuery("1")
 			f.request("directory-http-reader", list, nil, 200)
 			f.exec(c.sql, c.args...)
-			for _, path := range []string{list, list + "&sAMAccountName=exact&startTm=0001-01-01T00:00:00Z&endTm=2026-01-01T00:00:00Z&creatTm=desc", userAssetsV3HTTPDetail("1", "missing-observation", "00000000-0000-0000-0000-000000000001")} {
+			for _, path := range []string{list, list + "&uacDisableBit=set", list + "&uacDisableBit=clear", list + "&uacDisableBit=not_returned", list + "&sAMAccountName=exact&startTm=0001-01-01T00:00:00Z&endTm=2026-01-01T00:00:00Z&creatTm=desc", userAssetsV3HTTPDetail("1", "missing-observation", "00000000-0000-0000-0000-000000000001")} {
 				w := f.request("directory-http-reader", path, nil, c.status)
 				f.error(w, c.code)
 				if w.Header().Get("X-ADTR-User-ID") != "" {
@@ -489,15 +489,26 @@ func TestUserAssetsV3HTTPValidatesWholeObservationBeforeFilteredPage(t *testing.
 	// Corrupt an object outside the first GUID page and exact filter; compute a
 	// matching digest so the test proves complete body validation, not hash alone.
 	// Only this isolated disposable corruption fixture bypasses immutability.
-	raw = bytes.Replace(raw, []byte(`"primaryGroupIDBytes":null`), []byte(`"primaryGroupIDBytes":"@@@="`), 1)
-	sum := sha256.Sum256(raw)
-	f.exec(`ALTER TABLE adtr.domain_directory_observations DISABLE TRIGGER domain_directory_observations_immutable`)
-	f.exec(`UPDATE adtr.domain_directory_observations SET body=$2,sha256=$3 WHERE task_id=$1`, task.ID, raw, hex.EncodeToString(sum[:]))
-	f.exec(`ALTER TABLE adtr.domain_directory_observations ENABLE TRIGGER domain_directory_observations_immutable`)
-	for _, path := range []string{query, query + "&sAMAccountName=missing", query + "&pageIdx=10000", userAssetsV3HTTPDetail("2", task.ID, "00000000-0000-0000-0000-000000000001")} {
-		f.error(f.request("directory-http-reader", path, nil, 409), "directory_observation_unavailable")
+	corruptions := [][]byte{
+		bytes.Replace(raw, []byte(`"primaryGroupIDBytes":null`), []byte(`"primaryGroupIDBytes":"@@@="`), 1),
+		bytes.Replace(raw, []byte(`"userAccountControl":null`), []byte(`"userAccountControl":4294967296`), 1),
+		bytes.Replace(raw, []byte(`"userAccountControl":null`), []byte(`"userAccountControl":-1`), 1),
+		bytes.Replace(raw, []byte(`"userAccountControl":null`), []byte(`"userAccountControl":"2"`), 1),
 	}
-	if f.count(`SELECT count(*) FROM adtr.auth_audit WHERE action='user_assets_v3_list_denied'`) != 3 || f.count(`SELECT count(*) FROM adtr.auth_audit WHERE action='user_assets_v3_detail_denied'`) != 1 || f.count(`SELECT count(*) FROM adtr.auth_audit WHERE action IN ('user_assets_v2_list_denied','user_assets_v2_detail_denied')`) != 0 {
+	for _, corrupt := range corruptions {
+		if bytes.Equal(corrupt, raw) {
+			t.Fatal("corruption fixture did not change source")
+		}
+		sum := sha256.Sum256(corrupt)
+		f.exec(`ALTER TABLE adtr.domain_directory_observations DISABLE TRIGGER domain_directory_observations_immutable`)
+		f.exec(`UPDATE adtr.domain_directory_observations SET body=$2,sha256=$3 WHERE task_id=$1`, task.ID, corrupt, hex.EncodeToString(sum[:]))
+		f.exec(`ALTER TABLE adtr.domain_directory_observations ENABLE TRIGGER domain_directory_observations_immutable`)
+		for _, path := range []string{query, query + "&sAMAccountName=missing", query + "&pageIdx=10000", query + "&uacDisableBit=set", query + "&uacDisableBit=clear", query + "&uacDisableBit=not_returned", userAssetsV3HTTPDetail("2", task.ID, "00000000-0000-0000-0000-000000000001")} {
+			f.error(f.request("directory-http-reader", path, nil, 409), "directory_observation_unavailable")
+		}
+		clear(corrupt)
+	}
+	if f.count(`SELECT count(*) FROM adtr.auth_audit WHERE action='user_assets_v3_list_denied'`) != int64(6*len(corruptions)) || f.count(`SELECT count(*) FROM adtr.auth_audit WHERE action='user_assets_v3_detail_denied'`) != int64(len(corruptions)) || f.count(`SELECT count(*) FROM adtr.auth_audit WHERE action IN ('user_assets_v2_list_denied','user_assets_v2_detail_denied')`) != 0 {
 		t.Fatal("v3 failures misattributed to v2")
 	}
 }

@@ -33,6 +33,98 @@ QUEUED_CANCEL_ARM = '''    phase = "pause"; restoreWorker = true;
 QUEUED_CANCEL_IMAGE = 'const image = await screenshot(taskPage, info, "cancelled-terminal.png");'
 
 
+# Exact diagnostic-only boundaries: no new action, retry, timeout, or raw error.
+# These are source guards, not evidence that the browser or Worker ran.
+QUEUED_CANCEL_PHASE_TYPE = '''type QueuedCancelPhase =
+  | "setup"
+  | "pause"
+  | "create"
+  | "default-read-only"
+  | "new-tab"
+  | "dedicated-original-detail"
+  | "dedicated-cancel"
+  | "original-asset-receipt"
+  | "resume-owned-worker"
+  | "post-resume-receipt-detail"
+  | "post-resume-database"
+  | "post-resume-download-unavailable"
+  | "post-resume-database-invariant"
+  | "post-resume-detail-invariant"
+  | "post-resume-download-events"
+  | "old-panel-status-scroll"
+  | "old-panel-status-viewport"
+  | "old-panel-task-id-viewport"
+  | "old-panel-create-button-viewport"
+  | "new-entry-terminal-pixels"
+  | "evidence";
+
+'''
+QUEUED_CANCEL_PHASE_INIT = '  let phase: QueuedCancelPhase = "setup", failure: QueuedCancelPhase | "" = "", cleanupFailed = false, restoreWorker = false;'
+QUEUED_CANCEL_POST_RESUME = '''    phase = "resume-owned-worker";
+    const resume = await resumeOwnedExportWorker(context, pause);
+    phase = "post-resume-receipt-detail";
+    const postResumeReads = await receiptAndDetail(page, setup.actorId, originalTaskID);
+    phase = "post-resume-database";
+    const postResumeDatabase = await terminalExport(originalTaskID);
+    phase = "post-resume-download-unavailable";
+    const postResumeUnavailableDownload = await unavailableDownload(context, originalTaskID);
+    const postResume = { ...postResumeReads, database: postResumeDatabase, unavailableDownload: postResumeUnavailableDownload };
+    phase = "post-resume-database-invariant";
+    expect(postResume.database).toEqual(database);
+    phase = "post-resume-detail-invariant";
+    expect(postResume.detail).toMatchObject({ downloadReady: false, downloadStatus: "cancelled", task: { state: "cancelled" } });
+    phase = "post-resume-download-events";
+    expect(downloads).toBe(0);
+    // Keep the old asset-panel DOM and visibility checks after both queue cycles.
+    const cancelledStatus = panel.getByRole("status").filter({ hasText: "服务器已确认取消，没有可下载文件" });
+    phase = "old-panel-status-scroll";
+    await cancelledStatus.scrollIntoViewIfNeeded();
+    phase = "old-panel-status-viewport";
+    await expect(cancelledStatus).toBeInViewport({ ratio: 1 });
+    phase = "old-panel-task-id-viewport";
+    await expect(panel.getByText(`任务 ID：${originalTaskID}`, { exact: true })).toBeInViewport({ ratio: 1 });
+    phase = "old-panel-create-button-viewport";
+    try {
+      await expect(panel.getByRole("button", { name: "按当前列表创建另一导出", exact: true })).toBeInViewport({ ratio: 1 });
+    } catch (originalFailure) {
+      let diagnosticTimer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        // Failure-only, one-shot DOM reads; count 2 means two or more matches.
+        // Never emit text, identity, DOM, requests, or the original exception.
+        const measure = (elements: Element[]) => {
+          const count = elements.length === 0 ? 0 : elements.length === 1 ? 1 : 2;
+          const box = elements.length === 1 ? elements[0].getBoundingClientRect() : null;
+          const rect = box && [box.x, box.y, box.width, box.height].every((value) => Number.isFinite(value) && Math.abs(value) <= 1_000_000)
+            && box.width >= 0 && box.height >= 0
+            ? { x: box.x, y: box.y, width: box.width, height: box.height } : null;
+          return { count, rect };
+        };
+        const size = page.viewportSize();
+        const viewport = size && [size.width, size.height].every((value) => Number.isFinite(value) && value >= 0 && value <= 1_000_000)
+          ? { width: size.width, height: size.height } : null;
+        const deadline = new Promise<never>((_, reject) => {
+          diagnosticTimer = setTimeout(() => reject(new Error("Viewport diagnostic deadline")), 1_000);
+        });
+        const [status, taskIdentity, nextExport] = await Promise.race([
+          Promise.all([
+            cancelledStatus.evaluateAll(measure),
+            panel.getByText(`任务 ID：${originalTaskID}`, { exact: true }).evaluateAll(measure),
+            panel.getByRole("button", { name: "按当前列表创建另一导出", exact: true }).evaluateAll(measure),
+          ]),
+          deadline,
+        ]);
+        console.log("User export terminal viewport diagnostic: " + JSON.stringify({ viewport, status, taskIdentity, nextExport }));
+      } catch {
+        console.log("User export terminal viewport diagnostic unavailable");
+      } finally {
+        if (diagnosticTimer !== undefined) clearTimeout(diagnosticTimer);
+      }
+      throw originalFailure;
+    }
+
+'''
+
+
 def queued_cancel_browser_contract(source):
     v.require(type(source) is str and source.endswith(QUEUED_CANCEL_CLEANUP), 'closed queued cleanup and safe failure propagation')
     v.require(source.count('  finally {\n') == 1, 'one outer queued cleanup')
@@ -42,6 +134,11 @@ def queued_cancel_browser_contract(source):
     outer_try = '  try {\n    expect(process.env.ADTR_E2E_USER_ASSET_EXPORT_V3_TERMINAL)'
     v.require(source.count(outer_try) == 1 and source.index(outer_try) < source.index(QUEUED_CANCEL_ARM), 'pause attempt belongs to protected outer try')
     v.require(source.count('test.setTimeout(900_000);') == 1, 'unchanged queued timeout')
+    v.require(source.count(QUEUED_CANCEL_PHASE_TYPE) == 1, 'closed queued diagnostic phase type')
+    v.require(source.count(QUEUED_CANCEL_PHASE_INIT) == 1, 'closed queued phase and failure initialization')
+    v.require(source.count(QUEUED_CANCEL_POST_RESUME) == 1, 'exact post-resume actions and diagnostic boundaries')
+    phases = re.findall(r'"([^"\n]+)"', QUEUED_CANCEL_PHASE_TYPE)
+    v.require(re.findall(r'\bphase\s*=\s*([^;\n]+)', source) == [f'"{phase}"' for phase in phases[1:]], 'only ordered closed phase assignments')
     # Preserve post-resume DB invariance and old-panel visibility, then require
     # a real fresh dedicated read and proof-free original identity before the
     # new-tab screenshot. The existing artifact validator still binds its bytes.
@@ -336,6 +433,76 @@ class TerminalEvidenceContract(unittest.TestCase):
             with self.subTest(mutation=label):
                 with self.assertRaises(ValueError):
                     queued_cancel_browser_contract(changed)
+
+    def test_queued_browser_diagnostic_stage_contract_mutations(self):
+        root = Path(__file__).resolve().parents[1]
+        source = (root / 'web/e2e/user-asset-export-v3-cancel.spec.ts').read_text()
+        queued_cancel_browser_contract(source)
+        phases = re.findall(r'"([^"\n]+)"', QUEUED_CANCEL_PHASE_TYPE)
+        for phase in phases[1:]:
+            before = f'    phase = "{phase}";'
+            for label, after in [('missing', ''), ('duplicate', before + '\n' + before), ('dynamic', '    phase = originalTaskID;')]:
+                with self.subTest(phase=phase, mutation=label):
+                    self.assertEqual(source.count(before), 1)
+                    with self.assertRaises(ValueError):
+                        queued_cancel_browser_contract(source.replace(before, after, 1))
+        for phase in phases[8:19]:
+            before = f'    phase = "{phase}";'
+            with self.subTest(phase=phase, mutation='comment-only'):
+                with self.assertRaises(ValueError):
+                    queued_cancel_browser_contract(source.replace(before, '    // ' + before.strip(), 1))
+        mutations = [
+            ('open phase type', QUEUED_CANCEL_PHASE_TYPE, 'type QueuedCancelPhase = string;\n\n'),
+            ('open phase variable', 'phase: QueuedCancelPhase', 'phase: string'),
+            ('open failure variable', 'failure: QueuedCancelPhase | ""', 'failure: string'),
+            ('raw phase value', 'phase = "post-resume-database";', 'phase = String(originalTaskID);'),
+            ('receipt action removed', 'await receiptAndDetail(page, setup.actorId, originalTaskID);\n    phase = "post-resume-database";', 'recovered;\n    phase = "post-resume-database";'),
+            ('DB invariance weakened', 'expect(postResume.database).toEqual(database);', 'expect(postResume.database.state).toBe("cancelled");'),
+            ('detail invariant removed', '    expect(postResume.detail).toMatchObject({ downloadReady: false, downloadStatus: "cancelled", task: { state: "cancelled" } });', ''),
+            ('viewport threshold weakened', 'await expect(cancelledStatus).toBeInViewport({ ratio: 1 });', 'await expect(cancelledStatus).toBeInViewport({ ratio: 0.5 });'),
+            ('business action retried', 'const postResumeReads = await receiptAndDetail(page, setup.actorId, originalTaskID);', 'let postResumeReads; for (let i = 0; i < 2; i++) postResumeReads = await receiptAndDetail(page, setup.actorId, originalTaskID);'),
+        ]
+        for label, before, after in mutations:
+            with self.subTest(mutation=label):
+                self.assertEqual(source.count(before), 1, 'mutation must target one actual boundary')
+                with self.assertRaises(ValueError):
+                    queued_cancel_browser_contract(source.replace(before, after, 1))
+        before = '    phase = "post-resume-database";\n    const postResumeDatabase = await terminalExport(originalTaskID);'
+        after = '    const postResumeDatabase = await terminalExport(originalTaskID);\n    phase = "post-resume-database";'
+        with self.assertRaises(ValueError):
+            queued_cancel_browser_contract(source.replace(before, after, 1))
+
+
+    def test_queued_browser_failure_geometry_diagnostic_mutations(self):
+        root = Path(__file__).resolve().parents[1]
+        source = (root / 'web/e2e/user-asset-export-v3-cancel.spec.ts').read_text()
+        queued_cancel_browser_contract(source)
+        mutations = [
+            ('raw error payload', 'JSON.stringify({ viewport, status, taskIdentity, nextExport })', 'JSON.stringify({ viewport, status, taskIdentity, nextExport, originalFailure })'),
+            ('raw task identity payload', 'JSON.stringify({ viewport, status, taskIdentity, nextExport })', 'JSON.stringify({ viewport, status, taskIdentity, nextExport, originalTaskID })'),
+            ('DOM text payload', 'return { count, rect };', 'return { count, rect, text: elements[0]?.textContent };'),
+            ('unbounded count', 'const count = elements.length === 0 ? 0 : elements.length === 1 ? 1 : 2;', 'const count = elements.length;'),
+            ('open rectangle object', '{ x: box.x, y: box.y, width: box.width, height: box.height }', '{ ...box }'),
+            ('nonfinite rectangle allowed', 'Number.isFinite(value) && Math.abs(value) <= 1_000_000', 'Math.abs(value) <= 1_000_000'),
+            ('unbounded rectangle allowed', 'Number.isFinite(value) && Math.abs(value) <= 1_000_000', 'Number.isFinite(value)'),
+            ('negative rectangle size allowed', '&& box.width >= 0 && box.height >= 0', ''),
+            ('unbounded viewport allowed', 'Number.isFinite(value) && value >= 0 && value <= 1_000_000', 'Number.isFinite(value)'),
+            ('multiple-match geometry', 'elements.length === 1 ? elements[0].getBoundingClientRect() : null', 'elements.length > 0 ? elements[0].getBoundingClientRect() : null'),
+            ('diagnostic deadline enlarged', 'setTimeout(() => reject(new Error("Viewport diagnostic deadline")), 1_000)', 'setTimeout(() => reject(new Error("Viewport diagnostic deadline")), 60_000)'),
+            ('diagnostic deadline ignored', 'const [status, taskIdentity, nextExport] = await Promise.race([', 'const [status, taskIdentity, nextExport] = await Promise.all(['),
+            ('diagnostic timer not cleared', 'if (diagnosticTimer !== undefined) clearTimeout(diagnosticTimer);', ''),
+            ('diagnostic error exposed', 'console.log("User export terminal viewport diagnostic unavailable");', 'console.log(originalFailure);'),
+            ('original failure swallowed', '      throw originalFailure;', '      return;'),
+            ('original failure replaced', '      throw originalFailure;', '      throw new Error("diagnostic failure");'),
+            ('button assertion weakened', 'await expect(panel.getByRole("button", { name: "按当前列表创建另一导出", exact: true })).toBeInViewport({ ratio: 1 });', 'await expect(panel.getByRole("button", { name: "按当前列表创建另一导出", exact: true })).toBeInViewport({ ratio: 0.5 });'),
+            ('scroll target changed', 'await cancelledStatus.scrollIntoViewIfNeeded();', 'await panel.getByRole("button", { name: "按当前列表创建另一导出", exact: true }).scrollIntoViewIfNeeded();'),
+            ('diagnostic adds scrolling', 'cancelledStatus.evaluateAll(measure),', 'cancelledStatus.scrollIntoViewIfNeeded(),'),
+        ]
+        for label, before, after in mutations:
+            with self.subTest(mutation=label):
+                self.assertEqual(source.count(before), 1, 'mutation must target one diagnostic boundary')
+                with self.assertRaises(ValueError):
+                    queued_cancel_browser_contract(source.replace(before, after, 1))
 
 
 if __name__ == '__main__':

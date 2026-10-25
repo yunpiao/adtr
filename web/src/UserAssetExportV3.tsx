@@ -1,3 +1,4 @@
+import { uacDisableBitLabels } from "./user-assets-v3-filters";
 import { useLayoutEffect, useRef, useState, type FormEvent } from "react";
 import { ApiError, type Profile } from "./api";
 import { accessRequest, type Permission } from "./access-api";
@@ -213,6 +214,7 @@ function Export({ profile, query, disabled, failure, request }: Props & { reques
       <dt>配置版本 / 凭据版本</dt><dd>{capturedRequest.expectedRevision} / {capturedRequest.expectedCredentialRevision}</dd>
       <dt>固定观测</dt><dd>{display(capturedRequest.observationId)}</dd>
       <dt>关键词 / 精确 SAM</dt><dd>{display(capturedRequest.search) || "不限"} / {display(capturedRequest.sAMAccountName) || "不限"}</dd>
+      <dt>本次观测的禁用位</dt><dd>{capturedRequest.uacDisableBit === undefined ? "不限" : uacDisableBitLabels[capturedRequest.uacDisableBit]}</dd>
       <dt>创建时间范围 / 排序</dt><dd>{display(capturedRequest.startTm) || "不限"} 至 {display(capturedRequest.endTm) || "不限"} / {capturedRequest.creatTm || "GUID 升序"}</dd>
     </dl>}
     {!request && <p role="status">当前没有可用固定观测，不能新建导出；仍可核对原回执和取消原任务。</p>}
@@ -243,19 +245,26 @@ function Export({ profile, query, disabled, failure, request }: Props & { reques
       <button disabled={busy || abandoning || disabled}>使用原请求和幂等键重试</button>
     </form>}
     {detail && <>
-      <p>任务 ID：{detail.taskID}</p>
-      <p role="status">{stateLabels[detail.task.state]} · {statusText[detail.downloadStatus]}</p>
+      {terminal(detail.task.state) ? <div role="group" aria-label="导出终态与后续操作" style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "flex-end", margin: "12px 0" }}>
+        <div style={{ flex: "1 1 280px", minWidth: 0, overflowWrap: "anywhere" }}>
+          <p style={{ margin: 0 }}>任务 ID：{detail.taskID}</p>
+          <p role="status" style={{ margin: "8px 0 0" }}>{stateLabels[detail.task.state]} · {statusText[detail.downloadStatus]}</p>
+        </div>
+      {terminal(detail.task.state) && allowed[0] && <button disabled={busy || disabled || !request} onClick={() => {
+        resetTransport(); clearExportRecovery(); setRecovery(null); intentRef.current = null;
+        cancelSticky.current = false; cancelPrepared.current = true; cancelTask.current = ""; setCancelBlocked(""); setPrivateCancel(false);
+        setIntent(null); setDetail(null); setError(""); setNotice(""); setProofVersion((v) => v + 1);
+      }}>按当前列表创建另一导出</button>}
+      </div> : <>
+        <p>任务 ID：{detail.taskID}</p>
+        <p role="status">{stateLabels[detail.task.state]} · {statusText[detail.downloadStatus]}</p>
+      </>}
       <label>导出持久化进度：{detail.task.progress}%<progress aria-label="用户导出持久化进度" value={detail.task.progress} max={100} /></label>
       {detail.task.error && <p>任务错误代码：{display(detail.task.error)}。{terminalErrors[detail.task.error] ?? "具体原因尚待服务端任务记录核对；请保留任务 ID。"}</p>}
       {detail.artifact && <p>实际导出 {detail.artifact.rowCount} 行；{detail.artifact.byteCount} 字节{detail.artifact.rowCount === 0 ? "，文件仅含表头" : ""}</p>}
       {cancelBlocked && !terminal(detail.task.state) && <p role="status">{cancelBlocked}</p>}
       {!terminal(detail.task.state) && detail.task.state !== "cancel_requested" && allowed[3] && profile.hasMfa && !profile.needChangePwd && !profile.isExpired && !cancelBlocked && !cancelCapability() && <form onSubmit={cancel}><fieldset key={proofVersion} disabled={busy}><ProofFields /></fieldset><button disabled={busy}>取消用户导出任务</button></form>}
       {detail.task.state === "cancel_requested" && allowed[3] && <button disabled>取消用户导出任务</button>}
-      {terminal(detail.task.state) && allowed[0] && <button disabled={busy || disabled || !request} onClick={() => {
-        resetTransport(); clearExportRecovery(); setRecovery(null); intentRef.current = null;
-        cancelSticky.current = false; cancelPrepared.current = true; cancelTask.current = ""; setCancelBlocked(""); setPrivateCancel(false);
-        setIntent(null); setDetail(null); setError(""); setNotice(""); setProofVersion((v) => v + 1);
-      }}>按当前列表创建另一导出</button>}
       {detail.downloadReady && allowed[4] && <button disabled={busy} onClick={() => {
         const captured = detail;
         void operation(async (signal) => {
