@@ -2068,3 +2068,52 @@ describe("v3 observed UAC disabled-bit filter", () => {
     expect(screen.queryByLabelText("本次观测的禁用位")).not.toBeInTheDocument();
   });
 });
+
+describe("v3 UAC compact layout structure", () => {
+  it("keeps applied filters visible in one compact summary and SAM facts in one mobile value item", async () => {
+    await start();
+    const searchSummary = screen.getByText("已应用搜索：无文本筛选", {
+      exact: true,
+    });
+    const bitSummary = screen.getByText("已应用禁用位：不限", { exact: true });
+    expect(searchSummary).toBeVisible();
+    expect(bitSummary).toBeVisible();
+    expect(searchSummary.parentElement).toBe(bitSummary.parentElement);
+    expect(searchSummary.parentElement).toHaveClass("asset-applied-search");
+    expect(searchSummary.parentElement?.tagName).toBe("P");
+    expect(
+      screen.getByLabelText("本次观测的禁用位"),
+    ).toHaveAccessibleDescription(/ACCOUNTDISABLE（0x2）位/);
+    const help = document.getElementById("asset-uac-disable-help")!;
+    expect(help).toBeVisible();
+    expect(help.closest("details")).toBeNull();
+    expect(help).toHaveTextContent("未设置不能证明账户活跃、可登录或未锁定");
+    const name = screen.getByText("observed-1", { exact: true });
+    const cell = name.closest("td")!;
+    expect(cell).toHaveAttribute("data-label", "SAM");
+    expect(cell.childElementCount).toBe(1);
+    expect(cell.firstElementChild).toBe(name);
+    expect(
+      within(name).getByText("禁用位未设置 / 原始 UAC：0", { exact: true }),
+    ).toBeVisible();
+    expect(
+      Array.from(cell.childNodes).filter(
+        (node) => node.nodeType === Node.TEXT_NODE && node.textContent?.trim(),
+      ),
+    ).toHaveLength(0);
+    fill("本次观测的禁用位", "clear");
+    click("搜索用户");
+    await screen.findByText("已应用禁用位：禁用位未设置", { exact: true });
+    expect(
+      screen.getByText("已应用搜索：无文本筛选", { exact: true }).parentElement,
+    ).toBe(
+      screen.getByText("已应用禁用位：禁用位未设置", { exact: true })
+        .parentElement,
+    );
+    expect(params()).toMatchObject({
+      uacDisableBit: "clear",
+      observationId: "observation-one",
+      pageIdx: "1",
+    });
+  });
+});

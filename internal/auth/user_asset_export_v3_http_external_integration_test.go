@@ -591,6 +591,34 @@ func TestUserAssetExportV3NaturalEntitlementExpiryWithoutEpochChange(t *testing.
 	f.request("directory-admin", assetExportPath+"/download?taskID="+id, nil, 403)
 }
 
+// Keep the strict receipt DTO shared with the no-database shape regression.
+// The real endpoint returns all three fields, including its public task.
+type userExportHTTPReceipt struct {
+	TaskID  string                           `json:"taskID"`
+	Task    tasks.Task                       `json:"task"`
+	Request domains.UserAssetExportV3Payload `json:"request"`
+}
+
+func TestUserAssetExportV3UACReceiptDTOAcceptsCompleteShape(t *testing.T) {
+	for _, bit := range []string{"", "set", "clear", "not_returned"} {
+		t.Run("filter="+bit, func(t *testing.T) {
+			payload := `{"domainId":"domain-one","expectedRevision":"2","expectedCredentialRevision":"2","observationId":"observed","search":"synthetic","sAMAccountName":"","startTm":"","endTm":"","creatTm":"desc","screenColumns":["guid"]}`
+			want := domains.UserAssetExportV3Payload{DomainID: "domain-one", ExpectedRevision: "2", ExpectedCredentialRevision: "2", ObservationID: "observed", Search: "synthetic", CreatTm: "desc", ScreenColumns: []string{"guid"}}
+			if bit != "" {
+				payload = strings.TrimSuffix(payload, "}") + `,"uacDisableBit":"` + bit + `"}`
+				want.UACDisableBit = &bit
+			}
+			// Independent JSON mirrors the real receipt envelope, not a marshal
+			// of the DTO that could hide a missing field in both directions.
+			raw := `{"taskID":"export-one","task":{"taskUUID":"export-one","taskName":"user_assets.v3.export","domainId":"domain-one","state":"succeeded"},"request":` + payload + `}`
+			receipt := operationalDecode[userExportHTTPReceipt](t, []byte(raw))
+			if receipt.TaskID != "export-one" || receipt.Task.ID != receipt.TaskID || receipt.Task.Kind != domains.UserAssetExportV3KindName || receipt.Task.State != tasks.Succeeded || receipt.Task.DomainID != want.DomainID || !reflect.DeepEqual(receipt.Request, want) {
+				t.Fatal("complete receipt lost task identity, state or request binding")
+			}
+		})
+	}
+}
+
 func TestUserAssetExportV3UACFilteredPagesEqualWorkbookAndBoundReceipt(t *testing.T) {
 	// Real PostgreSQL, HTTP and export Worker; only the directory producer's
 	// Execute is synthetic. This does not claim TLS LDAP/real-AD set/null coverage.
@@ -682,12 +710,9 @@ func TestUserAssetExportV3UACFilteredPagesEqualWorkbookAndBoundReceipt(t *testin
 			if got := workbookRows(t, download.Body.Bytes()); !reflect.DeepEqual(got, wantRows) {
 				t.Fatal("whole filtered XLSX differs from paged list", got, wantRows)
 			}
-			receipt := operationalDecode[struct {
-				TaskID  string                           `json:"taskID"`
-				Request domains.UserAssetExportV3Payload `json:"request"`
-			}](t, f.request("directory-admin", assetExportPath+"/receipt?domainId=domain-one&idempotencyKey=uac-filtered", nil, 200).Body.Bytes())
-			if receipt.TaskID != id || !reflect.DeepEqual(receipt.Request, detail.Request) {
-				t.Fatal("recovered receipt did not preserve frozen filter")
+			receipt := operationalDecode[userExportHTTPReceipt](t, f.request("directory-admin", assetExportPath+"/receipt?domainId=domain-one&idempotencyKey=uac-filtered", nil, 200).Body.Bytes())
+			if receipt.TaskID != id || receipt.Task.ID != id || receipt.Task.Kind != domains.UserAssetExportV3KindName || receipt.Task.State != tasks.Succeeded || receipt.Task.DomainID != detail.Request.DomainID || !reflect.DeepEqual(receipt.Request, detail.Request) {
+				t.Fatal("recovered receipt did not preserve task identity, state or frozen request")
 			}
 			// A new empty export uses its own key and still yields a real header-only workbook.
 			empty := f.submit("directory-admin-other", "uac-empty", func(b map[string]any) { edit(b); b["search"] = "does-not-exist" })

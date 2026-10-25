@@ -787,18 +787,21 @@ function Assets({
         ACCOUNTDISABLE（0x2）位。未设置不能证明账户活跃、可登录或未锁定；UAC未返回不等于
         0。
       </p>
-      <p className="asset-applied-search">
-        已应用禁用位：
-        {query.uacDisableBit === undefined
-          ? "不限"
-          : uacDisableBitLabels[query.uacDisableBit]}
-      </p>
       <p
         className="asset-applied-search"
         style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}
       >
-        已应用搜索：
-        {query.search === "" ? "无文本筛选" : `“${display(query.search)}”`}
+        <span>
+          已应用搜索：
+          {query.search === "" ? "无文本筛选" : `“${display(query.search)}”`}
+        </span>
+        {" · "}
+        <span>
+          已应用禁用位：
+          {query.uacDisableBit === undefined
+            ? "不限"
+            : uacDisableBitLabels[query.uacDisableBit]}
+        </span>
       </p>
       {(query.sAMAccountName || query.startTm || query.creatTm) && (
         <p
@@ -880,15 +883,17 @@ function Assets({
                   {list.list.map((row) => (
                     <tr key={row.objectGUID}>
                       <td data-label="SAM" className="asset-name">
-                        {nullable(row.samAccountName)}
-                        <small style={{ display: "block", fontWeight: 400 }}>
-                          {
-                            uacDisableBitLabels[
-                              userUACDisableBit(row.userAccountControl)
-                            ]
-                          }{" "}
-                          / 原始 UAC：{nullable(row.userAccountControl)}
-                        </small>
+                        <span>
+                          {nullable(row.samAccountName)}
+                          <small style={{ display: "block", fontWeight: 400 }}>
+                            {
+                              uacDisableBitLabels[
+                                userUACDisableBit(row.userAccountControl)
+                              ]
+                            }{" "}
+                            / 原始 UAC：{nullable(row.userAccountControl)}
+                          </small>
+                        </span>
                       </td>
                       <td data-label="GUID" className="asset-identifier">
                         {display(row.objectGUID)}

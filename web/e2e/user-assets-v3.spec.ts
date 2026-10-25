@@ -1139,9 +1139,10 @@ test("UserAssetsV3 real workspace, pins, identity facts and native reader invali
     ),
   ).toBe(true);
   const firstBounds = await table.locator("tbody tr").first().boundingBox();
+  // Preserve source-bound partial pixels if the unchanged layout gate fails.
+  await capture("user-assets-v3-desktop-list.png", first.value);
   expect(firstBounds).not.toBeNull();
   expect(firstBounds!.y + firstBounds!.height).toBeLessThanOrEqual(900);
-  await capture("user-assets-v3-desktop-list.png", first.value);
 
   await test.step("actual ordered raw SPN, hostile controls, zero, max and null facts", async () => {
     for (const row of [1, 2, 3]) {
