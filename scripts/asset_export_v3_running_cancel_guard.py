@@ -169,6 +169,13 @@ STRICT_CANDIDATE_VALUES = MappingProxyType({key: TRANSACTION_FAILURE_VALUES[key]
 TUPLE_FAILURE_VALUES = MappingProxyType({key: frozenset({'matched', 'rejected'})
     for key in ('tupleQueryCheck', 'tupleRelationCheck', 'tupleModeCheck',
                 'tupleBarrierCheck', 'tupleWaitCheck')})
+# Diagnostic categories only; the original transactionid predicate stays below.
+TRANSACTION_LOCK_FAILURE_VALUES = MappingProxyType({
+    'modeCategory': RELATION_FAILURE_VALUES['modeCategory'],
+    'queryKind': RELATION_FAILURE_VALUES['queryKind'],
+    'waitTypeCategory': TRANSACTION_FAILURE_VALUES['waitTypeCategory'],
+})
+TRANSACTION_LOCK_FAILURE_FLAGS = ('granted', 'directBarrier', 'otherBlockers', 'barrierReachable')
 OBSERVATION_FAILURE_VALUES = MappingProxyType({
     'observationCheck': frozenset({'sessions', 'barrier_pid', 'session_fields',
         'pid', 'transaction', 'state_type', 'state_value', 'query', 'wait_type',
@@ -288,6 +295,16 @@ def failure_event(stage, error):
             and all(type(detail[key]) is str and detail[key] in values
                     for key, values in TUPLE_FAILURE_VALUES.items())):
         event.update({key: detail[key] for key in TUPLE_FAILURE_VALUES})
+    detail = getattr(error, 'transaction_lock_diagnostic', None) if (
+        type(error) is RuntimeError and reason == 'unsafe_transaction_lock'
+        and stage == 'candidate_strict') else None
+    if (type(detail) is dict and set(detail) == set(TRANSACTION_LOCK_FAILURE_VALUES)
+            | set(TRANSACTION_LOCK_FAILURE_FLAGS)
+            and all(type(detail[key]) is bool for key in TRANSACTION_LOCK_FAILURE_FLAGS)
+            and all(type(detail[key]) is str and detail[key] in values
+                    for key, values in TRANSACTION_LOCK_FAILURE_VALUES.items())):
+        event.update({key: detail[key] for key in
+            (*TRANSACTION_LOCK_FAILURE_VALUES, *TRANSACTION_LOCK_FAILURE_FLAGS)})
     detail = getattr(error, 'observation_diagnostic', None) if reason == 'invalid_session_observation' else None
     if (type(detail) is dict and set(detail) == set(OBSERVATION_FAILURE_VALUES)
             and all(type(detail[key]) is str and detail[key] in values
@@ -488,9 +505,29 @@ def validate_sessions(sessions, lock_pid):
             elif typ == 'virtualxid':
                 require(mode == 'ExclusiveLock' and lock['granted'], 'unsafe virtual transaction lock')
             elif typ == 'transactionid':
-                require((mode == 'ExclusiveLock' and lock['granted']) or
-                        (kind == 'activity' and mode == 'ShareLock' and not lock['granted'] and
-                         session['pid'] in reachable), 'unsafe transaction lock')
+                try:
+                    require((mode == 'ExclusiveLock' and lock['granted']) or
+                            (kind == 'activity' and mode == 'ShareLock' and not lock['granted'] and
+                             session['pid'] in reachable), 'unsafe transaction lock')
+                except RuntimeError as error:
+                    # Only the exact rejected lock and existing graph/sample.
+                    # Projection must not replace the original strict exception.
+                    try:
+                        if (type(error) is RuntimeError and error.args == ('unsafe transaction lock',)
+                                and type(lock['granted']) is bool):
+                            wait = session['waitType']
+                            error.transaction_lock_diagnostic = {
+                                'modeCategory': mode if type(mode) is str and mode in TRANSACTION_LOCK_FAILURE_VALUES['modeCategory'] else 'other',
+                                'queryKind': kind if type(kind) is str and kind in TRANSACTION_LOCK_FAILURE_VALUES['queryKind'] else 'unclassified',
+                                'waitTypeCategory': ('none' if wait is None else wait if type(wait) is str and wait in TRANSACTION_LOCK_FAILURE_VALUES['waitTypeCategory'] else 'other'),
+                                'granted': lock['granted'],
+                                'directBarrier': lock_pid in session['blockers'],
+                                'otherBlockers': any(pid != lock_pid for pid in session['blockers']),
+                                'barrierReachable': session['pid'] in reachable,
+                            }
+                    except Exception:
+                        pass  # Diagnostic failure cannot replace strict rejection.
+                    raise
             elif typ == 'tuple':
                 try:
                     require(kind == 'activity' and lock['relation'] == 'adtr.system_worker_activity'

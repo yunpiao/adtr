@@ -54,6 +54,25 @@ export function identityJSONFailureMessage(value: unknown): string {
     default: return "identity_response_json_failed; json_failure_class=unknown";
   }
 }
+export type IdentityRequestFailureClass = "aborted" | "connection_reset" | "connection_closed" | "connection_refused" | "timed_out" | "failed" | "unknown";
+// Exact allowlist projection only. Never stringify a Request failure or invoke
+// an accessor: unknown strings may contain URLs or other private text.
+export function classifyIdentityRequestFailure(value: unknown): IdentityRequestFailureClass {
+  try {
+    if (typeof value !== "object" || value === null || types.isProxy(value)) return "unknown";
+    const descriptor = Object.getOwnPropertyDescriptor(value, "errorText");
+    if (!descriptor || !Object.hasOwn(descriptor, "value")) return "unknown";
+    switch (descriptor.value) {
+      case "net::ERR_ABORTED": return "aborted";
+      case "net::ERR_CONNECTION_RESET": return "connection_reset";
+      case "net::ERR_CONNECTION_CLOSED": return "connection_closed";
+      case "net::ERR_CONNECTION_REFUSED": return "connection_refused";
+      case "net::ERR_TIMED_OUT": return "timed_out";
+      case "net::ERR_FAILED": return "failed";
+      default: return "unknown";
+    }
+  } catch { return "unknown"; }
+}
 // Read the first eligible original Playwright Response, not a replacement or
 // application-native JSON observation. FRESH means first host-observed after
 // arming; the bounded Page request snapshot cannot prove native initiation time.
@@ -68,18 +87,64 @@ export async function readNativeFocusIdentity(page: Page): Promise<number> {
   let jsonFailureClass: IdentityJSONFailureClass = "unknown";
   let frame: Frame | undefined, origin = "", selectedRequest: Request | undefined, selectedResponse: Response | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined, cleanupFailed = false;
+  // Host observations only, not native initiation/finish or causal proof. Keep
+  // the existing deadline and first-result state machine independent of logging.
+  type DiagnosticEvent = "prepare" | "armed" | "focus_call" | "focus_resolved" | "focus_rejected" |
+    "selected" | "json_call" | "json_resolved" | "json_rejected" | "request_finished" | "request_failed" |
+    "first_failure" | "success" | "cleanup" | "old_request" | "fresh_request";
+  type RequestObservation = { finishedAtMs: number | null; failedAtMs: number | null; failureClass: IdentityRequestFailureClass | "not_observed" };
+  const startedAt = deadline - 15_000;
+  const events: { event: DiagnosticEvent; atMs: number }[] = [];
+  const requestObservations = new Map<Request, RequestObservation>();
+  const diagnosticRemovers: (() => void)[] = [];
+  let diagnosticFault = false, eventsDropped = 0, laterMatchingResponses = 0, repeatedSelectedResponses = 0;
+  let selectedObservation: RequestObservation | undefined;
+  let selectedStatus: 200 | null = null;
+  let focusSettled = false, focusSettledWhenJSONRejected: boolean | null = null;
+  const observedRequests = { old: 0, fresh: 0 };
+  const relativeTime = () => Math.min(15_000, Math.max(0, Math.floor(Date.now() - startedAt)));
+  const note = (event: DiagnosticEvent) => {
+    if (!active) return;
+    try {
+      if (events.length < 32) events.push({ event, atMs: relativeTime() });
+      else eventsDropped = Math.min(65_535, eventsDropped + 1);
+    } catch { diagnosticFault = true; }
+  };
+  const observeTerminal = (request: Request, failed: boolean) => {
+    if (!active || state.phase === "SUCCESS" || state.phase === "FAILURE") return;
+    try {
+      // Object identity only: no URL/body/header reinspection or new command.
+      const observation = requestObservations.get(request);
+      if (!observation) return;
+      if (failed && observation.failedAtMs === null) {
+        observation.failedAtMs = relativeTime();
+        try { observation.failureClass = classifyIdentityRequestFailure(request.failure()); }
+        catch { observation.failureClass = "unknown"; diagnosticFault = true; }
+      } else if (!failed && observation.finishedAtMs === null) observation.finishedAtMs = relativeTime();
+      if (request === selectedRequest) note(failed ? "request_failed" : "request_finished");
+    } catch { diagnosticFault = true; }
+  };
+  const requestFinished = (request: Request) => { observeTerminal(request, false); };
+  const requestFailed = (request: Request) => { observeTerminal(request, true); };
+  const installDiagnostic = (add: () => void, remove: () => void) => {
+    try { add(); diagnosticRemovers.push(remove); }
+    catch { diagnosticFault = true; }
+  };
+  note("prepare");
   let complete!: () => void;
   const completion = new Promise<void>(resolve => { complete = resolve; });
   const finish = () => {
     if (state.phase === "FAILURE") { if (pending === 0) complete(); }
-    else if (state.phase === "SELECTED" && focusDone && id !== undefined) { state.phase = "SUCCESS"; complete(); }
+    else if (state.phase === "SELECTED" && focusDone && id !== undefined) { state.phase = "SUCCESS"; note("success"); complete(); }
   };
   const fail = (failure: Failure) => {
     if (!active || state.phase === "SUCCESS") return;
-    if (state.phase !== "FAILURE") { state.failure = failure; state.phase = "FAILURE"; }
+    if (state.phase !== "FAILURE") { state.failure = failure; state.phase = "FAILURE"; note("first_failure"); }
     finish();
   };
   const failJSON = (reason: unknown) => {
+    // Settlement timing only, including a rejection after another first failure.
+    if (active && focusSettledWhenJSONRejected === null) focusSettledWhenJSONRejected = focusSettled;
     // Do not inspect a late reason or let a new deadline check change the winner.
     if (active && state.phase === "SELECTED") jsonFailureClass = classifyIdentityJSONFailure(reason);
     fail("identity_response_json_failed");
@@ -93,6 +158,14 @@ export async function readNativeFocusIdentity(page: Page): Promise<number> {
   const record = (request: Request, beforeAction: boolean) => {
     if (old.has(request)) return;
     if (!fresh.has(request) && old.size + fresh.size >= 256) { fail("identity_record_limit"); return; }
+    try {
+      if (!requestObservations.has(request)) {
+        requestObservations.set(request, { finishedAtMs: null, failedAtMs: null, failureClass: "not_observed" });
+        const kind = beforeAction ? "old" : "fresh";
+        observedRequests[kind]++;
+        if (observedRequests[kind] === 1) note(beforeAction ? "old_request" : "fresh_request");
+      }
+    } catch { diagnosticFault = true; }
     if (beforeAction) { fresh.delete(request); old.add(request); }
     else fresh.add(request);
   };
@@ -109,6 +182,10 @@ export async function readNativeFocusIdentity(page: Page): Promise<number> {
       if (state.phase === "PREPARING") { record(request, true); return; }
       if (old.has(request)) return;
       if (selectedResponse) {
+        // Matching pathname only, not another eligible/canonical200 candidate.
+        // Counting ends at first failure/success via live(); no post-failure reads.
+        laterMatchingResponses = Math.min(65_535, laterMatchingResponses + 1);
+        if (request === selectedRequest) repeatedSelectedResponses = Math.min(65_535, repeatedSelectedResponses + 1);
         if (request === selectedRequest && response !== selectedResponse) fail("identity_request_ambiguous");
         return;
       }
@@ -125,10 +202,15 @@ export async function readNativeFocusIdentity(page: Page): Promise<number> {
       if (!fresh.has(request)) { fail("identity_request_ambiguous"); return; }
       if (!live()) return;
       selectedRequest = request; selectedResponse = response; state.phase = "SELECTED"; pending++;
+      selectedStatus = 200; // Already verified above; no extra status/URL read.
+      try { selectedObservation = requestObservations.get(request); } catch { diagnosticFault = true; }
+      note("selected");
       try {
         // Synchronous call in this response event, exactly once on this object.
         // Playwright owns its original body implementation and any internal fallback.
+        note("json_call");
         void response.json().then(value => {
+          note("json_resolved");
           pending--;
           if (live()) {
             try {
@@ -139,8 +221,8 @@ export async function readNativeFocusIdentity(page: Page): Promise<number> {
             } catch { fail("identity_invalid_id"); }
           }
           finish();
-        }, reason => { pending--; failJSON(reason); finish(); });
-      } catch (reason) { pending--; failJSON(reason); }
+        }, reason => { note("json_rejected"); pending--; failJSON(reason); finish(); });
+      } catch (reason) { note("json_rejected"); pending--; failJSON(reason); }
     } catch { fail("identity_response_metadata"); }
   };
   const changed = () => { if (live()) fail("identity_page_changed"); };
@@ -155,6 +237,8 @@ export async function readNativeFocusIdentity(page: Page): Promise<number> {
       install(() => { page.on("close", changed); }, () => { page.off("close", changed); });
       install(() => { page.on("crash", changed); }, () => { page.off("crash", changed); });
       install(() => { page.on("framenavigated", navigated); }, () => { page.off("framenavigated", navigated); });
+      installDiagnostic(() => { page.on("requestfinished", requestFinished); }, () => { page.off("requestfinished", requestFinished); });
+      installDiagnostic(() => { page.on("requestfailed", requestFailed); }, () => { page.off("requestfailed", requestFailed); });
       if (page.isClosed()) changed();
       if (live()) {
         pending++;
@@ -170,14 +254,16 @@ export async function readNativeFocusIdentity(page: Page): Promise<number> {
               }
               if (!live()) { finish(); return; }
               // Arm and invoke the native action in the same synchronous segment.
-              state.phase = "ARMED"; pending++;
+              state.phase = "ARMED"; pending++; note("armed");
               try {
+                note("focus_call");
                 void page.bringToFront().then(() => {
+                  if (active) focusSettled = true; note("focus_resolved");
                   pending--;
                   if (live()) focusDone = true;
                   finish();
-                }, () => { pending--; fail("identity_focus_failed"); finish(); });
-              } catch { pending--; fail("identity_focus_failed"); }
+                }, () => { if (active) focusSettled = true; note("focus_rejected"); pending--; fail("identity_focus_failed"); finish(); });
+              } catch { if (active) focusSettled = true; note("focus_rejected"); pending--; fail("identity_focus_failed"); }
             } catch { fail("identity_prepare_failed"); }
             finish();
           }, () => { pending--; fail("identity_prepare_failed"); finish(); });
@@ -188,11 +274,28 @@ export async function readNativeFocusIdentity(page: Page): Promise<number> {
   } finally {
     // Pending original protocol commands are quarantined, not cancelled/joined.
     // The existing Page/context fixture owns their eventual normal disposal.
+    note("cleanup");
     active = false;
     for (const remove of removers) { try { remove(); } catch { cleanupFailed = true; } }
     removers.length = 0;
+    for (const remove of diagnosticRemovers) { try { remove(); } catch { diagnosticFault = true; } }
+    diagnosticRemovers.length = 0;
     if (timer !== undefined) clearTimeout(timer);
     old.clear(); fresh.clear(); selectedRequest = undefined; selectedResponse = undefined; frame = undefined;
+    requestObservations.clear();
+    // One bounded line after cleanup; logging failure cannot replace the outcome.
+    // Missing host events remain not_observed, never inferred success/abort.
+    try {
+      console.log("[v4-focus-identity] " + JSON.stringify({
+        schema: "v1", phase: state.phase, failure: state.failure ?? null, jsonFailureClass,
+        events, eventsDropped, diagnosticFault, cleanupFailed,
+        selected: selectedStatus === 200, selectedStatus,
+        selectedRequest: selectedObservation ?? null, focusSettledWhenJSONRejected,
+        laterMatchingResponses, repeatedSelectedResponses, observedRequests,
+        counterWindow: "selected_until_first_terminal_state",
+        requestTerminalWindow: "observed_request_until_first_terminal_state", eventWindow: "prepare_until_cleanup",
+      }));
+    } catch { /* Diagnostics cannot change the original success/failure. */ }
   }
   if (state.failure || cleanupFailed) throw Object.assign(new Error(state.failure === "identity_response_json_failed" ? identityJSONFailureMessage(jsonFailureClass) : state.failure ?? "identity_cleanup_failed"),
     cleanupFailed ? { cleanupFailure: "identity_cleanup_failed" } : {});
