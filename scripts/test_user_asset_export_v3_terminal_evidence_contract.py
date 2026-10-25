@@ -84,7 +84,43 @@ QUEUED_CANCEL_POST_RESUME = '''    phase = "resume-owned-worker";
     phase = "old-panel-task-id-viewport";
     await expect(panel.getByText(`任务 ID：${originalTaskID}`, { exact: true })).toBeInViewport({ ratio: 1 });
     phase = "old-panel-create-button-viewport";
-    await expect(panel.getByRole("button", { name: "按当前列表创建另一导出", exact: true })).toBeInViewport({ ratio: 1 });
+    try {
+      await expect(panel.getByRole("button", { name: "按当前列表创建另一导出", exact: true })).toBeInViewport({ ratio: 1 });
+    } catch (originalFailure) {
+      let diagnosticTimer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        // Failure-only, one-shot DOM reads; count 2 means two or more matches.
+        // Never emit text, identity, DOM, requests, or the original exception.
+        const measure = (elements: Element[]) => {
+          const count = elements.length === 0 ? 0 : elements.length === 1 ? 1 : 2;
+          const box = elements.length === 1 ? elements[0].getBoundingClientRect() : null;
+          const rect = box && [box.x, box.y, box.width, box.height].every((value) => Number.isFinite(value) && Math.abs(value) <= 1_000_000)
+            && box.width >= 0 && box.height >= 0
+            ? { x: box.x, y: box.y, width: box.width, height: box.height } : null;
+          return { count, rect };
+        };
+        const size = page.viewportSize();
+        const viewport = size && [size.width, size.height].every((value) => Number.isFinite(value) && value >= 0 && value <= 1_000_000)
+          ? { width: size.width, height: size.height } : null;
+        const deadline = new Promise<never>((_, reject) => {
+          diagnosticTimer = setTimeout(() => reject(new Error("Viewport diagnostic deadline")), 1_000);
+        });
+        const [status, taskIdentity, nextExport] = await Promise.race([
+          Promise.all([
+            cancelledStatus.evaluateAll(measure),
+            panel.getByText(`任务 ID：${originalTaskID}`, { exact: true }).evaluateAll(measure),
+            panel.getByRole("button", { name: "按当前列表创建另一导出", exact: true }).evaluateAll(measure),
+          ]),
+          deadline,
+        ]);
+        console.log("User export terminal viewport diagnostic: " + JSON.stringify({ viewport, status, taskIdentity, nextExport }));
+      } catch {
+        console.log("User export terminal viewport diagnostic unavailable");
+      } finally {
+        if (diagnosticTimer !== undefined) clearTimeout(diagnosticTimer);
+      }
+      throw originalFailure;
+    }
 
 '''
 
@@ -435,6 +471,38 @@ class TerminalEvidenceContract(unittest.TestCase):
         after = '    const postResumeDatabase = await terminalExport(originalTaskID);\n    phase = "post-resume-database";'
         with self.assertRaises(ValueError):
             queued_cancel_browser_contract(source.replace(before, after, 1))
+
+
+    def test_queued_browser_failure_geometry_diagnostic_mutations(self):
+        root = Path(__file__).resolve().parents[1]
+        source = (root / 'web/e2e/user-asset-export-v3-cancel.spec.ts').read_text()
+        queued_cancel_browser_contract(source)
+        mutations = [
+            ('raw error payload', 'JSON.stringify({ viewport, status, taskIdentity, nextExport })', 'JSON.stringify({ viewport, status, taskIdentity, nextExport, originalFailure })'),
+            ('raw task identity payload', 'JSON.stringify({ viewport, status, taskIdentity, nextExport })', 'JSON.stringify({ viewport, status, taskIdentity, nextExport, originalTaskID })'),
+            ('DOM text payload', 'return { count, rect };', 'return { count, rect, text: elements[0]?.textContent };'),
+            ('unbounded count', 'const count = elements.length === 0 ? 0 : elements.length === 1 ? 1 : 2;', 'const count = elements.length;'),
+            ('open rectangle object', '{ x: box.x, y: box.y, width: box.width, height: box.height }', '{ ...box }'),
+            ('nonfinite rectangle allowed', 'Number.isFinite(value) && Math.abs(value) <= 1_000_000', 'Math.abs(value) <= 1_000_000'),
+            ('unbounded rectangle allowed', 'Number.isFinite(value) && Math.abs(value) <= 1_000_000', 'Number.isFinite(value)'),
+            ('negative rectangle size allowed', '&& box.width >= 0 && box.height >= 0', ''),
+            ('unbounded viewport allowed', 'Number.isFinite(value) && value >= 0 && value <= 1_000_000', 'Number.isFinite(value)'),
+            ('multiple-match geometry', 'elements.length === 1 ? elements[0].getBoundingClientRect() : null', 'elements.length > 0 ? elements[0].getBoundingClientRect() : null'),
+            ('diagnostic deadline enlarged', 'setTimeout(() => reject(new Error("Viewport diagnostic deadline")), 1_000)', 'setTimeout(() => reject(new Error("Viewport diagnostic deadline")), 60_000)'),
+            ('diagnostic deadline ignored', 'const [status, taskIdentity, nextExport] = await Promise.race([', 'const [status, taskIdentity, nextExport] = await Promise.all(['),
+            ('diagnostic timer not cleared', 'if (diagnosticTimer !== undefined) clearTimeout(diagnosticTimer);', ''),
+            ('diagnostic error exposed', 'console.log("User export terminal viewport diagnostic unavailable");', 'console.log(originalFailure);'),
+            ('original failure swallowed', '      throw originalFailure;', '      return;'),
+            ('original failure replaced', '      throw originalFailure;', '      throw new Error("diagnostic failure");'),
+            ('button assertion weakened', 'await expect(panel.getByRole("button", { name: "按当前列表创建另一导出", exact: true })).toBeInViewport({ ratio: 1 });', 'await expect(panel.getByRole("button", { name: "按当前列表创建另一导出", exact: true })).toBeInViewport({ ratio: 0.5 });'),
+            ('scroll target changed', 'await cancelledStatus.scrollIntoViewIfNeeded();', 'await panel.getByRole("button", { name: "按当前列表创建另一导出", exact: true }).scrollIntoViewIfNeeded();'),
+            ('diagnostic adds scrolling', 'cancelledStatus.evaluateAll(measure),', 'cancelledStatus.scrollIntoViewIfNeeded(),'),
+        ]
+        for label, before, after in mutations:
+            with self.subTest(mutation=label):
+                self.assertEqual(source.count(before), 1, 'mutation must target one diagnostic boundary')
+                with self.assertRaises(ValueError):
+                    queued_cancel_browser_contract(source.replace(before, after, 1))
 
 
 if __name__ == '__main__':

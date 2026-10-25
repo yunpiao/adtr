@@ -216,7 +216,43 @@ test("queued export is cancelled from its original task without a tab locator an
     phase = "old-panel-task-id-viewport";
     await expect(panel.getByText(`任务 ID：${originalTaskID}`, { exact: true })).toBeInViewport({ ratio: 1 });
     phase = "old-panel-create-button-viewport";
-    await expect(panel.getByRole("button", { name: "按当前列表创建另一导出", exact: true })).toBeInViewport({ ratio: 1 });
+    try {
+      await expect(panel.getByRole("button", { name: "按当前列表创建另一导出", exact: true })).toBeInViewport({ ratio: 1 });
+    } catch (originalFailure) {
+      let diagnosticTimer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        // Failure-only, one-shot DOM reads; count 2 means two or more matches.
+        // Never emit text, identity, DOM, requests, or the original exception.
+        const measure = (elements: Element[]) => {
+          const count = elements.length === 0 ? 0 : elements.length === 1 ? 1 : 2;
+          const box = elements.length === 1 ? elements[0].getBoundingClientRect() : null;
+          const rect = box && [box.x, box.y, box.width, box.height].every((value) => Number.isFinite(value) && Math.abs(value) <= 1_000_000)
+            && box.width >= 0 && box.height >= 0
+            ? { x: box.x, y: box.y, width: box.width, height: box.height } : null;
+          return { count, rect };
+        };
+        const size = page.viewportSize();
+        const viewport = size && [size.width, size.height].every((value) => Number.isFinite(value) && value >= 0 && value <= 1_000_000)
+          ? { width: size.width, height: size.height } : null;
+        const deadline = new Promise<never>((_, reject) => {
+          diagnosticTimer = setTimeout(() => reject(new Error("Viewport diagnostic deadline")), 1_000);
+        });
+        const [status, taskIdentity, nextExport] = await Promise.race([
+          Promise.all([
+            cancelledStatus.evaluateAll(measure),
+            panel.getByText(`任务 ID：${originalTaskID}`, { exact: true }).evaluateAll(measure),
+            panel.getByRole("button", { name: "按当前列表创建另一导出", exact: true }).evaluateAll(measure),
+          ]),
+          deadline,
+        ]);
+        console.log("User export terminal viewport diagnostic: " + JSON.stringify({ viewport, status, taskIdentity, nextExport }));
+      } catch {
+        console.log("User export terminal viewport diagnostic unavailable");
+      } finally {
+        if (diagnosticTimer !== undefined) clearTimeout(diagnosticTimer);
+      }
+      throw originalFailure;
+    }
 
     phase = "new-entry-terminal-pixels";
     await taskPage.bringToFront();
