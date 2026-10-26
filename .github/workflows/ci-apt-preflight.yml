@@ -1,0 +1,35 @@
+name: apt-readonly-preflight
+# Explicit diagnostic branch only. No PR is opened; engineering-ci stays unchanged.
+on:
+  push:
+    branches: ['ci/apt-preflight-20261026']
+permissions: {}
+concurrency:
+  group: apt-preflight-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  observe:
+    if: ${{ github.repository == 'yunpiao/adtr' && github.ref == 'refs/heads/ci/apt-preflight-20261026' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Validate read-only preflight contracts without host collection
+        run: python3 -I -m unittest discover -s scripts -p test_ci_apt_preflight_contract.py
+      - name: Collect bounded public runner observations without provisioning
+        id: collect
+        run: python3 -I scripts/ci_apt_preflight.py --output "$RUNNER_TEMP/adtr-apt-preflight.json"
+      - name: Retain only this invocation's validated closed receipt
+        if: ${{ always() && steps.collect.outputs.receipt_written == 'true' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: apt-readonly-preflight-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/adtr-apt-preflight.json
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 1
