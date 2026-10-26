@@ -37,6 +37,55 @@ def plan(analyzed=True):
 
 
 class ProjectionContracts(unittest.TestCase):
+    def test_pg17_analyze_bitmap_heap_counters_are_closed_integer_evidence(self):
+        # REL_17_6 explain.c show_tidbitmap_info emits both in non-text ANALYZE,
+        # including zero counters and a never-executed Bitmap Heap Scan.
+        # This is a source-derived synthetic shape, not retained runtime JSON.
+        for exact, lossy, loops in ((0, 0, 1), (4, 2, 1), (0, 0, 0)):
+            raw = plan()
+            raw[0]['Plan']['Plans'].append({
+                'Node Type': 'Bitmap Heap Scan', 'Actual Rows': 0, 'Actual Loops': loops,
+                'Exact Heap Blocks': exact, 'Lossy Heap Blocks': lossy})
+            with self.subTest(exact=exact, lossy=lossy, loops=loops):
+                result = runtime.project_plan(raw, True)
+                counts = result['nodes'][-1]['counts']
+                self.assertEqual(counts['Exact Heap Blocks'], exact)
+                self.assertEqual(counts['Lossy Heap Blocks'], lossy)
+                self.assertEqual(counts['Actual Loops'], loops)
+
+    def test_bitmap_counters_reject_bad_values_and_unreviewed_scope(self):
+        for key in ('Exact Heap Blocks', 'Lossy Heap Blocks'):
+            for value in (True, 1.0, -1, 10**12 + 1, 'private-value', None):
+                raw = plan()
+                raw[0]['Plan']['Plans'].append({
+                    'Node Type': 'Bitmap Heap Scan', 'Actual Rows': 0, 'Actual Loops': 0,
+                    'Exact Heap Blocks': 0, 'Lossy Heap Blocks': 0, key: value})
+                with self.subTest(key=key, value=type(value).__name__), self.assertRaises(runtime.PlanError):
+                    runtime.project_plan(raw, True)
+        for analyzed, kind, key in ((False, 'Bitmap Heap Scan', 'Exact Heap Blocks'),
+                                     (True, 'Seq Scan', 'Lossy Heap Blocks'),
+                                     (True, 'Bitmap Heap Scan', 'Unreviewed Bitmap Counter')):
+            raw = plan(analyzed)
+            raw[0]['Plan']['Plans'].append({
+                'Node Type': kind, 'Actual Rows': 0, 'Actual Loops': 0, key: 0})
+            with self.subTest(analyzed=analyzed, kind=kind, key=key), self.assertRaises(runtime.PlanError):
+                runtime.project_plan(raw, analyzed)
+
+    def test_failure_projection_does_not_trust_exception_attributes(self):
+        error = runtime.PlanError()
+        error.category = {'private-category': 'private-value'}
+        error.node_class = 'private-node'
+        self.assertEqual(runtime.projection_failure(error), {
+            'category': 'unexpected', 'nodeClass': 'not_identified'})
+
+        class UnreviewedError(RuntimeError):
+            @property
+            def category(self):
+                raise AssertionError('must not inspect arbitrary exceptions')
+
+        self.assertEqual(runtime.projection_failure(UnreviewedError('private-error')), {
+            'category': 'unexpected', 'nodeClass': 'not_identified'})
+
     def test_plain_and_analyze_are_distinct_and_preserve_tree_and_loops(self):
         plain = runtime.project_plan(plan(False), False)
         analyzed = runtime.project_plan(plan(), True)
@@ -151,7 +200,7 @@ class RuntimeOwnershipContracts(unittest.TestCase):
                 'ADTR_TEST_DATABASE_URL': 'postgres://postgres:synthetic@127.0.0.1:1234/adtr_test?sslmode=disable'}
 
     def exercise(self, bad_analyze=False, close_failure=False, migrate_failure=False,
-                 leftover=0, constructor_failure=False, preparation=None, visible=2):
+                 leftover=0, constructor_failure=False, preparation=None, visible=2, analyze_raw=None):
         clients = [Mock(), Mock()]
         for client in clients:
             client.open_transaction.return_value = preparation if preparation is not None else {
@@ -172,6 +221,8 @@ class RuntimeOwnershipContracts(unittest.TestCase):
             if sql.startswith('EXPLAIN (ANALYZE'):
                 if bad_analyze:
                     raise RuntimeError('private-plan-error')
+                if analyze_raw is not None:
+                    return analyze_raw
                 return json.dumps(plan())
             return json.dumps(plan(False))
 
@@ -190,6 +241,7 @@ class RuntimeOwnershipContracts(unittest.TestCase):
         self.assertIsNone(result['firstFailureStage'])
         self.assertEqual(result['cleanup'], {'clientsClosed': True, 'zeroOtherDatabaseBackends': True})
         self.assertEqual(len(result['plans']), 2)
+        self.assertTrue(all(attempt['failure'] is None for attempt in result['planAttempts']))
         self.assertEqual(result['ownedPreparation'], [
             {'appMatches': True, 'transactionReadOnly': True, 'activityRows': 0}] * 2)
         self.assertEqual(result['ownedSessionCounts'], {'beforePlan': 2, 'afterPlan': 2})
@@ -424,6 +476,55 @@ class RuntimeOwnershipContracts(unittest.TestCase):
         self.assertEqual(result['planAttempts'][0]['rawPlanSHA256'], runtime.sha(raw))
         self.assertEqual(result['plans'], [])
         self.assertNotIn(raw, json.dumps(result))
+
+    def test_analyze_rejection_categories_are_closed_and_keep_first_failure(self):
+        cases = [('json_decode', 'not_identified', '{private-invalid-json')]
+        for mutation, category, node_class in (
+                ('root_key', 'schema', 'not_identified'),
+                ('node_key', 'schema', 'Result'),
+                ('unknown_node', 'schema', 'unrecognized'),
+                ('visible_rows', 'two_owned_visibility', 'not_identified'),
+                ('lock_loops', 'lock_scan_execution', 'not_identified')):
+            raw = plan()
+            if mutation == 'root_key':
+                raw[0]['private-key'] = 'private-value'
+            elif mutation == 'node_key':
+                raw[0]['Plan']['private-key'] = 'private-value'
+            elif mutation == 'unknown_node':
+                raw[0]['Plan']['Plans'][0]['Node Type'] = 'private-node'
+            elif mutation == 'visible_rows':
+                raw[0]['Plan']['Plans'][0]['Actual Rows'] = 1
+            else:
+                raw[0]['Plan']['Plans'][1]['Actual Loops'] = 0
+            cases.append((category, node_class, json.dumps(raw)))
+        for category, node_class, raw in cases:
+            with self.subTest(category=category, node_class=node_class), \
+                    patch.object(runtime, 'unique_json', wraps=runtime.unique_json) as parse:
+                result, clients, _ = self.exercise(analyze_raw=raw, close_failure=True)
+            self.assertEqual(parse.call_count, 3)  # version, plain, analyze; no retry
+            self.assertEqual(result['firstFailureStage'], 'analyze')
+            self.assertFalse(result['success'])
+            self.assertFalse(result['cleanup']['clientsClosed'])
+            self.assertEqual(result['ownedSessionCounts']['afterPlan'], None)
+            self.assertEqual(len(result['plans']), 1)
+            self.assertEqual(len(result['planAttempts']), 2)
+            attempt = result['planAttempts'][-1]
+            self.assertFalse(attempt['projected'])
+            self.assertEqual(attempt['rawPlanSHA256'], runtime.sha(raw))
+            self.assertEqual(attempt['failure'], {'category': category, 'nodeClass': node_class})
+            self.assertNotIn('private-', json.dumps(result))
+            for client in clients:
+                client.close.assert_called_once()
+
+    def test_unexpected_projection_failure_is_private_and_not_retried(self):
+        with patch.object(runtime, 'project_plan', side_effect=RuntimeError('private-unexpected')) as project:
+            result, _, _ = self.exercise()
+        project.assert_called_once()
+        self.assertEqual(result['firstFailureStage'], 'explain')
+        self.assertEqual(result['planAttempts'][0]['failure'], {
+            'category': 'unexpected', 'nodeClass': 'not_identified'})
+        self.assertFalse(result['success'])
+        self.assertNotIn('private-', json.dumps(result))
 
 
 class SourceScopeContracts(unittest.TestCase):

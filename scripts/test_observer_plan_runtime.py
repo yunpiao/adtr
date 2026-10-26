@@ -39,6 +39,7 @@ COUNTS = frozenset(('Plan Rows', 'Plan Width', 'Actual Rows', 'Actual Loops',
                     'Original Hash Buckets', 'Hash Batches', 'Original Hash Batches',
                     'Peak Memory Usage', 'Sort Space Used', 'Workers Planned',
                     'Workers Launched', 'Subplans Removed'))
+BITMAP_COUNTS = frozenset(('Exact Heap Blocks', 'Lossy Heap Blocks'))
 TIMINGS = frozenset(('Startup Cost', 'Total Cost', 'Actual Startup Time', 'Actual Total Time'))
 BOOLEANS = frozenset(('Parallel Aware', 'Async Capable', 'Inner Unique', 'Single Copy'))
 ENUMS = {
@@ -52,15 +53,33 @@ ENUMS = {
 NAMES = frozenset(('Schema', 'Relation Name', 'Index Name', 'Alias', 'Function Name'))
 NODE_KEYS = (EXPRESSIONS | EXPRESSION_LISTS | COUNTS | TIMINGS | BOOLEANS | NAMES |
              set(ENUMS) | {'Node Type', 'Parent Relationship', 'Subplan Name', 'Plans'})
+FAILURE_CATEGORIES = frozenset(('json_decode', 'schema', 'two_owned_visibility',
+                                'lock_scan_execution', 'unexpected'))
 
 
 class PlanError(RuntimeError):
-    pass
+    def __init__(self, category='schema'):
+        super().__init__('observer plan evidence rejected')
+        self.category = category if type(category) is str and category in FAILURE_CATEGORIES else 'unexpected'
+        self.node_class = None
 
 
-def require(condition):
+def require(condition, category='schema'):
     if not condition:
-        raise PlanError('observer plan evidence rejected')
+        raise PlanError(category)
+
+
+def projection_failure(error):
+    # Never copy arbitrary exception text or attributes to the public receipt.
+    category, node_class = 'unexpected', 'not_identified'
+    if type(error) is json.JSONDecodeError:
+        category = 'json_decode'
+    elif type(error) is PlanError:
+        if type(error.category) is str and error.category in FAILURE_CATEGORIES:
+            category = error.category
+        if type(error.node_class) is str and error.node_class in NODE_TYPES | {'unrecognized'}:
+            node_class = error.node_class
+    return {'category': category, 'nodeClass': node_class}
 
 
 def sha(value):
@@ -108,11 +127,24 @@ def project_plan(raw, analyzed):
     nodes = []
 
     def visit(node, parent, depth):
+        try:
+            visit_node(node, parent, depth)
+        except PlanError as error:
+            if error.node_class is None:
+                kind = node.get('Node Type') if type(node) is dict else None
+                error.node_class = kind if type(kind) is str and kind in NODE_TYPES else 'unrecognized'
+            raise
+
+    def visit_node(node, parent, depth):
+        # PG 17 JSON ANALYZE emits these two integer counters even for a
+        # never-executed Bitmap Heap Scan. No other node/mode gains keys.
+        bitmap = analyzed and type(node) is dict and node.get('Node Type') == 'Bitmap Heap Scan'
+        allowed_keys = NODE_KEYS | BITMAP_COUNTS if bitmap else NODE_KEYS
         require(depth <= 32 and len(nodes) < 256 and type(node) is dict and
-                set(node) <= NODE_KEYS and type(node.get('Node Type')) is str and
+                set(node) <= allowed_keys and type(node.get('Node Type')) is str and
                 node['Node Type'] in NODE_TYPES)
         for key, value in node.items():
-            if key in COUNTS:
+            if key in COUNTS | BITMAP_COUNTS:
                 numeric(value, True)
             elif key in TIMINGS:
                 numeric(value)
@@ -131,7 +163,7 @@ def project_plan(raw, analyzed):
                      'relationship': relationship,
                      'subplanOrdinal': int(re.search(r'\d+', subplan)[0]) if subplan else None,
                      'aliasSHA256': sha(node['Alias']) if 'Alias' in node else None,
-                     'counts': {key: node[key] for key in sorted(COUNTS) if key in node},
+                     'counts': {key: node[key] for key in sorted(COUNTS | BITMAP_COUNTS) if key in node},
                      'expressions': {key: expression(node[key]) for key in sorted(EXPRESSIONS) if key in node},
                      'expressionLists': {}, 'functionClass': 'not_function',
                      'lockFunctionHasNoArguments': None, 'ownedApplicationFilter': False}
@@ -168,7 +200,8 @@ def project_plan(raw, analyzed):
                node['ownedApplicationFilter'] and node['counts'].get('Actual Rows') == 2 and
                node['counts'].get('Actual Loops') == 1]
     if analyzed:
-        require(visible and any(node['counts']['Actual Loops'] > 0 for node in locks))
+        require(visible, 'two_owned_visibility')
+        require(any(node['counts']['Actual Loops'] > 0 for node in locks), 'lock_scan_execution')
     return {'mode': 'analyze' if analyzed else 'plan_only', 'nodes': nodes,
             'planningTimeMS': root.get('Planning Time'), 'executionTimeMS': root.get('Execution Time'),
             'twoOwnedSessionsVisibleAtActivityScan': visible,
@@ -379,9 +412,13 @@ def run_experiment(container, environ):
             prefix = 'EXPLAIN (ANALYZE, VERBOSE, FORMAT JSON) ' if analyzed else 'EXPLAIN (VERBOSE, FORMAT JSON) '
             raw = observer_read(container, prefix + sql)
             attempt = {'mode': 'analyze' if analyzed else 'plan_only',
-                       'rawPlanSHA256': sha(raw), 'projected': False}
+                       'rawPlanSHA256': sha(raw), 'projected': False, 'failure': None}
             evidence['planAttempts'].append(attempt)
-            plan = project_plan(unique_json(raw), analyzed)
+            try:
+                plan = project_plan(unique_json(raw), analyzed)
+            except Exception as error:
+                attempt['failure'] = projection_failure(error)
+                raise
             plan['rawPlanSHA256'] = sha(raw)
             evidence['plans'].append(plan)
             attempt['projected'] = True
