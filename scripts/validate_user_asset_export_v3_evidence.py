@@ -79,6 +79,10 @@ def source_rows(source):
     rows = []
     for obj in value['objects']:
         base, extra = obj['base'], obj['supplemental']
+        require('userAccountControl' in base, 'raw UAC presence')
+        uac = base['userAccountControl']
+        require(uac is None or type(uac) is int and 0 <= uac <= 4294967295, 'raw nullable uint32 UAC')
+        # Validate raw UAC even for objects excluded by kind or later predicates.
         if base['kind'] != 'user':
             continue
         def text(key):
@@ -94,13 +98,18 @@ def source_rows(source):
             require(re.fullmatch(r'\d{14}(?:\.0)?Z', created) is not None, 'fixture generalized time')
             created = f'{created[:4]}-{created[4:6]}-{created[6:8]}T{created[8:10]}:{created[10:12]}:{created[12:14]}Z'
         rows.append({'guid': base['objectGUID'], 'sAMAccountName': base['samAccountName'] or '', 'sid': sid,
-                     'mail': text('mailBytes'), 'dn': base['distinguishedName'], 'whenCreated': created})
+                     'mail': text('mailBytes'), 'dn': base['distinguishedName'], 'whenCreated': created, 'userAccountControl': uac})
     require(len({r['guid'] for r in rows}) == len(rows), 'source GUID uniqueness')
     return rows
 
 
-def matched_rows(rows, request):
-    exact(request, REQUEST_KEYS, 'canonical request fields')
+def matched_rows(rows, request, *, allow_uac=False):
+    # Legacy terminal/running importers keep their exact ten-key profile.
+    # Only the format2 success consumer opts into the additional predicate.
+    require(type(request) is dict, 'canonical request object')
+    exact(request, REQUEST_KEYS | ({'uacDisableBit'} if allow_uac and 'uacDisableBit' in request else set()), 'canonical request fields')
+    if 'uacDisableBit' in request:
+        require(type(request['uacDisableBit']) is str and request['uacDisableBit'] in ('set', 'clear', 'not_returned'), 'canonical UAC filter')
     columns = request['screenColumns']
     require(type(columns) is list and 1 <= len(columns) <= 6 and len(set(columns)) == len(columns) and all(c in COLUMNS for c in columns), 'resolved columns')
     require(all(type(request[k]) is str for k in REQUEST_KEYS - {'screenColumns'}), 'request strings')
@@ -113,6 +122,13 @@ def matched_rows(rows, request):
     require(bool(request['startTm']) == bool(request['endTm']), 'paired time bounds')
     found = []
     for row in rows:
+        if 'uacDisableBit' in request:
+            uac, bit = row['userAccountControl'], request['uacDisableBit']
+            if bit == 'not_returned':
+                if uac is not None:
+                    continue
+            elif uac is None or bool(uac & 2) != (bit == 'set'):
+                continue
         if request['search'] and not any(request['search'].lower() in row[k].lower() for k in ('sAMAccountName', 'sid', 'mail', 'dn')):
             continue
         if request['sAMAccountName'] and request['sAMAccountName'] != row['sAMAccountName']:
@@ -228,7 +244,7 @@ def no_secrets(value):
 
 def validate(data, read_artifact, provenance):
     exact(data, ['format', 'provenance', 'source', 'actorId', 'sensitiveBudget', 'cases'], 'evidence envelope')
-    require(type(data['format']) is int and data['format'] == 1, 'evidence version')
+    require(type(data['format']) is int and data['format'] == 2, 'evidence version')
     require(data['provenance'] == provenance, 'checkout/run/source provenance mismatch')
     no_secrets(data)
     budget = data['sensitiveBudget']
@@ -238,14 +254,32 @@ def validate(data, read_artifact, provenance):
     require(all(type(n) is int for point in budget.values() for n in point.values()), 'integer ledger counts')
     source = data['source']
     rows = source_rows(source)
+    require(len(rows) == 12 and sorted(row['userAccountControl'] for row in rows if row['userAccountControl'] is not None) == [0] + [512] * 11, 'default LDAP user UAC distribution')
     actor = data['actorId']
     require(type(actor) is int and actor > 0 and str(actor) != source['actorId'], 'independent export owner')
     require(type(data['cases']) is list and [c['name'] for c in data['cases']] == ['allMatched', 'empty'], 'required cases')
     task_ids = set()
     for case in data['cases']:
-        exact(case, ['name', 'request', 'create', 'receipt', 'detail', 'download', 'database', 'pageSize', 'firstPageCount', 'screenshot'], 'case fields')
+        exact(case, ['name', 'request', 'create', 'receipt', 'detail', 'download', 'database', 'pageSize', 'firstPageCount', 'screenshot', 'listQueryEntries'], 'case fields')
         request = case['request']
-        expected = matched_rows(rows, request)
+        # Independent acceptance profile: never trust a copied create response or
+        # a no-match keyword to prove that the UAC filter was applied.
+        expected_request = {
+            'domainId': source['selection']['domainId'],
+            'expectedRevision': source['selection']['revision'],
+            'expectedCredentialRevision': source['selection']['credentialRevision'],
+            'observationId': source['taskUUID'], 'search': 'user-',
+            'sAMAccountName': '', 'startTm': '', 'endTm': '', 'creatTm': 'desc',
+            'screenColumns': ['mail', 'guid', 'sAMAccountName', 'dn', 'sid', 'whenCreated'],
+            **({'uacDisableBit': 'set'} if case['name'] == 'empty' else {}),
+        }
+        expected = matched_rows(rows, request, allow_uac=True)
+        require(request == expected_request, 'independent canonical success request')
+        entries = case['listQueryEntries']
+        require(type(entries) is list and all(type(pair) is list and len(pair) == 2 and all(type(value) is str for value in pair) for pair in entries), 'list query entry pairs')
+        expected_query = {key: value for key, value in expected_request.items() if key not in ('screenColumns', 'sAMAccountName', 'startTm', 'endTm')}
+        expected_query.update(pageIdx='1', pageSize='10')
+        require(sorted(entries) == sorted([list(pair) for pair in expected_query.items()]), 'complete duplicate-preserving list query binding')
         require(request['observationId'] == source['taskUUID'], 'observation binding')
         require(request['domainId'] == source['selection']['domainId'] and request['expectedRevision'] == source['selection']['revision'] and request['expectedCredentialRevision'] == source['selection']['credentialRevision'], 'source pins')
         task_id = case['create']['taskID']
@@ -279,7 +313,7 @@ def validate(data, read_artifact, provenance):
         require(type(case['pageSize']) is int and case['pageSize'] == 10, 'observed page capacity')
         require(type(case['firstPageCount']) is int and case['firstPageCount'] == min(10, len(expected)), 'first page size')
         if case['name'] == 'allMatched':
-            require(len(expected) > case['pageSize'] and request['search'] and request['creatTm'] == 'desc' and request['screenColumns'] != list(COLUMNS), 'nontrivial all-matched filter/order/column proof')
+            require(len(expected) == 12 > case['pageSize'] and request['search'] and request['creatTm'] == 'desc' and request['screenColumns'] != list(COLUMNS), 'nontrivial all-matched filter/order/column proof')
         else:
             require(not expected and request['search'], 'real zero-match workbook')
         stored = case['database']

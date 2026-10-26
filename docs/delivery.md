@@ -1,5 +1,31 @@
 # 交付台账与工作约定
 
+### 2026-10-25 用户禁用位 filtered-export 证据候选（仅源码/离线）
+
+本切片只更新既有 user-asset-export-v3 成功消费者、严格证据校验器、单元契约及
+三份契约/台账文档；不修改生产、fixture、共享helper、runner/workflow或证明/时间预算。
+保留 unfiltered `user-` 的12行全量导出和 unmatched-keyword 列表GET；第二次导出
+改为真实UI选择 `user-` + `set`，默认LDAP的UAC0/512应得到0行且ready的表头工作簿。
+原 unmatched-keyword→create→Worker→空XLSX→原任务重下载 整链被替换，不是等价覆盖。
+owner7→9、producer9、exportTasks0→2和一次观测/凭据用途保持，禁止追加第三次证明。
+
+成功证据升级format2，实际GET保留重复键的query entries；创建前独立构造预期请求，
+绑定create/receipt/detail、原始source及全部XLSX/chunks。未选UAC仍精确旧10键，
+选中则旧10键+合法enum；原始每个对象先验证UAC必有且uint32|null，再按kind/search筛选。
+离线混合UAC预期单元格/分区独立手写；语义篡改重算所有复制的sourceSHA，避免只测hash失败。
+terminal/running-cancel的format1、旧10键默认specimen与共享导入保持。
+
+查询变更会重挂载导出组件，所以保留主标签旧locator才能恢复原回执并显式创建另一导出；
+仅新开的原任务只读标签清除并断言无locator，继续四次GET和逐字相同重下载及finally关闭。
+这是消费者证据接线修正，不改变生产恢复逻辑。
+
+当前仅准备源码并运行离线检查，不声称真实browser/PG或验收通过。完整结果、命令、
+基线/候选树、失败记录和逐文件绑定由候选外的审查包记录。发布前须重新绑定实际main，
+独立审查精确diff；随后精确head CI、真实format2 JSON/XLSX、两张PNG实际视觉审查、
+原证明台账和runner/job成功清理仍是独立门禁。非空set、null用户LDAP及正向clear下载
+仍开放；真实AD/Windows、容量、AD-F-053/EXP-006和产品验收0/209保持不变。
+
+
 ### 2026-10-17 running-cancel 全会话冻结前就绪预检候选
 
 基线PR167 head `abddb252`（完整发布SHA由远程提交记录核对），本地同树提交

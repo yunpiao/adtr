@@ -183,6 +183,65 @@ not nonempty set/null user cases. Synthetic unit or PostgreSQL producer coverage
 cannot establish that missing LDAP/browser chain or real AD acceptance. Full
 EXP-006/AD-F-053 and product acceptance0/209 remain open.
 
+## Filtered success-browser evidence profile (2026-10-25 candidate)
+
+The existing success consumer now requests two exports only: `allMatched` keeps
+`search=user-`, omitted UAC, descending creation order, the reordered six columns,
+10 first-page rows and all12 workbook rows; `empty` uses the real UI to apply
+`search=user-` plus `uacDisableBit=set`. The unchanged default TLS LDAP source has
+one UAC0 user and eleven UAC512 users. Therefore set must produce zero rows and a
+ready, succeeded/100%, header-only XLSX; ignoring set would produce12 and fail.
+This profile does not prove a nonempty set, null-user LDAP ingestion or a positive
+filtered-clear download.
+
+The keyword-only `no-synthetic-user-match` GET remains before the second export.
+Its former complete create → Worker → empty XLSX → original-task redownload
+transaction is **replaced**, not retained or equivalently covered. Existing literal
+keyword units, ten-key offline specimen and synthetic-producer PostgreSQL tests
+remain distinct evidence; none substitutes for that removed browser transaction.
+No third proof/export or fixture change is introduced: owner7→9, producer9,
+observations1, directoryUses1 and exportTasks0→2 remain exact. Existing retries,
+concurrency, Worker policy and time/resource limits are unchanged.
+
+Format2 success evidence adds mandatory `listQueryEntries`, captured from the
+actual GET as ordered key/value pairs (compared order-independently without
+collapsing duplicates). Its complete8 or9 keys bind source pins, keyword, page1,
+size10, descending order and optional set. Before creation, the spec constructs
+its expected canonical request independently of create/receipt/detail responses;
+the offline validator reconstructs the same fixed profile from raw source pins.
+An omitted filter must keep exactly the old10 keys; a present filter permits only
+old10 plus the valid enum. Old format1 artifacts cannot satisfy this success gate;
+the unchanged gate invokes the strict validator before staging any success files.
+Terminal/running-cancel evidence and their shared default specimen remain format1.
+The shared matcher's `allow_uac=False` default retains their exact10-key rejection;
+only format2 success validation opts in with `allow_uac=True`. The opt-in is needed
+to validate filtered requests; removing it makes those requests fail rather than
+widening any legacy terminal schema.
+
+Raw `base.userAccountControl` presence and nullable uint32 type/range are checked
+for every source object before kind/search filtering. Null is retained distinctly
+from0; missing/bool/negative/overflow/fraction/string/container values fail even
+on excluded objects. This validation is necessary to prevent corrupt source data
+from masquerading as an empty partition; deleting it would weaken the evidence.
+Mixed-UAC offline fixtures use hand-authored cells/partition membership and rehash
+all copied source bindings for semantic tampering tests. These generated files
+are unit specimens, not browser acceptance artifacts.
+
+A draft selector change issues neither list GET nor create and blocks the explicit
+new-export transition until Search applies it. Query application remounts the export
+consumer; its existing main-tab recovery locator is preserved so only `按当前列表创建另一导出`
+replaces the original receipt/key. The new no-opener original-task tab independently
+clears/asserts its own locator, preserves the four GETs and byte-identical redownload,
+and closes in finally. The main locator is never copied into evidence.
+
+This is source/offline preparation, not a current-run acceptance claim. Exact-head
+CI, actual format2 JSON/XLSX, both independently viewed PNGs, source/run provenance,
+unchanged proof ledger and successful runner/job cleanup remain mandatory. Strict
+ZIP/XML/PNG/hash/chunk checks are retained; validation/staging alone cannot prove
+cleanup. Compatible-main rebind and independent exact implementation review are
+required before future publication or merge. Real AD/Windows, capacity and full
+EXP-006/AD-F-053 acceptance remain open.
+
 ## Idempotency, execution and lifecycle
 
 Reuse tasks' atomic submit/event/outbox, canonical payload digest, durable lease,
