@@ -196,7 +196,9 @@ describe("eager original Playwright focus identity", () => {
     return Object.assign({
       url: () => canonical, method: () => "GET", resourceType: () => "fetch", isNavigationRequest: () => false,
       frame: () => h.frame, redirectedFrom: () => null, redirectedTo: () => null, serviceWorker: () => null,
-      headers: () => { throw rawError(); }, postData: () => { throw rawError(); }, postDataJSON: () => { throw rawError(); },
+      headers: () => ({ "x-adtr-identity-purpose": "app-passive-session" }),
+      allHeaders: () => { throw rawError(); }, headerValue: () => { throw rawError(); }, headersArray: () => { throw rawError(); },
+      postData: () => { throw rawError(); }, postDataJSON: () => { throw rawError(); },
     }, overrides) as unknown as Request;
   }
   function response(req: Request, overrides: Record<string, unknown> = {}) {
@@ -367,9 +369,10 @@ describe("eager original Playwright focus identity", () => {
     h.emitter.emit("request", absentFromSnapshot); h.emitter.emit("response", selected.value);
     selected.body.resolve({ ID: 42 }); h.action.resolve(); await expect(result).resolves.toBe(42); clean(h);
   });
-  it.each(["query", "origin", "fragment", "request-url", "response-url", "method", "resource", "navigation", "frame", "page", "redirect-from", "redirect-to", "request-worker", "response-worker"])
+  it.each(["path", "query", "origin", "fragment", "request-url", "response-url", "method", "resource", "navigation", "frame", "page", "redirect-from", "redirect-to", "request-worker", "response-worker"])
     ("fails the first non-OLD candidate's %s metadata without choosing a later body", async kind => {
       const h = harness(), reqOverrides: Record<string, unknown> = {}, responseOverrides: Record<string, unknown> = {};
+      if (kind === "path") reqOverrides.url = () => "https://synthetic.invalid/api/other";
       if (kind === "query") reqOverrides.url = () => canonical + "?private=" + privateText;
       if (kind === "origin") reqOverrides.url = () => "https://other.invalid/api/auth/me";
       // A fake visible fragment is malformed host metadata only. Playwright
@@ -395,12 +398,66 @@ describe("eager original Playwright focus identity", () => {
       expect(bad.json).not.toHaveBeenCalled(); expect(good.json).not.toHaveBeenCalled(); clean(h);
     });
   it("ignores unrelated paths and non-200 responses, not a malformed first 200", async () => {
-    const h = harness(), unrelated = response(request(h, { url: () => "https://synthetic.invalid/api/other" }));
+    const h = harness(), unrelated = response(request(h, { url: () => "https://synthetic.invalid/api/other", headers: () => ({}) }));
     const non200 = response(request(h), { status: () => 403 }), req = request(h), selected = response(req), { result } = h.start();
     await arm(h); h.emitter.emit("response", unrelated.value); h.emitter.emit("response", non200.value);
     h.emitter.emit("request", req); h.emitter.emit("response", selected.value);
     selected.body.resolve({ ID: 42 }); h.action.resolve(); await expect(result).resolves.toBe(42);
     expect(unrelated.json).not.toHaveBeenCalled(); expect(non200.json).not.toHaveBeenCalled(); clean(h);
+  });
+  it.each(["before", "after"])("ignores an unmarked Workspace body/abort %s the selected App response without consuming it", async order => {
+    const h = harness(), unmarked = request(h, { headers: () => ({}) }), workspace = response(unmarked), app = request(h), selected = response(app), { result } = h.start();
+    await arm(h); h.emitter.emit("request", unmarked); h.emitter.emit("request", app);
+    if (order === "before") { h.emitter.emit("response", workspace.value); h.emitter.emit("requestfailed", unmarked); }
+    h.emitter.emit("response", selected.value); expect(selected.json).toHaveBeenCalledTimes(1);
+    if (order === "after") { h.emitter.emit("response", workspace.value); h.emitter.emit("requestfailed", unmarked); }
+    workspace.body.resolve({ ID: 7 }); selected.body.resolve({ ID: 42 }); h.action.resolve();
+    await expect(result).resolves.toBe(42); expect(workspace.json).not.toHaveBeenCalled();
+    expect(diagnostic().selectedRequest).toEqual({ finishedAtMs: null, failedAtMs: null, failureClass: "not_observed" }); clean(h);
+  });
+  it("does not rescue the first marked body's own abort with an unmarked or later marked success", async () => {
+    const h = harness(), first = request(h), selected = response(first), unmarked = response(request(h, { headers: () => ({}) })), laterReq = request(h), later = response(laterReq), { result } = h.start();
+    await arm(h); h.emitter.emit("request", first); h.emitter.emit("response", selected.value);
+    h.emitter.emit("response", unmarked.value); h.emitter.emit("request", laterReq); h.emitter.emit("response", later.value);
+    unmarked.body.resolve({ ID: 42 }); later.body.resolve({ ID: 42 });
+    selected.body.reject(new Error("response.json: Protocol error (Network.getResponseBody): No data found for resource with given identifier")); h.action.resolve();
+    await expect(result).rejects.toThrow("json_failure_class=cdp_body_no_data");
+    expect(selected.json).toHaveBeenCalledTimes(1); expect(unmarked.json).not.toHaveBeenCalled(); expect(later.json).not.toHaveBeenCalled(); clean(h);
+  });
+  it("keeps the original deadline when every response is unmarked instead of falling back", async () => {
+    const h = harness(), req = request(h, { headers: () => ({}) }), unmarked = response(req), { result } = h.start();
+    await arm(h); h.emitter.emit("request", req); h.emitter.emit("response", unmarked.value); h.action.resolve();
+    const rejection = expect(result).rejects.toThrow(/^identity_deadline$/u);
+    await vi.advanceTimersByTimeAsync(15_000); await rejection;
+    expect(unmarked.json).not.toHaveBeenCalled(); expect(diagnostic().selected).toBe(false); clean(h);
+  });
+  it.each(["empty", "unknown", "case", "space", "duplicate", "number", "boolean", "null", "object", "accessor", "inherited", "headers-throw", "descriptor-throw", "has-throw", "null-headers", "array-headers"])
+    ("rejects present-invalid purpose %s before selecting a later original body", async kind => {
+      const h = harness(), getter = vi.fn(() => "app-passive-session");
+      const values: Record<string, unknown> = { empty: "", unknown: "workspace-session", case: "APP-PASSIVE-SESSION", space: " app-passive-session", duplicate: "app-passive-session, app-passive-session", number: 1, boolean: true, null: null, object: {} };
+      let headers: unknown = { "x-adtr-identity-purpose": values[kind] };
+      if (kind === "accessor") headers = Object.defineProperty({}, "x-adtr-identity-purpose", { get: getter });
+      if (kind === "inherited") headers = Object.create({ "x-adtr-identity-purpose": "app-passive-session" });
+      if (kind === "descriptor-throw") headers = new Proxy({}, { getOwnPropertyDescriptor: () => { throw rawError(); } });
+      if (kind === "has-throw") headers = new Proxy({}, { has: () => { throw rawError(); } });
+      if (kind === "null-headers") headers = null;
+      if (kind === "array-headers") headers = [];
+      const req = request(h, { headers: () => { if (kind === "headers-throw") throw rawError(); return headers; } }), bad = response(req), goodReq = request(h), good = response(goodReq), { result } = h.start();
+      await arm(h); h.emitter.emit("request", req); h.emitter.emit("response", bad.value); h.emitter.emit("request", goodReq); h.emitter.emit("response", good.value); h.action.resolve();
+      await expect(result).rejects.toThrow(/^identity_response_metadata$/u); expect(bad.json).not.toHaveBeenCalled(); expect(good.json).not.toHaveBeenCalled(); expect(getter).not.toHaveBeenCalled(); diagnostic(); clean(h);
+    });
+  it("checks declared purpose and canonical metadata before ignoring a non200 response", async () => {
+    const h = harness(), bad = response(request(h, { url: () => "https://synthetic.invalid/api/other" }), { status: () => 403 }), { result } = h.start();
+    await arm(h); h.emitter.emit("response", bad.value); h.action.resolve();
+    await expect(result).rejects.toThrow(/^identity_response_metadata$/u); expect(bad.json).not.toHaveBeenCalled(); clean(h);
+  });
+  it("reads only the own fixed marker value, not private header getters or asynchronous header APIs", async () => {
+    const h = harness(), other = vi.fn(() => { throw rawError(); });
+    const headers = Object.defineProperty({ "x-adtr-identity-purpose": "app-passive-session" }, "cookie", { get: other });
+    const req = request(h, { headers: () => headers, allHeaders: other, headerValue: other, headersArray: other }), selected = response(req), { result } = h.start();
+    await arm(h); h.emitter.emit("request", req); h.emitter.emit("response", selected.value);
+    expect(selected.json).toHaveBeenCalledTimes(1); expect(other).not.toHaveBeenCalled();
+    selected.body.resolve({ ID: 42 }); h.action.resolve(); await expect(result).resolves.toBe(42); diagnostic(); clean(h);
   });
   it("rejects a conflicting Response for the locked Request and never reads its replacement", async () => {
     const h = harness(), req = request(h), selected = response(req), conflicting = response(req, { status: () => 201 });

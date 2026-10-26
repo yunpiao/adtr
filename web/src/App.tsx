@@ -278,7 +278,13 @@ export default function App() {
       const passive = mode === "passive" ? { id, controller: current } : null;
       passiveSessionCheck.current = passive;
       setCheckingSession(true);
-      request<Profile>("/me", current.signal)
+      request<Profile>(
+        "/me",
+        current.signal,
+        undefined,
+        undefined,
+        mode === "passive" ? "app-passive-session" : undefined,
+      )
         .then((data) => {
           if (id !== sequence.current) return;
           const previous = profileRef.current;

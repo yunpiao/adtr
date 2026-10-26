@@ -7,7 +7,10 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
-import type { Profile } from "./api";
+import DirectoryV4Workspace from "./DirectoryV4Workspace";
+import { createDirectoryV4RecoveryContext } from "./directory-v4-controls-api";
+import { ApiError, request as apiRequest, type Profile } from "./api";
+import { readFileSync, readdirSync } from "node:fs";
 import { readSourceIntent, saveSourceIntent } from "./domain-source-intent";
 import {
   listenForSessionInvalidation,
@@ -116,6 +119,18 @@ function expectGated() {
 function expectActor(username: string) {
   for (const node of screen.getAllByText(username, { exact: true }))
     expect(node).toBeVisible();
+}
+function expectPurpose(signal: AbortSignal, marked: boolean) {
+  const calls = fetcher.mock.calls.filter(([, init]) => init.signal === signal);
+  expect(calls).toHaveLength(1);
+  expect(calls[0][0]).toBe("/api/auth/me");
+  expect(calls[0][1]).toEqual({
+    method: "GET",
+    credentials: "same-origin",
+    cache: "no-store",
+    signal,
+    headers: marked ? { "x-adtr-identity-purpose": "app-passive-session" } : {},
+  });
 }
 let fetcher: ReturnType<typeof vi.fn>;
 beforeEach(() => {
@@ -413,6 +428,7 @@ describe("passive identity checks share only their current activation", () => {
       passive(next);
       expect(fetcher).toHaveBeenCalledTimes(count + 1);
       expect(held.signal().aborted).toBe(false);
+      expectPurpose(held.signal(), true);
       expect(held.json).toHaveBeenCalledTimes(1);
       expectGated();
       await act(async () => held.body.resolve(profile));
@@ -441,6 +457,7 @@ describe("passive identity checks share only their current activation", () => {
       passive(event);
       await waitFor(() => expect(held.json).toHaveBeenCalledTimes(1));
       expect(held.signal().aborted).toBe(false);
+      expectPurpose(held.signal(), true);
       expect(fetcher).toHaveBeenCalledTimes(count + 1);
       expectGated();
       await act(async () => held.body.resolve(secondProfile));
@@ -530,6 +547,7 @@ describe("passive identity checks share only their current activation", () => {
     passive("visibilitychange");
     expect(fetcher).toHaveBeenCalledTimes(count + 1);
     expect(held.signal().aborted).toBe(false);
+    expectPurpose(held.signal(), true);
     await act(async () => held.body.resolve(profile));
     expect(input).toHaveValue("private-draft");
     expect(input).toBeVisible();
@@ -639,6 +657,8 @@ describe("authoritative identity changes still preempt passive work", () => {
     passive("focus");
     await waitFor(() => expect(current.json).toHaveBeenCalledTimes(1));
     expect(initial.signal().aborted).toBe(true);
+    expectPurpose(initial.signal(), false);
+    expectPurpose(current.signal(), true);
     passive("visibilitychange");
     expect(fetcher).toHaveBeenCalledTimes(2);
     await act(async () => initial.body.resolve(profile));
@@ -672,6 +692,8 @@ describe("authoritative identity changes still preempt passive work", () => {
       passive("visibilitychange");
       await waitFor(() => expect(current.json).toHaveBeenCalledTimes(1));
       expect(fresh.signal().aborted).toBe(true);
+      expectPurpose(fresh.signal(), false);
+      expectPurpose(current.signal(), true);
       await act(async () => {
         old.body.resolve(profile);
         fresh.body.resolve(profile);
@@ -714,6 +736,10 @@ describe("authoritative identity changes still preempt passive work", () => {
     passive("visibilitychange");
     await waitFor(() => expect(current.json).toHaveBeenCalledTimes(1));
     expect(nextHistory.signal().aborted).toBe(true);
+    expectPurpose(old.signal(), true);
+    expectPurpose(history.signal(), false);
+    expectPurpose(nextHistory.signal(), false);
+    expectPurpose(current.signal(), true);
     await act(async () => {
       old.body.resolve(profile);
       history.body.resolve(profile);
@@ -825,4 +851,385 @@ describe("authoritative identity changes still preempt passive work", () => {
     expect(fetcher).toHaveBeenCalledTimes(count);
     expect(document.querySelector("main")).toBeNull();
   });
+});
+
+describe("closed App-passive identity request purpose", () => {
+  const purpose = "app-passive-session" as const;
+  it("preserves every old option when purpose is omitted, including other GETs and CSRF mutations", async () => {
+    const signal = new AbortController().signal;
+    await apiRequest("/me", signal);
+    await apiRequest("/profile", signal);
+    await apiRequest("/logout", signal, {}, "synthetic-csrf");
+    expect(fetcher.mock.calls).toEqual([
+      [
+        "/api/auth/me",
+        {
+          method: "GET",
+          credentials: "same-origin",
+          cache: "no-store",
+          signal,
+          headers: {},
+        },
+      ],
+      [
+        "/api/auth/profile",
+        {
+          method: "GET",
+          credentials: "same-origin",
+          cache: "no-store",
+          signal,
+          headers: {},
+        },
+      ],
+      [
+        "/api/auth/logout",
+        {
+          method: "POST",
+          credentials: "same-origin",
+          cache: "no-store",
+          signal,
+          headers: {
+            "Content-Type": "application/json",
+            "X-CSRF-Token": "synthetic-csrf",
+          },
+          body: "{}",
+        },
+      ],
+    ]);
+  });
+  it("adds only the fixed purpose on a bodyless same-origin no-store GET/me and consumes its original JSON once", async () => {
+    const signal = new AbortController().signal;
+    const json = vi.fn(async () => profile);
+    fetcher.mockImplementationOnce(async () => ({
+      ok: true,
+      status: 200,
+      json,
+    }));
+    await expect(
+      apiRequest("/me", signal, undefined, undefined, purpose),
+    ).resolves.toBe(profile);
+    expectPurpose(signal, true);
+    expect(json).toHaveBeenCalledTimes(1);
+  });
+  it.each([
+    null,
+    true,
+    false,
+    1,
+    {},
+    [],
+    "",
+    "APP-PASSIVE-SESSION",
+    " app-passive-session",
+    "app-passive-session ",
+    "app-passive-session, app-passive-session",
+    "workspace-session",
+  ])("rejects invalid runtime purpose %j before fetch", async (value) => {
+    await expect(
+      apiRequest(
+        "/me",
+        new AbortController().signal,
+        undefined,
+        undefined,
+        value as Parameters<typeof apiRequest>[4],
+      ),
+    ).rejects.toMatchObject({ code: "invalid_input" });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+  it.each([
+    "/profile",
+    "/logout",
+    "/me?purpose=passive",
+    "/me#passive",
+    "https://other.invalid/me",
+    "/ME",
+  ])("rejects purpose on wrong path %s before fetch", async (path) => {
+    await expect(
+      apiRequest(
+        path,
+        new AbortController().signal,
+        undefined,
+        undefined,
+        purpose,
+      ),
+    ).rejects.toBeInstanceOf(ApiError);
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+  it.each([null, {}, "", false, 0])(
+    "rejects a defined body %j before fetch rather than turning a POST into an identity probe",
+    async (body) => {
+      await expect(
+        apiRequest(
+          "/me",
+          new AbortController().signal,
+          body,
+          "synthetic-csrf",
+          purpose,
+        ),
+      ).rejects.toMatchObject({ code: "invalid_input" });
+      expect(fetcher).not.toHaveBeenCalled();
+    },
+  );
+  it.each(["401", "network", "body"] as const)(
+    "preserves original marked-request %s failure semantics without retry",
+    async (failure) => {
+      if (failure === "401")
+        fetcher.mockImplementationOnce(async () =>
+          response({ error: "unauthenticated" }, 401),
+        );
+      else if (failure === "network")
+        fetcher.mockRejectedValueOnce(new TypeError("private-network-canary"));
+      else
+        fetcher.mockImplementationOnce(async () => ({
+          ok: true,
+          status: 200,
+          json: async () => {
+            throw new Error("private-body-canary");
+          },
+        }));
+      const signal = new AbortController().signal;
+      await expect(
+        apiRequest("/me", signal, undefined, undefined, purpose),
+      ).rejects.toMatchObject({
+        code:
+          failure === "401"
+            ? "unauthenticated"
+            : failure === "network"
+              ? "network"
+              : "invalid_response",
+      });
+      expectPurpose(signal, true);
+    },
+  );
+  it("binds the sole production purpose caller to App's explicit passive mode without changing Workspace authority", () => {
+    const app = readFileSync("src/App.tsx", "utf8");
+    const api = readFileSync("src/api.ts", "utf8");
+    const workspace = readFileSync("src/DirectoryV4Workspace.tsx", "utf8");
+    expect(app.match(/"app-passive-session"/g)).toHaveLength(1);
+    expect(app).toContain(
+      'mode === "passive" ? "app-passive-session" : undefined',
+    );
+    expect(api).toContain('path !== "/me"');
+    expect(api).toContain("body !== undefined");
+    expect(api).toContain('"x-adtr-identity-purpose": identityPurpose');
+    expect(workspace).not.toContain("app-passive-session");
+    expect(workspace).not.toContain("x-adtr-identity-purpose");
+    expect(workspace).toContain("createDirectoryV4Controls");
+    const workspaceAPI = readFileSync(
+      "src/directory-v4-controls-api.ts",
+      "utf8",
+    );
+    expect(workspaceAPI).toContain('json("/api/auth/me", signal)');
+    expect(workspaceAPI).not.toContain("app-passive-session");
+    expect(workspaceAPI).not.toContain("x-adtr-identity-purpose");
+    const production = readdirSync("src", { recursive: true })
+      .filter(
+        (name): name is string =>
+          typeof name === "string" &&
+          /\.tsx?$/.test(name) &&
+          !name.includes(".test."),
+      )
+      .map((name) => ({ name, source: readFileSync(`src/${name}`, "utf8") }));
+    expect(
+      production
+        .filter(({ source }) => source.includes("app-passive-session"))
+        .map(({ name }) => name)
+        .sort(),
+    ).toEqual(["App.tsx", "api.ts"]);
+    expect(
+      production
+        .filter(({ source }) =>
+          source.toLowerCase().includes("x-adtr-identity-purpose"),
+        )
+        .map(({ name }) => name),
+    ).toEqual(["api.ts"]);
+  });
+});
+
+describe("unmarked Workspace authorization keeps its own cancellation boundary", () => {
+  function streamedResponse(body: unknown, status = 200) {
+    return new Response(JSON.stringify(body), {
+      status,
+      headers: {
+        "Content-Type": "application/json",
+        "Cache-Control": "no-store",
+        "X-Content-Type-Options": "nosniff",
+        "X-ADTR-User-ID": String(profile.ID),
+      },
+    });
+  }
+  function heldStream() {
+    let controller!: ReadableStreamDefaultController<Uint8Array>;
+    let signal!: AbortSignal;
+    const read = vi.fn();
+    const abort = vi.fn();
+    const fetch = async (url: string, init: RequestInit) => {
+      expect(url).toBe("/api/auth/me");
+      signal = init.signal as AbortSignal;
+      const stream = new ReadableStream<Uint8Array>(
+        {
+          start(value) {
+            controller = value;
+          },
+          pull() {
+            read();
+          },
+        },
+        { highWaterMark: 0 },
+      );
+      signal.addEventListener(
+        "abort",
+        () => {
+          abort();
+          try {
+            controller.error(new DOMException("synthetic abort", "AbortError"));
+          } catch {
+            /* A settled stream cannot be restored by a late abort. */
+          }
+        },
+        { once: true },
+      );
+      return new Response(stream, {
+        status: 200,
+        headers: {
+          "Content-Type": "application/json",
+          "Cache-Control": "no-store",
+          "X-Content-Type-Options": "nosniff",
+          "X-ADTR-User-ID": String(profile.ID),
+        },
+      });
+    };
+    const resolve = (value: unknown) => {
+      controller.enqueue(new TextEncoder().encode(JSON.stringify(value)));
+      controller.close();
+    };
+    return { fetch, read, abort, resolve, signal: () => signal };
+  }
+  beforeEach(() => {
+    vi.stubGlobal("BroadcastChannel", undefined);
+    sessionStorage.clear();
+    fetcher.mockImplementation(async () =>
+      streamedResponse({ error: "forbidden" }, 403),
+    );
+  });
+  it.each([
+    ["focus", "visibilitychange"],
+    ["visibilitychange", "focus"],
+  ] as const)(
+    "preserves independent Workspace cancellation for trusted-shaped %s then %s callbacks",
+    async (first, second) => {
+      const w = vi.spyOn(window, "addEventListener"),
+        d = vi.spyOn(document, "addEventListener");
+      const view = render(
+        <DirectoryV4Workspace
+          profile={profile}
+          sessionChanged={vi.fn()}
+          recoveryContext={createDirectoryV4RecoveryContext()}
+          storage={{
+            getItem: () => null,
+            setItem: () => {},
+            removeItem: () => {},
+          }}
+        />,
+      );
+      await screen.findByText(/当前权限不可用/);
+      const callbacks = {
+        focus: w.mock.calls.find(
+          ([name]) => name === "focus",
+        )![1] as EventListener,
+        visibilitychange: d.mock.calls.find(
+          ([name]) => name === "visibilitychange",
+        )![1] as EventListener,
+      };
+      const old = heldStream(),
+        current = heldStream();
+      fetcher
+        .mockImplementationOnce(old.fetch)
+        .mockImplementationOnce(current.fetch);
+      // Invoke actual callbacks with a fixture-shaped trusted event. jsdom does
+      // not create a native trusted event; native authority remains a CI gate.
+      act(() =>
+        callbacks[first]({
+          isTrusted: true,
+          target: window,
+        } as unknown as Event),
+      );
+      await waitFor(() => expect(old.read).toHaveBeenCalledTimes(1));
+      act(() =>
+        callbacks[second]({
+          isTrusted: true,
+          target: window,
+        } as unknown as Event),
+      );
+      await waitFor(() => expect(current.read).toHaveBeenCalledTimes(1));
+      expect(old.signal().aborted).toBe(true);
+      expect(old.abort).toHaveBeenCalledTimes(1);
+      expect(current.signal().aborted).toBe(false);
+      for (const [, init] of fetcher.mock.calls)
+        expect(new Headers(init.headers).has("x-adtr-identity-purpose")).toBe(
+          false,
+        );
+      view.unmount();
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(current.signal().aborted).toBe(true);
+      expect(current.abort).toHaveBeenCalledTimes(1);
+    },
+  );
+  it.each([true, false])(
+    "keeps changed-actor=%s App transition and legitimate unmarked Workspace unmount abort",
+    async (changed) => {
+      const workspace = heldStream(),
+        app = heldStream();
+      fetcher
+        .mockImplementationOnce(async () => streamedResponse(profile))
+        .mockImplementationOnce(workspace.fetch)
+        .mockImplementationOnce(app.fetch);
+      window.history.replaceState({}, "", "#directory-v4");
+      const view = render(<App />);
+      await waitFor(() => expect(workspace.read).toHaveBeenCalledTimes(1));
+      expect(document.querySelector(".directory-v4-workspace")).not.toBeNull();
+      // The untrusted fixture event reaches App but not Workspace's trusted-only
+      // branch, isolating legitimate identity-change unmount from dual activation.
+      passive("focus");
+      await waitFor(() => expect(app.read).toHaveBeenCalledTimes(1));
+      expectPurpose(app.signal(), true);
+      const workspaceCall = fetcher.mock.calls.find(
+        ([, init]) => init.signal === workspace.signal(),
+      )!;
+      expect(
+        new Headers(workspaceCall[1].headers).has("x-adtr-identity-purpose"),
+      ).toBe(false);
+      expect(workspaceCall[1]).toEqual(
+        expect.objectContaining({
+          credentials: "same-origin",
+          cache: "no-store",
+          redirect: "error",
+        }),
+      );
+      expect(workspace.signal()).not.toBe(app.signal());
+      expect(workspace.signal().aborted).toBe(false);
+      expectGated();
+      await act(async () => app.resolve(changed ? secondProfile : profile));
+      expect(app.signal().aborted).toBe(false);
+      if (changed) {
+        expect(document.querySelector(".directory-v4-workspace")).toBeNull();
+        expect(workspace.signal().aborted).toBe(true);
+        expect(workspace.abort).toHaveBeenCalledTimes(1);
+        expectActor("second-actor");
+      } else {
+        expect(
+          document.querySelector(".directory-v4-workspace"),
+        ).not.toBeNull();
+        expect(workspace.signal().aborted).toBe(false);
+        await act(async () => workspace.resolve(profile));
+        await screen.findByText(/当前权限不可用/);
+      }
+      view.unmount();
+      await act(async () => {
+        await Promise.resolve();
+      });
+    },
+  );
 });
