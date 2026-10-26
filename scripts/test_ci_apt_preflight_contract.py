@@ -349,4 +349,175 @@ class ExactWorkflowScopeContracts(unittest.TestCase):
         for value in (raw+b'\n',raw[:-1],raw.replace(b'\n',b'\r\n')):
             with self.assertRaises(ValueError):require_exact_probe_workflow(value)
 
+
+class DiagnosticContracts(unittest.TestCase):
+    """Closed diagnostics explain rejection; no host observation or weaker policy."""
+    def collect(self,host=None):return p.Collector(host or FakeHost(),REPO).collect()
+    def assert_closed(self,data):
+        p.validate_receipt(data);self.assertNotIn(CANARY,json.dumps(data))
+    def source_case(self,raw,kind='.list'):
+        host=FakeHost()
+        if kind=='.list':host.files['/etc/apt/sources.list.d/microsoft.list']=raw
+        else:host.files['/etc/apt/sources.list.d/ubuntu.sources']=raw
+        result=self.collect(host);self.assert_closed(result);return result
+    def node_path_case(self,path_env,exists=True,target='/usr/bin/node',uid=0,mode=stat.S_IFREG|0o755,error=None):
+        host=p.Host(env={'PATH':path_env})
+        def resolve(path,strict=False):
+            if error:raise error
+            return Path(target)
+        with patch.object(p.Path,'exists',return_value=exists),patch.object(p.Path,'resolve',resolve),patch.object(p.Path,'stat',return_value=types.SimpleNamespace(st_uid=uid,st_mode=mode)):
+            return host.node_path()
+    def assert_node_path_block(self,expected,**kwargs):
+        with self.assertRaises(p.Blocked) as raised:self.node_path_case(**kwargs)
+        self.assertEqual(str(raised.exception),'node_unsupported');self.assertEqual(raised.exception.diagnostic,expected)
+    def test_node_path_absent_and_unapproved_path_are_distinct_missing(self):
+        for path in ('','/private/'+CANARY):self.assert_node_path_block('path_missing',path_env=path)
+    def test_node_allowed_path_without_candidate(self):self.assert_node_path_block('candidate_missing',path_env='/usr/bin',exists=False)
+    def test_node_resolved_target_scope_still_rejected(self):self.assert_node_path_block('target_path_unsupported',path_env='/usr/bin',target='/private/'+CANARY)
+    def test_node_owner_and_writable_modes_still_rejected(self):
+        for uid,mode in ((1001,stat.S_IFREG|0o755),(0,stat.S_IFREG|0o775),(0,stat.S_IFREG|0o757)):
+            self.assert_node_path_block('owner_mode_unsupported',path_env='/usr/bin',uid=uid,mode=mode)
+    def test_node_nonregular_target_still_rejected(self):self.assert_node_path_block('target_type_unsupported',path_env='/usr/bin',mode=stat.S_IFDIR|0o755)
+    def test_node_root_owned_allowed_paths_unchanged(self):
+        for path in ('/usr/bin','/usr/local/bin','/opt/hostedtoolcache/node/20.19.0/x64/bin'):
+            self.assertEqual(self.node_path_case(path,target=path+'/node'),path+'/node')
+    def test_node_path_exception_is_closed_not_raw(self):
+        host=FakeHost();host.node_path=lambda:(_ for _ in ()).throw(OSError(CANARY))
+        data=self.collect(host);self.assert_closed(data);self.assertEqual(data['toolchain']['nodeObservation'],'path_check_failed');self.assertIn('unexpected_failure',data['reasonCodes'])
+    def test_node_path_diagnostics_propagate_without_version_query(self):
+        for state in ('path_missing','candidate_missing','target_path_unsupported','owner_mode_unsupported','target_type_unsupported'):
+            host=FakeHost();host.node_path=lambda state=state:(_ for _ in ()).throw(p.Blocked('node_unsupported',state))
+            data=self.collect(host);self.assert_closed(data);self.assertEqual(data['toolchain']['nodeObservation'],state)
+            self.assertFalse(any(c[0]=='/usr/bin/node' for c in host.commands));self.assertIsNone(data['toolchain']['observedNodeVersion'])
+    def test_node_version_query_failure_retains_original_codes(self):
+        for code in ('tool_missing','command_failed','command_timeout','output_limit','deadline'):
+            host=FakeHost();host.failures['/usr/bin/node']=code;data=self.collect(host)
+            self.assert_closed(data);self.assertEqual(data['toolchain']['nodeObservation'],'version_query_failed');self.assertIn(code,data['reasonCodes'])
+    def test_node_version_format_failure_never_emits_output(self):
+        for version in (CANARY.encode(),b'v24.19.0-rc.1\n',b'v20.19.0\r\n',b'20.19.0\n',b'v20.19.0\nextra'):
+            host=FakeHost();run=host.run;host.run=lambda argv,limit=65536,home=None:version if argv[0]=='/usr/bin/node' else run(argv,limit,home)
+            data=self.collect(host);self.assert_closed(data);self.assertEqual(data['toolchain']['nodeObservation'],'version_format_unsupported');self.assertIn('node_unsupported',data['reasonCodes'])
+    def test_node_non24_stable_version_is_observation_not_requirement(self):
+        data=self.collect();self.assertEqual(data['toolchain']['nodeObservation'],'observed');self.assertEqual(data['toolchain']['observedNodeVersion'],'20.19.0');self.assertEqual(data['toolchain']['expectedNodeVersion'],'24.19.0')
+    def test_identity_block_means_all_source_flags_unknown(self):
+        host=FakeHost();host.env['GITHUB_SHA']='c'*40;data=self.collect(host);self.assert_closed(data)
+        self.assertEqual(data['sources']['observation'],'not_observed');self.assertEqual(data['toolchain']['nodeObservation'],'not_observed')
+        self.assertTrue(all(data['sources'][f] is None for f in p.SOURCE_FLAGS))
+    def test_config_block_is_not_source_absence_proof(self):
+        host=FakeHost();host.env['APT_CONFIG']='';data=self.collect(host);self.assert_closed(data)
+        self.assertEqual(data['sources']['observation'],'config_unavailable');self.assertTrue(all(data['sources'][f] is None for f in p.SOURCE_FLAGS))
+    def test_source_read_failure_keeps_unknown_without_partial_counts(self):
+        host=FakeHost();host.files['/etc/apt/sources.list.d/ubuntu.sources']=p.Blocked('file_changed')
+        # FakeHost.entries normally sizes the bytes; this injected listing is fixed.
+        host.entries=lambda path,limit:[('ubuntu.sources',stat.S_IFREG|0o644,10,0)] if str(path)=='/etc/apt/sources.list.d' else host.indexes
+        data=self.collect(host);self.assert_closed(data);self.assertEqual(data['sources']['observation'],'source_read_failed')
+        self.assertTrue(all(data['sources'][f] is None for f in p.SOURCE_FLAGS));self.assertIsNone(data['sources']['enabledCount']);self.assertEqual(data['sources']['publicEntries'],[])
+    def test_source_uri_predicate_diagnostics_keep_original_rejection(self):
+        cases=[('https://[bad','uri_invalid','source_invalid'),('https://'+CANARY+'@packages.microsoft.com/ubuntu/24.04/prod','credential_like','source_credential_like'),
+            ('https://packages.microsoft.com:443/ubuntu/24.04/prod','uri_authority_unsupported','source_unknown'),
+            ('ftp://packages.microsoft.com/ubuntu/24.04/prod','uri_scheme_unsupported','source_unknown'),
+            ('https://unknown.invalid/prod','uri_host_unsupported','source_unknown'),
+            ('https://packages.microsoft.com/'+CANARY,'uri_path_unsupported','source_unknown')]
+        for uri,stage,code in cases:
+            with self.subTest(stage=stage):
+                raw=f'deb [signed-by=/usr/share/keyrings/microsoft-prod.gpg] {uri} noble main\n'.encode();data=self.source_case(raw)
+                self.assertEqual(data['sources']['observation'],stage);self.assertIn(code,data['reasonCodes'])
+                self.assertIsNone(data['sources']['enabledCount']);self.assertEqual(data['sources']['publicEntries'],[])
+    def test_source_uri_canaries_never_become_diagnostics(self):
+        for suffix in ('?token='+CANARY,'#'+CANARY,'/%'+CANARY):
+            raw=('deb [signed-by=/usr/share/keyrings/microsoft-prod.gpg] https://packages.microsoft.com/ubuntu/24.04/prod'+suffix+' noble main\n').encode()
+            data=self.source_case(raw);self.assertEqual(data['sources']['observation'],'credential_like')
+            self.assertIs(data['sources']['credentialLikeSourcePresent'],True);self.assertIsNone(data['sources']['unknownSourcePresent']);self.assertIsNone(data['sources']['implicitTrustUnresolved'])
+    def test_source_options_suites_components_architecture_stay_closed(self):
+        base='deb [arch=amd64 signed-by=/usr/share/keyrings/microsoft-prod.gpg] https://packages.microsoft.com/ubuntu/24.04/prod noble main\n'
+        cases=[(base.replace('arch=amd64','trusted='+CANARY),'list_option_unsupported'),(base.replace(' noble ',' '+CANARY+' '),'suites_unsupported'),
+            (base.replace(' main\n',' '+CANARY+'\n'),'components_unsupported'),(base.replace('arch=amd64','arch='+CANARY),'architectures_unsupported')]
+        for text,stage in cases:
+            data=self.source_case(text.encode());self.assertEqual(data['sources']['observation'],stage);self.assertIn('source_unknown',data['reasonCodes']);self.assertTrue(data['sources']['unknownSourcePresent'])
+    def test_source_deb822_unknown_field_and_syntax(self):
+        base=b'Types: deb\nURIs: http://azure.archive.ubuntu.com/ubuntu/\nSuites: noble\nComponents: main\nSigned-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg\n'
+        for raw,stage,code in ((base+b'Unexpected: '+CANARY.encode()+b'\n','deb822_field_unsupported','source_unknown'),
+                (base+b'Types: deb\n','deb822_syntax_invalid','source_invalid')):
+            data=self.source_case(raw,'.sources');self.assertEqual(data['sources']['observation'],stage);self.assertIn(code,data['reasonCodes'])
+    def test_source_entry_and_types_diagnostics(self):
+        base=b'Types: deb\nURIs: http://azure.archive.ubuntu.com/ubuntu/\nSuites: noble\nComponents: main\nSigned-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg\n'
+        for raw,stage in ((base.replace(b'Types: deb',b'Types: invalid'),'types_invalid'),(base.replace(b'Suites: noble',b'Suites: noble noble'),'entry_invalid')):
+            data=self.source_case(raw,'.sources');self.assertEqual(data['sources']['observation'],stage);self.assertIn('source_invalid',data['reasonCodes'])
+    def test_source_list_syntax_and_implicit_trust_and_keyring(self):
+        cases=[((CANARY+' malformed\n').encode(),'list_syntax_invalid','source_invalid'),
+            (b'deb https://packages.microsoft.com/ubuntu/24.04/prod noble main\n','implicit_trust','source_implicit_trust'),
+            (f'deb [signed-by=/private/{CANARY}] https://packages.microsoft.com/ubuntu/24.04/prod noble main\n'.encode(),'keyring_unsupported','keyring_unsupported')]
+        for raw,stage,code in cases:
+            data=self.source_case(raw);self.assertEqual(data['sources']['observation'],stage);self.assertIn(code,data['reasonCodes'])
+    def test_source_first_rejection_stops_before_later_credential(self):
+        host=FakeHost();host.files['/etc/apt/sources.list.d/ubuntu.sources']=b'Types: deb\nUnknown: '+CANARY.encode()+b'\n'
+        host.files['/etc/apt/sources.list.d/microsoft.list']=f'deb [signed-by=/usr/share/keyrings/microsoft-prod.gpg] https://{CANARY}@packages.microsoft.com/ubuntu/24.04/prod noble main\n'.encode()
+        data=self.collect(host);self.assert_closed(data);self.assertEqual(data['sources']['observation'],'deb822_field_unsupported')
+        self.assertEqual(data['reasonCodes'],['source_unknown']);self.assertIsNone(data['sources']['credentialLikeSourcePresent'])
+    def test_source_partial_key_success_stays_unknown_and_discards_entries(self):
+        host=FakeHost();calls=[]
+        def keys(path):
+            calls.append(path)
+            if len(calls)==2:raise p.Blocked('key_invalid')
+            return 'd'*64,['A'*40],[]
+        host.key_fingerprints=keys;data=self.collect(host);self.assert_closed(data)
+        self.assertEqual(len(calls),2);self.assertEqual(data['sources']['observation'],'key_observation_failed');self.assertIsNone(data['sources']['enabledCount']);self.assertEqual(data['sources']['publicEntries'],[])
+        self.assertTrue(all(data['sources'][f] is None for f in p.SOURCE_FLAGS))
+    def test_source_generic_parse_and_empty_set_stages(self):
+        host=FakeHost()
+        with patch.object(p,'parse_source_file',side_effect=RuntimeError(CANARY)):
+            data=self.collect(host);self.assert_closed(data);self.assertEqual(data['sources']['observation'],'source_parse_failed');self.assertIn('unexpected_failure',data['reasonCodes'])
+        host=FakeHost()
+        for name in ('ubuntu.sources','microsoft.list'):host.files['/etc/apt/sources.list.d/'+name]=b''
+        data=self.collect(host);self.assert_closed(data);self.assertEqual(data['sources']['observation'],'source_set_invalid');self.assertTrue(data['sources']['unknownSourcePresent'])
+    def test_only_complete_source_observation_emits_false(self):
+        host=FakeHost();host.failures['/usr/bin/node']='command_failed';data=self.collect(host);self.assert_closed(data)
+        self.assertEqual(data['status'],'blocked');self.assertEqual(data['sources']['observation'],'complete');self.assertTrue(all(data['sources'][f] is False for f in p.SOURCE_FLAGS));self.assertEqual(data['sources']['enabledCount'],2)
+    def test_schema_rejects_diagnostic_free_text_and_old_schema(self):
+        good=self.collect()
+        for section,key,value in (('toolchain','nodeObservation',CANARY),('sources','observation',CANARY),(None,'schema',1),('toolchain','nodeObservation',None),('sources','observation',True)):
+            bad=copy.deepcopy(good);(bad if section is None else bad[section])[key]=value
+            with self.assertRaises(p.Blocked):p.validate_receipt(bad)
+    def test_schema_rejects_node_diagnostic_version_and_reason_contradictions(self):
+        good=self.collect()
+        for stage,version,reasons in (('observed',None,[]),('path_missing','20.19.0',['node_unsupported']),('path_missing',None,['command_failed']),('version_query_failed',None,['node_unsupported'])):
+            bad=copy.deepcopy(good);bad['toolchain'].update(nodeObservation=stage,observedNodeVersion=version);bad['reasonCodes']=reasons;bad['status']='blocked' if reasons else 'observed'
+            with self.assertRaises(p.Blocked):p.validate_receipt(bad)
+    def test_schema_rejects_false_absence_and_partial_complete_contradictions(self):
+        host=FakeHost();host.env['GITHUB_SHA']='c'*40;unknown=self.collect(host)
+        for flag in p.SOURCE_FLAGS:
+            bad=copy.deepcopy(unknown);bad['sources'][flag]=False
+            with self.assertRaises(p.Blocked):p.validate_receipt(bad)
+        good=self.collect()
+        for patch_values in ({'observation':'source_read_failed'},{'observation':'complete','enabledCount':None},{'observation':'complete','credentialLikeSourcePresent':None}):
+            bad=copy.deepcopy(good);bad['sources'].update(patch_values)
+            with self.assertRaises(p.Blocked):p.validate_receipt(bad)
+    def test_schema_rejects_source_reason_and_flag_contradictions(self):
+        data=self.source_case(b'deb [signed-by=/usr/share/keyrings/microsoft-prod.gpg] https://unknown.invalid/prod noble main\n')
+        for mutation in ('reason','flag','positive'):
+            bad=copy.deepcopy(data)
+            if mutation=='reason':bad['reasonCodes']=['command_failed']
+            elif mutation=='flag':bad['sources']['unknownSourcePresent']=None
+            else:bad['sources']['credentialLikeSourcePresent']=True
+            with self.assertRaises(p.Blocked):p.validate_receipt(bad)
+    def test_arbitrary_exception_diagnostic_cannot_escape(self):
+        error=p.Blocked(CANARY,CANARY);self.assertEqual(str(error),'unexpected_failure');self.assertIsNone(error.diagnostic)
+    def test_public_allowlists_are_exact_unchanged(self):
+        self.assertEqual(p.PUBLIC_SOURCES,{('http','azure.archive.ubuntu.com','/ubuntu'):'ubuntu-azure',('http','archive.ubuntu.com','/ubuntu'):'ubuntu-archive',('http','security.ubuntu.com','/ubuntu'):'ubuntu-security',('https','packages.microsoft.com','/ubuntu/24.04/prod'):'microsoft-prod'})
+        self.assertEqual(p.KEYRINGS,{'/usr/share/keyrings/ubuntu-archive-keyring.gpg':'ubuntu-archive','/usr/share/keyrings/microsoft-prod.gpg':'microsoft-prod'})
+        self.assertEqual(p.SUITES,frozenset(('noble','noble-updates','noble-backports','noble-security')));self.assertEqual(p.COMPONENTS,frozenset(('main','restricted','universe','multiverse')))
+
+    def test_diagnostic_failure_code_maps_cover_exact_closed_states(self):
+        self.assertEqual(set(p.NODE_FAILURE_CODES),p.NODE_OBSERVATIONS-{'not_observed','observed'})
+        self.assertEqual(set(p.SOURCE_FAILURE_CODES),p.SOURCE_OBSERVATIONS-{'not_observed','complete'})
+        self.assertTrue(all(values and values<=p.CODES for values in [*p.NODE_FAILURE_CODES.values(),*p.SOURCE_FAILURE_CODES.values()]))
+    def test_complete_source_requires_completed_key_observation_even_when_other_section_blocked(self):
+        host=FakeHost();host.failures['/usr/bin/node']='command_failed';data=self.collect(host)
+        for key,value in (('keyringSHA256',None),('primaryFingerprints',[]),('types',[]),('suites',[]),('components',[])):
+            bad=copy.deepcopy(data);bad['sources']['publicEntries'][0][key]=value
+            with self.assertRaises(p.Blocked):p.validate_receipt(bad)
+    def test_uppercase_authority_preserves_first_original_rejection(self):
+        raw=f'deb [signed-by=/usr/share/keyrings/microsoft-prod.gpg] https://{CANARY}.invalid/prod noble main\n'.encode()
+        data=self.source_case(raw);self.assertEqual(data['sources']['observation'],'uri_authority_unsupported');self.assertEqual(data['reasonCodes'],['source_unknown'])
+
 if __name__=='__main__':unittest.main()

@@ -73,13 +73,49 @@ CONFIG_ALIASES = {f'P{i}':name for i,name in enumerate(CONFIG)}
 DPKG_FORMAT = '${Package}\t${Architecture}\t${Version}\t${db:Status-Abbrev}\n'
 INDEX_TYPES = ('Packages','Packages.lz4','Packages.gz','Packages.xz','InRelease','Release','Release.gpg','other')
 
+NODE_OBSERVATIONS = frozenset(('not_observed','path_missing','candidate_missing',
+    'target_path_unsupported','owner_mode_unsupported','target_type_unsupported',
+    'path_check_failed','version_query_failed','version_format_unsupported','observed'))
+SOURCE_OBSERVATIONS = frozenset(('not_observed','config_unavailable','source_read_failed',
+    'source_parse_failed','source_set_invalid','uri_invalid','credential_like',
+    'uri_authority_unsupported','uri_scheme_unsupported','uri_host_unsupported',
+    'uri_path_unsupported','types_invalid','suites_unsupported','components_unsupported',
+    'architectures_unsupported','entry_invalid','implicit_trust','keyring_unsupported',
+    'list_syntax_invalid','list_option_unsupported','deb822_syntax_invalid',
+    'deb822_field_unsupported','key_observation_failed','complete'))
+NODE_FAILURE_CODES = {name:frozenset(('node_unsupported',)) for name in
+    ('path_missing','candidate_missing','target_path_unsupported','owner_mode_unsupported',
+     'target_type_unsupported','version_format_unsupported')}
+NODE_FAILURE_CODES.update(path_check_failed=frozenset(('unexpected_failure',)),
+    version_query_failed=frozenset(('tool_missing','command_failed','command_timeout','output_limit','deadline','unexpected_failure')))
+SOURCE_FAILURE_CODES = {
+    'config_unavailable':frozenset(('config_invalid',)),
+    'source_read_failed':frozenset(('file_missing','unsafe_file','file_changed','file_limit','directory_limit','deadline','unexpected_failure')),
+    'source_parse_failed':frozenset(('file_limit','source_invalid','unexpected_failure')),
+    'source_set_invalid':frozenset(('source_invalid',)),
+    'key_observation_failed':frozenset(('keyring_unsupported','unsafe_file','file_missing','file_changed','file_limit',
+        'key_invalid','secret_key_rejected','tool_missing','command_failed','command_timeout','output_limit','deadline','unexpected_failure'))}
+SOURCE_FAILURE_CODES.update({name:frozenset(('source_invalid',)) for name in
+    ('uri_invalid','types_invalid','entry_invalid','list_syntax_invalid','deb822_syntax_invalid')})
+SOURCE_FAILURE_CODES.update({name:frozenset(('source_unknown',)) for name in
+    ('uri_authority_unsupported','uri_scheme_unsupported','uri_host_unsupported','uri_path_unsupported',
+     'suites_unsupported','components_unsupported','architectures_unsupported','list_option_unsupported','deb822_field_unsupported')})
+SOURCE_FAILURE_CODES.update(credential_like=frozenset(('source_credential_like',)),
+    implicit_trust=frozenset(('source_implicit_trust',)),keyring_unsupported=frozenset(('keyring_unsupported',)))
+SOURCE_FLAGS = ('unknownSourcePresent','credentialLikeSourcePresent','implicitTrustUnresolved')
+SOURCE_FLAG_CODES = {'unknownSourcePresent':frozenset(('source_unknown','source_invalid','keyring_unsupported')),
+    'credentialLikeSourcePresent':frozenset(('source_credential_like',)),
+    'implicitTrustUnresolved':frozenset(('source_implicit_trust',))}
+
 class Blocked(ValueError):
-    def __init__(self, code):
+    def __init__(self, code, diagnostic=None):
         super().__init__(code if code in CODES else 'unexpected_failure')
+        # Never carry an arbitrary exception, URI, path or environment value to output.
+        self.diagnostic=diagnostic if diagnostic in NODE_OBSERVATIONS|SOURCE_OBSERVATIONS else None
 
 
-def require(condition, code):
-    if not condition: raise Blocked(code)
+def require(condition, code, diagnostic=None):
+    if not condition: raise Blocked(code,diagnostic)
 
 
 def sha(raw): return hashlib.sha256(raw).hexdigest()
@@ -170,17 +206,18 @@ class Host:
         for part in self.env.get('PATH','').split(os.pathsep):
             if part in ('/usr/bin','/usr/local/bin') or re.fullmatch(r'/opt/hostedtoolcache/node/[0-9]+\.[0-9]+\.[0-9]+/x64/bin',part):
                 candidates.append(Path(part)/'node')
+        require(candidates,'node_unsupported','path_missing')
         for path in candidates:
             if not path.exists():continue
             real=path.resolve(strict=True)
             require(str(real) in ('/usr/bin/node','/usr/local/bin/node') or
-                    re.fullmatch(r'/opt/hostedtoolcache/node/[0-9]+\.[0-9]+\.[0-9]+/x64/bin/node',str(real)), 'node_unsupported')
+                    re.fullmatch(r'/opt/hostedtoolcache/node/[0-9]+\.[0-9]+\.[0-9]+/x64/bin/node',str(real)), 'node_unsupported','target_path_unsupported')
             for parent in [real,*real.parents]:
                 info=parent.stat()
-                require(info.st_uid==0 and not info.st_mode&0o022,'node_unsupported')
-            require(stat.S_ISREG(real.stat().st_mode),'node_unsupported')
+                require(info.st_uid==0 and not info.st_mode&0o022,'node_unsupported','owner_mode_unsupported')
+            require(stat.S_ISREG(real.stat().st_mode),'node_unsupported','target_type_unsupported')
             return str(real)
-        raise Blocked('node_unsupported')
+        raise Blocked('node_unsupported','candidate_missing')
     def run(self,argv,limit=65536,home=None):
         self.tick()
         if argv[0] in ('/usr/bin/apt-get','/usr/bin/apt-config'):
@@ -282,30 +319,33 @@ def parse_config(raw):
 
 
 def source_class(uri):
-    require(type(uri) is str and len(uri)<=1024,'source_invalid')
-    require(not any(ord(c)<33 or ord(c)>126 for c in uri),'source_invalid')
+    require(type(uri) is str and len(uri)<=1024,'source_invalid','uri_invalid')
+    require(not any(ord(c)<33 or ord(c)>126 for c in uri),'source_invalid','uri_invalid')
     try:parsed=urlsplit(uri)
-    except ValueError:raise Blocked('source_invalid') from None
+    except ValueError:raise Blocked('source_invalid','uri_invalid') from None
     require(not parsed.username and not parsed.password and not parsed.query and not parsed.fragment
-            and '%' not in uri and '@' not in uri,'source_credential_like')
+            and '%' not in uri and '@' not in uri,'source_credential_like','credential_like')
     try:port=parsed.port
-    except ValueError:raise Blocked('source_invalid') from None
-    require(port is None and parsed.hostname==parsed.netloc,'source_unknown')
+    except ValueError:raise Blocked('source_invalid','uri_invalid') from None
+    require(port is None and parsed.hostname==parsed.netloc,'source_unknown','uri_authority_unsupported')
     path=parsed.path[:-1] if parsed.path.endswith('/') else parsed.path
     key=(parsed.scheme,parsed.hostname,path)
-    require(key in PUBLIC_SOURCES,'source_unknown')
+    require(any(k[0]==key[0] for k in PUBLIC_SOURCES),'source_unknown','uri_scheme_unsupported')
+    require(any(k[:2]==key[:2] for k in PUBLIC_SOURCES),'source_unknown','uri_host_unsupported')
+    require(key in PUBLIC_SOURCES,'source_unknown','uri_path_unsupported')
     return PUBLIC_SOURCES[key]
 
 
 def _source_entry(types,uris,suites,components,architectures,keyring):
-    require(0<len(types)<=2 and len(set(types))==len(types) and set(types)<={'deb','deb-src'},'source_invalid')
-    require(suites and set(suites)<=SUITES and components and set(components)<=COMPONENTS,'source_unknown')
-    require(len(set(suites))==len(suites) and len(set(components))==len(components),'source_invalid')
-    require(not architectures or set(architectures)<=ARCHES,'source_unknown')
-    require(len(set(architectures))==len(architectures),'source_invalid')
-    require(keyring is not None,'source_implicit_trust')
-    require(keyring in KEYRINGS,'keyring_unsupported')
-    require(0<len(uris)<=4 and len(set(uris))==len(uris),'source_invalid')
+    require(0<len(types)<=2 and len(set(types))==len(types) and set(types)<={'deb','deb-src'},'source_invalid','types_invalid')
+    require(suites and set(suites)<=SUITES,'source_unknown','suites_unsupported')
+    require(components and set(components)<=COMPONENTS,'source_unknown','components_unsupported')
+    require(len(set(suites))==len(suites) and len(set(components))==len(components),'source_invalid','entry_invalid')
+    require(not architectures or set(architectures)<=ARCHES,'source_unknown','architectures_unsupported')
+    require(len(set(architectures))==len(architectures),'source_invalid','entry_invalid')
+    require(keyring is not None,'source_implicit_trust','implicit_trust')
+    require(keyring in KEYRINGS,'keyring_unsupported','keyring_unsupported')
+    require(0<len(uris)<=4 and len(set(uris))==len(uris),'source_invalid','entry_invalid')
     return [dict(sourceClass=source_class(uri),types=sorted(types),suites=sorted(suites),
                  components=sorted(components),architectures=sorted(architectures),signedByClass=KEYRINGS[keyring],
                  keyringSHA256=None,primaryFingerprints=[],subkeyFingerprints=[]) for uri in uris]
@@ -314,46 +354,46 @@ def _source_entry(types,uris,suites,components,architectures,keyring):
 def parse_source_file(raw,kind):
     require(type(raw) is bytes and len(raw)<=262144,'file_limit')
     try:text=raw.decode('utf-8','strict')
-    except UnicodeError:raise Blocked('source_invalid') from None
-    require('\x00' not in text and '\r' not in text,'source_invalid')
+    except UnicodeError:raise Blocked('source_invalid','entry_invalid') from None
+    require('\x00' not in text and '\r' not in text,'source_invalid','entry_invalid')
     enabled=[];disabled=0
     if kind=='.list':
         for line in text.splitlines():
             line=line.strip()
             if not line or line.startswith('#'):continue
-            require(len(line)<=8192,'source_invalid')
+            require(len(line)<=8192,'source_invalid','entry_invalid')
             # Comment only when preceded by whitespace, never strip URI fragment.
             line=re.split(r'\s+#',line,maxsplit=1)[0].rstrip()
             m=re.fullmatch(r'(deb|deb-src)\s+(?:\[([^\]]+)\]\s+)?(\S+)\s+(\S+)\s+(.+)',line)
-            require(m is not None,'source_invalid');opts={}
+            require(m is not None,'source_invalid','list_syntax_invalid');opts={}
             for token in (m[2] or '').split():
                 pair=token.split('=',1)
-                require(len(pair)==2 and pair[0] in ('arch','signed-by') and pair[0] not in opts,'source_unknown')
+                require(len(pair)==2 and pair[0] in ('arch','signed-by') and pair[0] not in opts,'source_unknown','list_option_unsupported')
                 opts[pair[0]]=pair[1]
             enabled.extend(_source_entry([m[1]],[m[3]],[m[4]],m[5].split(),opts.get('arch','').split(',') if opts.get('arch') else [],opts.get('signed-by')))
     else:
-        require(kind=='.sources','source_invalid');stanzas=[];current={};last=None
+        require(kind=='.sources','source_invalid','entry_invalid');stanzas=[];current={};last=None
         for line in text.splitlines()+['']:
-            require(len(line)<=8192,'source_invalid')
+            require(len(line)<=8192,'source_invalid','entry_invalid')
             if line.startswith('#'):continue
             if not line.strip():
                 if current:stanzas.append(current);current={};last=None
-                require(len(stanzas)<=32,'source_invalid');continue
+                require(len(stanzas)<=32,'source_invalid','entry_invalid');continue
             if line[0].isspace():
-                require(last is not None,'source_invalid');current[last]+=' '+line.strip();continue
+                require(last is not None,'source_invalid','deb822_syntax_invalid');current[last]+=' '+line.strip();continue
             m=re.fullmatch(r'([A-Za-z][A-Za-z-]*):\s*(.*)',line)
-            require(m is not None and m[1] not in current,'source_invalid')
+            require(m is not None and m[1] not in current,'source_invalid','deb822_syntax_invalid')
             last=m[1];current[last]=m[2]
         for stanza in stanzas:
-            require(set(stanza)<={'Types','URIs','Suites','Components','Architectures','Signed-By','Enabled'},'source_unknown')
-            require(stanza.get('Enabled','yes') in ('yes','no'),'source_invalid')
+            require(set(stanza)<={'Types','URIs','Suites','Components','Architectures','Signed-By','Enabled'},'source_unknown','deb822_field_unsupported')
+            require(stanza.get('Enabled','yes') in ('yes','no'),'source_invalid','entry_invalid')
             if stanza.get('Enabled')=='no':
                 for uri in stanza.get('URIs','').split():source_class(uri)
                 disabled+=1;continue
-            require({'Types','URIs','Suites','Components'}<=set(stanza),'source_invalid')
+            require({'Types','URIs','Suites','Components'}<=set(stanza),'source_invalid','entry_invalid')
             enabled.extend(_source_entry(stanza['Types'].split(),stanza['URIs'].split(),stanza['Suites'].split(),
                          stanza['Components'].split(),stanza.get('Architectures','').split(),stanza.get('Signed-By')))
-    require(len(enabled)<=32,'source_invalid')
+    require(len(enabled)<=32,'source_invalid','entry_invalid')
     return enabled,disabled
 
 
@@ -394,21 +434,21 @@ def index_summary(entries):
 IDENTITY_FIELDS=('checkoutSHA','treeSHA','collectorSHA256','workflowSHA256','contractSHA256','checkoutClean',
                  'runID','runAttempt','runnerImage','imageOS','runnerOS','runnerArch')
 TOOL_FIELDS=('aptVersion','aptArchitecture','observedNodeVersion','expectedNodeVersion','lockedPlaywrightVersion',
-             'playwrightInstalledObserved','observedPlaywrightVersion','packageLockSHA256')
+             'playwrightInstalledObserved','observedPlaywrightVersion','packageLockSHA256','nodeObservation')
 STATE_FIELDS=('statusSHA256','statusBytes','dpkgQueryCanonicalSHA256','rowCount','configuredCount','heldCount',
               'residualConfigCount','unconfiguredCount','extendedStatesSHA256','extendedStatesBytes','baselineStable')
-SOURCE_KEYS=('enabledCount','disabledCount','publicEntries','unknownSourcePresent','credentialLikeSourcePresent','implicitTrustUnresolved')
+SOURCE_KEYS=('enabledCount','disabledCount','publicEntries','unknownSourcePresent','credentialLikeSourcePresent','implicitTrustUnresolved','observation')
 SOURCE_ENTRY_KEYS=('sourceClass','types','suites','components','architectures','signedByClass','keyringSHA256','primaryFingerprints','subkeyFingerprints')
 INDEX_KEYS=('entryCount','regularFileCount','totalBytes','suffixCounts','suffixBytes','newestMtime','oldestMtime','measurement')
 
 
 def empty_receipt():
-    return {'schema':1,'status':'blocked','reasonCodes':[],
+    return {'schema':2,'status':'blocked','reasonCodes':[],
       'identity':dict.fromkeys(IDENTITY_FIELDS),
       'os':dict.fromkeys(('ID','version','codename','dpkgArchitecture')),
-      'toolchain':dict(dict.fromkeys(TOOL_FIELDS),expectedNodeVersion='24.19.0'),
-      'sources':dict(enabledCount=None,disabledCount=None,publicEntries=[],unknownSourcePresent=False,
-                     credentialLikeSourcePresent=False,implicitTrustUnresolved=False),
+      'toolchain':dict(dict.fromkeys(TOOL_FIELDS),expectedNodeVersion='24.19.0',nodeObservation='not_observed'),
+      'sources':dict(enabledCount=None,disabledCount=None,publicEntries=[],unknownSourcePresent=None,
+                     credentialLikeSourcePresent=None,implicitTrustUnresolved=None,observation='not_observed'),
       'aptConfig':dict(dict.fromkeys(CONFIG),coverage='fixed-queries-only',fullEffectiveConfigBound=False),
       'installedState':dict.fromkeys(STATE_FIELDS),
       'indexes':dict(dict.fromkeys(INDEX_KEYS),measurement='preexisting-local-index-stat-only'),
@@ -420,7 +460,14 @@ class Collector:
         self.host=host;self.repo=Path(repo);self.data=empty_receipt();self.reasons=set()
     def part(self,function):
         try:function()
-        except Blocked as error:self.reasons.add(str(error))
+        except Blocked as error:
+            self.reasons.add(str(error))
+            if function.__name__=='node' and error.diagnostic in NODE_OBSERVATIONS:
+                self.data['toolchain']['nodeObservation']=error.diagnostic
+            if function.__name__=='sources':
+                if error.diagnostic in SOURCE_OBSERVATIONS:self.data['sources']['observation']=error.diagnostic
+                for flag,codes in SOURCE_FLAG_CODES.items():
+                    if str(error) in codes:self.data['sources'][flag]=True
         except Exception:self.reasons.add('unexpected_failure')
     def git(self,*args):
         return self.host.run(['/usr/bin/git','--no-optional-locks','-c','core.fsmonitor=false',
@@ -464,9 +511,13 @@ class Collector:
         for alias,name in CONFIG_ALIASES.items():argv.extend((alias,CONFIG[name][0]))
         self.data['aptConfig']=parse_config(self.host.run(argv))
     def node(self):
-        raw=self.host.run([self.host.node_path(),'--version'])
+        tool=self.data['toolchain'];tool['nodeObservation']='path_check_failed'
+        path=self.host.node_path()
+        tool['nodeObservation']='version_query_failed'
+        raw=self.host.run([path,'--version'])
+        tool['nodeObservation']='version_format_unsupported'
         require(re.fullmatch(rb'v[0-9]+\.[0-9]+\.[0-9]+\n',raw),'node_unsupported')
-        self.data['toolchain']['observedNodeVersion']=raw.decode().strip()[1:]
+        tool.update(observedNodeVersion=raw.decode().strip()[1:],nodeObservation='observed')
     def playwright(self):
         raw=self.host.read(self.repo/'web/package-lock.json',4*1024*1024)
         lock=strict_json(raw)
@@ -487,8 +538,10 @@ class Collector:
         self.data['toolchain'].update(playwrightInstalledObserved=all(v is not None for v in installed),
                                       observedPlaywrightVersion='1.56.1' if all(installed) else None)
     def sources(self):
+        section=self.data['sources'];section['observation']='config_unavailable'
         config=self.data['aptConfig']
         require(config['sourcesList']=='/etc/apt/sources.list' and config['sourcesParts']=='/etc/apt/sources.list.d/','config_invalid')
+        section['observation']='source_read_failed'
         file_inputs=[]
         primary=self.host.read('/etc/apt/sources.list',262144,optional=True)
         if primary is not None:file_inputs.append((primary,'.list'))
@@ -497,18 +550,22 @@ class Collector:
             require(re.fullmatch(r'[A-Za-z0-9_.-]+',name) and stat.S_ISREG(mode),'unsafe_file')
             require(size<=262144,'file_limit')
             file_inputs.append((self.host.read(Path('/etc/apt/sources.list.d')/name,262144),Path(name).suffix))
+        section['observation']='source_parse_failed'
         public=[];disabled=0
         for raw,kind in file_inputs:
             entries,count=parse_source_file(raw,kind);public.extend(entries);disabled+=count
             require(len(public)<=32,'source_invalid')
+        section['observation']='source_set_invalid'
         require(public,'source_invalid')
         # Source count is preserved, never omit an enabled unknown source.
         require(disabled<=128,'source_invalid')
+        section['observation']='key_observation_failed'
         for item in public:
             path=next(path for path,kind in KEYRINGS.items() if kind==item['signedByClass'])
             digest,primary,sub=self.host.key_fingerprints(path)
             item.update(keyringSHA256=digest,primaryFingerprints=primary,subkeyFingerprints=sub)
-        self.data['sources'].update(enabledCount=len(public),disabledCount=disabled,publicEntries=public)
+        section.update(enabledCount=len(public),disabledCount=disabled,publicEntries=public,observation='complete',
+                       unknownSourcePresent=False,credentialLikeSourcePresent=False,implicitTrustUnresolved=False)
     def installed(self):
         require(self.data['aptConfig']['statusFile']=='/var/lib/dpkg/status','config_invalid')
         before=self.host.read('/var/lib/dpkg/status',16*1024*1024)
@@ -538,9 +595,6 @@ class Collector:
                 if self.data['toolchain']['packageLockSHA256'] is not None:
                     require(sha(self.host.read(self.repo/'web/package-lock.json',4*1024*1024))==self.data['toolchain']['packageLockSHA256'],'source_changed')
             self.part(unchanged)
-        self.data['sources']['unknownSourcePresent']=bool(self.reasons & {'source_unknown','source_invalid','keyring_unsupported'})
-        self.data['sources']['credentialLikeSourcePresent']='source_credential_like' in self.reasons
-        self.data['sources']['implicitTrustUnresolved']='source_implicit_trust' in self.reasons
         if getattr(self.host,'cleanup_failed',False):self.reasons.add('cleanup_failed')
         self.data['reasonCodes']=sorted(self.reasons);self.data['status']='blocked' if self.reasons else 'observed'
         validate_receipt(self.data)
@@ -550,7 +604,7 @@ class Collector:
 def validate_receipt(data):
     template=empty_receipt()
     require(type(data) is dict and set(data)==set(template),'receipt_invalid')
-    require(type(data['schema']) is int and data['schema']==1 and data['status'] in ('observed','blocked'),'receipt_invalid')
+    require(type(data['schema']) is int and data['schema']==2 and data['status'] in ('observed','blocked'),'receipt_invalid')
     codes=data['reasonCodes']
     require(type(codes) is list and len(codes)<=len(CODES) and all(type(x) is str and x in CODES for x in codes)
             and codes==sorted(set(codes)) and (bool(codes)==(data['status']=='blocked')),'receipt_invalid')
@@ -573,8 +627,27 @@ def validate_receipt(data):
     require(tool['observedPlaywrightVersion'] in (None,'1.56.1'),'receipt_invalid');string(tool['packageLockSHA256'],r'[0-9a-f]{64}')
     if tool['playwrightInstalledObserved'] is not None:
         require((tool['observedPlaywrightVersion']=='1.56.1')==tool['playwrightInstalledObserved'],'receipt_invalid')
+    require(type(tool['nodeObservation']) is str and tool['nodeObservation'] in NODE_OBSERVATIONS,'receipt_invalid')
+    require((tool['nodeObservation']=='observed')==(tool['observedNodeVersion'] is not None),'receipt_invalid')
+    if tool['nodeObservation'] in NODE_FAILURE_CODES:
+        require(bool(set(codes)&NODE_FAILURE_CODES[tool['nodeObservation']]),'receipt_invalid')
     sources=data['sources'];integer(sources['enabledCount'],32);integer(sources['disabledCount'],128)
-    for key in SOURCE_KEYS[-3:]:require(type(sources[key]) is bool,'receipt_invalid')
+    require(type(sources['observation']) is str and sources['observation'] in SOURCE_OBSERVATIONS,'receipt_invalid')
+    for key in SOURCE_FLAGS:
+        boolean(sources[key])
+        if sources[key] is True:require(bool(set(codes)&SOURCE_FLAG_CODES[key]),'receipt_invalid')
+    if sources['observation']=='complete':
+        require(all(sources[key] is False for key in SOURCE_FLAGS) and sources['enabledCount'] is not None
+                and sources['enabledCount']>0 and sources['disabledCount'] is not None,'receipt_invalid')
+    else:
+        require(all(sources[key] is not False for key in SOURCE_FLAGS) and sources['enabledCount'] is None
+                and sources['disabledCount'] is None and sources['publicEntries']==[],'receipt_invalid')
+        if sources['observation']=='not_observed':require(all(sources[key] is None for key in SOURCE_FLAGS),'receipt_invalid')
+        else:
+            encountered=set(codes)&SOURCE_FAILURE_CODES[sources['observation']]
+            require(bool(encountered),'receipt_invalid')
+            for key in SOURCE_FLAGS:
+                require(sources[key] is (True if encountered & SOURCE_FLAG_CODES[key] else None),'receipt_invalid')
     require(type(sources['publicEntries']) is list and len(sources['publicEntries'])<=32,'receipt_invalid')
     for entry in sources['publicEntries']:
         require(type(entry) is dict and set(entry)==set(SOURCE_ENTRY_KEYS),'receipt_invalid')
@@ -585,6 +658,10 @@ def validate_receipt(data):
         for key in ('primaryFingerprints','subkeyFingerprints'):
             require(type(entry[key]) is list and len(entry[key])<=64 and all(type(x) is str and re.fullmatch(r'(?:[0-9A-F]{40}|[0-9A-F]{64})',x) for x in entry[key]) and entry[key]==sorted(set(entry[key])),'receipt_invalid')
     if sources['enabledCount'] is not None:require(sources['enabledCount']==len(sources['publicEntries']),'receipt_invalid')
+    if sources['observation']=='complete':
+        for entry in sources['publicEntries']:
+            require(entry['keyringSHA256'] is not None and entry['primaryFingerprints'] and entry['types']
+                    and entry['suites'] and entry['components'],'receipt_invalid')
     config=data['aptConfig']
     require(config['coverage']=='fixed-queries-only' and config['fullEffectiveConfigBound'] is False,'receipt_invalid')
     for key,(_,kind) in CONFIG.items():
@@ -614,7 +691,7 @@ def validate_receipt(data):
         for section in ('identity','os','aptConfig','installedState','indexes'):
             allowed={'extendedStatesSHA256','oldestMtime','newestMtime'}
             require(all(v is not None or k in allowed for k,v in data[section].items()),'receipt_invalid')
-        require(all(tool[k] is not None for k in TOOL_FIELDS if k!='observedPlaywrightVersion') and sources['enabledCount'] is not None and sources['enabledCount']>0 and not any(sources[k] for k in SOURCE_KEYS[-3:]),'receipt_invalid')
+        require(all(tool[k] is not None for k in TOOL_FIELDS if k!='observedPlaywrightVersion') and sources['enabledCount'] is not None and sources['enabledCount']>0 and sources['observation']=='complete' and tool['nodeObservation']=='observed' and all(sources[k] is False for k in SOURCE_FLAGS),'receipt_invalid')
         require(identity['checkoutClean'] is True and state['baselineStable'] is True,'receipt_invalid')
         for entry in sources['publicEntries']:
             require(entry['keyringSHA256'] is not None and entry['primaryFingerprints'] and entry['types'] and entry['suites'] and entry['components'],'receipt_invalid')
