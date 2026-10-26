@@ -73,8 +73,11 @@ export function classifyIdentityRequestFailure(value: unknown): IdentityRequestF
     }
   } catch { return "unknown"; }
 }
-// Read the first eligible original Playwright Response, not a replacement or
-// application-native JSON observation. FRESH means first host-observed after
+// Read the first eligible App-passive-purpose original Playwright Response,
+// not the formerly ambiguous first /me from any owner, a replacement, or an
+// application-native JSON observation. The fixed client purpose is not authority
+// or cryptographic owner authentication; reviewed source and the original actor
+// assertion remain mandatory. FRESH means first host-observed after
 // arming; the bounded Page request snapshot cannot prove native initiation time.
 export async function readNativeFocusIdentity(page: Page): Promise<number> {
   type Failure = "identity_prepare_failed" | "identity_request_ambiguous" | "identity_response_metadata" |
@@ -177,11 +180,14 @@ export async function readNativeFocusIdentity(page: Page): Promise<number> {
   const responseSeen = (response: Response) => {
     if (!live()) return;
     try {
-      if (new URL(response.url()).pathname !== "/api/auth/me") return;
+      if (state.phase === "PREPARING") {
+        if (new URL(response.url()).pathname === "/api/auth/me") record(response.request(), true);
+        return;
+      }
       const request = response.request();
-      if (state.phase === "PREPARING") { record(request, true); return; }
       if (old.has(request)) return;
       if (selectedResponse) {
+        if (new URL(response.url()).pathname !== "/api/auth/me") return;
         // Matching pathname only, not another eligible/canonical200 candidate.
         // Counting ends at first failure/success via live(); no post-failure reads.
         laterMatchingResponses = Math.min(65_535, laterMatchingResponses + 1);
@@ -189,9 +195,24 @@ export async function readNativeFocusIdentity(page: Page): Promise<number> {
         if (request === selectedRequest && response !== selectedResponse) fail("identity_request_ambiguous");
         return;
       }
-      if (response.status() !== 200) return;
-      // The first non-OLD pathname/status candidate must pass these checks.
-      // Invalid metadata is terminal, never a filter for a later better body.
+      // Synchronous provisional Request metadata only. Inspect no other header
+      // value and never issue a complete-header protocol request before JSON.
+      // Missing purpose is non-target; present malformed/inherited metadata is
+      // terminal, including a marked wrong-path response. No unmarked fallback.
+      const headers = request.headers();
+      if (!headers || typeof headers !== "object" || Array.isArray(headers)) {
+        fail("identity_response_metadata"); return;
+      }
+      const purpose = Object.getOwnPropertyDescriptor(headers, "x-adtr-identity-purpose");
+      if (!purpose) {
+        if ("x-adtr-identity-purpose" in headers) fail("identity_response_metadata");
+        return;
+      }
+      if (!("value" in purpose) || purpose.value !== "app-passive-session") {
+        fail("identity_response_metadata"); return;
+      }
+      // The first declared App-purpose candidate must pass all metadata before
+      // the original status rule. Bad metadata cannot select a later good body.
       const canonical = origin + "/api/auth/me";
       if (response.url() !== canonical || request.url() !== canonical || request.method() !== "GET" ||
           request.resourceType() !== "fetch" || request.isNavigationRequest() || request.frame() !== frame ||
@@ -199,6 +220,7 @@ export async function readNativeFocusIdentity(page: Page): Promise<number> {
           request.serviceWorker() !== null || response.fromServiceWorker()) {
         fail("identity_response_metadata"); return;
       }
+      if (response.status() !== 200) return;
       if (!fresh.has(request)) { fail("identity_request_ambiguous"); return; }
       if (!live()) return;
       selectedRequest = request; selectedResponse = response; state.phase = "SELECTED"; pending++;

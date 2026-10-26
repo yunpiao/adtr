@@ -116,7 +116,16 @@
           "aborted"
         ],
         "harnessDenials403": true,
-        "proofEmptyScreenshots": true
+        "proofEmptyScreenshots": true,
+        "appWitnessPredeclaredOldActorSettled": true,
+        "appWitnessAccountOnly": true,
+        "appWitnessTrustedNativeActivation": true,
+        "appWitnessOriginalMarkedBody": true,
+        "originalWorkspaceTrustedNativeActivation": true,
+        "originalWorkspaceReaderGateOpen": true,
+        "readerSessionSamples": 4,
+        "readerBrowserAuthMutations": 0,
+        "checkedSessionContinuity": true
       },
       "screenshots": {
         "producer-proof-cleared-1440.png": [

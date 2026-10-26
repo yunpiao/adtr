@@ -74,7 +74,11 @@ def witnesses(suite):
     counts = dict(taskSHA256=a['taskSHA256'], domainSHA256=a['domainSHA256'], readerActorSHA256=sha('reader'), originalState='succeeded', originalResultVersion='7', observationSHA256=sha('stored'), tasks=2, uses=1, dependencies=1, observations=1, readerTasks=0, readerUses=0)
     return dict(original=a, mutations=[mutation(a, 'sync', 30000)], readerActorSHA256=sha('reader'),
                 readerMenu=[dict(mark=mark, readable=True, writeable=False) for mark in ['directory_assets', 'domains']],
-                readerObservationSHA256=a['taskSHA256'], countsBefore=counts, countsAfter=copy.deepcopy(counts), denialStatuses=[403, 403])
+                readerObservationSHA256=a['taskSHA256'], countsBefore=counts, countsAfter=copy.deepcopy(counts), denialStatuses=[403, 403],
+                identityWitness=dict(kind='split-app-account-and-workspace-v1', appPageRole='predeclared-account', workspacePageRole='original-workspace',
+                                     samePageAtomicBinding=False, producerActorSHA256=a['actorSHA256'], appReaderActorSHA256=sha('reader'), workspaceReaderActorSHA256=sha('reader'),
+                                     sessionContinuity='checked-identity-and-csrf-in-memory', identitySamples=4, browserAuthMutations=0,
+                                     harnessAuthWrites='source-closed-none', auxiliaryPageCleanup='source-bound-after-finally'))
 
 
 def png(width, height):
@@ -182,6 +186,43 @@ class DictionaryV4Evidence(unittest.TestCase):
         data['checks']['staleDelivery'] = 'ignored_abort_proved'
         with self.assertRaises(ValueError):
             v.validate(data, self.expected, self.rules, 'readers', images.__getitem__)
+
+    def test_reader_split_roles_session_and_non_atomic_claim_are_closed(self):
+        source = witnesses('readers')
+        for field in source['identityWitness']:
+            bad = copy.deepcopy(source); del bad['identityWitness'][field]
+            with self.subTest(missing=field), self.assertRaises(ValueError):
+                v.validate_readers(bad)
+        changes = [('kind', 'same-page-original-response-commit'), ('kind', 'unknown'),
+                   ('appPageRole', 'late-selected-page'), ('workspacePageRole', 'replacement-workspace'),
+                   ('samePageAtomicBinding', True), ('samePageAtomicBinding', 0),
+                   ('producerActorSHA256', sha('other-producer')), ('appReaderActorSHA256', source['original']['actorSHA256']),
+                   ('workspaceReaderActorSHA256', sha('other-reader')), ('sessionContinuity', 'same-cookie-bytes'),
+                   ('identitySamples', 3), ('identitySamples', True), ('browserAuthMutations', 1), ('browserAuthMutations', False),
+                   ('harnessAuthWrites', 'browser-listener-proves-all'), ('auxiliaryPageCleanup', 'already-closed')]
+        for field, value in changes:
+            bad = copy.deepcopy(source); bad['identityWitness'][field] = value
+            with self.subTest(field=field, value=value), self.assertRaises(ValueError):
+                v.validate_readers(bad)
+        for field in ['csrfToken', 'csrfSHA256', 'cookie', 'rawProfile', 'closed']:
+            bad = copy.deepcopy(source); bad['identityWitness'][field] = 'not-allowed'
+            with self.subTest(extra=field), self.assertRaises(ValueError):
+                v.validate_readers(bad)
+        bad = copy.deepcopy(source); del bad['identityWitness']
+        with self.assertRaises(ValueError): v.validate_readers(bad)
+
+    def test_reader_split_required_checks_cannot_be_missing_false_or_wrong_type(self):
+        data, images = self.scenario('readers')
+        fields = ['appWitnessPredeclaredOldActorSettled', 'appWitnessAccountOnly', 'appWitnessTrustedNativeActivation',
+                  'appWitnessOriginalMarkedBody', 'originalWorkspaceTrustedNativeActivation', 'originalWorkspaceReaderGateOpen',
+                  'readerSessionSamples', 'readerBrowserAuthMutations', 'checkedSessionContinuity']
+        for field in fields:
+            for value in [None, False, 'unknown']:
+                bad = copy.deepcopy(data)
+                if value is None: del bad['checks'][field]
+                else: bad['checks'][field] = value
+                with self.subTest(field=field, value=value), self.assertRaises(ValueError):
+                    v.validate(bad, self.expected, self.rules, 'readers', images.__getitem__)
 
     def test_unknown_nested_witnesses_and_secret_fields_are_rejected(self):
         for suite in self.rules['suites']:

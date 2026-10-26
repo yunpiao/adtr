@@ -27,7 +27,18 @@ export async function request<T>(
   signal: AbortSignal,
   body?: unknown,
   csrfToken?: string,
+  identityPurpose?: "app-passive-session",
 ): Promise<T> {
+  // Fixed client intent only, never an authorization assertion or generic
+  // header escape hatch. Keep all omitted-purpose transport options unchanged.
+  if (
+    identityPurpose !== undefined &&
+    (identityPurpose !== "app-passive-session" ||
+      path !== "/me" ||
+      body !== undefined)
+  ) {
+    throw new ApiError("invalid_input");
+  }
   let response: Response;
   try {
     response = await fetch(`/api/auth${path}`, {
@@ -37,7 +48,9 @@ export async function request<T>(
       signal,
       headers:
         body === undefined
-          ? {}
+          ? identityPurpose === undefined
+            ? {}
+            : { "x-adtr-identity-purpose": identityPurpose }
           : {
               "Content-Type": "application/json",
               ...(csrfToken ? { "X-CSRF-Token": csrfToken } : {}),

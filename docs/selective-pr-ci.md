@@ -38,7 +38,7 @@ short setup work in exchange for independently checking a correct selection.
   TaskWorkspace. Their dependency closures cover API modules and helper components.
   Other production consumers, App/global composition, shared APIs and unknown
   frontend dependencies conservatively expand to all seven groups, including
-  contracts, all eight auth shards and every browser/fixed/native check. This
+  contracts, all sixteen auth shards and every browser/fixed/native check. This
   intentionally costs more than the previous browser/fixed/native fallback:
   until the dependency boundary is proved, frontend location alone cannot
   justify omitting auth. Proved spec/page/test-only/native selections retain
@@ -71,8 +71,8 @@ short setup work in exchange for independently checking a correct selection.
 - The owned running-cancel controller/guard selects its three real running-cancel
   consumers plus contracts. Other shared runners/fixtures conservatively expand
 - Shared Go/auth/DB/tasks, build files, dependency locks, CI/selector files and
-  otherwise unknown paths select contracts, all eight auth shards and all browser
-  variants. Eight auth shards remain indivisible because test-name insertion can
+  otherwise unknown paths select contracts, all sixteen auth shards and all browser
+  variants. Sixteen auth shards remain indivisible because test-name insertion can
   move tests between shards. Reasons are printed for every changed path
 
 `contracts` keeps its original complete lint/race/type/build/non-auth PostgreSQL
