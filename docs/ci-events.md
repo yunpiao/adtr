@@ -32,7 +32,7 @@ settings are changed.
 `contracts` still runs make check, non-auth real PostgreSQL migrations/concurrency and
 API/Worker lifecycle acceptance. No previous browser suite was removed.
 
-Authentication/HTTP PostgreSQL contracts use four deterministic shards, with at
+Authentication/HTTP PostgreSQL contracts use sixteen deterministic shards, with at
 most two concurrent jobs, fail-fast disabled and the same 20-minute job limit.
 Every shard discovers the actual integration-tagged Go test names, then takes
 its sorted round-robin partition. Tests, examples and fuzz seed cases are retained;
@@ -40,7 +40,7 @@ subtests run with their parent. Discovery errors, duplicate names and empty shar
 fail. Each invocation keeps `-race -count=1 -timeout=10m`; password work factors and
 test assertions are unchanged. Verbose output records the actual executed names.
 The normal `python3 scripts/test_integration.py` and `make integration` entry points
-run all non-auth packages and all four auth shards, even if an earlier group fails.
+run all non-auth packages and all sixteen auth shards, even if an earlier group fails.
 
 F52 adds a separate system browser matrix case with the same 20-minute job
 budget and browser-matrix concurrency bound. The harness passes only the PID of its

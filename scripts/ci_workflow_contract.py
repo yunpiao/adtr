@@ -9,8 +9,58 @@ import json
 from pathlib import Path
 
 
+def restore_auth_shards16(text):
+    """Reverse only the reviewed 16-to-8 auth matrix line, not runtime coverage."""
+    def unique(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError('auth shards workflow delta is invalid')
+            result[key] = value
+        return result
+    raw = Path('scripts/fixtures/auth_shards16_ci_delta.json').read_bytes()
+    if not 0 < len(raw) <= 8192:
+        raise ValueError('auth shards workflow delta is invalid')
+    decoded = raw.decode('utf-8')
+    depth, quoted, escaped = 0, False, False
+    for char in decoded:
+        if quoted:
+            if escaped:
+                escaped = False
+            elif char == '\\':
+                escaped = True
+            elif char == '"':
+                quoted = False
+        elif char == '"':
+            quoted = True
+        elif char in '[{':
+            depth += 1
+            if depth > 3:
+                raise ValueError('auth shards workflow delta is invalid')
+        elif char in ']}':
+            depth -= 1
+            if depth < 0:
+                raise ValueError('auth shards workflow delta is invalid')
+    if quoted or depth != 0:
+        raise ValueError('auth shards workflow delta is invalid')
+    delta = json.loads(decoded, object_pairs_hook=unique)
+    baseline = '80c650cfd2184e2c9604d1a222843b64c642cb300ba63e2b1ffe9df20a899e61'
+    old = '        shard: [1, 2, 3, 4, 5, 6, 7, 8]\n'
+    new = '        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]\n'
+    expected = {'baselineSHA256': baseline, 'replacements': [{'old': old, 'new': new}]}
+    if type(delta) is not dict or delta != expected:
+        raise ValueError('auth shards workflow delta is invalid')
+    if type(text) is not str or text.count(new) != 1:
+        raise ValueError('auth shards workflow block differs from reviewed delta')
+    text = text.replace(new, old, 1)
+    if hashlib.sha256(text.encode('utf-8')).hexdigest() != baseline:
+        raise ValueError('non-auth-shards workflow bytes changed')
+    return text
+
+
 def restore_access_role_bulk(text):
     """Reverse exactly the reviewed access-only validated two-file upload."""
+    text = restore_auth_shards16(text)
     def unique(pairs):
         result = {}
         for key, value in pairs:

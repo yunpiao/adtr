@@ -34,7 +34,14 @@ class DirectoryV4ControlsCI(unittest.TestCase):
         legacy = restore_selection(Path('.github/workflows/ci.yml').read_text())
         matrix = legacy.split('  browser:\n', 1)[1].split('    steps:\n', 1)[0]
         self.assertEqual([(entry['name'], entry['command']) for entry in inventory['browser'] if entry['name'] not in expected + ['messages-isolation', 'tasks-health-recovery']], re.findall(r'          - name: ([^\n]+)\n            command: ([^\n]+)', matrix))
-        self.assertEqual(56 + 7 + 8 + 6, 77)  # plan, prepare, contracts, two native, verify.
+        actual = Path(".github/workflows/ci.yml").read_text()
+        auth = actual.split("  auth-integration:\n", 1)[1].split("  browser:\n", 1)[0]
+        matrices = re.findall(r"^        shard: \[([0-9, ]+)\]$", auth, re.M)
+        self.assertEqual(len(matrices), 1)
+        shards = [int(value) for value in matrices[0].split(",")]
+        self.assertEqual(shards, list(range(1, 17)))
+        self.assertEqual(len(inventory["browser"]) + len(inventory["fixed"]) + len(shards) + 6, 85)
+        # Six scalar/native gates: plan, prepare, contracts, two native, verify.
 
     def test_runtime_commands_budgets_and_real_discovery(self):
         runner = Path('scripts/test_auth_e2e.py').read_text()

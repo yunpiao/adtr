@@ -48,22 +48,22 @@ class IntegrationRunnerContract(unittest.TestCase):
         self.assertLessEqual(max(map(len, shards)) - min(map(len, shards)), 1)
         self.assertEqual(shards, runner.partition_auth_tests("\n".join(self.names)))
 
-    def test_eight_shards_split_each_previous_four_shard_without_moving_coverage(self):
-        self.assertEqual(runner.AUTH_SHARDS, 8)
-        # Exercise uneven discovery sizes as well as the current 297-test suite.
-        for count in (8, 19, 296, 297, 298):
+    def test_sixteen_shards_split_each_previous_eight_shard_without_moving_coverage(self):
+        self.assertEqual(runner.AUTH_SHARDS, 16)
+        # Include future/odd discovery sizes, not a frozen current test-name list.
+        for count in (16, 17, 19, 351, 352, 353, 1001):
             names = sorted(f"TestCase{index}" for index in range(count))
             shards = runner.partition_auth_tests("\n".join(reversed(names)))
-            for index in range(4):
+            for index in range(8):
                 with self.subTest(count=count, old_shard=index + 1):
-                    old = names[index::4]
+                    old = names[index::8]
                     self.assertEqual(shards[index], old[::2])
-                    self.assertEqual(shards[index + 4], old[1::2])
-                    self.assertFalse(set(shards[index]) & set(shards[index + 4]))
-                    self.assertCountEqual(shards[index] + shards[index + 4], old)
+                    self.assertEqual(shards[index + 8], old[1::2])
+                    self.assertFalse(set(shards[index]) & set(shards[index + 8]))
+                    self.assertCountEqual(shards[index] + shards[index + 8], old)
 
     def test_workflow_matrix_matches_every_runner_shard_exactly_once(self):
-        workflow = reviewed_workflow()
+        workflow = Path(".github/workflows/ci.yml").read_text()
         auth = workflow.split('  auth-integration:\n', 1)[1].split('  browser:\n', 1)[0]
         matrices = re.findall(r'^        shard: \[([0-9, ]+)\]$', auth, re.M)
         self.assertEqual(len(matrices), 1)
@@ -71,7 +71,7 @@ class IntegrationRunnerContract(unittest.TestCase):
                          list(range(1, runner.AUTH_SHARDS + 1)))
 
     def test_discovery_rejects_missing_duplicate_ambiguous_and_empty_shards(self):
-        for output in ("", "ok \tpackage\t1s", "TestOnly", self.discovery + "TestCase0\n",
+        for output in ("", "ok \tpackage\t1s", "TestOnly", "\n".join(self.names[:15]), self.discovery + "TestCase0\n",
                        self.discovery + "unexpected output\n", self.discovery + "TestShell;exit\n"):
             with self.subTest(output=output), self.assertRaises(ValueError):
                 runner.partition_auth_tests(output)
@@ -173,7 +173,7 @@ class IntegrationRunnerContract(unittest.TestCase):
 
     def test_invalid_shard_configuration_is_rejected(self):
         for argv in (["--suite", "auth"], ["--shard", "1"], ["--suite", "non-auth", "--shard", "1"],
-                     ["--suite", "auth", "--shard", "0"], ["--suite", "auth", "--shard", "9"]):
+                     ["--suite", "auth", "--shard", "0"], ["--suite", "auth", "--shard", "17"]):
             with self.subTest(argv=argv), contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
                 runner.parse_args(argv)
 
