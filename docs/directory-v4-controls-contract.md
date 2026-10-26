@@ -256,7 +256,9 @@ non-restoration of intent/results, no browser business POST, original reader GET
 two separately proved 403 write denials and unchanged database counts all remain.
 The same four safe Workspace PNGs are retained; no account-profile image is added.
 
-The genuine context `/me` checks use the reader header identity and compare ID,
+The genuine context `/me` checks require HTTP 200 and `no-store`, then verify the
+reader identity in the actual JSON body; this auth endpoint does not provide the
+business-response `X-ADTR-User-ID` header. The checks compare ID,
 username, role, priv, MFA, needChangePwd, isExpired and the exact nonempty CSRF
 value only in memory at four declared boundaries. Browser auth mutations must be
 zero from the first reader check through both witnesses and final authority check.

@@ -113,11 +113,11 @@ class DirectoryV4ControlsCI(unittest.TestCase):
         self.assertIn('events.length >= 16', readers)
         for fragment in ['page.locator(".soc-session-status")', '正在确认登录状态…', 'main.soc-main', '!main.hidden && !main.inert', '.signed-in strong', 'node.textContent === "用户 ID"']:
             self.assertIn(fragment, readers)
-        self.assertIn('const me = await readJSON(context, "/api/auth/me", reader.actorId);', readers)
-        self.assertLess(readers.index('readerMonitoring = true;'), readers.index('const me = await readJSON(context, "/api/auth/me", reader.actorId);'))
+        self.assertIn('const me = await readJSON(context, "/api/auth/me");', readers)
+        self.assertLess(readers.index('readerMonitoring = true;'), readers.index('const me = await readJSON(context, "/api/auth/me");'))
         interval = readers.split('readerMonitoring = true;', 1)[1].split('leaks.assertClean();', 1)[0]
         self.assertEqual(re.findall(r'readJSON\(context, ([^,\)]+)', interval), ['"/api/auth/me"', '"/api/access/menu"', '"/api/auth/me"'])
-        self.assertEqual(interval.count('readJSON(context, "/api/auth/me", reader.actorId)'), 2)
+        self.assertEqual(interval.count('readJSON(context, "/api/auth/me")'), 2)
         self.assertEqual(re.findall(r'context\.request\.([a-z]+)\(', interval), ['post'])
         self.assertIn('context.request.post(V4 + operation,', interval)
         self.assertIn('for (const [operation, data] of [', interval)
@@ -160,6 +160,24 @@ class DirectoryV4ControlsCI(unittest.TestCase):
             self.assertNotIn(forbidden, navigation)
         self.assertIn('headers()["x-adtr-user-id"] !== String(actorId)', Path('web/e2e/directory-v4-fixture.ts').read_text())
 
+    def test_auth_me_body_contract_does_not_borrow_business_actor_header(self):
+        source = Path('internal/auth/service.go').read_text()
+        writer = source.split('func write(', 1)[1].split('func (s *Service) readUser(', 1)[0]
+        for header in ['w.Header().Set("Content-Type", "application/json")',
+                       'w.Header().Set("Cache-Control", "no-store")',
+                       'w.Header().Set("X-Content-Type-Options", "nosniff")']:
+            self.assertIn(header, writer)
+        self.assertNotIn('x-adtr-user-id', source.lower())
+        self.assertIn('if path == "/me" {\n\t\treturn u, "", false, tx.Commit(ctx)', source)
+        self.assertIn('mux.Handle("/api/auth/", authentication)', Path('cmd/adtr/main.go').read_text())
+        fixture = Path('web/e2e/directory-v4-fixture.ts').read_text()
+        self.assertIn('actorId !== undefined && response.headers()["x-adtr-user-id"] !== String(actorId)', fixture)
+        self.assertIn('response.status() !== 200 || response.headers()["cache-control"] !== "no-store"', fixture)
+        runtime = Path('web/src/directory-v4-runtime-contract.test.ts').read_text()
+        self.assertIn('import { readJSON } from "../e2e/directory-v4-fixture"', runtime)
+        self.assertIn('const start = fromActualSpec(source);', runtime)
+        self.assertIn('accepts legitimate auth /me without a business actor header', runtime)
+
     def test_split_identity_source_rejects_single_scope_and_session_cleanup_regressions(self):
         readers = Path('web/e2e/directory-v4-readers.spec.ts').read_text()
         replacements = [
@@ -168,7 +186,7 @@ class DirectoryV4ControlsCI(unittest.TestCase):
             ('await requireTrustedActivation(appActivation);', ''),
             ('await requireTrustedActivation(workspaceActivation);', ''),
             ('accountIdentitySettled(appWitness, actor.actorId, actor.username)', 'accountIdentitySettled(appWitness, reader.actorId, reader.username)'),
-            ('readJSON(context, "/api/auth/me", reader.actorId)', 'readJSON(context, "/api/auth/me")'),
+            ('readJSON(context, "/api/auth/me")', 'readJSON(context, "/api/auth/me", reader.actorId)'),
             ('"isExpired", "csrfToken"] as const', '"isExpired"] as const'),
             ('context.request.post(V4 + operation,', 'context.request.post("/api/auth/logout",'),
             ('readerBrowserAuthMutations === 0', 'readerBrowserAuthMutations >= 0'),

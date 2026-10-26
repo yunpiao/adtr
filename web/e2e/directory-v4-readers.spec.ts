@@ -167,7 +167,7 @@ test("actual reader authority, native lifecycle and stale original reads never r
     const readerAuth = await enrollMfa(switching, reader.password);
     fixture.secrets.push(readerAuth.secret);
     readerMonitoring = true;
-    const me = await readJSON(context, "/api/auth/me", reader.actorId);
+    const me = await readJSON(context, "/api/auth/me");
     fixture.secrets.push(me.csrfToken);
     invariant(me.ID === reader.actorId && me.username === reader.username && me.role === "viewer" && Number.isSafeInteger(me.priv) && me.priv >= 0 && me.hasMfa === true && me.needChangePwd === false && me.isExpired === false && typeof me.csrfToken === "string" && me.csrfToken.length > 0, "Actual reader session identity mismatch");
     const menu = (await readJSON(context, "/api/access/menu")).menu as { mark: string; auth: { readable: boolean; writeable: boolean } }[];
@@ -176,7 +176,7 @@ test("actual reader authority, native lifecycle and stale original reads never r
     // contract separately closes harness calls to GETs and the two V4 denials.
     let readerSessionSamples = 1;
     const assertReaderSessionUnchanged = async () => {
-      const current = await readJSON(context, "/api/auth/me", reader.actorId);
+      const current = await readJSON(context, "/api/auth/me");
       if (typeof current.csrfToken === "string") fixture.secrets.push(current.csrfToken);
       const keys = ["ID", "username", "role", "priv", "hasMfa", "needChangePwd", "isExpired", "csrfToken"] as const;
       invariant(keys.every(key => current[key] === me[key]) && readerBrowserAuthMutations === 0, "Reader session interval changed");

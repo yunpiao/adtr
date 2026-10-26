@@ -3,6 +3,11 @@ import { parseWorkerControlState, workerControl, safeScreenshots, v4ScreenshotTa
 import type { Page, Request, Response, TestInfo } from "@playwright/test";
 import { EventEmitter } from "node:events";
 import { runInNewContext } from "node:vm";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import ts from "typescript";
+import { readJSON } from "../e2e/directory-v4-fixture";
+import type { BrowserContext, APIResponse } from "@playwright/test";
 
 describe("committed cancel query-only unknown UI barrier", () => {
   const notice = "结果尚未确认或响应未通过校验。请查询原操作；不会自动重新采集或取消。 请点击“重新核验并恢复”查询原回执。";
@@ -869,5 +874,147 @@ describe("closed identity request failure projection", () => {
     const access = vi.fn(() => { throw new Error("private"); });
     for (const value of [Object.defineProperty({}, "errorText", { get: access }), new Proxy({}, { getOwnPropertyDescriptor: access }), { errorText: { toString: access } }]) expect(classifyIdentityRequestFailure(value)).toBe("unknown");
     expect(access).not.toHaveBeenCalled();
+  });
+});
+
+describe("reader auth-session transport and actual spec contract", () => {
+  const source = readFileSync(resolve(process.cwd(), "e2e/directory-v4-readers.spec.ts"), "utf8");
+  const reader = { actorId: 73, username: "synthetic-reader" };
+  const fields = ["ID", "username", "role", "priv", "hasMfa", "needChangePwd", "isExpired", "csrfToken"] as const;
+  const secret = "synthetic-private-reader-csrf";
+  function profile(): Record<string, unknown> {
+    return { ID: reader.actorId, username: reader.username, role: "viewer", priv: 0, hasMfa: true, needChangePwd: false, isExpired: false, csrfToken: secret };
+  }
+  type Session = { sample(): Promise<void>; count(): number; setAuthMutations(value: number): void };
+  // Execute the complete current spec statements, not a copy of their predicates.
+  // Two- and legacy three-argument shapes are recognized solely so the unchanged
+  // old-source sensitivity oracle reaches the real helper's transport check.
+  function fromActualSpec(text: string) {
+    const tree = ts.createSourceFile("readers.ts", text, ts.ScriptTarget.Latest, true), nodes: ts.Node[] = [];
+    const visit = (node: ts.Node) => { nodes.push(node); ts.forEachChild(node, visit); }; visit(tree);
+    const fail = () => { throw new Error("Reader session contract source shape changed"); };
+    const variable = (name: string) => {
+      const matches = nodes.filter((node): node is ts.VariableStatement => ts.isVariableStatement(node) && node.declarationList.declarations.some(value => ts.isIdentifier(value.name) && value.name.text === name));
+      if (matches.length !== 1 || matches[0].declarationList.declarations.length !== 1) return fail();
+      return matches[0];
+    };
+    const me = variable("me"), count = variable("readerSessionSamples"), check = variable("assertReaderSessionUnchanged");
+    if (!ts.isBlock(me.parent) || count.parent !== me.parent || check.parent !== me.parent) return fail();
+    const siblings = me.parent.statements, index = siblings.indexOf(me);
+    const enrollment = siblings[index + 1], assertion = siblings[index + 2];
+    if (!enrollment || !assertion || enrollment.getText(tree) !== "fixture.secrets.push(me.csrfToken);" ||
+        !ts.isExpressionStatement(assertion) || !ts.isCallExpression(assertion.expression) ||
+        assertion.expression.expression.getText(tree) !== "invariant" || assertion.expression.arguments.length !== 2 ||
+        !ts.isStringLiteral(assertion.expression.arguments[1]) || assertion.expression.arguments[1].text !== "Actual reader session identity mismatch") return fail();
+    const firstCall = me.declarationList.declarations[0].initializer;
+    if (!firstCall || !ts.isAwaitExpression(firstCall) || !ts.isCallExpression(firstCall.expression)) return fail();
+    const checkInitializer = check.declarationList.declarations[0].initializer;
+    if (!checkInitializer || !ts.isArrowFunction(checkInitializer) || !ts.isBlock(checkInitializer.body)) return fail();
+    const laterCalls: ts.CallExpression[] = [];
+    const findRead = (node: ts.Node) => { if (ts.isCallExpression(node) && node.expression.getText(tree) === "readJSON") laterCalls.push(node); ts.forEachChild(node, findRead); }; findRead(checkInitializer);
+    if (laterCalls.length !== 1) return fail();
+    for (const call of [firstCall.expression, laterCalls[0]]) {
+      if (call.expression.getText(tree) !== "readJSON" || ![2, 3].includes(call.arguments.length) ||
+          call.arguments[0].getText(tree) !== "context" || !ts.isStringLiteral(call.arguments[1]) || call.arguments[1].text !== "/api/auth/me" ||
+          (call.arguments.length === 3 && call.arguments[2].getText(tree) !== "reader.actorId")) return fail();
+    }
+    const body = `return async (context, reader, fixture) => {
+      let readerBrowserAuthMutations = 0;
+      ${[me, enrollment, assertion, count, check].map(node => node.getText(tree)).join("\n")}
+      return { sample: assertReaderSessionUnchanged, count: () => readerSessionSamples,
+        setAuthMutations: value => { readerBrowserAuthMutations = value; } };
+    };`;
+    const javascript = ts.transpileModule(body, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None }, reportDiagnostics: true });
+    if (javascript.diagnostics?.some(diagnostic => diagnostic.category === ts.DiagnosticCategory.Error)) return fail();
+    return new Function("readJSON", "invariant", javascript.outputText)(readJSON, invariant) as
+      (context: BrowserContext, expected: typeof reader, fixture: { secrets: string[] }) => Promise<Session>;
+  }
+  const start = fromActualSpec(source);
+  function response(body: unknown = profile(), options: { status?: number; cache?: string | null; actor?: string; rejectJSON?: boolean } = {}) {
+    const headers: Record<string, string> = { "content-type": "application/json", "x-content-type-options": "nosniff" };
+    if (options.cache !== null) headers["cache-control"] = options.cache ?? "no-store";
+    if (options.actor !== undefined) headers["x-adtr-user-id"] = options.actor;
+    const json = vi.fn(async () => { if (options.rejectJSON) throw new Error("Synthetic JSON rejection"); return body; });
+    return { value: { status: () => options.status ?? 200, headers: () => headers, json } as unknown as APIResponse, json };
+  }
+  function context(...responses: ReturnType<typeof response>[]) {
+    let index = 0;
+    const get = vi.fn(async () => { if (index >= responses.length) throw new Error("Unexpected extra fixture read"); return responses[index++].value; });
+    return { value: { request: { get } } as unknown as BrowserContext, get };
+  }
+  it("accepts legitimate auth /me without a business actor header and keeps four real-body samples", async () => {
+    const replies = Array.from({ length: 4 }, () => response()), transport = context(...replies), fixture = { secrets: [] as string[] };
+    const session = await start(transport.value, reader, fixture);
+    for (let index = 0; index < 3; index++) await session.sample();
+    expect(session.count()).toBe(4); expect(transport.get).toHaveBeenCalledTimes(4);
+    for (const reply of replies) expect(reply.json).toHaveBeenCalledTimes(1);
+    for (const call of transport.get.mock.calls) expect(call).toEqual(["/api/auth/me", { maxRedirects: 0, timeout: 15000 }]);
+    expect(fixture.secrets.length === 4 && fixture.secrets.every(value => value === secret)).toBe(true);
+  });
+  it("preserves the old actor-argument failure as a real-helper sensitivity oracle", async () => {
+    const reply = response(), transport = context(reply);
+    await expect(readJSON(transport.value, "/api/auth/me", reader.actorId)).rejects.toThrow("Real fixture read failed identity or status checks");
+    expect(reply.json).not.toHaveBeenCalled();
+  });
+  it.each(fields)("rejects a missing first-profile field %s", async field => {
+    const body = profile(); delete body[field];
+    await expect(start(context(response(body)).value, reader, { secrets: [] })).rejects.toThrow("Actual reader session identity mismatch");
+  });
+  it.each(fields)("rejects a wrong-typed first-profile field %s", async field => {
+    const body = profile(); body[field] = typeof body[field] === "string" ? 73 : "wrong-type";
+    await expect(start(context(response(body)).value, reader, { secrets: [] })).rejects.toThrow("Actual reader session identity mismatch");
+  });
+  it.each(["ID", "username", "role", "priv", "hasMfa", "needChangePwd", "isExpired", "csrfToken"])("rejects an invalid first-profile value %s", async field => {
+    const body = profile(), wrong: Record<string, unknown> = { ID: 74, username: "other-reader", role: "platform_admin", priv: -1, hasMfa: false, needChangePwd: true, isExpired: true, csrfToken: "" };
+    body[field] = wrong[field];
+    await expect(start(context(response(body)).value, reader, { secrets: [] })).rejects.toThrow("Actual reader session identity mismatch");
+  });
+  it.each(fields)("rejects a missing continuity field %s", async field => {
+    const body = profile(); delete body[field];
+    const session = await start(context(response(), response(body)).value, reader, { secrets: [] });
+    await expect(session.sample()).rejects.toThrow("Reader session interval changed"); expect(session.count()).toBe(1);
+  });
+  it.each(fields)("rejects a wrong-typed continuity field %s", async field => {
+    const body = profile(); body[field] = typeof body[field] === "string" ? 73 : "wrong-type";
+    const session = await start(context(response(), response(body)).value, reader, { secrets: [] });
+    await expect(session.sample()).rejects.toThrow("Reader session interval changed"); expect(session.count()).toBe(1);
+  });
+  it.each(fields)("rejects a changed continuity field %s", async field => {
+    const body = profile(), changed: Record<string, unknown> = { ID: 74, username: "other-reader", role: "platform_admin", priv: 1, hasMfa: false, needChangePwd: true, isExpired: true, csrfToken: "new-synthetic-private-csrf" };
+    body[field] = changed[field]; const fixture = { secrets: [] as string[] };
+    const session = await start(context(response(), response(body)).value, reader, fixture);
+    await expect(session.sample()).rejects.toThrow("Reader session interval changed"); expect(session.count()).toBe(1);
+    if (field === "csrfToken") expect(fixture.secrets.includes(String(changed[field]))).toBe(true);
+  });
+  it("rejects a browser authentication write despite otherwise identical samples", async () => {
+    const session = await start(context(response(), response()).value, reader, { secrets: [] }); session.setAuthMutations(1);
+    await expect(session.sample()).rejects.toThrow("Reader session interval changed"); expect(session.count()).toBe(1);
+  });
+  it.each([201, 401, 403, 500])("rejects HTTP status %s before reading JSON", async status => {
+    const reply = response(profile(), { status });
+    await expect(start(context(reply).value, reader, { secrets: [] })).rejects.toThrow("Real fixture read failed identity or status checks"); expect(reply.json).not.toHaveBeenCalled();
+  });
+  it.each([null, "", "private", "no-store, max-age=0"])("rejects wrong cache policy %s before reading JSON", async cache => {
+    const reply = response(profile(), { cache });
+    await expect(start(context(reply).value, reader, { secrets: [] })).rejects.toThrow("Real fixture read failed identity or status checks"); expect(reply.json).not.toHaveBeenCalled();
+  });
+  it("propagates actual JSON rejection at both profile boundaries without accepting a sample", async () => {
+    const first = response(profile(), { rejectJSON: true });
+    await expect(start(context(first).value, reader, { secrets: [] })).rejects.toThrow("Synthetic JSON rejection"); expect(first.json).toHaveBeenCalledTimes(1);
+    const later = response(profile(), { rejectJSON: true }), session = await start(context(response(), later).value, reader, { secrets: [] });
+    await expect(session.sample()).rejects.toThrow("Synthetic JSON rejection"); expect(later.json).toHaveBeenCalledTimes(1); expect(session.count()).toBe(1);
+  });
+  it.each([undefined, "74"])("keeps missing or wrong business actor header %s rejected", async actor => {
+    const reply = response({ ID: reader.actorId }, { actor });
+    await expect(readJSON(context(reply).value, "/api/domains/detail?domainId=synthetic", reader.actorId)).rejects.toThrow("Real fixture read failed identity or status checks"); expect(reply.json).not.toHaveBeenCalled();
+  });
+  it("continues accepting the actual business actor header contract", async () => {
+    const body = { connection: "synthetic" }, reply = response(body, { actor: String(reader.actorId) });
+    await expect(readJSON(context(reply).value, "/api/domains/detail?domainId=synthetic", reader.actorId)).resolves.toBe(body); expect(reply.json).toHaveBeenCalledTimes(1);
+  });
+  it("rejects missing or ambiguous extraction anchors without a fallback", () => {
+    for (const changed of [source.replace("const me =", "const renamedProfile ="), source + "\nlet readerSessionSamples = 1;", source.replace('fixture.secrets.push(me.csrfToken);', "void 0;")]) {
+      expect(() => fromActualSpec(changed)).toThrow("Reader session contract source shape changed");
+    }
   });
 });
