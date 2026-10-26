@@ -2,13 +2,17 @@
 
 面向 Active Directory 的安全产品，全部 209 项需求在
 [路线图 #1](https://github.com/yunpiao/adtr/issues/1) 范围内。
+当前源码核对至 main `8b3524dad9a9adb9d4a1d3a6f64557e0143b7aa3`（2026-10-26）；
+工程实现、所属历史运行与未验产品范围见[交付证据对账](docs/delivery-evidence-reconciliation.md)。
+截至 2026-10-26 17:29 UTC 的观测，该提交的新 main-push CI 尚在独立验证；此处不登记其后结果，也不继承 PR 或旧 main 的通过。产品验收仍 **0/209**。
+
 当前已有 G01/G02 设计、G03 工程基础设施，以及 F43/F44 本地账户认证、F45/F46 用户角色功能权限、F47 本地资源授权管理、F48 持久化任务框架、F39 平台审计、F52 本地系统监控及 F49 健康任务周期计划/可恢复归档实现。
 认证包括持久化登录/退出、首次/过期密码修改、管理员同租户重置、TOTP MFA 和实际浏览器界面。
 访问管理包括同租户用户/角色维护、单个/批量角色分配、显式功能权限、服务器菜单与操作检查；
 所有权限修改需要密码与新鲜 MFA，角色变化撤销受影响会话。
 资源组、角色关联和租户配置持久化；AD域范围必须显式授权，平台管理员也没有默认数据绕过。
 初始目录无业务数据，尚未完成真实AD接入验收；测试只使用明确标记的合成域和目录对象。
-[PR #81](https://github.com/yunpiao/adtr/pull/81) head `d6b6063f5fa5407779f465789e652a3dc24ff7c2` 的 [28 个 CI job](https://github.com/yunpiao/adtr/actions/runs/37945689472) 已全部通过，包含真实 PostgreSQL、API/Worker 与 22 个浏览器套件；已合并为 main 提交 [`4faafb552a5c7887a62930f7563b22d3cbcdfbf9`](https://github.com/yunpiao/adtr/commit/4faafb552a5c7887a62930f7563b22d3cbcdfbf9)。该合并提交的 [main-push CI 37954766457](https://github.com/yunpiao/adtr/actions/runs/37954766457) 也已在 attempt 1 全部 28 个 job 通过；具体证据与剩余范围见 [交付台账](docs/delivery.md)。产品验收计数仍为 **0/209**。
+历史基线：[PR #81](https://github.com/yunpiao/adtr/pull/81) head `d6b6063f5fa5407779f465789e652a3dc24ff7c2` 的 [28 个 CI job](https://github.com/yunpiao/adtr/actions/runs/37945689472) 已全部通过，包含真实 PostgreSQL、API/Worker 与 22 个浏览器套件；已合并为 main 提交 [`4faafb552a5c7887a62930f7563b22d3cbcdfbf9`](https://github.com/yunpiao/adtr/commit/4faafb552a5c7887a62930f7563b22d3cbcdfbf9)。该合并提交的 [main-push CI 37954766457](https://github.com/yunpiao/adtr/actions/runs/37954766457) 也已在 attempt 1 全部 28 个 job 通过；具体证据与剩余范围见 [交付台账](docs/delivery.md)。产品验收计数仍为 **0/209**。
 任务 Worker 注册基础设施健康、审计XLSX导出、运行日志打包、域诊断及目录读取执行器；具备租约、隔离、进度和按类型限制的重试、取消与恢复机制。
 审计支持持久化查询、筛选、可恢复隐藏/还原，以及受当前权限保护的异步导出；历史缺失元数据明确为空。
 F01 域连接正在实现：加密配置、明确资源授权、单次诊断任务和严格 TLS/出口策略；安全传输与凭据策略的合成测试及独立审查已通过。隔离合成 LDAP 目标下的数据库及真实浏览器链路已在上述 CI 通过；真实 AD 仍待验收。契约见 [docs/domain-contract.md](docs/domain-contract.md)。
@@ -19,21 +23,23 @@ F39/F52/F49 的真实 PostgreSQL/浏览器切片已在上述 CI 通过，Linux �
 周期计划只调度真实基础设施健康检查，创建后暂停，按UTC固定间隔启用；停机合并到最近一期，当前一期未结束则跳过重叠。
 任务归档仅改变可见性，可还原，不清除审计、幂等或消息记录，也不声称释放磁盘空间。
 这些工程验证不能替代产品验收。
-已有默认关闭的有界 LDAP 目录读取代码；增量采集、检测、AD业务导出和阻断执行器仍未交付，未进行生产部署。
+已有默认关闭的有界 LDAP 目录读取，以及已合并的 dictionary3 单域固定观测用户/组/计算机有界 XLSX 导出（PR159/161/162）。这些是已采集 scalar 字段的工程切片；增量采集、完整检测/阻断执行器、DNS/IP 导出和完整旧业务字段兼容仍未交付或未验收，未进行生产部署。
 
 F12 当前切片包含独立目录凭据用途、逐页授权、受执行结束证明保护的账本、完整观测暂存、当前域权限下的稳定分页与界面。迁移15原子安装新约束，并在未确认旧凭据使用已停止时拒绝升级。`ADTR_DIRECTORY_READ_ENABLED` 默认关闭，启用仍需独立密钥、CA、出口策略和当前角色显式 `domain.directory_read` 授权。连接检测授权不会自动变成目录授权。该 v1 切片仅覆盖 GUID/DN/类别/对象类/可选 SAM/UAC 字段；没有增量、缺席删除推断、完整字段兼容或真实 AD 验收。契约见 [directory-api-contract.md](docs/directory-api-contract.md)，证据与剩余门禁见 [delivery.md](docs/delivery.md)。
 
 ## Dictionary 2 整合范围
 
-PR #81 已将独立 `domain.directory_read.v2` 任务/授权、迁移16和 `/api/directory/v2/*` 界面链路合并到 main，提供 SID、mail、description 和创建时间四类事实字段。采集需要 `ADTR_DIRECTORY_READ_ENABLED=true`、`ADTR_DIRECTORY_READ_V2_ENABLED=true` 以及独立当前 v2 授权；两个开关默认关闭，旧授权不升级。上述精确 head CI 的 directory-v2、directory-v2-controls、directory-v2-readers 三个新增套件均已通过真实浏览器/API/Worker/PostgreSQL/合成 TLS LDAP 链路。真实 AD、完整字段兼容及 F14 业务资产页面/关系/导出仍未验收或未交付；范围、历史本地证据与合并后门禁见 [v2 整合状态](docs/directory-v2-integration-status.md)。
+PR #81 已将独立 `domain.directory_read.v2` 任务/授权、迁移16和 `/api/directory/v2/*` 界面链路合并到 main，提供 SID、mail、description 和创建时间四类事实字段。采集需要 `ADTR_DIRECTORY_READ_ENABLED=true`、`ADTR_DIRECTORY_READ_V2_ENABLED=true` 以及独立当前 v2 授权；两个开关默认关闭，旧授权不升级。上述精确 head CI 的 directory-v2、directory-v2-controls、directory-v2-readers 三个新增套件均已通过真实浏览器/API/Worker/PostgreSQL/合成 TLS LDAP 链路。真实 AD、完整字段兼容及 F14 完整产品验收仍开放；后续已合并的有界资产页面、原始组成员和导出见[交付证据对账](docs/delivery-evidence-reconciliation.md)，不能由 v2 共享链路代替其验收。v2 范围、历史本地证据与合并后门禁见 [v2 整合状态](docs/directory-v2-integration-status.md)。
 
 ## 本地构建与测试
 
-EXP-007计算机资产有界XLSX导出正在实现：固定dictionary3单域观测、五个已采集
-scalar列、与列表相同的搜索/创建时间范围/排序及全部匹配行；独立权限、任务和
-schema23存储。契约与当前验证门禁见[计算机导出契约](docs/computer-asset-export-v3-contract.md)。
-候选CI、实际产物与独立审查待完成；完整旧字段/筛选、真实AD/Windows和容量
-验收仍开放，AD-F-053保持in_progress，产品验收仍0/209。
+EXP-007 计算机资产有界 XLSX 导出已通过 [PR162](https://github.com/yunpiao/adtr/pull/162) 合并：
+固定 dictionary3 单域观测、五个已采集 scalar 列、与列表相同的搜索/创建时间范围/排序
+及全部匹配行；独立权限、任务和 schema23 存储。其合并提交 `94b098d6acf5187e1ecf9aa659f5abed00122ce7`
+的[历史 main CI](https://github.com/yunpiao/adtr/actions/runs/38561279766) 首轮 68/68 通过，
+包含隔离 PostgreSQL/合成 TLS LDAP/真实浏览器及实际 XLSX 证据；PR 运行经历重试，见[对账记录](docs/delivery-evidence-reconciliation.md)。
+这不是当前 main 的新测试结果。契约见[计算机导出契约](docs/computer-asset-export-v3-contract.md)；
+完整旧字段/筛选、真实 AD/Windows、容量与产品验收仍开放，AD-F-053 保持 in_progress，产品验收仍 0/209。
 
 需要 Go **1.27.1**、Node **24.19.0**、npm、make；集成测试另需 Python 3、Docker Engine 与 Compose v2。
 Go 依赖由 `go.mod`/`go.sum` 固定，容器基础镜像固定 digest。
@@ -130,13 +136,13 @@ F02 第一阶段提供已授权、已保存域连接的数据源选择，选择�
 
 F03 B1 将凭据使用授权与元数据管理权分开，所有角色（包括内置管理员）默认无使用授权。B2 仅启用固定连接测试消费者，仍须每次验证显式授权、当前绑定和执行栅栏；过期或超额租户保留按原有域范围撤销授权的入口。迁移、SQL治理屏障和真实链路验证要求见 [docs/credential-use-contract.md](docs/credential-use-contract.md) 与 [docs/account-reference-contract.md](docs/account-reference-contract.md)。进程崩溃后尚未确认停止的凭据使用会保留依赖，阻止更换或移除账户；任务终态不能代替执行结束证明。
 
-F38 增加当前账户的审计导出历史：离开页面后可重新发现实际持久化任务，按状态/创建时间分页查看并使用现有受保护 XLSX 下载。历史列表先校验当前权限、提交时权限版本及快照域范围，再计算总数；文件状态“可请求下载”表示元数据匹配，实际字节、摘要和实时权限仍在下载时核验。当前只有 Audit/XLSX 生产者，其他业务导出和 appType 未实现，见 [docs/export-history-contract.md](docs/export-history-contract.md)。
+F38 增加当前账户的审计导出历史：离开页面后可重新发现实际持久化任务，按状态/创建时间分页查看并使用现有受保护 XLSX 下载。历史列表先校验当前权限、提交时权限版本及快照域范围，再计算总数；文件状态“可请求下载”表示元数据匹配，实际字节、摘要和实时权限仍在下载时核验。该统一历史入口当前只接 Audit/XLSX；已合并的用户/组/计算机导出使用各自受保护工作区，并不代表已接入本入口或实现全部 appType，见 [docs/export-history-contract.md](docs/export-history-contract.md)。
 
 F56/AD-F-205 本地切片记录本应用从部署后实际产生的 api/worker 运行事件，可按确认的时间范围查询并生成受保护 ZIP/JSONL 诊断包。它不采集历史 stdout、不读取任意路径，也不生成不存在的服务日志；失败、队列拒绝和不确定确认分别记录，覆盖范围始终是尽力记录。默认安装租户还须具有 system 与 system_logs 权限。迁移14遇到尚未确认停止的账户凭据使用时会拒绝升级，必须让旧版本执行器完成真实确认后再重试。详见 [docs/operational-log-contract.md](docs/operational-log-contract.md)。网络诊断 AD-F-204 仍待目标、协议、端口与授权契约。
 
 浏览器会话隔离已在本地增强：另一标签的登录/退出会触发真实会话重核验，通知不可用时由重新聚焦/可见性补核验；旧私有响应不能恢复旧身份。非敏感未知结果记录按actor保留，避免会话轮换丢失原幂等键。上述精确 head CI 的 [session-invalidation 套件](https://github.com/yunpiao/adtr/actions/runs/37945689472/job/113871223388) 已通过真实跨标签链路；范围见 [docs/session-invalidation-contract.md](docs/session-invalidation-contract.md)，不替代完整产品验收。
 
-## Dictionary4 原始组成员后端（实现中）
+## Dictionary4 原始组成员与控制界面（有界工程切片已合并）
 
 [工程#151](https://github.com/yunpiao/adtr/issues/151) 新增独立默认关闭的
 `domain.directory_read.v4`：固定请求原始 member，schema20不可变观察和
@@ -146,4 +152,6 @@ F56/AD-F-205 本地切片记录本应用从部署后实际产生的 api/worker �
 删除开关会改变默认执行边界；代码安装不会创建实际授权或启用生产设置。
 原始返回值数不等于旧memberCount，null与返回空集合分开；所有range返回整次拒绝。
 详细预算、错误、权限和剩余范围见[dictionary4契约](docs/directory-v4-contract.md)。
-尚无此功能UI；未验证真实AD、Windows、生产或容量，不改变0/209。
+后端 PR152、固定观测组成员页面 PR153 和采集/取消/原任务恢复界面 PR195 已合并。
+PR195 合并提交 `39eb1077df159c6d83cd7f0c4f5e504cd335066e` 的[历史 main CI](https://github.com/yunpiao/adtr/actions/runs/39518300817) 首轮 75/75 通过，包含实际 PostgreSQL/合成 TLS LDAP/浏览器控制与读取链；历史失败、证据边界及当前源码入口见[对账记录](docs/delivery-evidence-reconciliation.md)。
+这不提供 memberOf、主组补齐、递归/跨域完整性或 ranged continuation；真实 AD、八版本 Windows、生产和目标容量仍未验，不改变 0/209。

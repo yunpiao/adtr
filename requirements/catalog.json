@@ -2403,7 +2403,7 @@
       "evidence": {
         "local_contract": "docs/user-assets-v2-contract.md",
         "implementation_base": "26f1463e98d2064182ad3f89e8663af7a0d9ef24",
-        "implemented_scope": "只读已验证dictionary2不可变观测；当前域/凭据版本下的用户SAM/SID/mail/DN字面量搜索、稳定分页与观测/GUID固定详情；保留十个事实字段和null语义；已接PR92生产SOC工作区与PR114精确SAM/创建时间范围排序，详见latest_delivery",
+        "implemented_scope": "只读已验证dictionary2不可变观测；当前域/凭据版本下的用户SAM/SID/mail/DN字面量搜索、稳定分页与观测/GUID固定详情；保留十个事实字段和null语义；已接PR92生产SOC工作区与PR114精确SAM/创建时间范围排序，详见latest_delivery；后续已合并dictionary3用户页面/固定详情及PR226可选UAC禁用位筛选（仅列表与导出，详情不接受该筛选），当前层次见current_reconciliation。",
         "tests": [
           "internal/domains/user_assets_v2_test.go",
           "internal/domains/user_assets_v2_integration_test.go",
@@ -2415,7 +2415,7 @@
         ],
         "remaining": [
           "工程切片精确head/合并后CI与独立审查已记录；完整F14旧字段、枚举、筛选默认/运算符及源系统1:1兼容仍未冻结/验收",
-          "关系、风险/登录/成员数据及业务导出仍未交付；PR114创建时间/SAM为明确的新工程契约，不冒称旧系统或AD服务端语义",
+          "完整关系、风险/登录及旧业务成员语义仍开放；已有PR159/161/162有界scalar导出及PR152/153/195原始直接组member切片，不能再概括为全部业务导出/成员均未交付。PR114时间/SAM及PR226 UAC均是明确的新工程契约，不冒称旧系统或AD实时状态语义。",
           "真实AD、八版本Windows、容量与生产验收仍开放；Issue30及product_accepted保持未完成"
         ],
         "latest_delivery": {
@@ -2430,6 +2430,17 @@
             "PR114精确SAM按原始字节区分大小写、成对RFC3339纳秒whenCreated半开范围、asc/desc与null最后；谓词在total/page前执行，切页/确认筛选固定观测，明确刷新才更新"
           ],
           "local_contract": "docs/user-assets-v2-filters-contract.md"
+        },
+        "current_reconciliation": {
+          "record": "docs/delivery-evidence-reconciliation.md",
+          "source_commit": "8b3524dad9a9adb9d4a1d3a6f64557e0143b7aa3",
+          "source_tree": "f7601cf7be1e928710eedf59d63fe2a2972e45f2",
+          "verification_boundary": "工程实现、所属历史CI/实际产物与未验产品范围分层记录；截至2026-10-26 17:29 UTC观测，main8b3524的新push run40368246014尚在独立验证，本索引不登记其后结果，不继承PR或历史main通过；本次不修改需求status、product_accepted或范围计数。",
+          "prs": [
+            "https://github.com/yunpiao/adtr/pull/226",
+            "https://github.com/yunpiao/adtr/pull/227"
+          ],
+          "scope": "UAC set/clear/not_returned分别表示保存的0x2位已设置/未设置/属性未返回；省略不筛选。PG合成执行器覆盖三枚举及省略共四种模式；真实合成TLS LDAP用户仅UAC0/512。PR227浏览器仅证明无UAC筛选12行及user-/set空0行XLSX；非空set/null及正向filtered-clear真实下载仍缺。"
         }
       }
     },
@@ -2554,7 +2565,7 @@
       "evidence": {
         "local_contract": "docs/user-assets-v2-contract.md",
         "implementation_base": "26f1463e98d2064182ad3f89e8663af7a0d9ef24",
-        "implemented_scope": "只读已验证dictionary2不可变观测；当前域/凭据版本下的用户SAM/SID/mail/DN字面量搜索、稳定分页与观测/GUID固定详情；保留十个事实字段和null语义",
+        "implemented_scope": "只读已验证dictionary2不可变观测；当前域/凭据版本下的用户SAM/SID/mail/DN字面量搜索、稳定分页与观测/GUID固定详情；保留十个事实字段和null语义；后续已合并dictionary3用户页面/固定详情及PR226可选UAC禁用位筛选（仅列表与导出，详情不接受该筛选），当前层次见current_reconciliation。",
         "tests": [
           "internal/domains/user_assets_v2_test.go",
           "internal/domains/user_assets_v2_integration_test.go",
@@ -2566,7 +2577,7 @@
         ],
         "remaining": [
           "工程切片精确head/合并后CI与独立审查已记录；完整F14旧字段、枚举、筛选默认/运算符及源系统1:1兼容仍未冻结/验收",
-          "关系、风险/登录/成员数据及业务导出仍未交付；PR114创建时间/SAM为明确的新工程契约，不冒称旧系统或AD服务端语义",
+          "完整关系、风险/登录及旧业务成员语义仍开放；已有PR159/161/162有界scalar导出及PR152/153/195原始直接组member切片，不能再概括为全部业务导出/成员均未交付。PR114时间/SAM及PR226 UAC均是明确的新工程契约，不冒称旧系统或AD实时状态语义。",
           "真实AD、八版本Windows、容量与生产验收仍开放；Issue30及product_accepted保持未完成"
         ],
         "latest_delivery": {
@@ -2580,6 +2591,17 @@
             "PR92真实SOC用户资产固定observationId+GUID详情、桌面520px/手机全宽抽屉、返回/焦点与会话隔离、真实null及恶意文本按字面显示"
           ],
           "local_contract": "docs/soc-production-ui.md"
+        },
+        "current_reconciliation": {
+          "record": "docs/delivery-evidence-reconciliation.md",
+          "source_commit": "8b3524dad9a9adb9d4a1d3a6f64557e0143b7aa3",
+          "source_tree": "f7601cf7be1e928710eedf59d63fe2a2972e45f2",
+          "verification_boundary": "工程实现、所属历史CI/实际产物与未验产品范围分层记录；截至2026-10-26 17:29 UTC观测，main8b3524的新push run40368246014尚在独立验证，本索引不登记其后结果，不继承PR或历史main通过；本次不修改需求status、product_accepted或范围计数。",
+          "prs": [
+            "https://github.com/yunpiao/adtr/pull/226",
+            "https://github.com/yunpiao/adtr/pull/227"
+          ],
+          "scope": "UAC set/clear/not_returned分别表示保存的0x2位已设置/未设置/属性未返回；省略不筛选。PG合成执行器覆盖三枚举及省略共四种模式；真实合成TLS LDAP用户仅UAC0/512。PR227浏览器仅证明无UAC筛选12行及user-/set空0行XLSX；非空set/null及正向filtered-clear真实下载仍缺。"
         }
       }
     },
@@ -2665,7 +2687,7 @@
           "https://github.com/yunpiao/adtr/pull/175",
           "https://github.com/yunpiao/adtr/pull/176"
         ],
-        "implemented_scope": "已合入的单授权来源、固定有效dictionary3观测只读computer列表；12事实闭集投影、SAM/SID/DN字面搜索、创建时间区间与排序、有界分页、行内事实和撤权/迟到响应隔离。UI-0438仅当前接受页1..N序号；UI-0437仅关键词草稿清除与焦点恢复，显式Apply才查询。12事实不等于原47字段中的12项完整兼容。",
+        "implemented_scope": "已合入的单授权来源、固定有效dictionary3观测只读computer列表；12事实闭集投影、SAM/SID/DN字面搜索、创建时间区间与排序、有界分页、行内事实和撤权/迟到响应隔离。UI-0438仅当前接受页1..N序号；UI-0437仅关键词草稿清除与焦点恢复，显式Apply才查询。PR178已加入50 UTF-16整次超限拒绝、有效草稿/选区/焦点恢复与composition结束校验，不截断、不自动请求；双引擎键盘/粘贴/emoji工程证据已记录。12事实不等于原47字段中的12项完整兼容。",
         "latest_regression": {
           "pr_head": "0d34a88882207eb3e9bd99d7388bc8ea35f3e1fc",
           "tree": "79723cf4435305fb27ebbe51f8944af9732db7be",
@@ -2679,11 +2701,25 @@
           "全部FLD-0412–0458与UI-0437–0445来源记录保留；DNSName/DNSAddress、OS、登录时间、业务状态/类型/应用、每行业务domain/name/id及地址关系未齐；不能由SPN/UAC/GUID/来源域猜造。",
           "原sid/dn/sAMAccountName/created与现objectSid/distinguishedName/samAccountName/whenCreated键不同；原creatTm整数枚举、时间/搜索语义、跨页序号及clear-event查询行为未冻结。domainId单来源不等于多domainName；pageSize=-1全量不支持，独立导出不能代替原列表验收。",
           "第二组17字段FLD-0442–0458原入口未知，不能借第一组通过或推定地址关联endpoint；动态列UI-0439–0444的column/slot及UI-0445 item.prop checkbox用途未明，事实按钮不能代替旧operation列。",
-          "UI-0437原maxlength仍未对齐：当前允许超长草稿、提交拒绝，不做maxlength截断；关键词清除仅有界本地行为。",
+          "UI-0437/FLD-0418已由PR178实现50 UTF-16整次超限拒绝；PR176关键词清除已通过实际双引擎浏览器/PG链，不是仅本地未运行。OS级IME与native drop尚未独立实测，原maxlength的完整源系统行为等价及clear-event自动查询语义仍未验收。",
           "真实AD、八版本Windows、原目标容量、完整旧协议/业务兼容与生产验收仍开放；sticky full-page移动端截图不能证明所有文字同时可见。",
           "PR175历史secret substring及具体identity predicate、PR176历史candidate_strict及socket关闭原因未查明；后续成功不抹去失败或证明根因修复。详情见delivery_reconciliation。",
-          "本对账仅文档/证据登记；本轮未执行Node/Go/PostgreSQL/browser或重验历史产物，新的提交须单独通过自身检查。Issue30/131保持open，product_accepted=false。"
-        ]
+          "本次仅对账当前说明/证据索引，未重新执行历史Node/Go/PostgreSQL/browser；新文档候选的本地检查和远端CI须单独记录，不继承既往运行。Issue30/131保持open，product_accepted=false。"
+        ],
+        "current_reconciliation": {
+          "record": "docs/delivery-evidence-reconciliation.md",
+          "source_commit": "8b3524dad9a9adb9d4a1d3a6f64557e0143b7aa3",
+          "source_tree": "f7601cf7be1e928710eedf59d63fe2a2972e45f2",
+          "verification_boundary": "工程实现、所属历史CI/实际产物与未验产品范围分层记录；截至2026-10-26 17:29 UTC观测，main8b3524的新push run40368246014尚在独立验证，本索引不登记其后结果，不继承PR或历史main通过；本次不修改需求status、product_accepted或范围计数。",
+          "prs": [
+            "https://github.com/yunpiao/adtr/pull/176",
+            "https://github.com/yunpiao/adtr/pull/178"
+          ],
+          "ci": [
+            "https://github.com/yunpiao/adtr/actions/runs/39211561445",
+            "https://github.com/yunpiao/adtr/actions/runs/39274635431"
+          ]
+        }
       }
     },
     {
@@ -2753,7 +2789,7 @@
         "local_contract": "docs/group-assets-v3-contract.md",
         "engineering_issue": "https://github.com/yunpiao/adtr/issues/135",
         "implementation_base": "8d559dd1c1bb888a49c2e1f044d64e78feff42f1",
-        "implemented_scope": "实现中的dictionary3只读原始组列表与SOC行内事实；完整观测校验后取group，SAM/SID/DN逐字段Go简单小写字面搜索，上限20 UTF-16单元及80 UTF-8字节的新工程约定；固定观测分页、创建时间排序与筛选前组数。未补造组分类、名称或应用字段。",
+        "implemented_scope": "PR136已合并的dictionary3只读原始组列表与SOC行内事实；完整观测校验后取group，SAM/SID/DN逐字段Go简单小写字面搜索，上限20 UTF-16单元及80 UTF-8字节的新工程约定；固定观测分页、创建时间排序与筛选前组数。未补造组分类、名称或应用字段。",
         "tests": [
           "internal/domains/group_assets_v3_test.go",
           "internal/domains/group_assets_v3_integration_test.go",
@@ -2766,10 +2802,23 @@
         ],
         "local_validation": "docs/group-assets-v3-validation.md",
         "remaining": [
-          "独立源码/联合复审与本地2069 DOM/136 Python及Go完整check已通过；精确远端head全CI、真实Worker/TLS LDAP/PG/API/browser逐值链与双引擎reader/截图、最终main兼容/合并后验证待核。128/132仍未合main依赖；本地PG/浏览器因缺DSN/Docker失败，不计通过",
+          "PR128/132依赖与PR136均已合并；PR136精确head a42645f39ecde4342f4359f4b9b790fbe3ce7dc8的run38200302860首轮50/50通过，含真实Worker/合成TLS LDAP/PG/API/browser与双引擎组列表/reader。早期本地缺DSN/Docker的失败保留为历史，不能描述为当前尚无运行证据；这些历史运行不替代新main验证。",
           "组groupMold/groupScope/groupType、显示名称/应用归属/敏感分类、完整旧字段与源系统1:1兼容没有采集依据或未冻结；不把原始kind=group当组业务分类",
-          "成员/关系/导出、真实AD与八版本Windows、大容量及生产验收开放；Issue30与工程Issue135保持open，product_accepted=false"
-        ]
+          "后续PR161有界组XLSX和PR152/153/195原始直接member/界面切片已合并；完整组分类、关系/成员语义和旧导出兼容仍未验收。真实AD、八版本Windows、目标容量及生产验收开放；Issue30/135与product_accepted保持未完成。"
+        ],
+        "current_reconciliation": {
+          "record": "docs/delivery-evidence-reconciliation.md",
+          "source_commit": "8b3524dad9a9adb9d4a1d3a6f64557e0143b7aa3",
+          "source_tree": "f7601cf7be1e928710eedf59d63fe2a2972e45f2",
+          "verification_boundary": "工程实现、所属历史CI/实际产物与未验产品范围分层记录；截至2026-10-26 17:29 UTC观测，main8b3524的新push run40368246014尚在独立验证，本索引不登记其后结果，不继承PR或历史main通过；本次不修改需求status、product_accepted或范围计数。",
+          "prs": [
+            "https://github.com/yunpiao/adtr/pull/136",
+            "https://github.com/yunpiao/adtr/pull/161"
+          ],
+          "ci": [
+            "https://github.com/yunpiao/adtr/actions/runs/38200302860"
+          ]
+        }
       }
     },
     {
@@ -2854,18 +2903,33 @@
       "evidence": {
         "engineering_issue": "https://github.com/yunpiao/adtr/issues/151",
         "contract": "docs/directory-v4-contract.md",
-        "implemented_scope": "实现中的dictionary4独立默认关闭原始组member采集、不可变存储和固定观测只读API；区分未返回与返回空集合；returnedMemberCount仅表示返回值数，不声称旧memberCount口径；所有ranged属性整次拒绝。",
+        "implemented_scope": "PR152已合并的dictionary4独立默认关闭原始组member采集、不可变存储和固定观测只读API；区分未返回与返回空集合；returnedMemberCount仅表示返回值数，不声称旧memberCount口径；所有ranged属性整次拒绝。 PR153固定观测组成员页面及PR195采集/取消/原任务恢复界面也已合并；这仍只证明原始直接member工程切片。",
         "verified": [
-          "基线main013ba239e5a6af5061a252125a92779c33bf1725完整make check通过；第一版整合候选完整make check通过；最终冻结版本另跑完整check和精确远端CI",
-          "独立codec/transport race与真实StartTLS/LDAPS fixture精确11属性、30行/2页、缺失/空/原始值测试通过；integration-tag测试编译通过，不替代PG执行",
-          "独立API审查提出的浅clone provenance与stored body/hash链缺口已修复，具名对抗测试通过；最终精确tree复核与CI待完成"
+          "历史本地候选检查点（不再代表当前门禁状态）：基线main013ba239e5a6af5061a252125a92779c33bf1725完整make check通过；第一版整合候选完整make check通过；最终冻结版本另跑完整check和精确远端CI",
+          "历史本地候选检查点（不再代表当前门禁状态）：独立codec/transport race与真实StartTLS/LDAPS fixture精确11属性、30行/2页、缺失/空/原始值测试通过；integration-tag测试编译通过，不替代PG执行",
+          "历史本地候选检查点（不再代表当前门禁状态）：独立API审查提出的浅clone provenance与stored body/hash链缺口已修复，具名对抗测试通过；最终精确tree复核与CI待完成",
+          "PR152后端main bd302da的run38382121720首轮55/55及PR195界面main39eb1077的run39518300817首轮75/75均已记录；本次回读后者完整jobs与controls原日志，并核对保留证据，详见current_reconciliation。"
         ],
         "remaining": [
-          "最终完整本地check、独立实际diff复审、精确head全CI、current-main兼容、合并及main-push CI待完成",
-          "真实注册Worker到合成TLS LDAP再到PostgreSQL/API逐值链已编写，当前executor缺Docker/PG，远端运行前不计通过",
-          "FLD0511旧memberCount、memberOf、主组补齐、递归/跨域完整性、ranged continuation、完整旧字段/分页/UI未完成",
+          "旧候选的独立复审/合并门禁已有后续PR152/153/195结果，不再列为当前未合并；本次source_commit的main-push及此文档候选新CI仍需独立完成。",
+          "隔离真实PostgreSQL/API/Worker/合成TLS LDAP及浏览器原始member/控制链已有所属历史运行；本地缺Docker/PG的旧检查点保留，不转记成本地运行成功。",
+          "FLD0511旧memberCount、memberOf、主组补齐、递归/跨域完整性、ranged continuation及完整旧字段/UI语义未完成或未验收；有界分页/固定观测页面不等于旧系统兼容。",
           "真实AD、八版本Windows、容量和生产验收开放；#30与#151保持open，product_accepted=false"
-        ]
+        ],
+        "current_reconciliation": {
+          "record": "docs/delivery-evidence-reconciliation.md",
+          "source_commit": "8b3524dad9a9adb9d4a1d3a6f64557e0143b7aa3",
+          "source_tree": "f7601cf7be1e928710eedf59d63fe2a2972e45f2",
+          "verification_boundary": "工程实现、所属历史CI/实际产物与未验产品范围分层记录；截至2026-10-26 17:29 UTC观测，main8b3524的新push run40368246014尚在独立验证，本索引不登记其后结果，不继承PR或历史main通过；本次不修改需求status、product_accepted或范围计数。",
+          "prs": [
+            "https://github.com/yunpiao/adtr/pull/152",
+            "https://github.com/yunpiao/adtr/pull/153",
+            "https://github.com/yunpiao/adtr/pull/195"
+          ],
+          "ci": [
+            "https://github.com/yunpiao/adtr/actions/runs/39518300817"
+          ]
+        }
       }
     },
     {
@@ -3110,13 +3174,26 @@
       "product_accepted": false,
       "evidence": {
         "contract": "docs/directory-v3-contract.md",
-        "scope": "Candidate bounded observed counts for FLD-0586/0588/0590 from one fully validated dictionary3 observation, before kind/page filtering; unavailable null differs from successful zero counts.",
-        "verification_status": "Candidate only; exact-head CI, independent review, merge and post-main verification pending.",
+        "scope": "PR165已合并的有界observedCounts：FLD-0586/0588/0590仅来自同一完整有效dictionary3观测，在kind筛选/分页前按明确类别计数；不可用null不同于成功空观测的三个0，不是旧资产总量或安全概览。",
+        "verification_status": "PR165精确head1ced20c5的run38637507796与main7140933的run38644413239均首轮71/71；本次回读后者完整jobs和directory-v3原日志。旧失败与范围缺口见current_reconciliation；不是当前main8b3524的新执行结果。",
         "remaining": [
           "Legacy asset-total semantics and full field compatibility are unverified.",
           "Security/risk overview, differences, charts, real AD and Windows compatibility remain open.",
           "Issue30 remains open; product acceptance stays 0/209."
-        ]
+        ],
+        "current_reconciliation": {
+          "record": "docs/delivery-evidence-reconciliation.md",
+          "source_commit": "8b3524dad9a9adb9d4a1d3a6f64557e0143b7aa3",
+          "source_tree": "f7601cf7be1e928710eedf59d63fe2a2972e45f2",
+          "verification_boundary": "工程实现、所属历史CI/实际产物与未验产品范围分层记录；截至2026-10-26 17:29 UTC观测，main8b3524的新push run40368246014尚在独立验证，本索引不登记其后结果，不继承PR或历史main通过；本次不修改需求status、product_accepted或范围计数。",
+          "prs": [
+            "https://github.com/yunpiao/adtr/pull/165"
+          ],
+          "ci": [
+            "https://github.com/yunpiao/adtr/actions/runs/38637507796",
+            "https://github.com/yunpiao/adtr/actions/runs/38644413239"
+          ]
+        }
       }
     },
     {
@@ -3204,7 +3281,7 @@
         "commit": "9a8d5b10b1c68b7355604d7eb85274677479421d",
         "merge_commit": "370e405b50a23a85a63126c562bb1790dd4eca87",
         "tree": "7c768d2649ef741d9ec371e69f49c8f6e3a211c9",
-        "implemented_scope": "PR159已合并的EXP-006有界用户异步XLSX：仅dictionary3、单域及固定已发布观测、已采集的guid/sAMAccountName/sid/mail/dn/whenCreated六个scalar列；沿用v3用户列表筛选/排序，导出全部匹配行而非当前页。当前AD-F-053仍未验收。",
+        "implemented_scope": "PR159已合并的EXP-006有界用户异步XLSX：仅dictionary3、单域及固定已发布观测、已采集的guid/sAMAccountName/sid/mail/dn/whenCreated六个scalar列；沿用v3用户列表筛选/排序，导出全部匹配行而非当前页。当前AD-F-053仍未验收。 后续PR161/162组/计算机五scalar切片与PR226可选UAC筛选已合并；PR227补充当前用户筛选导出证据，详见current_reconciliation。",
         "ci": [
           {
             "url": "https://github.com/yunpiao/adtr/actions/runs/38483191968",
@@ -3243,7 +3320,7 @@
           }
         ],
         "remaining": [
-          "PR160已验证failed→安全两列恢复与queued取消真实browser/Worker/PG链；running/cancel_requested等其他取消边界仍须逐项验收。",
+          "PR160已验证failed→安全两列恢复与queued取消；PR163/164及后续运行已有用户/组/计算机snapshot阶段running→cancel_requested→cancelled工程证据。多块与其他取消/fencing边界仍须逐项证明，不能把历史candidate字段读成当前所有running取消均未实现。",
           "EXP-006完整旧字段、默认业务列、多域、status/overviewType/updateTm/scoreSort及全部源系统筛选语义未达1:1；六scalar列不能替代未采集业务字段。",
           "EXP-008组及EXP-007计算机五scalar有界切片已分别在PR161/162合并验证，但完整旧筛选/业务默认列/目标容量仍未验收；EXP-009 DNS/IP导出未实现。",
           "真实AD及八版本Windows、目标容量/峰值内存、生产验收开放；代码上限不代表容量验收。",
@@ -3345,10 +3422,17 @@
           "base_tree": "ec801e6ffc0bce09cd89714bb1be3586d2781fad",
           "base_main_ci": "https://github.com/yunpiao/adtr/actions/runs/38588506730",
           "base_main_ci_result": "69/69 jobs success; historical baseline only",
-          "suites": ["group-asset-export-v3-running-cancel", "computer-asset-export-v3-running-cancel"],
-          "contracts": ["docs/group-asset-export-v3-contract.md", "docs/computer-asset-export-v3-contract.md"],
+          "suites": [
+            "group-asset-export-v3-running-cancel",
+            "computer-asset-export-v3-running-cancel"
+          ],
+          "contracts": [
+            "docs/group-asset-export-v3-contract.md",
+            "docs/computer-asset-export-v3-contract.md"
+          ],
           "scope": "Test-only snapshot/progress10 running to cancel_requested to cancelled; fixed kind/source and owned Worker; prior69 jobs preserved,71 expected; exact-head CI/artifacts pending.",
-          "remaining": "Chunk-stage cancellation, fencing races, legacy parity/capacity, real AD/Windows and production acceptance remain open."
+          "remaining": "Chunk-stage cancellation, fencing races, legacy parity/capacity, real AD/Windows and production acceptance remain open.",
+          "record_context": "保留原候选阶段记录，不作为当前交付状态；后续PR163/164已合并的snapshot阶段工程验证见本项user_running_cancel_verified_slice及current_reconciliation。原status字段不在此次对账中修改。"
         },
         "user_running_cancel_verified_slice": {
           "pr": "https://github.com/yunpiao/adtr/pull/163",
@@ -3362,7 +3446,7 @@
           "pr_artifact": "11902942969; sha256 1956d254dfe0fd16911e473c52ca8f9fb728d78fcc225590edf99694ec0bec4e",
           "main_artifact": "11907692240; sha256 bc5aefae6611c54291f4d1c8973d1ca87018031fbe51e57dd8075e1911417baf",
           "verification": "Independent current PR/main evidence review passed; user snapshot-stage running cancellation only; prior candidate and failed attempts retained in delivery ledger.",
-          "remaining": "Group/computer candidate CI, chunk-stage cancellation, fencing races, full parity/capacity, real AD/Windows and product acceptance remain open."
+          "remaining": "Group/computer snapshot-stage verification subsequently merged in PR164; historical candidate records are retained, not current pending gates. Chunk-stage/fencing races, full parity/capacity, real AD/Windows and product acceptance remain open."
         },
         "running_cancel_candidate": {
           "contract": "docs/user-asset-export-v3-contract.md",
@@ -3372,7 +3456,26 @@
           "suite": "user-asset-export-v3-running-cancel",
           "scope": "仅test-only用户导出真实running（snapshot/progress10已持久化）→cancel_requested→cancelled；精确owned Worker、临时activity行锁及全部PG锁校验、fresh MFA预备、live lease>20s且同Worker10s内CONT；取消后snapshot/manifest/chunk清零、原始receipt与后续Worker活动。",
           "verification": "旧68项CI完整保留并增加1项，预期69；尚无本候选精确head运行或独立产物验收。本地限静态及明确白名单无子进程/网络纯Python；不运行Go/Node/PG/browser/build。",
-          "remaining": "不证明chunk阶段取消/fencing竞争；group/computer浏览器取消仍限queued；无生产/schema变更，不增加产品验收，Issue30/151保持open。"
+          "remaining": "不证明chunk阶段取消/fencing竞争；group/computer浏览器取消仍限queued；无生产/schema变更，不增加产品验收，Issue30/151保持open。",
+          "record_context": "保留原候选阶段记录，不作为当前交付状态；后续PR163/164已合并的snapshot阶段工程验证见本项user_running_cancel_verified_slice及current_reconciliation。原status字段不在此次对账中修改。"
+        },
+        "current_reconciliation": {
+          "record": "docs/delivery-evidence-reconciliation.md",
+          "source_commit": "8b3524dad9a9adb9d4a1d3a6f64557e0143b7aa3",
+          "source_tree": "f7601cf7be1e928710eedf59d63fe2a2972e45f2",
+          "verification_boundary": "工程实现、所属历史CI/实际产物与未验产品范围分层记录；截至2026-10-26 17:29 UTC观测，main8b3524的新push run40368246014尚在独立验证，本索引不登记其后结果，不继承PR或历史main通过；本次不修改需求status、product_accepted或范围计数。",
+          "prs": [
+            "https://github.com/yunpiao/adtr/pull/159",
+            "https://github.com/yunpiao/adtr/pull/161",
+            "https://github.com/yunpiao/adtr/pull/162",
+            "https://github.com/yunpiao/adtr/pull/163",
+            "https://github.com/yunpiao/adtr/pull/164",
+            "https://github.com/yunpiao/adtr/pull/227"
+          ],
+          "ci": [
+            "https://github.com/yunpiao/adtr/actions/runs/40335636523"
+          ],
+          "scope": "PR227 run40335636523/attempt5当前85个check-linked逻辑job成功：80首轮+4项各一次受限复验+最终verify；raw93另8条queued无独立执行保留。format2证明无UAC筛选12行与user-/set空0行；旧unmatched关键词完整第二导出链被替换而非等价保留。非空set/null真实LDAP与正向filtered-clear下载仍缺；PR225已发布head86e的真实database失败/随后平台取消保留；尚未发布的后继修订仅离线245+2，上传审批未知，不能算多块DB/browser验收。"
         }
       }
     },
