@@ -41,6 +41,8 @@ def main():
         if fixture_psql and os.environ.get("GITHUB_ACTIONS") == "true":
             subprocess.run(["python3", "scripts/test_observer_plan_runtime.py", "--container", name],
                            env=dict(env, ADTR_RUN_OBSERVER_PLAN_TESTS="1"), check=True, timeout=120)
+            subprocess.run(["python3", "scripts/test_observer_temporal_control_runtime.py", "--container", name],
+                           env=dict(env, ADTR_RUN_OBSERVER_TEMPORAL_TESTS="1"), check=True, timeout=120)
         return run_tests(args, env)
     finally:
         if created:
