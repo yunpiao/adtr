@@ -38,6 +38,9 @@ def main():
                            env=dict(env, ADTR_RUN_ACTIVITY_PSQL_TESTS="1"), check=True)
         address = subprocess.check_output(["docker", "port", name, "5432/tcp"], text=True).strip()
         env["ADTR_TEST_DATABASE_URL"] = f"postgres://postgres:{password}@{address}/adtr_test?sslmode=disable"
+        if fixture_psql and os.environ.get("GITHUB_ACTIONS") == "true":
+            subprocess.run(["python3", "scripts/test_observer_plan_runtime.py", "--container", name],
+                           env=dict(env, ADTR_RUN_OBSERVER_PLAN_TESTS="1"), check=True, timeout=120)
         return run_tests(args, env)
     finally:
         if created:
