@@ -247,7 +247,7 @@ def select(paths, inventory, snapshots, full=False):
                    'native-no-store': native, 'native-no-store-fixed': native, 'user-assets-fixed': bool(fixed)})
     groups['prepare-postgres'] = contracts or auth or bool(selected) or bool(fixed)
     return {'groups': groups, 'browser': [e for e in inventory['browser'] if e['name'] in selected],
-            'fixed': fixed, 'auth': list(range(1, 9)) if auth else [], 'reasons': reasons}
+            'fixed': fixed, 'auth': list(range(1, 17)) if auth else [], 'reasons': reasons}
 
 
 def make_plan(event, base, head, inventory, loader=web_sources, tested=None):

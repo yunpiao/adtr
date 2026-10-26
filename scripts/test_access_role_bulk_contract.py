@@ -532,6 +532,9 @@ HELPER_BLOCK_SHA256 = 'd4ae094998bb8aa183e965ce8352ab4ac56e4f4db09ea7f4e25e52756
 
 
 def restore_helper_source(text):
+    # Undo only the separately frozen outer auth matrix helper addition.
+    from test_auth_shards16_contract import restore_auth_helper_source
+    text = restore_auth_helper_source(text)
     start = 'def restore_access_role_bulk(text):\n'
     end = 'def restore_archive_target_observation(text):\n'
     evidence.require(text.count(start) == 1 and text.count(end) == 1)
@@ -723,7 +726,11 @@ class AccessRoleBulkWorkflowContract(unittest.TestCase):
                 '1d9ef348def9d9b55ee4d0f8bb7da340a3c9049f9e90b5826bd71f3a39c47f24',
         }
         for path, expected in frozen.items():
-            self.assertEqual(evidence.digest(Path(path).read_bytes()), expected)
+            raw = Path(path).read_bytes()
+            if path == "scripts/ci_selection.py":
+                from test_auth_shards16_contract import restore_auth_selector_source
+                raw = restore_auth_selector_source(raw)
+            self.assertEqual(evidence.digest(raw), expected)
 
 
     def test_standalone_validator_and_ci_changes_conservatively_select_full_matrix(self):
@@ -749,7 +756,7 @@ class AccessRoleBulkWorkflowContract(unittest.TestCase):
             with self.subTest(path=path):
                 self.assertEqual(plan['browser'], inventory['browser'])
                 self.assertEqual(plan['fixed'], inventory['fixed'])
-                self.assertEqual(plan['auth'], list(range(1, 9)))
+                self.assertEqual(plan['auth'], list(range(1, 17)))
                 self.assertTrue(all(plan['groups'].values()))
         plan = choose('scripts/test_access_role_bulk_contract.py', {})
         self.assertTrue(plan['groups']['contracts'])

@@ -176,7 +176,8 @@ export default function App() {
   const [directoryV4Recovery] = useState(createDirectoryV4RecoveryContext);
   const [directoryV4Storage] = useState(() => ({
     getItem: (key: string) => window.sessionStorage.getItem(key),
-    setItem: (key: string, value: string) => window.sessionStorage.setItem(key, value),
+    setItem: (key: string, value: string) =>
+      window.sessionStorage.setItem(key, value),
     removeItem: (key: string) => window.sessionStorage.removeItem(key),
   }));
   const [profile, setProfile] = useState<Profile | null>(null),
@@ -201,8 +202,13 @@ export default function App() {
     sequence = useRef(0),
     locked = useRef(false),
     profileRef = useRef(profile);
+  const passiveSessionCheck = useRef<{
+    id: number;
+    controller: AbortController;
+  } | null>(null);
   profileRef.current = profile;
   const invalidate = useCallback(() => {
+    passiveSessionCheck.current = null;
     sequence.current++;
     controller.current?.abort();
     locked.current = false;
@@ -250,15 +256,35 @@ export default function App() {
       refresh();
     });
     sessionNotifications.current = notifications;
-    const verify = () => {
+    const verify = (mode: "passive" | "fresh") => {
       if (document.visibilityState !== "visible") return;
       setMobileNavigationOpen(false);
+      const pending = passiveSessionCheck.current;
+      if (
+        mode === "passive" &&
+        pending &&
+        pending.id === sequence.current &&
+        pending.controller === controller.current &&
+        !pending.controller.signal.aborted
+      ) {
+        return;
+      }
       invalidate();
       const id = sequence.current;
       const current = new AbortController();
       controller.current = current;
+      // Only overlapping passive events in this activation may share work.
+      // No identity or completed authorization result is retained in this slot.
+      const passive = mode === "passive" ? { id, controller: current } : null;
+      passiveSessionCheck.current = passive;
       setCheckingSession(true);
-      request<Profile>("/me", current.signal)
+      request<Profile>(
+        "/me",
+        current.signal,
+        undefined,
+        undefined,
+        mode === "passive" ? "app-passive-session" : undefined,
+      )
         .then((data) => {
           if (id !== sequence.current) return;
           const previous = profileRef.current;
@@ -287,23 +313,44 @@ export default function App() {
           );
         })
         .finally(() => {
+          if (passive && passiveSessionCheck.current === passive) {
+            passiveSessionCheck.current = null;
+          }
           if (id !== sequence.current) return;
           setCheckingSession(false);
           setLoading(false);
         });
     };
-    domainHistoryVerify.current = verify;
+    const revokePassiveJoin = () => {
+      passiveSessionCheck.current = null;
+    };
+    domainHistoryVerify.current = () => verify("fresh");
     const focused = (event: Event) => {
-      if (!(event.target instanceof Element)) verify();
+      if (!(event.target instanceof Element)) verify("passive");
+    };
+    const blurred = (event: Event) => {
+      if (!(event.target instanceof Element)) revokePassiveJoin();
+    };
+    const visibilityChanged = () => {
+      if (document.visibilityState !== "visible") {
+        revokePassiveJoin();
+        return;
+      }
+      verify("passive");
     };
     window.addEventListener("focus", focused);
-    document.addEventListener("visibilitychange", verify);
+    window.addEventListener("blur", blurred);
+    window.addEventListener("pagehide", revokePassiveJoin);
+    document.addEventListener("visibilitychange", visibilityChanged);
     return () => {
       domainHistoryVerify.current = null;
       notifications.close();
       sessionNotifications.current = null;
       window.removeEventListener("focus", focused);
-      document.removeEventListener("visibilitychange", verify);
+      window.removeEventListener("blur", blurred);
+      window.removeEventListener("pagehide", revokePassiveJoin);
+      document.removeEventListener("visibilitychange", visibilityChanged);
+      passiveSessionCheck.current = null;
       sequence.current++;
       controller.current?.abort();
     };
@@ -331,6 +378,7 @@ export default function App() {
     window.addEventListener("popstate", back);
     window.addEventListener("hashchange", back);
     return () => {
+      passiveSessionCheck.current = null;
       sequence.current++;
       controller.current?.abort();
       window.removeEventListener("popstate", back);
@@ -343,6 +391,7 @@ export default function App() {
     setBusy(true);
     setError("");
     setNotice("");
+    passiveSessionCheck.current = null;
     const id = ++sequence.current;
     controller.current?.abort();
     const current = new AbortController();

@@ -106,7 +106,7 @@ class SelectionContract(unittest.TestCase):
             plan=selection.select([path],self.inventory,snapshots)
         self.assertEqual(plan['browser'],self.inventory['browser'])
         self.assertEqual(plan['fixed'],self.inventory['fixed'])
-        self.assertEqual(plan['auth'],list(range(1,9)))
+        self.assertEqual(plan['auth'],list(range(1,17)))
         self.assertTrue(all(plan['groups'].values()))
         calls=[]
         def loader(sha):calls.append(sha);return old
@@ -280,7 +280,7 @@ class SelectionContract(unittest.TestCase):
                 plan=selection.select([api],self.inventory,snapshots)
                 self.assertEqual(plan['browser'],self.inventory['browser'])
                 self.assertEqual(plan['fixed'],self.inventory['fixed'])
-                self.assertEqual(plan['auth'],list(range(1,9)))
+                self.assertEqual(plan['auth'],list(range(1,17)))
                 self.assertTrue(all(plan['groups'].values()))
 
     def test_unit_test_only_and_production_import_of_test(self):
@@ -340,7 +340,7 @@ class SelectionContract(unittest.TestCase):
                 plan = self.choose([path], sources)
                 self.assertEqual(plan['browser'], self.inventory['browser'])
                 self.assertEqual(plan['fixed'], self.inventory['fixed'])
-                self.assertEqual(plan['auth'], list(range(1, 9)))
+                self.assertEqual(plan['auth'], list(range(1, 17)))
                 self.assertTrue(all(plan['groups'].values()))
         self.assertNotIn('web/src/DirectoryV4Workspace.tsx', self.inventory['frontend_roots'])
 
@@ -369,7 +369,7 @@ class SelectionContract(unittest.TestCase):
                 plan=self.choose([path],src,uncertain=uncertain)
                 self.assertEqual(plan['browser'],self.inventory['browser'])
                 self.assertEqual(plan['fixed'],self.inventory['fixed'])
-                self.assertEqual(plan['auth'],list(range(1,9)))
+                self.assertEqual(plan['auth'],list(range(1,17)))
                 self.assertTrue(all(plan['groups'].values()))
                 self.assertIn('unproved frontend dependency: '+path,plan['reasons'])
 
@@ -453,7 +453,7 @@ class SelectionContract(unittest.TestCase):
             n={g:{'result':'success'} for g in selection.GROUPS};n['plan']={'result':'success'}
             summary.verify(p,n,event,'a'*40,'b'*40,p)
             self.assertEqual(len(p['browser']),56)
-            self.assertEqual(p['auth'],list(range(1,9)))
+            self.assertEqual(p['auth'],list(range(1,17)))
             self.assertEqual(p['fixed'],self.inventory['fixed'])
 
     def test_legacy_workflow_restore_never_consumes_a_raw_workflow_read(self):
