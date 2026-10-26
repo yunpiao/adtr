@@ -23,6 +23,44 @@ async function privateCleared(page: Page) {
   for (const name of ["原操作恢复", "原任务状态", "本任务的原始组成员结果", "组原始成员详情"]) await expect(page.getByRole("region", { name, exact: true })).toHaveCount(0);
   await proofEmpty(page);
 }
+// No extra /me consumer is mounted at this fixed Account target. These are
+// direct root DOM checks, not a claim linking this DOM commit to one Response.
+async function accountIdentitySettled(page: Page, actorId: number, username: string) {
+  await expect(page.getByRole("heading", { name: "账户概览", exact: true })).toBeVisible();
+  await expect(page.locator(".soc-session-status")).toHaveCount(0);
+  await expect(page.getByText("正在确认登录状态…", { exact: true })).toHaveCount(0);
+  await expect.poll(() => page.evaluate(({ actorId, username }) => {
+    const main = document.querySelector<HTMLElement>("main.soc-main");
+    const id = Array.from(main?.querySelectorAll("dt") ?? []).find(node => node.textContent === "用户 ID")?.nextElementSibling?.textContent;
+    return !!main && !main.hidden && !main.inert && id === String(actorId) &&
+      document.querySelector(".signed-in strong")?.textContent === username &&
+      !document.querySelector('.directory-v4-workspace, .group-members-v4-workspace');
+  }, { actorId, username })).toBe(true);
+}
+async function observeHiddenNativeActivation(page: Page) {
+  await expect.poll(() => page.evaluate(() => ({ visibility: document.visibilityState, focused: document.hasFocus() }))).toEqual({ visibility: "hidden", focused: false });
+  return page.evaluateHandle(() => {
+    const events: { type: string; trusted: boolean; visible: boolean }[] = [];
+    let overflow = false;
+    const record = (event: Event) => {
+      if (event.type === "focus" && event.target !== window) return;
+      if (events.length >= 16) { overflow = true; return; }
+      events.push({ type: event.type, trusted: event.isTrusted, visible: document.visibilityState === "visible" });
+    };
+    window.addEventListener("focus", record); document.addEventListener("visibilitychange", record);
+    return {
+      read: () => ({ visibility: document.visibilityState, focused: document.hasFocus(), events, overflow }),
+      stop: () => { window.removeEventListener("focus", record); document.removeEventListener("visibilitychange", record); },
+    };
+  });
+}
+async function requireTrustedActivation(lifecycle: Awaited<ReturnType<typeof observeHiddenNativeActivation>>) {
+  await expect.poll(() => lifecycle.evaluate(value => value.read())).toMatchObject({
+    visibility: "visible", focused: true, overflow: false,
+    events: expect.arrayContaining([expect.objectContaining({ type: "focus", trusted: true }), { type: "visibilitychange", trusted: true, visible: true }]),
+  });
+}
+
 test("actual reader authority, native lifecycle and stale original reads never restore private state", async ({ page, context }, info) => {
   test.setTimeout(630_000);
   configureV4Deadlines(context);
@@ -38,18 +76,35 @@ test("actual reader authority, native lifecycle and stale original reads never r
   const reader = fixture.reader, mutations = observeMutations(context, actor);
   const leaks = guardLeaks(context, fixture.secrets);
   v4Phase("readers-tabs");
-  const switching = await context.newPage();
+  const ownedPages: Page[] = [];
+  const activationObservers: Awaited<ReturnType<typeof observeHiddenNativeActivation>>[] = [];
+  let initialLifecycleCleanup: { stop: () => Promise<unknown>; dispose: () => Promise<void> } | undefined;
+  let failed = false;
   let release = () => {}, delayedFinished: Promise<void> | undefined;
-  let readerMonitoring = false, readerUiBusinessPosts = 0;
+  let readerMonitoring = false, readerUiBusinessPosts = 0, readerBrowserAuthMutations = 0;
   const writeListener = (request: import("@playwright/test").Request) => {
     const path = new URL(request.url()).pathname;
-    if (readerMonitoring && request.method() !== "GET" && request.method() !== "HEAD" && path !== "/api/access/check" && !path.startsWith("/api/auth/")) readerUiBusinessPosts++;
+    if (readerMonitoring && request.method() !== "GET" && request.method() !== "HEAD") {
+      if (path.startsWith("/api/auth/")) readerBrowserAuthMutations++;
+      else if (path !== "/api/access/check") readerUiBusinessPosts++;
+    }
   };
   context.on("request", writeListener);
   try {
+    // Every additional page is owned immediately, including failures during setup.
+    const switching = await context.newPage(); ownedPages.push(switching);
+    const appWitness = await context.newPage(); ownedPages.push(appWitness);
+    await appWitness.addInitScript(() => {
+      Object.defineProperty(window, "BroadcastChannel", { configurable: true, value: class { constructor() { throw new DOMException("Unavailable", "SecurityError"); } } });
+      Object.defineProperty(window, "localStorage", { configurable: true, get() { throw new DOMException("Unavailable", "SecurityError"); } });
+    });
+    await bounded(useNativeTabLifecycle(appWitness), 15_000, "App witness native lifecycle setup deadline exceeded");
+    await bounded(appWitness.goto("/#account"), 15_000, "App witness account setup deadline exceeded");
+    await bounded(accountIdentitySettled(appWitness, actor.actorId, actor.username), 15_000, "Old actor account witness did not settle");
+    invariant(new URL(appWitness.url()).hash === "#account", "App witness fixed account target changed");
     await bounded(useNativeTabLifecycle(switching), 15_000, "Switching native lifecycle setup deadline exceeded");
     await switching.goto("/");
-    await bounded(requireSameNativeWindow([page, switching]), 15_000, "Native window identity deadline exceeded");
+    await bounded(requireSameNativeWindow([page, switching, appWitness]), 15_000, "Native window identity deadline exceeded");
     v4Phase("readers-focus");
     await page.bringToFront(); await openCollection(page); await prepareSync(page); await draft(page);
     const lifecycle = await page.evaluateHandle(() => {
@@ -58,12 +113,13 @@ test("actual reader authority, native lifecycle and stale original reads never r
       window.addEventListener("focus", record); document.addEventListener("visibilitychange", record);
       return { read: () => ({ visibility: document.visibilityState, focused: document.hasFocus(), events }), stop: () => { window.removeEventListener("focus", record); document.removeEventListener("visibilitychange", record); } };
     });
+    initialLifecycleCleanup = { stop: () => lifecycle.evaluate(v => v.stop()), dispose: () => lifecycle.dispose() };
     await switching.bringToFront();
     await expect.poll(() => lifecycle.evaluate(v => v.read())).toMatchObject({ visibility: "hidden", focused: false });
     await proofEmpty(page); await privateCleared(page);
     await page.bringToFront();
     await expect.poll(() => lifecycle.evaluate(v => v.read())).toMatchObject({ visibility: "visible", focused: true, events: expect.arrayContaining([expect.objectContaining({ type: "focus", trusted: true }), { type: "visibilitychange", trusted: true, visible: true }]) });
-    await lifecycle.evaluate(v => v.stop()); await lifecycle.dispose();
+    await lifecycle.evaluate(v => v.stop()); await lifecycle.dispose(); initialLifecycleCleanup = undefined;
     await expect(form(page, "sync")).toHaveCount(0); await proofEmpty(page);
     await prepareSync(page); await draft(page);
     // Real browser history navigation, not synthetic popstate/hashchange events.
@@ -110,17 +166,42 @@ test("actual reader authority, native lifecycle and stale original reads never r
     await login(switching, reader.username, reader.initialPassword); await changePassword(switching, reader.initialPassword, reader.password);
     const readerAuth = await enrollMfa(switching, reader.password);
     fixture.secrets.push(readerAuth.secret);
-    const me = await readJSON(context, "/api/auth/me");
+    readerMonitoring = true;
+    const me = await readJSON(context, "/api/auth/me", reader.actorId);
     fixture.secrets.push(me.csrfToken);
-    invariant(me.ID === reader.actorId && me.username === reader.username && me.role === "viewer" && me.hasMfa === true && me.needChangePwd === false, "Actual reader session identity mismatch");
+    invariant(me.ID === reader.actorId && me.username === reader.username && me.role === "viewer" && Number.isSafeInteger(me.priv) && me.priv >= 0 && me.hasMfa === true && me.needChangePwd === false && me.isExpired === false && typeof me.csrfToken === "string" && me.csrfToken.length > 0, "Actual reader session identity mismatch");
     const menu = (await readJSON(context, "/api/access/menu")).menu as { mark: string; auth: { readable: boolean; writeable: boolean } }[];
     invariant(JSON.stringify(menu.map(v => v.mark).sort()) === JSON.stringify(["directory_assets", "domains"]) && menu.every(v => v.auth.readable && !v.auth.writeable), "Actual reader has unexpected authority");
-    readerMonitoring = true;
+    // BrowserContext request events do not cover APIRequestContext. The source
+    // contract separately closes harness calls to GETs and the two V4 denials.
+    let readerSessionSamples = 1;
+    const assertReaderSessionUnchanged = async () => {
+      const current = await readJSON(context, "/api/auth/me", reader.actorId);
+      if (typeof current.csrfToken === "string") fixture.secrets.push(current.csrfToken);
+      const keys = ["ID", "username", "role", "priv", "hasMfa", "needChangePwd", "isExpired", "csrfToken"] as const;
+      invariant(keys.every(key => current[key] === me[key]) && readerBrowserAuthMutations === 0, "Reader session interval changed");
+      readerSessionSamples++;
+    };
     release(); await bounded(delayedFinished, 15_000, "Genuine delayed read did not drain"); delayedFinished = undefined;
     invariant(genuineOldResponse && delivery.value !== "not_attempted", "Held genuine response was not drained");
     await privateCleared(page);
-    const checkedID = await readNativeFocusIdentity(page);
+    // This target was fixed and settled under the producer before actor change.
+    // Strict original-body acceptance is isolated from lawful Workspace refresh.
+    const appActivation = await observeHiddenNativeActivation(appWitness); activationObservers.push(appActivation);
+    const checkedID = await readNativeFocusIdentity(appWitness);
     invariant(checkedID === reader.actorId, "Native focus did not recheck actual changed actor");
+    await requireTrustedActivation(appActivation);
+    await accountIdentitySettled(appWitness, reader.actorId, reader.username);
+    invariant(new URL(appWitness.url()).hash === "#account", "App witness fixed account target changed");
+    await assertReaderSessionUnchanged();
+
+    // Independent original-Workspace obligation: allow its legitimate session
+    // callback/forced refresh, without rescuing or replacing the App-only body.
+    const workspaceActivation = await observeHiddenNativeActivation(page); activationObservers.push(workspaceActivation);
+    await bounded(page.bringToFront(), 15_000, "Original Workspace native focus deadline exceeded");
+    await requireTrustedActivation(workspaceActivation);
+    await accountIdentitySettled(page, reader.actorId, reader.username);
+    await assertReaderSessionUnchanged();
     await privateCleared(page);
     // The previous actor's genuine hint exists, but cannot authorize this reader.
     v4Phase("readers-authority"); await openCollection(page);
@@ -169,6 +250,8 @@ test("actual reader authority, native lifecycle and stale original reads never r
     const countsAfter = await readDirectoryV4ReaderCounts(countInput);
     invariant(JSON.stringify(countsBefore) === JSON.stringify(countsAfter), "Reader probes changed actual task/use/dependency/observation evidence");
     invariant(readerUiBusinessPosts === 0 && mutations.counts().sync === 1 && mutations.counts().cancel === 0, "Reader UI/harness evidence was conflated");
+    await assertReaderSessionUnchanged();
+    invariant(readerSessionSamples === 4 && readerBrowserAuthMutations === 0, "Reader session interval was not closed");
     leaks.assertClean();
     await writeEvidence(info, "readers", {
       producerUiSyncPosts: 1, readerUiBusinessPosts: 0, harnessDeniedSyncPosts: 1, harnessDeniedCancelPosts: 1,
@@ -177,16 +260,54 @@ test("actual reader authority, native lifecycle and stale original reads never r
       proofClearedOnBlur: true, proofClearedOnHistory: true, oldActorIntentNotRestored: true,
       genuineOldSuccessHeld: true, lateReadAfterSessionChangeCleared: true, staleDelivery: delivery.value,
       harnessDenials403: denialStatuses.every(status => status === 403), proofEmptyScreenshots: true,
+      appWitnessPredeclaredOldActorSettled: true, appWitnessAccountOnly: true,
+      appWitnessTrustedNativeActivation: true, appWitnessOriginalMarkedBody: true,
+      originalWorkspaceTrustedNativeActivation: true, originalWorkspaceReaderGateOpen: true,
+      readerSessionSamples: 4, readerBrowserAuthMutations: 0, checkedSessionContinuity: true,
     }, {
       original: originalEvidence(original, actor.actorId), mutations: mutationEvidence(mutations.entries),
       readerActorSHA256: evidenceDigest([String(reader.actorId)]),
       readerMenu: menu.map(value => ({ mark: value.mark, readable: value.auth.readable, writeable: value.auth.writeable })).sort((a,b) => a.mark.localeCompare(b.mark)),
       readerObservationSHA256: evidenceDigest([parsed.observationId]),
       countsBefore, countsAfter, denialStatuses,
+      identityWitness: {
+        kind: "split-app-account-and-workspace-v1", appPageRole: "predeclared-account", workspacePageRole: "original-workspace",
+        samePageAtomicBinding: false, producerActorSHA256: evidenceDigest([String(actor.actorId)]),
+        appReaderActorSHA256: evidenceDigest([String(checkedID)]), workspaceReaderActorSHA256: evidenceDigest([String(reader.actorId)]),
+        sessionContinuity: "checked-identity-and-csrf-in-memory", identitySamples: readerSessionSamples,
+        browserAuthMutations: readerBrowserAuthMutations, harnessAuthWrites: "source-closed-none",
+        auxiliaryPageCleanup: "source-bound-after-finally",
+      },
     });
+  } catch (error) {
+    failed = true;
+    throw error; // Preserve the first test failure even if owned cleanup also fails.
   } finally {
     release();
-    try { if (delayedFinished) await bounded(delayedFinished, 20_000, "Delayed actual read cleanup did not finish"); }
-    finally { leaks.close(); mutations.close(); context.off("request", writeListener); await switching.close(); }
+    // Shared wait budget, then bounded best-effort tail attempts; not a hard
+    // total wall-clock guarantee if the event loop itself is delayed.
+    const cleanupDeadline = Date.now() + 20_000;
+    let cleanupFailed = false;
+    const cleanup = async (action: () => Promise<unknown>) => {
+      try { await bounded(action(), Math.max(1, cleanupDeadline - Date.now()), "Owned reader witness cleanup deadline exceeded"); }
+      catch { cleanupFailed = true; }
+    };
+    if (delayedFinished) await cleanup(() => delayedFinished!);
+    if (initialLifecycleCleanup) {
+      await cleanup(initialLifecycleCleanup.stop);
+      await cleanup(initialLifecycleCleanup.dispose);
+    }
+    for (const observer of activationObservers) {
+      await cleanup(() => observer.evaluate(value => value.stop()));
+      await cleanup(() => observer.dispose());
+    }
+    await cleanup(async () => { leaks.close(); });
+    await cleanup(async () => { mutations.close(); });
+    await cleanup(async () => { context.off("request", writeListener); });
+    for (const owned of [...ownedPages].reverse()) await cleanup(() => owned.close());
+    if (cleanupFailed) {
+      if (!failed) throw new Error("Owned reader witness cleanup failed");
+      console.log("[v4-readers-cleanup] failed-after-original-failure");
+    }
   }
 });

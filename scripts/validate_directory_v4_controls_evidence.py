@@ -239,11 +239,25 @@ def validate_cancel(w):
 
 
 def validate_readers(w):
-    exact(w, ['original', 'mutations', 'readerActorSHA256', 'readerMenu', 'readerObservationSHA256', 'countsBefore', 'countsAfter', 'denialStatuses'], 'reader witnesses')
+    exact(w, ['original', 'mutations', 'readerActorSHA256', 'readerMenu', 'readerObservationSHA256', 'countsBefore', 'countsAfter', 'denialStatuses', 'identityWitness'], 'reader witnesses')
     item = w['original']; original(item)
     mutations(w['mutations'], [('sync', item)])
     require(digest(w['readerActorSHA256']) and w['readerActorSHA256'] != item['actorSHA256'], 'actual distinct reader')
     require(w['readerObservationSHA256'] == item['taskSHA256'], 'reader original observation')
+    identity = w['identityWitness']
+    exact(identity, ['kind', 'appPageRole', 'workspacePageRole', 'samePageAtomicBinding', 'producerActorSHA256',
+                     'appReaderActorSHA256', 'workspaceReaderActorSHA256', 'sessionContinuity', 'identitySamples',
+                     'browserAuthMutations', 'harnessAuthWrites', 'auxiliaryPageCleanup'], 'split identity witness fields')
+    require(identity['kind'] == 'split-app-account-and-workspace-v1'
+            and identity['appPageRole'] == 'predeclared-account' and identity['workspacePageRole'] == 'original-workspace', 'fixed split identity roles')
+    require(identity['samePageAtomicBinding'] is False, 'no same-page response-to-commit atomic claim')
+    require(identity['producerActorSHA256'] == item['actorSHA256']
+            and identity['appReaderActorSHA256'] == identity['workspaceReaderActorSHA256'] == w['readerActorSHA256'], 'same declared producer and actual reader')
+    require(identity['sessionContinuity'] == 'checked-identity-and-csrf-in-memory'
+            and type(identity['identitySamples']) is int and identity['identitySamples'] == 4
+            and type(identity['browserAuthMutations']) is int and identity['browserAuthMutations'] == 0
+            and identity['harnessAuthWrites'] == 'source-closed-none', 'checked session interval without auth writes')
+    require(identity['auxiliaryPageCleanup'] == 'source-bound-after-finally', 'auxiliary cleanup is not a premature closed assertion')
     require(type(w['readerMenu']) is list and len(w['readerMenu']) == 2, 'read-only menu count')
     for row, mark in zip(w['readerMenu'], ['directory_assets', 'domains']):
         exact(row, ['mark', 'readable', 'writeable'], 'reader menu fields')
