@@ -229,3 +229,73 @@ ledger/quiescence witnesses, independent read-only UI, late authority/session
 responses and safe desktop/mobile pixels. Add CI/provenance/consumer registrations
 only with actual executable coverage. No C code is included here. No runtime
 claims, product acceptance, deployment enablement or Issue closure follows.
+
+## Reader native identity evidence: explicitly split witnesses
+
+The reader scenario now declares a fixed third **App-only `#account` page** in
+advance, in the same browser context and native window as the original Workspace
+and login switcher. Both notification transports are unavailable on the original
+Workspace and the App-only page. Before actor change, the extra page must display
+the settled producer account, with no loading/checking gate or mounted Workspace;
+Account and SocNavigation's source closure contains no other `/me` producer.
+This prevents choosing a convenient page after seeing a response.
+
+The App-only page must begin hidden/unfocused, then undergo one real trusted
+native focus/visible activation. The unchanged native helper still accepts only
+the first eligible marked canonical 200 **original Response**, calls its original
+`json()` once synchronously, and keeps its 15-second deadline and first-failure
+rule. The root account independently must display the actual reader with its gate
+open. The fixed purpose header remains caller intent, not server-trusted authority.
+
+The original Workspace is a separate security witness. Its own hidden/unfocused
+to trusted focus/visible transition must settle the root App as the reader without
+an artificial navigation. Its valid Workspace-session-change callback may preempt
+an obsolete passive request and force refresh; this behavior is not disabled or
+reclassified as a body-reader pass. Held genuine old-actor success, proof clearing,
+non-restoration of intent/results, no browser business POST, original reader GET,
+two separately proved 403 write denials and unchanged database counts all remain.
+The same four safe Workspace PNGs are retained; no account-profile image is added.
+
+The genuine context `/me` checks require HTTP 200 and `no-store`, then verify the
+reader identity in the actual JSON body; this auth endpoint does not provide the
+business-response `X-ADTR-User-ID` header. The checks compare ID,
+username, role, priv, MFA, needChangePwd, isExpired and the exact nonempty CSRF
+value only in memory at four declared boundaries. Browser auth mutations must be
+zero from the first reader check through both witnesses and final authority check.
+The browser request listener cannot see APIRequestContext writes: a separate source
+contract closes the harness interval to declared GETs and the original two non-auth
+business denial probes. New token values enter the existing leak guard; neither
+tokens, token hashes nor raw profiles are emitted. Current GET/me derives CSRF from
+the current session and does not rotate it. This supports source-bound sampled
+session continuity, not direct cookie-byte measurement or an atomic cross-page
+snapshot immune to an external change-and-restore between samples.
+
+The closed `identityWitness.kind` is `split-app-account-and-workspace-v1`; roles,
+actor digests, four samples, zero browser auth mutations, source-closed harness
+writes and `samePageAtomicBinding: false` are mandatory. Missing/unknown/old
+same-page atomic claims are rejected. **This is not equivalent to proving that the
+original Response on the original Workspace page is the epoch whose identity
+finally committed there. That same-page Response-to-commit atomic linkage is no
+longer claimed.** Direct root UI/authority checks remain additional obligations,
+not a substitute mislabeled as that linkage.
+
+Every added page is registered for owned cleanup immediately after creation.
+A shared 20-second finally waiting budget drains held work, removes all owned
+native observers and independently attempts every teardown action and both page
+closes. After exhaustion, each remaining action gets a bounded best-effort attempt;
+this is not a strict total wall-clock guarantee under event-loop delay. The original
+failure is retained if cleanup also fails.
+Artifact cleanup semantics say `source-bound-after-finally`, never an early
+`closed: true`; acceptance still requires the successful runner after finally.
+The 630-second test / 660-second wrapper limits, 15-second body witness, screenshots,
+proof work, backend, production App/API/Workspace, helper and CI are unchanged.
+Removing the extra witness or session checks would lose the separated native-body
+or authority/session evidence; removing the explicit non-atomic declaration would
+misstate the weaker combined claim. The added tab consumes time inside the same
+budget and still needs fresh native CI acceptance.
+
+The earlier `identity_deadline` with no selected response and the older
+`cdp_body_no_data` failure remain distinct historical evidence. Offline reproduction
+shows a lawful Workspace-first preemption ordering, not the precise interleaving
+of either CI failure. Source/contract tests do not establish native runtime success,
+product acceptance, merge clearance or deployment readiness.

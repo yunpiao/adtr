@@ -56,7 +56,7 @@ def verify(plan, needs, event, base, head, expected_plan):
     if event != 'pull_request' and (plan['browser'] != INVENTORY['browser'] or set(plan['fixed']) != set(INVENTORY['fixed'])):
         raise ValueError('full matrix reduced')
     groups=plan['groups']
-    if groups['browser'] != bool(names) or groups['user-assets-fixed'] != bool(plan['fixed']) or plan['auth'] != (list(range(1,9)) if groups['auth-integration'] else []):
+    if groups['browser'] != bool(names) or groups['user-assets-fixed'] != bool(plan['fixed']) or plan['auth'] != (list(range(1,17)) if groups['auth-integration'] else []):
         raise ValueError('matrix coverage mismatch')
     if groups['native-no-store'] != groups['native-no-store-fixed'] or groups['prepare-postgres'] != any(groups[n] for n in ('contracts','auth-integration','browser','user-assets-fixed')):
         raise ValueError('dependency coverage mismatch')
