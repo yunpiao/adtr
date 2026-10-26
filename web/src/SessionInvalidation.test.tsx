@@ -57,6 +57,66 @@ function deferred() {
   });
   return { promise, resolve };
 }
+function deferredValue<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason: unknown) => void;
+  const promise = new Promise<T>((yes, no) => {
+    resolve = yes;
+    reject = no;
+  });
+  return { promise, resolve, reject };
+}
+// Return headers immediately, but keep the original Response.json pending.
+// Ignoring abort deliberately models a late body that still needs epoch fencing.
+function heldBody(status = 200, abortAware = false) {
+  const body = deferredValue<unknown>();
+  const json = vi.fn(() => body.promise);
+  let signal!: AbortSignal;
+  const fetch = async (_url: unknown, init: RequestInit) => {
+    signal = init.signal!;
+    if (abortAware)
+      signal.addEventListener(
+        "abort",
+        () => body.reject(new DOMException("aborted", "AbortError")),
+        { once: true },
+      );
+    return { ok: status < 400, status, json } as unknown as Response;
+  };
+  return { body, json, fetch, signal: () => signal };
+}
+type PassiveEvent = "focus" | "visibilitychange";
+function passive(event: PassiveEvent) {
+  fireEvent(event === "focus" ? window : document, new Event(event));
+}
+function activationBoundary(event: "hidden" | "blur" | "pagehide") {
+  if (event === "hidden") {
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: "hidden",
+    });
+    fireEvent(document, new Event("visibilitychange"));
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: "visible",
+    });
+  } else fireEvent(window, new Event(event));
+}
+const secondProfile: Profile = {
+  ...profile,
+  ID: 2,
+  username: "second-actor",
+  csrfToken: "second-csrf",
+};
+function expectGated() {
+  const main = document.querySelector("main")!;
+  expect(main).toHaveAttribute("hidden");
+  expect(main).toHaveAttribute("inert");
+  expect(main).not.toBeVisible();
+}
+function expectActor(username: string) {
+  for (const node of screen.getAllByText(username, { exact: true }))
+    expect(node).toBeVisible();
+}
 let fetcher: ReturnType<typeof vi.fn>;
 beforeEach(() => {
   Channel.instances = [];
@@ -329,5 +389,440 @@ describe("live session UI boundaries", () => {
     channel.emit(nonce(6));
     expect(fetcher).toHaveBeenCalledTimes(count);
     await act(async () => held.resolve(response(profile)));
+  });
+});
+
+describe("passive identity checks share only their current activation", () => {
+  it.each<[PassiveEvent, PassiveEvent]>([
+    ["focus", "visibilitychange"],
+    ["visibilitychange", "focus"],
+    ["focus", "focus"],
+    ["visibilitychange", "visibilitychange"],
+  ])(
+    "keeps the original 200 body for overlapping %s then %s",
+    async (first, next) => {
+      await start();
+      await passwordDraft();
+      const input = screen.getByLabelText("当前密码", { exact: true });
+      const held = heldBody(200, true);
+      const count = fetcher.mock.calls.length;
+      fetcher.mockImplementationOnce(held.fetch);
+      passive(first);
+      await waitFor(() => expect(held.json).toHaveBeenCalledTimes(1));
+      expectGated();
+      passive(next);
+      expect(fetcher).toHaveBeenCalledTimes(count + 1);
+      expect(held.signal().aborted).toBe(false);
+      expect(held.json).toHaveBeenCalledTimes(1);
+      expectGated();
+      await act(async () => held.body.resolve(profile));
+      expect(input).toBeVisible();
+      expect(input).toHaveValue("private-draft");
+      expect(document.querySelector("main")).not.toHaveAttribute("inert");
+      // A settled check is never an authorization cache for the next event.
+      fetcher.mockImplementationOnce(async () => response(secondProfile));
+      passive(next);
+      await screen.findAllByText("second-actor", { exact: true });
+      expect(fetcher).toHaveBeenCalledTimes(count + 2);
+      expectActor("second-actor");
+      expect(
+        screen.queryByLabelText("当前密码", { exact: true }),
+      ).not.toBeInTheDocument();
+    },
+  );
+
+  it.each<PassiveEvent>(["focus", "visibilitychange"])(
+    "retains the single %s request through its body",
+    async (event) => {
+      await start();
+      const held = heldBody(200, true);
+      const count = fetcher.mock.calls.length;
+      fetcher.mockImplementationOnce(held.fetch);
+      passive(event);
+      await waitFor(() => expect(held.json).toHaveBeenCalledTimes(1));
+      expect(held.signal().aborted).toBe(false);
+      expect(fetcher).toHaveBeenCalledTimes(count + 1);
+      expectGated();
+      await act(async () => held.body.resolve(secondProfile));
+      expectActor("second-actor");
+    },
+  );
+
+  it.each<"hidden" | "blur" | "pagehide">(["hidden", "blur", "pagehide"])(
+    "requires fresh identity after %s without a session notification",
+    async (boundary) => {
+      await start();
+      await passwordDraft();
+      const old = heldBody();
+      const current = heldBody();
+      const count = fetcher.mock.calls.length;
+      fetcher
+        .mockImplementationOnce(old.fetch)
+        .mockImplementationOnce(current.fetch);
+      passive("focus");
+      await waitFor(() => expect(old.json).toHaveBeenCalledTimes(1));
+      activationBoundary(boundary);
+      // Losing activation only revokes joining; it adds no abort policy.
+      expect(old.signal().aborted).toBe(false);
+      expect(fetcher).toHaveBeenCalledTimes(count + 1);
+      passive(boundary === "hidden" ? "visibilitychange" : "focus");
+      await waitFor(() => expect(current.json).toHaveBeenCalledTimes(1));
+      expect(old.signal().aborted).toBe(true);
+      expect(current.signal().aborted).toBe(false);
+      expect(fetcher).toHaveBeenCalledTimes(count + 2);
+      expectGated();
+      await act(async () => current.body.resolve(secondProfile));
+      await act(async () => old.body.resolve(profile));
+      expectActor("second-actor");
+      expect(
+        screen.queryByText("first-actor", { exact: true }),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByLabelText("当前密码", { exact: true }),
+      ).not.toBeInTheDocument();
+      expect(Channel.instances[0].postMessage).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(["resolve", "reject"] as const)(
+    "does not let an old %s/finally clear a newer passive slot or gate",
+    async (settlement) => {
+      await start();
+      const old = heldBody();
+      const current = heldBody();
+      const count = fetcher.mock.calls.length;
+      fetcher
+        .mockImplementationOnce(old.fetch)
+        .mockImplementationOnce(current.fetch);
+      passive("focus");
+      await waitFor(() => expect(old.json).toHaveBeenCalledTimes(1));
+      activationBoundary("blur");
+      passive("focus");
+      await waitFor(() => expect(current.json).toHaveBeenCalledTimes(1));
+      await act(async () => {
+        if (settlement === "resolve") old.body.resolve(secondProfile);
+        else old.body.reject(new Error("late old body failure"));
+      });
+      expectGated();
+      passive("visibilitychange");
+      expect(fetcher).toHaveBeenCalledTimes(count + 2);
+      expect(current.signal().aborted).toBe(false);
+      expectGated();
+      await act(async () => current.body.resolve(profile));
+      expectActor("first-actor");
+      expect(
+        screen.queryByText("second-actor", { exact: true }),
+      ).not.toBeInTheDocument();
+    },
+  );
+
+  it("does not treat Element focus or blur as activation changes", async () => {
+    await start();
+    await passwordDraft();
+    const input = screen.getByLabelText("当前密码", { exact: true });
+    const held = heldBody();
+    const count = fetcher.mock.calls.length;
+    fetcher.mockImplementationOnce(held.fetch);
+    passive("focus");
+    await waitFor(() => expect(held.json).toHaveBeenCalledTimes(1));
+    fireEvent(input, new FocusEvent("blur", { bubbles: true }));
+    fireEvent(input, new FocusEvent("focus", { bubbles: true }));
+    passive("visibilitychange");
+    expect(fetcher).toHaveBeenCalledTimes(count + 1);
+    expect(held.signal().aborted).toBe(false);
+    await act(async () => held.body.resolve(profile));
+    expect(input).toHaveValue("private-draft");
+    expect(input).toBeVisible();
+  });
+
+  it.each(["401", "body failure"] as const)(
+    "fails closed after a joined %s and permits the next fresh check",
+    async (failure) => {
+      await start();
+      await passwordDraft();
+      const held = heldBody(failure === "401" ? 401 : 200);
+      const count = fetcher.mock.calls.length;
+      fetcher.mockImplementationOnce(held.fetch);
+      passive("focus");
+      await waitFor(() => expect(held.json).toHaveBeenCalledTimes(1));
+      passive("visibilitychange");
+      expect(fetcher).toHaveBeenCalledTimes(count + 1);
+      await act(async () => {
+        if (failure === "401") held.body.resolve({ error: "unauthenticated" });
+        else held.body.reject(new Error("invalid JSON body"));
+      });
+      expect(screen.getByRole("heading", { name: "登录账户" })).toBeVisible();
+      expect(
+        screen.queryByText("first-actor", { exact: true }),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByLabelText("当前密码", { exact: true }),
+      ).not.toBeInTheDocument();
+      expect(document.querySelector("main")).not.toHaveAttribute("hidden");
+      fetcher.mockImplementationOnce(async () => response(secondProfile));
+      passive("focus");
+      await screen.findAllByText("second-actor", { exact: true });
+      expect(fetcher).toHaveBeenCalledTimes(count + 2);
+      expectActor("second-actor");
+    },
+  );
+
+  it("shares a pending network request but does not retain its failure", async () => {
+    await start();
+    const pending = deferredValue<Response>();
+    const count = fetcher.mock.calls.length;
+    fetcher.mockImplementationOnce(() => pending.promise);
+    passive("visibilitychange");
+    const signal = fetcher.mock.calls.at(-1)![1].signal as AbortSignal;
+    passive("focus");
+    expect(fetcher).toHaveBeenCalledTimes(count + 1);
+    expect(signal.aborted).toBe(false);
+    expectGated();
+    await act(async () =>
+      pending.reject(new TypeError("synthetic network failure")),
+    );
+    expect(screen.getByRole("heading", { name: "登录账户" })).toBeVisible();
+    expect(screen.getByRole("alert")).toHaveTextContent("连接中断");
+    fetcher.mockImplementationOnce(async () => response(secondProfile));
+    passive("focus");
+    await screen.findAllByText("second-actor", { exact: true });
+    expect(fetcher).toHaveBeenCalledTimes(count + 2);
+    expectActor("second-actor");
+  });
+});
+
+describe("authoritative identity changes still preempt passive work", () => {
+  it.each([
+    ["changed actor", secondProfile],
+    [
+      "same actor privilege and CSRF rotation",
+      { ...profile, priv: 2, csrfToken: "rotated-csrf" },
+    ],
+  ] as const)(
+    "lets a real notification preempt the pending body for %s",
+    async (_label, updated) => {
+      await start();
+      await passwordDraft();
+      const old = heldBody();
+      const fresh = heldBody();
+      const count = fetcher.mock.calls.length;
+      fetcher
+        .mockImplementationOnce(old.fetch)
+        .mockImplementationOnce(fresh.fetch);
+      passive("focus");
+      await waitFor(() => expect(old.json).toHaveBeenCalledTimes(1));
+      act(() => Channel.instances[0].emit(nonce(20)));
+      await waitFor(() => expect(fresh.json).toHaveBeenCalledTimes(1));
+      expect(old.signal().aborted).toBe(true);
+      expect(fetcher).toHaveBeenCalledTimes(count + 2);
+      expect(
+        screen.queryByLabelText("当前密码", { exact: true }),
+      ).not.toBeInTheDocument();
+      await act(async () => fresh.body.resolve(updated));
+      await act(async () => old.body.resolve(profile));
+      expectActor(updated.username);
+      expect(
+        screen.queryByLabelText("当前密码", { exact: true }),
+      ).not.toBeInTheDocument();
+      expect(Channel.instances[0].postMessage).not.toHaveBeenCalled();
+    },
+  );
+
+  it("does not make the initial refresh joinable by passive events", async () => {
+    const initial = heldBody();
+    const current = heldBody();
+    fetcher
+      .mockImplementationOnce(initial.fetch)
+      .mockImplementationOnce(current.fetch);
+    render(<App />);
+    await waitFor(() => expect(initial.json).toHaveBeenCalledTimes(1));
+    passive("focus");
+    await waitFor(() => expect(current.json).toHaveBeenCalledTimes(1));
+    expect(initial.signal().aborted).toBe(true);
+    passive("visibilitychange");
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    await act(async () => initial.body.resolve(profile));
+    expectGated();
+    expect(
+      screen.queryByText("first-actor", { exact: true }),
+    ).not.toBeInTheDocument();
+    await act(async () => current.body.resolve(secondProfile));
+    expectActor("second-actor");
+  });
+
+  it.each(["navigation", "notification"] as const)(
+    "keeps %s refresh fresh and not joinable by a subsequent passive event",
+    async (forced) => {
+      await start();
+      const old = heldBody();
+      const fresh = heldBody();
+      const current = heldBody();
+      const count = fetcher.mock.calls.length;
+      fetcher
+        .mockImplementationOnce(old.fetch)
+        .mockImplementationOnce(fresh.fetch)
+        .mockImplementationOnce(current.fetch);
+      passive("focus");
+      await waitFor(() => expect(old.json).toHaveBeenCalledTimes(1));
+      if (forced === "navigation")
+        fireEvent.click(screen.getByRole("link", { name: /ADTR/ }));
+      else act(() => Channel.instances[0].emit(nonce(21)));
+      await waitFor(() => expect(fresh.json).toHaveBeenCalledTimes(1));
+      expect(old.signal().aborted).toBe(true);
+      passive("visibilitychange");
+      await waitFor(() => expect(current.json).toHaveBeenCalledTimes(1));
+      expect(fresh.signal().aborted).toBe(true);
+      await act(async () => {
+        old.body.resolve(profile);
+        fresh.body.resolve(profile);
+      });
+      expectGated();
+      passive("focus");
+      expect(fetcher).toHaveBeenCalledTimes(count + 3);
+      expect(current.signal().aborted).toBe(false);
+      await act(async () => current.body.resolve(secondProfile));
+      expectActor("second-actor");
+    },
+  );
+
+  it("keeps explicit domain-history verification fresh rather than sharing passive or forced bodies", async () => {
+    const queue: ReturnType<typeof heldBody>[] = [];
+    fetcher.mockImplementation(async (url: string, init: RequestInit) => {
+      if (url === "/api/auth/me")
+        return queue.shift()?.fetch(url, init) ?? response(profile);
+      return response({ error: "forbidden" }, 403);
+    });
+    window.history.replaceState({}, "", "#domains");
+    render(<App />);
+    await screen.findAllByText("first-actor", { exact: true });
+    const meCalls = () =>
+      fetcher.mock.calls.filter(([url]) => url === "/api/auth/me").length;
+    const count = meCalls();
+    const old = heldBody();
+    const history = heldBody();
+    const nextHistory = heldBody();
+    const current = heldBody();
+    queue.push(old, history, nextHistory, current);
+    passive("focus");
+    await waitFor(() => expect(old.json).toHaveBeenCalledTimes(1));
+    fireEvent(window, new PopStateEvent("popstate"));
+    await waitFor(() => expect(history.json).toHaveBeenCalledTimes(1));
+    expect(old.signal().aborted).toBe(true);
+    fireEvent(window, new HashChangeEvent("hashchange"));
+    await waitFor(() => expect(nextHistory.json).toHaveBeenCalledTimes(1));
+    expect(history.signal().aborted).toBe(true);
+    passive("visibilitychange");
+    await waitFor(() => expect(current.json).toHaveBeenCalledTimes(1));
+    expect(nextHistory.signal().aborted).toBe(true);
+    await act(async () => {
+      old.body.resolve(profile);
+      history.body.resolve(profile);
+      nextHistory.body.resolve(profile);
+    });
+    expectGated();
+    passive("focus");
+    expect(meCalls()).toBe(count + 4);
+    expect(current.signal().aborted).toBe(false);
+    await act(async () => current.body.resolve(secondProfile));
+    expectActor("second-actor");
+  });
+
+  it("lets logout preempt a passive body without changing mutation request or busy semantics", async () => {
+    await start();
+    const logoutButton = screen.getByRole("button", { name: "退出登录" });
+    const old = heldBody();
+    const logout = heldBody();
+    fetcher
+      .mockImplementationOnce(old.fetch)
+      .mockImplementationOnce(logout.fetch);
+    passive("focus");
+    await waitFor(() => expect(old.json).toHaveBeenCalledTimes(1));
+    // Dispatch the existing callback through a retained node to test run's
+    // epoch boundary, not to claim that a gated navigation is user-interactive.
+    fireEvent.click(logoutButton);
+    await waitFor(() => expect(logout.json).toHaveBeenCalledTimes(1));
+    expect(old.signal().aborted).toBe(true);
+    expect(fetcher.mock.calls.at(-1)).toEqual([
+      "/api/auth/logout",
+      expect.objectContaining({
+        method: "POST",
+        body: "{}",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRF-Token": profile.csrfToken,
+        },
+      }),
+    ]);
+    expect(logoutButton).toBeDisabled();
+    await act(async () => old.body.resolve(profile));
+    expectGated();
+    await act(async () => logout.body.resolve({ result: "SUCCESS" }));
+    expect(Channel.instances[0].postMessage).toHaveBeenCalledTimes(1);
+    expect(
+      screen.queryByText("first-actor", { exact: true }),
+    ).not.toBeInTheDocument();
+    // Preserve the original policy: a later passive event can revalidate after logout.
+    fetcher.mockImplementationOnce(async () =>
+      response({ error: "unauthenticated" }, 401),
+    );
+    passive("focus");
+    await screen.findByRole("heading", { name: "登录账户" });
+  });
+
+  it("retains passive preemption of an in-flight mutation rather than adding a scheduler", async () => {
+    await start();
+    const mutation = heldBody();
+    const current = heldBody();
+    const count = fetcher.mock.calls.length;
+    fetcher
+      .mockImplementationOnce(mutation.fetch)
+      .mockImplementationOnce(current.fetch);
+    fireEvent.click(screen.getByRole("button", { name: "退出登录" }));
+    await waitFor(() => expect(mutation.json).toHaveBeenCalledTimes(1));
+    passive("focus");
+    await waitFor(() => expect(current.json).toHaveBeenCalledTimes(1));
+    expect(mutation.signal().aborted).toBe(true);
+    await act(async () => mutation.body.resolve({ result: "SUCCESS" }));
+    expect(Channel.instances[0].postMessage).not.toHaveBeenCalled();
+    expectGated();
+    passive("visibilitychange");
+    expect(fetcher).toHaveBeenCalledTimes(count + 2);
+    await act(async () => current.body.resolve(secondProfile));
+    expectActor("second-actor");
+    expect(screen.getByRole("button", { name: "退出登录" })).not.toBeDisabled();
+  });
+
+  it("removes every passive listener and fences a pending body on unmount", async () => {
+    const windowAdded = vi.spyOn(window, "addEventListener");
+    const windowRemoved = vi.spyOn(window, "removeEventListener");
+    const documentAdded = vi.spyOn(document, "addEventListener");
+    const documentRemoved = vi.spyOn(document, "removeEventListener");
+    const mounted = await start();
+    const held = heldBody();
+    fetcher.mockImplementationOnce(held.fetch);
+    passive("focus");
+    await waitFor(() => expect(held.json).toHaveBeenCalledTimes(1));
+    mounted.unmount();
+    expect(held.signal().aborted).toBe(true);
+    for (const name of ["focus", "blur", "pagehide"]) {
+      const listener = windowAdded.mock.calls.find(
+        ([event]) => event === name,
+      )![1];
+      expect(windowRemoved).toHaveBeenCalledWith(name, listener);
+    }
+    const listener = documentAdded.mock.calls.find(
+      ([event]) => event === "visibilitychange",
+    )![1];
+    expect(documentRemoved).toHaveBeenCalledWith("visibilitychange", listener);
+    const count = fetcher.mock.calls.length;
+    activationBoundary("hidden");
+    activationBoundary("blur");
+    activationBoundary("pagehide");
+    passive("focus");
+    passive("visibilitychange");
+    act(() => Channel.instances[0].emit(nonce(22)));
+    await act(async () => held.body.resolve(secondProfile));
+    expect(fetcher).toHaveBeenCalledTimes(count);
+    expect(document.querySelector("main")).toBeNull();
   });
 });
