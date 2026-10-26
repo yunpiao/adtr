@@ -201,10 +201,20 @@ def psql_command(container, application):
     require(re.fullmatch(r'adtr-auth-e2e-[0-9a-f]{12}', container) is not None and
             application in {APPLICATION, OBSERVER})
     options = ('-c statement_timeout=1000 -c idle_in_transaction_session_timeout=8000 '
-               '-c default_transaction_read_only=on -c application_name=' + application)
-    return ['docker', 'exec', '-i', '-e', 'PGOPTIONS=' + options, container,
+               '-c default_transaction_read_only=on')
+    # psql supplies fallback_application_name in its startup packet after the
+    # server processes PGOPTIONS. Use libpq's explicit application_name field.
+    return ['docker', 'exec', '-i', '-e', 'PGOPTIONS=' + options,
+            '-e', 'PGAPPNAME=' + application, container,
             'psql', '-U', 'postgres', '-d', DATABASE, '-X', '-q', '-A', '-t',
             '-v', 'ON_ERROR_STOP=1']
+
+
+def preparation_checked(value):
+    require(type(value) is dict and set(value) == {'appMatches', 'transactionReadOnly', 'activityRows'})
+    require(type(value['appMatches']) is bool and type(value['transactionReadOnly']) is bool and
+            type(value['activityRows']) is int and 0 <= value['activityRows'] <= 10**6)
+    return {key: value[key] for key in ('appMatches', 'transactionReadOnly', 'activityRows')}
 
 
 class OwnedSession:
@@ -245,9 +255,12 @@ class OwnedSession:
                 pass
 
     def open_transaction(self):
-        self.process.stdin.write('BEGIN; SELECT to_json(count(*)) FROM adtr.system_worker_activity;\n')
+        self.process.stdin.write("BEGIN; SELECT jsonb_build_object('appMatches',"
+                                 "current_setting('application_name')='" + APPLICATION + "',"
+                                 "'transactionReadOnly',current_setting('transaction_read_only')='on',"
+                                 "'activityRows',(SELECT count(*) FROM adtr.system_worker_activity));\n")
         self.process.stdin.flush()
-        require(unique_json(self.lines.get(timeout=3)) == 0)
+        return preparation_checked(unique_json(self.lines.get(timeout=3)))
 
     def close(self):
         clean = reap_process(self.process)
@@ -308,7 +321,8 @@ def run_experiment(container, environ):
     first_failure = None
     cleanup = {'clientsClosed': False, 'zeroOtherDatabaseBackends': False}
     evidence = {'version': 1, 'purpose': 'original_observer_plan_only', 'success': False,
-                'fixture': 'migrated_empty_task_two_idle_owned_transactions', 'plans': [], 'planAttempts': []}
+                'fixture': 'migrated_empty_task_two_idle_owned_transactions', 'plans': [], 'planAttempts': [],
+                'ownedPreparation': [], 'ownedSessionCounts': {'beforePlan': None, 'afterPlan': None}}
     started = time.monotonic()
     try:
         require(environ.get('ADTR_RUN_OBSERVER_PLAN_TESTS') == '1' and
@@ -346,8 +360,12 @@ def run_experiment(container, environ):
                 constructions_confirmed = False
                 raise
             sessions.append(session)
-            session.open_transaction()
-        require(session_count(container) == 2)
+            proof = session.open_transaction()
+            evidence['ownedPreparation'].append(proof)
+            require(proof == {'appMatches': True, 'transactionReadOnly': True, 'activityRows': 0})
+        stage = 'owned_visibility'
+        evidence['ownedSessionCounts']['beforePlan'] = session_count(container)
+        require(evidence['ownedSessionCounts']['beforePlan'] == 2)
         stage = 'original_sql'
         context = SimpleNamespace(asset_kind='group', application_name=APPLICATION)
         sql = RunningExportCancelGuard.observe_sql(context, TASK)
@@ -367,7 +385,9 @@ def run_experiment(container, environ):
             plan['rawPlanSHA256'] = sha(raw)
             evidence['plans'].append(plan)
             attempt['projected'] = True
-        require(session_count(container) == 2)
+        stage = 'owned_visibility_after_plan'
+        evidence['ownedSessionCounts']['afterPlan'] = session_count(container)
+        require(evidence['ownedSessionCounts']['afterPlan'] == 2)
     except Exception:
         first_failure = stage
     finally:

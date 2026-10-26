@@ -151,8 +151,11 @@ class RuntimeOwnershipContracts(unittest.TestCase):
                 'ADTR_TEST_DATABASE_URL': 'postgres://postgres:synthetic@127.0.0.1:1234/adtr_test?sslmode=disable'}
 
     def exercise(self, bad_analyze=False, close_failure=False, migrate_failure=False,
-                 leftover=0, constructor_failure=False):
+                 leftover=0, constructor_failure=False, preparation=None, visible=2):
         clients = [Mock(), Mock()]
+        for client in clients:
+            client.open_transaction.return_value = preparation if preparation is not None else {
+                'appMatches': True, 'transactionReadOnly': True, 'activityRows': 0}
         if close_failure:
             clients[0].close.side_effect = RuntimeError('private-cleanup-error')
         calls = []
@@ -176,7 +179,7 @@ class RuntimeOwnershipContracts(unittest.TestCase):
         with patch.object(runtime.subprocess, 'run', side_effect=run), \
                 patch.object(runtime, 'OwnedSession', side_effect=constructed), \
                 patch.object(runtime, 'observer_read', side_effect=read), \
-                patch.object(runtime, 'session_count', return_value=2), \
+                patch.object(runtime, 'session_count', return_value=visible), \
                 patch.object(runtime, 'other_database_backends', return_value=leftover):
             result = runtime.run_experiment('adtr-auth-e2e-123456abcdef', self.environment())
         return result, clients, calls
@@ -187,6 +190,9 @@ class RuntimeOwnershipContracts(unittest.TestCase):
         self.assertIsNone(result['firstFailureStage'])
         self.assertEqual(result['cleanup'], {'clientsClosed': True, 'zeroOtherDatabaseBackends': True})
         self.assertEqual(len(result['plans']), 2)
+        self.assertEqual(result['ownedPreparation'], [
+            {'appMatches': True, 'transactionReadOnly': True, 'activityRows': 0}] * 2)
+        self.assertEqual(result['ownedSessionCounts'], {'beforePlan': 2, 'afterPlan': 2})
         self.assertEqual(calls[0][0], ['git', 'rev-parse', 'HEAD'])
         self.assertEqual(calls[1][0], ['docker', 'exec', 'adtr-auth-e2e-123456abcdef',
                                      'createdb', '-U', 'postgres', 'adtr_observer_plan'])
@@ -242,12 +248,77 @@ class RuntimeOwnershipContracts(unittest.TestCase):
     def test_psql_is_bounded_readonly_and_has_no_connection_credentials(self):
         command = runtime.psql_command('adtr-auth-e2e-123456abcdef', runtime.APPLICATION)
         self.assertIn('-c statement_timeout=1000 -c idle_in_transaction_session_timeout=8000 '
-                      '-c default_transaction_read_only=on -c application_name=' + runtime.APPLICATION,
+                      '-c default_transaction_read_only=on',
                       command[4].removeprefix('PGOPTIONS='))
         self.assertIn(runtime.DATABASE, command)
         self.assertNotIn('postgres://', ' '.join(command))
         with self.assertRaises(runtime.PlanError):
             runtime.psql_command('external', runtime.APPLICATION)
+
+    def test_explicit_appname_beats_psql_startup_fallback_model(self):
+        # libpq's startup appname is PGAPPNAME when supplied, else psql's
+        # fallback. The server applies it after PGOPTIONS at equal priority.
+        # This is an offline constructor regression, not a real PG run.
+        for application in (runtime.APPLICATION, runtime.OBSERVER):
+            with self.subTest(application=application):
+                command = runtime.psql_command('adtr-auth-e2e-123456abcdef', application)
+                env = dict(command[index + 1].split('=', 1) for index, item in enumerate(command)
+                           if item == '-e')
+                self.assertEqual(env.get('PGAPPNAME', 'psql'), application)
+                self.assertNotIn('application_name=', env['PGOPTIONS'])
+
+    def test_preparation_projection_requires_exact_closed_types(self):
+        good = {'appMatches': True, 'transactionReadOnly': True, 'activityRows': 0}
+        self.assertEqual(runtime.preparation_checked(good), good)
+        bad = [False, 0, {**good, 'appMatches': 'actual-private-name'},
+               {**good, 'transactionReadOnly': 1}, {**good, 'activityRows': False},
+               {**good, 'activityRows': -1}, {**good, 'activityRows': 10**6 + 1},
+               {**good, 'pid': 123}, {'appMatches': True, 'activityRows': 0}]
+        for value in bad:
+            with self.subTest(value=type(value).__name__), self.assertRaises(runtime.PlanError):
+                runtime.preparation_checked(value)
+
+    def test_existing_roundtrip_checks_actual_transaction_and_identity_once(self):
+        session = runtime.OwnedSession.__new__(runtime.OwnedSession)
+        session.process = Mock()
+        session.lines = Mock()
+        proof = {'appMatches': True, 'transactionReadOnly': True, 'activityRows': 0}
+        session.lines.get.return_value = json.dumps(proof)
+        self.assertEqual(session.open_transaction(), proof)
+        session.process.stdin.write.assert_called_once()
+        sql = session.process.stdin.write.call_args.args[0]
+        self.assertTrue(sql.startswith('BEGIN; SELECT jsonb_build_object('))
+        self.assertEqual(sql.count(';'), 2)
+        self.assertIn("current_setting('application_name')='" + runtime.APPLICATION + "'", sql)
+        self.assertIn("current_setting('transaction_read_only')='on'", sql)
+        self.assertNotIn("current_setting('default_transaction_read_only')", sql)
+        self.assertIn('SELECT count(*) FROM adtr.system_worker_activity', sql)
+        session.lines.get.assert_called_once_with(timeout=3)
+        session.process.stdin.flush.assert_called_once()
+
+    def test_wrong_identity_readonly_or_nonempty_fixture_stops_before_explain(self):
+        for key, value in (('appMatches', False), ('transactionReadOnly', False), ('activityRows', 1)):
+            proof = {'appMatches': True, 'transactionReadOnly': True, 'activityRows': 0}
+            proof[key] = value
+            with self.subTest(key=key):
+                result, clients, _ = self.exercise(preparation=proof)
+                self.assertEqual(result['firstFailureStage'], 'owned_sessions')
+                self.assertEqual(result['ownedPreparation'], [proof])
+                self.assertEqual(result['ownedSessionCounts'], {'beforePlan': None, 'afterPlan': None})
+                self.assertEqual(result['planAttempts'], [])
+                self.assertEqual(result['plans'], [])
+                self.assertFalse(result['success'])
+                self.assertTrue(result['cleanup']['zeroOtherDatabaseBackends'])
+                clients[0].close.assert_called_once()
+                clients[1].open_transaction.assert_not_called()
+
+    def test_safe_zero_count_is_retained_without_relaxing_two_session_requirement(self):
+        result, _, _ = self.exercise(visible=0)
+        self.assertEqual(result['firstFailureStage'], 'owned_visibility')
+        self.assertEqual(result['ownedSessionCounts'], {'beforePlan': 0, 'afterPlan': None})
+        self.assertEqual(len(result['ownedPreparation']), 2)
+        self.assertFalse(result['success'])
+        self.assertEqual(result['planAttempts'], [])
 
     def test_normal_reap_never_sends_signal(self):
         process = Mock(returncode=0)
