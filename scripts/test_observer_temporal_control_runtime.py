@@ -574,8 +574,8 @@ def run_experiment(container, environ):
                f'LANGUAGE plpgsql VOLATILE PARALLEL UNSAFE AS $body${GATE_BODY}$body$; SELECT to_json(true)')
         need(control.query(ddl, work_deadline) is True)
         binding_sql = ("SELECT jsonb_build_object('database',current_database(),'databaseOID',"
-                       "(SELECT oid FROM pg_database WHERE datname=current_database()),'markerOID',"
-                       f"'{MARKER}'::regclass::oid,'markerName','{MARKER}'::regclass::text,"
+                       "(SELECT oid::bigint FROM pg_database WHERE datname=current_database()),'markerOID',"
+                       f"'{MARKER}'::regclass::oid::bigint,'markerName','{MARKER}'::regclass::text,"
                        "'searchPath',current_setting('search_path'))")
         binding = observer.query(binding_sql, work_deadline)
         need(type(binding) is dict and set(binding) == {'database', 'databaseOID', 'markerOID', 'markerName', 'searchPath'})

@@ -3,6 +3,7 @@ import ast
 import copy
 import json
 import io
+import inspect
 from pathlib import Path
 import subprocess
 import unittest
@@ -67,6 +68,26 @@ def state(markers=(0, 0), target=None):
         result.update({role + 'Marker': markers[index], role + 'Blocker': role == target,
                        role + 'BlockerCount': int(role == target), role + 'LockWait': role == target})
     return result
+
+
+def binding_from_sql(sql, binding):
+    # PG17 json_categorize_type maps native oid to OTHER/string, while explicit
+    # int8 is numeric. Interpret only these four exact reviewed query shapes;
+    # a cast on one field cannot mask a missing cast on the other field.
+    for database_cast in (False, True):
+        for marker_cast in (False, True):
+            expected = ("SELECT jsonb_build_object('database',current_database(),'databaseOID',"
+                        "(SELECT oid" + ('::bigint' if database_cast else '') +
+                        " FROM pg_database WHERE datname=current_database()),'markerOID'," +
+                        f"'{runtime.MARKER}'::regclass::oid" + ('::bigint' if marker_cast else '') +
+                        f",'markerName','{runtime.MARKER}'::regclass::text,"
+                        "'searchPath',current_setting('search_path'))")
+            if sql == expected:
+                result = dict(binding)
+                for key, cast in (('databaseOID', database_cast), ('markerOID', marker_cast)):
+                    result[key] = binding[key] if cast else str(binding[key])
+                return result
+    raise AssertionError('unreviewed synthetic binding query')
 
 
 class PureContracts(unittest.TestCase):
@@ -437,13 +458,13 @@ class ClientAndCleanupContracts(unittest.TestCase):
 class ExperimentLifecycleContracts(unittest.TestCase):
     def exercise(self, outcome='controlled_cross_time_combination_observed', setup_bad=False,
                  leftover_gate=0, constructor_bad=False, cleanup_bad=False, transition_bad=False,
-                 wrong_mapping=False, wrong_body=False):
+                 wrong_mapping=False, wrong_body=False, oid_values=(401, 301), binding_overrides=None):
         env = {'ADTR_RUN_OBSERVER_TEMPORAL_TESTS': '1', 'GITHUB_ACTIONS': 'true',
                'GITHUB_SHA': 'a' * 40, 'ADTR_EVENT_HEAD_SHA': 'b' * 40,
                'GITHUB_RUN_ID': '123', 'GITHUB_RUN_ATTEMPT': '1',
                'ADTR_TEST_DATABASE_URL': 'postgres://postgres:private@127.0.0.1:1234/adtr_test?sslmode=disable'}
         calls, sql_calls, clients, marker_roles = [], [], {}, set()
-        binding = {'database': runtime.DATABASE, 'databaseOID': 401, 'markerOID': 301,
+        binding = {'database': runtime.DATABASE, 'databaseOID': oid_values[0], 'markerOID': oid_values[1],
                    'markerName': 'other_schema.marker' if wrong_mapping else runtime.MARKER,
                    'searchPath': '"$user", public'}
 
@@ -464,7 +485,10 @@ class ExperimentLifecycleContracts(unittest.TestCase):
                         raise RuntimeError('private-setup')
                     return True
                 if "'markerName'" in sql:
-                    return binding
+                    projected = binding_from_sql(sql, binding)
+                    if binding_overrides is not None:
+                        projected.update(binding_overrides)
+                    return projected
                 if "'body',p.prosrc" in sql:
                     return {'body': 'private-wrong-body' if wrong_body else runtime.GATE_BODY,
                             'volatile': True, 'parallelUnsafe': True, 'invoker': True, 'plpgsql': True}
@@ -536,6 +560,84 @@ class ExperimentLifecycleContracts(unittest.TestCase):
         marker_indexes = [i for i, (_, sql, _) in enumerate(queries) if sql.startswith('BEGIN; SAVEPOINT')]
         self.assertTrue(all(i > ddl_index for i in marker_indexes))
         self.assertTrue(runtime.GATE_BODY.endswith('END;'))
+
+    def test_binding_numeric_oid_casts_cover_full_unsigned_oid_domain(self):
+        for value in (1, 2**31, 2**32 - 1):
+            with self.subTest(value=value):
+                result, _, queries, _, controlled = self.exercise(oid_values=(value, value))
+                self.assertTrue(result['success'])
+                self.assertIsNone(result['firstFailureStage'])
+                controlled.assert_called_once()
+                binding_queries = [sql for _, sql, _ in queries if "'markerName'" in sql]
+                self.assertEqual(len(binding_queries), 2)  # original binding and unchanged-map recheck
+                self.assertEqual(binding_queries[0], binding_queries[1])
+                self.assertIn('(SELECT oid::bigint FROM pg_database', binding_queries[0])
+                self.assertIn("'markerOID','observer_temporal.marker'::regclass::oid::bigint,", binding_queries[0])
+                self.assertNotIn('databaseOID', json.dumps(result))
+                self.assertNotIn('markerOID', json.dumps(result))
+
+    def test_each_missing_binding_cast_rejects_actual_setup_before_markers(self):
+        original = inspect.getsource(runtime.run_experiment)
+        changes = (('oid::bigint FROM pg_database', 'oid FROM pg_database'),
+                   ('::regclass::oid::bigint,', '::regclass::oid,'))
+        for indexes in ((0,), (1,), (0, 1)):
+            source = original
+            for index in indexes:
+                before, after = changes[index]
+                self.assertEqual(source.count(before), 1)
+                source = source.replace(before, after)
+            namespace = {}
+            exec(compile(source, '<exact-runtime-missing-binding-cast>', 'exec'), runtime.__dict__, namespace)
+            with self.subTest(missing=indexes), patch.object(runtime, 'run_experiment', namespace['run_experiment']):
+                result, _, queries, clients, controlled = self.exercise()
+            self.assertEqual(result['firstFailureStage'], 'fixture_setup')
+            self.assertEqual(result['firstFailureClass'], 'schema')
+            self.assertFalse(result['success'])
+            self.assertEqual(result['events'], [])
+            self.assertEqual(result['planAttempts'], [])
+            self.assertIsNone(result['gated'])
+            self.assertNotIn('fixtureBinding', result)
+            self.assertFalse(any(sql.startswith('BEGIN; SAVEPOINT') for _, sql, _ in queries))
+            self.assertFalse(any("'body',p.prosrc" in sql for _, sql, _ in queries))
+            controlled.assert_not_called()
+            self.assertEqual(result['cleanup'], {'clientsClosed': True, 'zeroOtherDatabaseBackends': True})
+            for client in clients.values():
+                client.close.assert_called_once()
+
+    def test_binding_oid_invalid_types_and_ranges_remain_rejected(self):
+        for field in ('databaseOID', 'markerOID'):
+            for invalid in (None, True, False, 0, -1, 2**32, 1.5, '401', {'private': 1}, [1]):
+                with self.subTest(field=field, kind=type(invalid).__name__):
+                    result, _, queries, _, controlled = self.exercise(binding_overrides={field: invalid})
+                    self.assertEqual(result['firstFailureStage'], 'fixture_setup')
+                    self.assertEqual(result['firstFailureClass'], 'schema')
+                    self.assertEqual(result['events'], [])
+                    self.assertEqual(result['planAttempts'], [])
+                    self.assertIsNone(result['gated'])
+                    self.assertFalse(any(sql.startswith('BEGIN; SAVEPOINT') for _, sql, _ in queries))
+                    controlled.assert_not_called()
+                    self.assertEqual(result['cleanup'], {'clientsClosed': True, 'zeroOtherDatabaseBackends': True})
+                    self.assertNotIn('private', json.dumps(result))
+
+    def test_binding_failure_remains_first_when_cleanup_is_unconfirmed(self):
+        result, _, _, _, controlled = self.exercise(binding_overrides={'markerOID': '301'}, cleanup_bad=True)
+        self.assertEqual(result['firstFailureStage'], 'fixture_setup')
+        self.assertEqual(result['firstFailureClass'], 'schema')
+        self.assertFalse(result['cleanup']['clientsClosed'])
+        self.assertTrue(result['cleanup']['zeroOtherDatabaseBackends'])
+        self.assertFalse(result['success'])
+        controlled.assert_not_called()
+
+    def test_binding_mock_does_not_guess_unknown_sql_from_one_cast_token(self):
+        _, _, queries, _, _ = self.exercise()
+        sql = next(sql for _, sql, _ in queries if "'markerName'" in sql)
+        binding = {'databaseOID': 401, 'markerOID': 301}
+        self.assertEqual(binding_from_sql(sql, binding), binding)
+        for changed in (sql.replace('pg_database', 'other_catalog'),
+                        sql.replace('oid::bigint FROM', 'oid::integer FROM'),
+                        sql + ' /* ::bigint */'):
+            with self.assertRaisesRegex(AssertionError, 'unreviewed synthetic binding query'):
+                binding_from_sql(changed, binding)
 
     def test_inconclusive_outcome_is_not_fixture_success(self):
         result, _, _, _, _ = self.exercise(outcome='inconclusive_later_read_not_established')
