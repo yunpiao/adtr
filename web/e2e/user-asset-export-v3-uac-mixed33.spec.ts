@@ -27,6 +27,8 @@ import {
   storedUACExport,
   storedUACSource,
   uacRequire,
+  uacFailureMessage,
+  type UACFailureStage,
   exportPrefix,
   type UACMode,
   type ExportDetail,
@@ -88,6 +90,7 @@ test("mixed33 real UAC lists and full exports bind wire, source, original receip
   context,
 }, info) => {
   test.setTimeout(900_000);
+  let stage: UACFailureStage = "configuration";
   try {
     const origin = new URL(process.env.ADTR_E2E_BASE_URL ?? "").origin;
     const nonce = process.env.ADTR_LDAP_FIXTURE_UAC_RUN_NONCE ?? "";
@@ -110,7 +113,9 @@ test("mixed33 real UAC lists and full exports bind wire, source, original receip
     );
     await page.setViewportSize({ width: 1440, height: 900 });
     await observeDirectoryV2Responses(context);
+    stage = "fixture";
     const fixture = await setupUACGroupFixture(page, context, "mixed-33-v1");
+    stage = "source_read";
     const source = await storedUACSource(fixture.taskUUID);
     safeValue(source, fixture.secrets);
     uacRequire(
@@ -121,6 +126,7 @@ test("mixed33 real UAC lists and full exports bind wire, source, original receip
         source.sha256 === hash(Buffer.from(source.bodyBase64, "base64")),
       "source_binding",
     );
+    stage = "wire_read";
     const wire = await boundedFile(
       path.join(
         process.env.ADTR_E2E_LDAP_UAC_EVIDENCE_DIR ?? "",
@@ -136,6 +142,7 @@ test("mixed33 real UAC lists and full exports bind wire, source, original receip
       "raw_transcript",
     );
     const observer = observeUACExportWrites(context, origin, fixture.secrets);
+    stage = "owner_switch";
     await switchToExportOwner(page, fixture.bootstrap);
     const actorId = (await readJSON(context, "/api/auth/me")).ID as number;
     uacRequire(
@@ -144,6 +151,7 @@ test("mixed33 real UAC lists and full exports bind wire, source, original receip
         actorId !== fixture.actorId,
       "source_binding",
     );
+    stage = "budget_before";
     const before: Budget = await sensitiveBudget(actorId, fixture.actorId);
     uacRequire(
       sameValue(before, {
@@ -155,6 +163,7 @@ test("mixed33 real UAC lists and full exports bind wire, source, original receip
       }),
       "post_count",
     );
+    stage = "initial_list";
     const initial = await openAssets(page, actorId);
     safeValue(initial, fixture.secrets);
     uacRequire(
@@ -164,6 +173,7 @@ test("mixed33 real UAC lists and full exports bind wire, source, original receip
         initial.page.total === 33,
       "source_binding",
     );
+    stage = "list_filters";
     await page.getByText("精确账户与创建时间筛选", { exact: true }).click();
     await page.getByLabel("创建时间排序", { exact: true }).selectOption("desc");
     await page.getByLabel("用户资产关键词", { exact: true }).fill("user-");
@@ -178,6 +188,7 @@ test("mixed33 real UAC lists and full exports bind wire, source, original receip
       pageIdx: number,
       action: () => Promise<unknown>,
     ) => {
+      stage = "list_read";
       const [response] = await Promise.all([
         page.waitForResponse(
           (r) =>
@@ -200,23 +211,36 @@ test("mixed33 real UAC lists and full exports bind wire, source, original receip
         pageSize: "10",
         ...(mode === "omitted" ? {} : { uacDisableBit: mode }),
       };
+      stage = "list_query";
       uacRequire(
         sameValue(
           [...queryEntries].sort(),
           Object.entries(expectedQuery).sort(),
-        ) &&
-          sameValue(
-            value.list,
-            oracle.queries[mode].pages[pageIdx - 1].public12Rows,
-          ) &&
-          sameValue(value.selection, source.selection) &&
-          value.observationId === source.taskUUID &&
-          sameValue(value.page, {
-            pageIdx,
-            pageSize: 10,
-            total: mode === "omitted" ? 33 : 11,
-            totalPage: mode === "omitted" ? 4 : 2,
-          }),
+        ),
+        "source_binding",
+      );
+      stage = "list_rows";
+      uacRequire(
+        sameValue(
+          value.list,
+          oracle.queries[mode].pages[pageIdx - 1].public12Rows,
+        ),
+        "source_binding",
+      );
+      stage = "list_source";
+      uacRequire(
+        sameValue(value.selection, source.selection) &&
+          value.observationId === source.taskUUID,
+        "source_binding",
+      );
+      stage = "list_page";
+      uacRequire(
+        sameValue(value.page, {
+          pageIdx,
+          pageSize: 10,
+          total: mode === "omitted" ? 33 : 11,
+          totalPage: mode === "omitted" ? 4 : 2,
+        }),
         "source_binding",
       );
       listPages.push({ mode, pageIdx, queryEntries, response: value });
@@ -234,6 +258,7 @@ test("mixed33 real UAC lists and full exports bind wire, source, original receip
     const cases = [],
       afterEach: Budget[] = [];
     for (const mode of ["set", "clear", "not_returned"] as const) {
+      stage = "list_filters";
       await page
         .getByLabel("本次观测的禁用位", { exact: true })
         .selectOption(mode);
@@ -245,6 +270,7 @@ test("mixed33 real UAC lists and full exports bind wire, source, original receip
           .getByRole("button", { name: "用户资产下一页", exact: true })
           .click(),
       );
+      stage = "export_prepare";
       const expected = expectedUACRequest(source, mode);
       observer.armCase(mode, expected, actorId, page);
       const panel = page.getByRole("region", {
@@ -281,6 +307,7 @@ test("mixed33 real UAC lists and full exports bind wire, source, original receip
           expected.screenColumns.join(" → "),
         "post_binding",
       );
+      stage = "export_submit";
       await proof(
         page,
         fixture.bootstrap.password,
@@ -308,10 +335,13 @@ test("mixed33 real UAC lists and full exports bind wire, source, original receip
           sameValue(created.request, expected),
         "post_binding",
       );
+      stage = "export_settle";
       await observer.settleCase(created.taskID);
+      stage = "export_ready";
       await expect(
         panel.getByRole("button", { name: "下载用户 XLSX", exact: true }),
       ).toBeVisible({ timeout: 30_000 });
+      stage = "export_database";
       const database = await storedUACExport(created.taskID);
       safeValue(database, fixture.secrets);
       uacRequire(
@@ -319,6 +349,7 @@ test("mixed33 real UAC lists and full exports bind wire, source, original receip
           /^[0-9a-f]{64}$/u.test(database.idempotencyKeySHA256),
         "task_binding",
       );
+      stage = "original_receipt";
       const receipt = await readUACOriginalReceipt(
         page,
         origin,
@@ -328,6 +359,7 @@ test("mixed33 real UAC lists and full exports bind wire, source, original receip
         fixture.secrets,
       );
       uacRequire(receipt.taskID === created.taskID, "task_binding");
+      stage = "export_download";
       const [download, downloadResponse, detailResponse] = await Promise.all([
         page.waitForEvent("download"),
         page.waitForResponse(
@@ -370,6 +402,7 @@ test("mixed33 real UAC lists and full exports bind wire, source, original receip
         Object.fromEntries(
           downloadHeaderNames.map((name) => [name, response.headers()[name]]),
         );
+      stage = "original_task";
       const originalTab = await context.newPage();
       let originalTaskReadback;
       try {
@@ -427,6 +460,7 @@ test("mixed33 real UAC lists and full exports bind wire, source, original receip
           name: "原导出只读详情",
           exact: true,
         });
+        stage = "original_download";
         const [originalDownload, originalDownloadResponse] = await Promise.all([
           originalTab.waitForEvent("download"),
           originalTab.waitForResponse(
@@ -458,6 +492,7 @@ test("mixed33 real UAC lists and full exports bind wire, source, original receip
         } finally {
           await unlink(temporaryDownload).catch(() => undefined);
         }
+        stage = "screenshot";
         await captureUACReadOnlyScreenshot(
           originalTab,
           page,
@@ -473,6 +508,7 @@ test("mixed33 real UAC lists and full exports bind wire, source, original receip
       } finally {
         await originalTab.close();
       }
+      stage = "case_evidence";
       const screenshot = `${mode}-ready.png`;
       cases.push({
         name: mode,
@@ -494,6 +530,7 @@ test("mixed33 real UAC lists and full exports bind wire, source, original receip
         listQueryEntries: second.queryEntries,
         originalTaskReadback,
       });
+      stage = "case_budget";
       const budget = await sensitiveBudget(actorId, fixture.actorId);
       uacRequire(
         sameValue(budget, {
@@ -504,6 +541,7 @@ test("mixed33 real UAC lists and full exports bind wire, source, original receip
         "post_count",
       );
       afterEach.push(budget);
+      stage = "case_dismiss";
       if (mode === "not_returned") {
         await panel
           .getByRole("button", { name: "放弃原回执恢复", exact: true })
@@ -516,13 +554,16 @@ test("mixed33 real UAC lists and full exports bind wire, source, original receip
         .getByRole("button", { name: "关闭导出面板", exact: true })
         .click();
     }
+    stage = "budget_final";
     const after: Budget = await sensitiveBudget(actorId, fixture.actorId);
     uacRequire(
       sameValue(after, { ...before, owner: 10, exportTasks: 3 }),
       "post_count",
     );
+    stage = "observer_close";
     for (const tab of context.pages()) await tab.close();
     const postLedger = await observer.closeAndSnapshot(after);
+    stage = "candidate_write";
     const candidate = {
       format: 1,
       profile: "mixed-33-v1",
@@ -549,8 +590,8 @@ test("mixed33 real UAC lists and full exports bind wire, source, original receip
       serialized,
       { flag: "wx", mode: 0o600 },
     );
-  } catch {
-    throw new Error("uac_evidence_invalid:candidate_schema");
+  } catch (error) {
+    throw new Error(uacFailureMessage(error, stage));
   } finally {
     // Keep the all-context observer attached through every page close on failure.
     for (const tab of context.pages()) await tab.close().catch(() => undefined);

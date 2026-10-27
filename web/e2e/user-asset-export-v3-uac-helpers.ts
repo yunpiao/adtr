@@ -133,6 +133,80 @@ const bodyKeys = [
   "actorPassword",
   "totpCode",
 ].sort();
+// Only these literals may reach the failure reporter. Never reuse the caught
+// error, its stack/cause, or even a getter-backed message in the public error.
+export const uacFailureStages = [
+  "configuration",
+  "fixture",
+  "source_read",
+  "wire_read",
+  "owner_switch",
+  "budget_before",
+  "initial_list",
+  "list_filters",
+  "list_read",
+  "list_query",
+  "list_rows",
+  "list_source",
+  "list_page",
+  "export_prepare",
+  "export_submit",
+  "export_settle",
+  "export_ready",
+  "export_database",
+  "original_receipt",
+  "export_download",
+  "original_task",
+  "original_download",
+  "screenshot",
+  "case_evidence",
+  "case_budget",
+  "case_dismiss",
+  "budget_final",
+  "observer_close",
+  "candidate_write",
+  "unexpected",
+] as const;
+export type UACFailureStage = (typeof uacFailureStages)[number];
+const uacFailureCodes = [
+  "configuration",
+  "provenance",
+  "candidate_discovery",
+  "candidate_schema",
+  "source_binding",
+  "task_binding",
+  "raw_transcript",
+  "terminal_seal",
+  "post_parse",
+  "post_binding",
+  "post_count",
+  "artifact_binding",
+  "cleanup",
+  "publication",
+] as const;
+export function uacFailureMessage(
+  error: unknown,
+  stage: UACFailureStage,
+): string {
+  let code: string = "unexpected";
+  try {
+    // Read only an own data property; do not invoke an unknown message getter.
+    const message =
+      error instanceof Error
+        ? Object.getOwnPropertyDescriptor(error, "message")?.value
+        : undefined;
+    code =
+      uacFailureCodes.find(
+        (value) => message === `uac_evidence_invalid:${value}`,
+      ) ?? "unexpected";
+  } catch {
+    /* Uninspectable errors are still closed unexpected failures. */
+  }
+  const safeStage =
+    uacFailureStages.find((value) => value === stage) ?? "unexpected";
+  return `uac_evidence_invalid:${code};stage=${safeStage}`;
+}
+
 export function uacRequire(
   condition: unknown,
   code = "post_binding",

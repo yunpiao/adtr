@@ -451,20 +451,38 @@ class PublicationTests(unittest.TestCase):
 
 class BrowserHelperOfflineTests(unittest.TestCase):
     def test_post_parser_and_observer_async_privacy_contract(self):
-        # Transpile the actual TS helper and parser; fake Playwright objects are
-        # explicitly unit inputs, never evidence of browser or HTTP execution.
-        script = r'''const fs = require("node:fs"), path = require("node:path"), crypto = require("node:crypto");
+        # Node 24 (the pinned CI toolchain) executes the actual TS sources before
+        # npm ci. Only the existing offline dependency seams are stubbed; fake
+        # Playwright objects never establish browser or HTTP acceptance evidence.
+        script = r'''const path = require("node:path"), crypto = require("node:crypto");
 const { EventEmitter } = require("node:events");
-const root = process.argv[1], ts = require(path.join(root, "web/node_modules/typescript"));
+const { registerHooks, isBuiltin } = require("node:module");
+const { pathToFileURL } = require("node:url");
+const root = process.argv[1];
 const hash = (v) => crypto.createHash("sha256").update(v).digest("hex");
-function compile(name, imports) {
-  const code = ts.transpileModule(fs.readFileSync(path.join(root, name), "utf8"), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText;
-  const module = { exports: {} };
-  new Function("require", "module", "exports", code)((id) => imports[id] ?? require(id), module, module.exports);
-  return module.exports;
-}
-const parser = compile("web/src/directory-v4-controls-json.ts", { "./api": { ApiError: class extends Error { constructor() { super("invalid_response"); } } } });
-const h = compile("web/e2e/user-asset-export-v3-uac-helpers.ts", { "../src/directory-v4-controls-json": parser, "./user-asset-export-v3-helpers": { hash } });
+const local = (name) => pathToFileURL(path.join(root, name)).href;
+const stub = (source) => "data:text/javascript," + encodeURIComponent(source);
+const parserURL = local("web/src/directory-v4-controls-json.ts");
+const helperURL = local("web/e2e/user-asset-export-v3-uac-helpers.ts");
+const fixtureURL = local("web/e2e/group-assets-v3-fixture.ts");
+const unused = stub('const fail = () => { throw new Error("unexpected_offline_dependency"); }; export { fail as navigateTo, fail as test, fail as expect, fail as directoryV2ResponseJSON };');
+const imports = new Map([
+  [parserURL, { "./api": stub('export class ApiError extends Error { constructor() { super("invalid_response"); } }') }],
+  [helperURL, { "../src/directory-v4-controls-json": parserURL,
+    "./user-asset-export-v3-helpers": stub('import { createHash } from "node:crypto"; export const hash = (v) => createHash("sha256").update(v).digest("hex");') }],
+  [fixtureURL, { "./navigation": unused, "@playwright/test": unused, "./directory-v2-response-observer": unused }],
+]);
+const hooks = registerHooks({ resolve(specifier, context, nextResolve) {
+  const dependencies = imports.get(context.parentURL);
+  if (dependencies && Object.hasOwn(dependencies, specifier)) return { url: dependencies[specifier], shortCircuit: true };
+  if (dependencies && !isBuiltin(specifier)) throw new Error("unexpected_offline_dependency");
+  return nextResolve(specifier, context);
+} });
+let h, fixture;
+try {
+  h = require(path.join(root, "web/e2e/user-asset-export-v3-uac-helpers.ts"));
+  fixture = require(path.join(root, "web/e2e/group-assets-v3-fixture.ts"));
+} finally { hooks.deregister(); }
 const check = (v) => { if (!v) throw new Error("unit_assertion"); };
 const origin = "http://127.0.0.1:12345";
 const source = { taskUUID: "synthetic-observation", selection: { domainId: "synthetic-domain", revision: "2", credentialRevision: "1" } };
@@ -515,7 +533,6 @@ async function reject(input, reader=async () => storage, secrets=[]) {
  let oldRejected = false; try { h.safeValue({ previousCaseKey: key }, runSecrets); } catch { oldRejected = true; } check(oldRejected);
  storage = locator();
  // Exercise the actual proof generation helper, not merely a fake registration.
- const fixture = compile("web/e2e/group-assets-v3-fixture.ts", { "./navigation": {}, "@playwright/test": {}, "./directory-v2-response-observer": {} });
  const generatedSecrets = [], capturedCodes = [];
  const proofPage = { getByLabel: (name) => ({ fill: async (value) => {
    if (name === "未使用的认证器验证码") { check(generatedSecrets.includes(value)); capturedCodes.push(value); }
@@ -600,6 +617,156 @@ async function reject(input, reader=async () => storage, secrets=[]) {
         result = subprocess.run(['node', '-e', script, str(ROOT)], capture_output=True, text=True, timeout=30)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(result.stdout.strip(), 'offline_parser_observer_contract_pass')
+
+    def test_actual_spec_closed_failure_stages_and_secret_errors(self):
+        # Execute the actual spec and its safety primitives with closed offline
+        # browser/IO seams. The load hook only injects throws immediately after
+        # stage assignments; it does not replace the real outer catch/finally.
+        # This establishes diagnostics, never real browser/HTTP acceptance.
+        data, files, _ = specimen()
+        envelope = json.loads(files[v.RAW_NAME])
+        payload = dict(data=data, files={name: b64(raw) for name, raw in files.items()},
+                       oracle=b64((ROOT / 'scripts/fixtures/user_uac_v3_mixed33_oracle.json').read_bytes()),
+                       wire=envelope['candidateTranscriptBase64'], nonce=NONCE, codes=sorted(v.CODES))
+        script = r'''const fs = require('node:fs'), path = require('node:path'), crypto = require('node:crypto');
+const { registerHooks, isBuiltin } = require('node:module');
+const { pathToFileURL } = require('node:url');
+const root = process.argv[1], unit = JSON.parse(fs.readFileSync(0, 'utf8'));
+const local = (name) => pathToFileURL(path.join(root, name)).href;
+const stub = (s) => 'data:text/javascript,' + encodeURIComponent(s);
+const helperURL = local('web/e2e/user-asset-export-v3-uac-helpers.ts');
+const specURL = local('web/e2e/user-asset-export-v3-uac-mixed33.spec.ts');
+const parserURL = local('web/src/directory-v4-controls-json.ts');
+const check = (v) => { if (!v) throw new Error('unit_assertion'); };
+const hash = (v) => crypto.createHash('sha256').update(v).digest('hex');
+const bytes = Object.fromEntries(Object.entries(unit.files).map(([k,v]) => [k, Buffer.from(v,'base64')]));
+const origin = 'http://127.0.0.1:12345', exportPrefix = '/api/user-assets/v3/exports';
+const headers = ['x-adtr-user-id','cache-control','x-content-type-options','content-type','content-length','x-adtr-artifact-sha256','x-adtr-row-count','content-disposition'];
+process.env.ADTR_E2E_BASE_URL = origin;
+process.env.ADTR_LDAP_FIXTURE_UAC_RUN_NONCE = unit.nonce;
+process.env.ADTR_E2E_LDAP_UAC_EVIDENCE_DIR = '/unit-owned';
+let callback, target, injected, stages, tabs, mode, index, budgetCalls, writes, closed, waits;
+let mainPage;
+const fixture = { taskUUID: unit.data.source.taskUUID, actorId: 2, secrets: [], consoles: [], bootstrap: {} };
+function file(name) {
+ const key = path.basename(name).replace(/^task-result-/, '');
+ if (key === 'user_uac_v3_mixed33_oracle.json') return Buffer.from(unit.oracle, 'base64');
+ if (key === 'user-asset-export-v3-uac-provenance.json') return Buffer.from(JSON.stringify(unit.data.provenance));
+ if (key === 'candidate-wire.json') return Buffer.from(unit.wire,'base64');
+ check(Object.hasOwn(bytes,key)); return bytes[key];
+}
+const stat = (name) => ({ isSymbolicLink: () => false, isFile: () => true, size: file(name).length, ino: 1, dev: 1 });
+const fsMock = {
+ lstat: async (name) => ({ isSymbolicLink: () => false, isFile: () => true, get size() { return file(name).length; }, ino: 1, dev: 1 }),
+ open: async (name) => { let at = 0; return { stat: async () => stat(name), close: async () => {}, read: async (out, off, len) => {
+   const b = file(name), n = Math.min(len, b.length-at); b.copy(out, off, at, at+n); at += n; return { bytesRead: n };
+ } }; },
+ readFile: async (name) => file(name), writeFile: async () => { writes++; }, unlink: async () => {},
+};
+const currentCase = () => unit.data.cases.find(c => c.name === mode);
+function response(pathname, value, extra={}) {
+ return { url: () => origin + pathname, request: () => ({ method: () => pathname === exportPrefix ? 'POST' : 'GET' }),
+ status: () => 200, headers: () => ({ 'x-adtr-user-id':'1','cache-control':'no-store',...extra }),
+ body: async () => Buffer.from(JSON.stringify(value)), json: async () => value };
+}
+function emit(page, value) {
+ for (const item of [...waits]) if (item.page === page && item.kind === 'response' && item.predicate(value)) {
+  waits.splice(waits.indexOf(item),1); item.resolve(value);
+ }
+}
+function emitDownload(page) {
+ const c = currentCase();
+ for (const item of [...waits]) if(item.page === page && item.kind === 'download') {
+  waits.splice(waits.indexOf(item),1);item.resolve({ suggestedFilename: () => c.download.filename, saveAs: async () => {} });
+ }
+ emit(page,response(exportPrefix+'/download',{},c.download.headers));
+ emit(page,response(exportPrefix+'/detail',c.detail));
+}
+function locator(page, name) {
+ const click = async () => {
+  if(name === '搜索用户' || name === '用户资产下一页') {
+   index = name === '搜索用户' ? 1 : index+1;
+   const p=unit.data.listPages.find(p=>p.mode===mode && p.pageIdx===index);check(p);
+   emit(page,response('/api/user-assets/v3?'+new URLSearchParams(p.queryEntries),p.response));
+  } else if(name==='下载用户 XLSX' || name==='下载原用户 XLSX') emitDownload(page);
+  else if(name==='查看原导出结果') emit(page,response(exportPrefix+'/detail',currentCase().detail));
+ };
+ return { click, dblclick: async () => emit(page,response(exportPrefix,currentCase().create)),
+ fill: async () => {}, selectOption: async (value) => { if(name==='本次观测的禁用位') mode=value; },
+ uncheck: async () => {},check: async () => {}, innerText: async () => currentCase().request.screenColumns.join(' → '),
+ getByRole: (_,c) => locator(page,c.name),getByLabel: (n) => locator(page,n),isVisible: async () => true };
+}
+function pageObject(original=false) {
+ let isClosed=false;
+ const p={ setViewportSize: async()=>{}, getByText:(n)=>locator(p,n),getByLabel:(n)=>locator(p,n),
+ getByRole:(_,c)=>locator(p,c.name),locator:(n)=>locator(p,n),keyboard:{press:async()=>{}},
+ waitForResponse:(predicate)=>new Promise(resolve=>waits.push({page:p,kind:'response',predicate,resolve})),
+ waitForEvent:()=>new Promise(resolve=>waits.push({page:p,kind:'download',resolve})),
+ opener:async()=>null,goto:async()=>emit(p,response('/api/auth/me',{ID:1})),url:()=>origin+'/#tasks',evaluate:async()=>null,
+ close:async()=>{if(!isClosed){isClosed=true;closed++;tabs=tabs.filter(t=>t!==p);}},isClosed:()=>isClosed };
+ return p;
+}
+const context={ pages:()=>tabs,newPage:async()=>{const p=pageObject(true);tabs.push(p);return p;} };
+const expectMock=()=>({toBeEnabled:async()=>{},toBeVisible:async()=>{}});
+const testMock=(_,fn)=>{callback=fn;};testMock.use=()=>{};testMock.setTimeout=()=>{};
+globalThis.__uacMocks = {test:testMock,expect:expectMock,navigateTo:async()=>{}, setupUACGroupFixture:async()=>fixture,
+ proof:async()=>{},readJSON:async()=>({ID:1}),observeDirectoryV2Responses:async()=>{},downloadHeaderNames:headers,hash,
+ switchToExportOwner:async()=>{},openAssets:async()=>unit.data.listPages[0].response,
+ sensitiveBudget:async()=>{const at=budgetCalls++;return at===0?unit.data.sensitiveBudget.before:at<=3?unit.data.sensitiveBudget.afterEach[at-1]:unit.data.sensitiveBudget.after;},
+ captureUACReadOnlyScreenshot:async()=>{},storedUACSource:async()=>unit.data.source,storedUACExport:async()=>currentCase().database,
+ readUACOriginalReceipt:async()=>currentCase().receipt,
+ observeUACExportWrites:()=>({armCase:()=>{},settleCase:async()=>{},closeAndSnapshot:async()=>unit.data.postLedger}),...fsMock};
+const stubExports = (names) => stub(names.map(n=>`export const ${n}=globalThis.__uacMocks.${n};`).join('\n'));
+const helperStub = stub('export const '+['captureUACReadOnlyScreenshot','storedUACSource','storedUACExport','readUACOriginalReceipt','observeUACExportWrites'].map(n=>`${n}=globalThis.__uacMocks.${n}`).join(',')+';\n'+['expectedUACRequest','safeResponse','safeValue','sameValue','uacRequire','uacFailureMessage','exportPrefix'].map(n=>`export const ${n}=globalThis.__actualUAC.${n};`).join('\n'));
+const imports = new Map([
+ [helperURL,{'../src/directory-v4-controls-json':parserURL,'./user-asset-export-v3-helpers':stubExports(['hash'])}],
+ [parserURL,{'./api':stub('export class ApiError extends Error {}')}],
+ [specURL,{'@playwright/test':stubExports(['test','expect']),'node:fs/promises':stubExports(Object.keys(fsMock)),
+ './navigation':stubExports(['navigateTo']),'./group-assets-v3-fixture':stubExports(['setupUACGroupFixture','proof','readJSON']),
+ './directory-v2-response-observer':stubExports(['observeDirectoryV2Responses']),
+ './user-asset-export-v3-helpers':stubExports(['downloadHeaderNames','hash','switchToExportOwner','openAssets','sensitiveBudget']),
+ './user-asset-export-v3-uac-helpers':helperStub}],
+]);
+globalThis.__uacEnterStage=(value)=>{stages.push(value);if(value===target)throw injected;};
+const hooks=registerHooks({resolve(specifier,context,next){
+ const map=imports.get(context.parentURL);if(map&&Object.hasOwn(map,specifier))return{url:map[specifier],shortCircuit:true};
+ if(map&&!isBuiltin(specifier))throw new Error('unexpected_offline_dependency');return next(specifier,context);
+},load(url,context,next){const out=next(url,context);if(url!==specURL)return out;
+ let source=Buffer.from(out.source).toString();
+ source=source.replace(/(\bstage = "([a-z_]+)";)/g,'$1 globalThis.__uacEnterStage("$2");');
+ source=source.replace('  try {\n    const origin','  try {\n    globalThis.__uacEnterStage("configuration");\n    const origin');
+ return {...out,source};
+}});
+let h;try{h=require(path.join(root,'web/e2e/user-asset-export-v3-uac-helpers.ts'));globalThis.__actualUAC=h;require(path.join(root,'web/e2e/user-asset-export-v3-uac-mixed33.spec.ts'));}finally{hooks.deregister();}
+const secret='UNIT_SECRET_DO_NOT_REPORT_843921_01234567-89ab-4cde-8123-456789abcdef';
+async function run(at,error){target=at;injected=error;stages=[];mode='omitted';index=0;budgetCalls=0;writes=0;closed=0;waits=[];mainPage=pageObject();tabs=[mainPage];
+ let failure;try{await callback({page:mainPage,context},{outputPath:(n)=>'/unit-output/'+n});}catch(e){failure=e;}
+ return {failure,stages:[...stages],writes,closed};
+}
+(async()=>{
+ const success=await run(null,null);check(!success.failure&&success.writes===1&&success.closed===4);
+ const stageSet=[...new Set(success.stages)];check(stageSet.length===h.uacFailureStages.length-1);
+ for(const stage of stageSet)for(const error of [new Error(secret,{cause:new Error(secret)}),new Error('uac_evidence_invalid:post_count')]){
+  error.stack=secret;const result=await run(stage,error);
+  const code=error.message==='uac_evidence_invalid:post_count'?'post_count':'unexpected';
+  check(result.failure instanceof Error && result.failure.message===`uac_evidence_invalid:${code};stage=${stage}`);
+  check(result.writes===0 && result.closed>=1 && result.failure.cause===undefined && !result.failure.stack.includes(secret));
+ }
+ let getterCalls=0;const getterError=new Error();Object.defineProperty(getterError,'message',{get(){getterCalls++;throw new Error(secret);}});
+ for(const error of [new Error('uac_evidence_invalid:post_count:'+secret),new Error('uac_evidence_invalid:post_count\n'+secret),
+  {message:'uac_evidence_invalid:post_count'},secret,getterError,new Proxy(new Error(),{getOwnPropertyDescriptor(){throw new Error(secret);}})]){
+  check(h.uacFailureMessage(error,'initial_list')==='uac_evidence_invalid:unexpected;stage=initial_list');
+ }
+ check(getterCalls===0 && h.uacFailureMessage(new Error(secret),secret)==='uac_evidence_invalid:unexpected;stage=unexpected');
+ for(const code of unit.codes)check(h.uacFailureMessage(new Error('uac_evidence_invalid:'+code),'initial_list')===`uac_evidence_invalid:${code};stage=initial_list`);
+ console.log('offline_actual_spec_closed_diagnostic_pass stages='+stageSet.length+' injections='+stageSet.length*2);
+})().catch(()=>{console.error('offline_actual_spec_closed_diagnostic_failed');process.exitCode=1;});
+'''
+        result = subprocess.run(['node', '-e', script, str(ROOT)], input=json.dumps(payload),
+                                capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(result.stdout.strip(),
+                         'offline_actual_spec_closed_diagnostic_pass stages=29 injections=58')
 
     def test_browser_and_sql_safety_source_contract(self):
         helper = (ROOT / 'web/e2e/user-asset-export-v3-uac-helpers.ts').read_text()

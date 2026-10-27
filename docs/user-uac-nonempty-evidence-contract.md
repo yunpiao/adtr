@@ -90,4 +90,10 @@ finalizer验证所有原件及13键cleanup receipt，原子发布至唯一
 `set-ready.png`、`clear-ready.png`、`not_returned-ready.png`。没有第十个manifest。
 CLI仅有`capture --repo .`与`validate --repo . [--github-output]`；不提供可伪造success的finalize CLI。
 workflow复验同九件成功后，才输出一次`artifact_paths`九个排序精确路径并上传，禁止目录/glob兜底。
-所有失败只输出固定`uac_evidence_invalid:<code>`，不输出原异常内容。
+Python 校验/发布失败仍只输出固定 `uac_evidence_invalid:<code>`。
+浏览器最外层失败只输出 `uac_evidence_invalid:<code>;stage=<stage>`：stage 为源码固定阶段枚举，
+code 仅从完整匹配既有固定错误码的 Error 自有 message 数据属性映射；其他异常统一 unexpected。
+不转发原异常、message 后缀、stack、cause、DOM、URL、key 或 proof；getter 不执行。
+阶段表示最后进入的操作区间，不证明该区间已完成，也不将未知错误认定为 candidate schema 错误。
+这项诊断只为下次真实失败定位；删除会恢复不可定位的泛化失败，不影响验收判定。
+它不新增 artifact/schema/path/预算，不修改 validator、成功证据、重试或生产行为。
