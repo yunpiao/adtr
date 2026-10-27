@@ -1,10 +1,12 @@
 """C-only launcher lifecycle contracts; subprocesses are explicitly mocked."""
+import ast
 import hashlib
 import inspect
 import json
 import os
 from pathlib import Path
 import stat
+import traceback
 import subprocess
 import tempfile
 import unittest
@@ -156,13 +158,17 @@ class UACLDAPFixtureContract(unittest.TestCase):
                     original_cleanup()
                     if failure in ("directory", "uac_directory"):
                         raise RuntimeError("PRIVATE FAILURE DO NOT OUTPUT")
+                expected_stage = {"stop": "ldap_stop", "inspect": "ldap_inspect", "exit": "ldap_exit", "read": "ldap_evidence_json", "container": "ldap_container_remove", "network": "ldap_network_remove", "directory": "ldap_private_remove", "uac_directory": "ldap_private_remove"}[failure]
                 with patch.object(target, "cleanup", side_effect=cleanup_then_fail):
-                    with self.assertRaisesRegex(RuntimeError, "^uac_evidence_invalid:cleanup$"):
+                    with self.assertRaisesRegex(RuntimeError, "^uac_evidence_invalid:cleanup$") as first:
                         fixture.close()
+                self.assertEqual(module.uac_ldap_failure_stage(first.exception), expected_stage)
                 self.assertIsNone(fixture.retained_uac_evidence)
                 calls = len(run.call_args_list)
-                with self.assertRaisesRegex(RuntimeError, "^uac_evidence_invalid:cleanup$"):
+                with self.assertRaisesRegex(RuntimeError, "^uac_evidence_invalid:cleanup$") as repeated:
                     fixture.close()
+                self.assertIsNot(first.exception, repeated.exception)
+                self.assertEqual(module.uac_ldap_failure_stage(repeated.exception), expected_stage)
                 self.assertEqual(calls, len(run.call_args_list))
                 self.assertTrue(all(not path.exists() for path in directories))
                 commands = [call.args[0] for call in run.call_args_list]
@@ -191,9 +197,12 @@ class UACLDAPFixtureContract(unittest.TestCase):
                     key, changed = {"boolean": ("entryCount", True), "nonce": ("nonce", "f" * 32), "hash": ("candidateTranscriptSHA256", "0" * 64), "unknown": ("extra", 1), "inflight": ("inflightWrites", 1), "sequence": ("finalSequence", 122), "poison": ("poisoned", True)}[mutation]
                     value[key] = changed
                     path.write_text(json.dumps(value))
+                entered = []
                 try:
                     with self.assertRaises((ValueError, OSError)):
-                        fixture._read_uac_evidence()
+                        fixture._read_uac_evidence(_entered=entered.append)
+                    expected_stage = {"duplicate": "ldap_evidence_json", "boolean": "ldap_evidence_counts", "nonce": "ldap_evidence_schema", "hash": "ldap_evidence_binding", "unknown": "ldap_evidence_schema", "inflight": "ldap_evidence_counts", "sequence": "ldap_evidence_sequence", "poison": "ldap_evidence_state"}.get(mutation, "ldap_evidence_file")
+                    self.assertEqual(entered[-1], expected_stage)
                 finally:
                     fixture.directory.cleanup()
                     fixture.uac_evidence_directory.cleanup()
@@ -218,6 +227,176 @@ class UACLDAPFixtureContract(unittest.TestCase):
                 self.assertIsNone(fixture.retained_uac_evidence)
                 self.assertFalse(Path(fixture.directory.name).exists())
                 self.assertFalse(Path(fixture.uac_evidence_directory.name).exists())
+
+    def test_owned_stage_accessor_rejects_forgery_and_hostile_types_without_hooks(self):
+        def forbidden(*args, **kwargs):
+            raise AssertionError("diagnostic inspected a hostile value")
+        class HostileMeta(type):
+            __eq__ = forbidden
+            __hash__ = forbidden
+        class HostileError(RuntimeError, metaclass=HostileMeta):
+            __str__ = forbidden
+            __repr__ = forbidden
+            __getattribute__ = forbidden
+            args = property(forbidden)
+        class HostileString(str):
+            __hash__ = forbidden
+            __eq__ = forbidden
+        class HostileDict(dict):
+            get = forbidden
+            __getitem__ = forbidden
+        for error in (HostileError(), ValueError("uac_evidence_invalid:cleanup"), object(), None):
+            self.assertIsNone(module.uac_ldap_failure_stage(error))
+        for args in (("uac_evidence_invalid:cleanup\nPRIVATE",), ("uac_evidence_invalid:cleanup", "PRIVATE"), (HostileString("uac_evidence_invalid:cleanup"),), (), (object(),)):
+            error = module._uac_ldap_error("ldap_stop")
+            error.args = args
+            self.assertIsNone(module.uac_ldap_failure_stage(error))
+        forged = RuntimeError("uac_evidence_invalid:cleanup")
+        forged._uac_ldap_tag = (object(), "ldap_stop")
+        self.assertIsNone(module.uac_ldap_failure_stage(forged))
+        for tag in (None, [], (object(),), (module._UAC_LDAP_MARKER, "ldap_stop\nPRIVATE"), (module._UAC_LDAP_MARKER, HostileString("ldap_stop"))):
+            forged._uac_ldap_tag = tag
+            self.assertIsNone(module.uac_ldap_failure_stage(forged))
+        forged.__dict__ = HostileDict(_uac_ldap_tag=(module._UAC_LDAP_MARKER, "ldap_stop"))
+        self.assertIsNone(module.uac_ldap_failure_stage(forged))
+        class CollidingKey:
+            def __hash__(self):
+                return hash("_uac_ldap_tag")
+            __eq__ = forbidden
+        forged.__dict__ = {CollidingKey(): None}
+        self.assertIsNone(module.uac_ldap_failure_stage(forged))
+        for stage in module._UAC_LDAP_STAGES:
+            first, second = module._uac_ldap_error(stage), module._uac_ldap_error(stage)
+            self.assertIsNot(first, second)
+            self.assertIs(type(first), RuntimeError)
+            self.assertEqual(first.args, ("uac_evidence_invalid:cleanup",))
+            self.assertEqual(module.uac_ldap_failure_stage(first), stage)
+        for stage in (HostileString("ldap_stop"), object(), "ldap_stop\nPRIVATE"):
+            self.assertIsNone(module.uac_ldap_failure_stage(module._uac_ldap_error(stage)))
+
+    def test_actual_reader_each_entered_stage_keeps_baseexception_policy_and_cleanup(self):
+        reader_stages = ("ldap_evidence_open", "ldap_evidence_file", "ldap_evidence_read", "ldap_evidence_json", "ldap_evidence_schema", "ldap_evidence_binding", "ldap_evidence_counts", "ldap_evidence_state", "ldap_evidence_sequence")
+        class HostileInterrupt(BaseException):
+            def __str__(self):
+                raise AssertionError("raw exception formatted")
+            __repr__ = __str__
+        for stage in reader_stages:
+            with self.subTest(stage=stage), patch.object(module.subprocess, "run") as run, patch.object(module.subprocess, "check_output", side_effect=output):
+                fixture = module.LDAPFixture(**BASE)
+                fixture.start({"ADTR_LDAP_FIXTURE_UAC_RUN_NONCE": NONCE})
+                write_receipts(fixture)
+                paths = (Path(fixture.directory.name), Path(fixture.uac_evidence_directory.name))
+                original = fixture._read_uac_evidence
+                visited = []
+                def read_with_fault(*, _entered):
+                    def enter(value):
+                        visited.append(value)
+                        _entered(value)
+                        if value == stage:
+                            raise HostileInterrupt("PRIVATE BYTES")
+                    return original(_entered=enter)
+                with patch.object(fixture, "_read_uac_evidence", side_effect=read_with_fault):
+                    with self.assertRaisesRegex(RuntimeError, "^uac_evidence_invalid:cleanup$") as failed:
+                        fixture.close()
+                self.assertEqual(visited[-1], stage)
+                self.assertEqual(module.uac_ldap_failure_stage(failed.exception), stage)
+                self.assertIsNone(fixture.retained_uac_evidence)
+                self.assertTrue(all(not path.exists() for path in paths))
+                commands = [call.args[0] for call in run.call_args_list]
+                self.assertIn(["docker", "rm", "--force", fixture.name], commands)
+                self.assertIn(["docker", "network", "rm", fixture.network], commands)
+                # from None suppresses displayed chaining, not physical context.
+                self.assertTrue(failed.exception.__suppress_context__)
+                rendered = "".join(traceback.format_exception(failed.exception))
+                self.assertNotIn("PRIVATE BYTES", rendered)
+
+    def test_first_failure_sticky_after_every_later_removal_and_repeated_close(self):
+        for failure in ("stop", "inspect", "exit", "retained", "container", "network", "private"):
+            with self.subTest(failure=failure), patch.object(module.subprocess, "run") as run, patch.object(module.subprocess, "check_output", side_effect=output) as inspect_exit:
+                fixture = module.LDAPFixture(**BASE)
+                fixture.start({"ADTR_LDAP_FIXTURE_UAC_RUN_NONCE": NONCE})
+                write_receipts(fixture)
+                order = []
+                def fail_command(command, **kwargs):
+                    name = "stop" if command[1] == "stop" else "container" if command[1] == "rm" else "network"
+                    order.append(name)
+                    if name == failure or name in ("container", "network") and failure not in ("private", "network") or name == "network" and failure != "private":
+                        raise KeyboardInterrupt("PRIVATE command")
+                run.side_effect = fail_command
+                if failure == "inspect":
+                    inspect_exit.side_effect = SystemExit("PRIVATE inspect")
+                elif failure == "exit":
+                    inspect_exit.side_effect = lambda *args, **kwargs: "137"
+                original_read = fixture._read_uac_evidence
+                def read(*, _entered):
+                    if failure == "retained":
+                        raise GeneratorExit("PRIVATE reader")
+                    return original_read(_entered=_entered)
+                def remove_then_fail(directory, name):
+                    original_cleanup = directory.cleanup
+                    def remove():
+                        order.append(name)
+                        original_cleanup()
+                        raise SystemExit("PRIVATE removal")
+                    return remove
+                with patch.object(fixture, "_read_uac_evidence", side_effect=read), patch.object(fixture.directory, "cleanup", side_effect=remove_then_fail(fixture.directory, "directory")), patch.object(fixture.uac_evidence_directory, "cleanup", side_effect=remove_then_fail(fixture.uac_evidence_directory, "evidence")):
+                    with self.assertRaises(RuntimeError) as failed:
+                        fixture.close()
+                expected = {"retained": "ldap_retained_read", "container": "ldap_container_remove", "network": "ldap_network_remove", "private": "ldap_private_remove"}.get(failure, "ldap_" + failure)
+                self.assertEqual(module.uac_ldap_failure_stage(failed.exception), expected)
+                self.assertEqual(order, ["stop", "container", "network", "directory", "evidence"])
+                self.assertIsNone(fixture.retained_uac_evidence)
+                with self.assertRaises(RuntimeError) as repeated:
+                    fixture.close()
+                self.assertIsNot(failed.exception, repeated.exception)
+                self.assertEqual(module.uac_ldap_failure_stage(repeated.exception), expected)
+                self.assertEqual(order, ["stop", "container", "network", "directory", "evidence"])
+
+    def test_actual_reader_default_exception_and_success_identity_unchanged(self):
+        fixture = module.LDAPFixture(**BASE)
+        fixture._uac_nonce = NONCE
+        fixture.uac_evidence_directory = tempfile.TemporaryDirectory(prefix="adtr-uac-test-")
+        try:
+            expected = write_receipts(fixture)
+            entered = []
+            self.assertEqual(fixture._read_uac_evidence(), expected)
+            self.assertEqual(fixture._read_uac_evidence(_entered=entered.append), expected)
+            self.assertEqual(entered, ["ldap_evidence_open", "ldap_evidence_file", "ldap_evidence_read", "ldap_evidence_file", "ldap_evidence_read", "ldap_evidence_json", "ldap_evidence_schema", "ldap_evidence_binding", "ldap_evidence_counts", "ldap_evidence_state", "ldap_evidence_sequence"])
+            for error in (OSError("PRIVATE path"), KeyboardInterrupt("PRIVATE interrupt")):
+                with patch.object(module.os, "open", side_effect=error):
+                    with self.assertRaises(type(error)) as caught:
+                        fixture._read_uac_evidence()
+                    self.assertIs(caught.exception, error)
+        finally:
+            fixture.directory.cleanup()
+            fixture.uac_evidence_directory.cleanup()
+
+    def test_all_other_fixture_methods_are_byte_bound_to_published_tree242(self):
+        # Frozen published a062/tree242: all original methods outside the two
+        # C-only read/close implementations, including non-C close, stay exact.
+        source = inspect.getsource(module.LDAPFixture)
+        node = ast.parse(source).body[0]
+        lines = source.splitlines(keepends=True)
+        unchanged = []
+        for method in node.body:
+            if isinstance(method, (ast.FunctionDef, ast.AsyncFunctionDef)) and method.name not in ("_read_uac_evidence", "_close_uac"):
+                start = min([method.lineno] + [item.lineno for item in method.decorator_list])
+                unchanged.extend(lines[start - 1:method.end_lineno])
+        self.assertEqual(hashlib.sha256("".join(unchanged).encode()).hexdigest(), "0889b1d33c2f7162cd4c96443b4a1a5ca836a2399018e6af26d611faff69b80c")
+        self.assertEqual(module._UAC_LDAP_STAGES, frozenset({"ldap_stop", "ldap_inspect", "ldap_exit", "ldap_retained_read", "ldap_container_remove", "ldap_network_remove", "ldap_private_remove", "ldap_evidence_open", "ldap_evidence_file", "ldap_evidence_read", "ldap_evidence_json", "ldap_evidence_schema", "ldap_evidence_binding", "ldap_evidence_counts", "ldap_evidence_state", "ldap_evidence_sequence"}))
+
+    def test_suppressed_chain_is_not_claimed_to_erase_physical_context(self):
+        try:
+            try:
+                raise ValueError("PRIVATE original context")
+            except ValueError:
+                raise module._uac_ldap_error("ldap_stop") from None
+        except RuntimeError as error:
+            self.assertIs(type(error.__context__), ValueError)
+            self.assertTrue(error.__suppress_context__)
+            self.assertIsNone(error.__cause__)
+            self.assertEqual(module.uac_ldap_failure_stage(error), "ldap_stop")
+            self.assertNotIn("PRIVATE original context", "".join(traceback.format_exception(error)))
 
     def test_go_source_join_and_preclear_invariants(self):
         root = Path(__file__).resolve().parents[1]

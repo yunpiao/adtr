@@ -17,6 +17,46 @@ from ci_postgres_image import postgres_image_args
 from test_integration import IMAGE
 
 
+_UAC_LDAP_MARKER = object()
+_UAC_LDAP_STAGES = frozenset({
+    "ldap_stop", "ldap_inspect", "ldap_exit", "ldap_retained_read",
+    "ldap_container_remove", "ldap_network_remove", "ldap_private_remove",
+    "ldap_evidence_open", "ldap_evidence_file", "ldap_evidence_read",
+    "ldap_evidence_json", "ldap_evidence_schema", "ldap_evidence_binding",
+    "ldap_evidence_counts", "ldap_evidence_state", "ldap_evidence_sequence",
+})
+
+
+def _uac_ldap_error(stage):
+    # Fresh fixed args and owned fixed metadata only; never retain an input error.
+    error = RuntimeError("uac_evidence_invalid:cleanup")
+    if type(stage) is str and stage in _UAC_LDAP_STAGES:
+        error._uac_ldap_tag = (_UAC_LDAP_MARKER, stage)
+    return error
+
+
+def uac_ldap_failure_stage(error: BaseException) -> str | None:
+    # Exact types and builtin descriptors avoid hostile getters/str/repr/args.
+    if type(error) is not RuntimeError:
+        return None
+    args = BaseException.args.__get__(error)
+    if type(args) is not tuple or len(args) != 1 or type(args[0]) is not str or args[0] != "uac_evidence_invalid:cleanup":
+        return None
+    metadata = BaseException.__dict__["__dict__"].__get__(error)
+    if type(metadata) is not dict:
+        return None
+    # A colliding non-string dictionary key must not run its equality hook.
+    tag = None
+    for key, value in dict.items(metadata):
+        if type(key) is str and key == "_uac_ldap_tag":
+            tag = value
+            break
+    if type(tag) is not tuple or len(tag) != 2 or tag[0] is not _UAC_LDAP_MARKER:
+        return None
+    stage = tag[1]
+    return stage if type(stage) is str and stage in _UAC_LDAP_STAGES else None
+
+
 class LDAPFixture:
     def __init__(self, control_enabled=False, directory_enabled=False,
                  directory_empty=False, directory_slow=False, *, directory_v2=False, user_assets_v2=False, directory_v3=False, directory_v4=False, computer_assets_v3=False, group_assets_v3=False, empty_transition=False, group_members_v4_pagination=False, group_members_v4_refresh=False, user_export_failure_v3=False, group_export_failure_v3=False, computer_export_failure_v3=False, user_uac_v3_profile: str = ""):
@@ -305,7 +345,11 @@ class LDAPFixture:
         if error:
             raise error
 
-    def _read_uac_evidence(self):
+    def _read_uac_evidence(self, *, _entered=None):
+        # Invocation-local diagnostic callback; direct callers retain the same
+        # exceptions. Only fixed literals are reported, never evidence values.
+        enter = _entered if _entered is not None else lambda stage: None
+        enter("ldap_evidence_open")
         # Open only fixed basenames via the owned directory descriptor. NOFOLLOW
         # and NONBLOCK reject symlinks/FIFOs before a read can block.
         root = self.uac_evidence_directory
@@ -317,11 +361,13 @@ class LDAPFixture:
                 raise ValueError("uac_evidence_invalid:terminal_seal")
             values = []
             for name, cap in (("candidate-wire.json", 163840), ("terminal-seal.json", 8192)):
+                enter("ldap_evidence_file")
                 descriptor = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory)
                 try:
                     info = os.fstat(descriptor)
                     if not stat.S_ISREG(info.st_mode) or stat.S_IMODE(info.st_mode) != 0o600 or not 0 < info.st_size <= cap or info.st_nlink != 1:
                         raise ValueError("uac_evidence_invalid:terminal_seal")
+                    enter("ldap_evidence_read")
                     with os.fdopen(descriptor, "rb", closefd=False) as stream:
                         data = stream.read(cap + 1)
                     if len(data) != info.st_size or len(data) > cap:
@@ -340,19 +386,27 @@ class LDAPFixture:
             return result
         def invalid(_):
             raise ValueError("uac_evidence_invalid:terminal_seal")
+        enter("ldap_evidence_json")
         candidate, seal = (json.loads(value.decode("utf-8"), object_pairs_hook=unique, parse_constant=invalid) for value in values)
+        enter("ldap_evidence_schema")
         for value in (candidate, seal):
             if type(value) is not dict or type(value.get("format")) is not int or value["format"] != 1 or value.get("profile") != self.user_uac_v3_profile or value.get("nonce") != self._uac_nonce:
                 raise ValueError("uac_evidence_invalid:terminal_seal")
         seal_keys = {"format", "profile", "nonce", "candidateTranscriptSHA256", "claimCount", "completedExchangeCount", "directoryAttemptCount", "pageCount", "entryCount", "activeHandlers", "inflightWrites", "listenersClosed", "participantClosed", "poisoned", "poisonCode", "lateDirectoryAttempts", "participantRebinds", "terminalState", "completionSequence", "finalSequence"}
         candidate_keys = {"format", "profile", "nonce", "transport", "claimOrdinal", "entryCount", "pageCount", "completionSequence", "pages"}
-        if set(seal) != seal_keys or set(candidate) != candidate_keys or seal["candidateTranscriptSHA256"] != hashlib.sha256(values[0]).hexdigest():
+        if set(seal) != seal_keys or set(candidate) != candidate_keys:
             raise ValueError("uac_evidence_invalid:terminal_seal")
+        enter("ldap_evidence_binding")
+        if seal["candidateTranscriptSHA256"] != hashlib.sha256(values[0]).hexdigest():
+            raise ValueError("uac_evidence_invalid:terminal_seal")
+        enter("ldap_evidence_counts")
         for key, expected in (("claimCount", 1), ("completedExchangeCount", 1), ("directoryAttemptCount", 4), ("pageCount", 4), ("entryCount", 51), ("activeHandlers", 0), ("inflightWrites", 0), ("lateDirectoryAttempts", 0), ("participantRebinds", 0)):
             if type(seal[key]) is not int or seal[key] != expected:
                 raise ValueError("uac_evidence_invalid:terminal_seal")
+        enter("ldap_evidence_state")
         if seal["listenersClosed"] is not True or seal["participantClosed"] is not True or seal["poisoned"] is not False or seal["poisonCode"] != "none" or seal["terminalState"] != "sealed_ok":
             raise ValueError("uac_evidence_invalid:terminal_seal")
+        enter("ldap_evidence_sequence")
         if type(candidate["completionSequence"]) is not int or type(seal["completionSequence"]) is not int or type(seal["finalSequence"]) is not int or not 0 < candidate["completionSequence"] == seal["completionSequence"] <= seal["finalSequence"]:
             raise ValueError("uac_evidence_invalid:terminal_seal")
         return values[0], values[1], 0
@@ -360,37 +414,46 @@ class LDAPFixture:
     def _close_uac(self):
         if self._uac_closed:
             if self._uac_close_failed:
-                raise RuntimeError("uac_evidence_invalid:cleanup") from None
+                raise _uac_ldap_error(self._uac_close_failure_stage) from None
             return
         self._retained_uac_evidence = None
         retained = None
-        failed = False
+        failure_stage = None
+        stage = "ldap_stop"
+        def entered(reader_stage):
+            nonlocal stage
+            stage = reader_stage
         # Each cleanup is attempted even if an earlier stop/read/remove failed.
         # Keep the existing 10/20/5-second limits; no new retry or wait budget.
         try:
             if self.created_container:
                 subprocess.run(["docker", "stop", "--time", "10", self.name], check=True, capture_output=True, timeout=20)
+                stage = "ldap_inspect"
                 code = subprocess.check_output(["docker", "inspect", "-f", "{{.State.ExitCode}}", self.name], text=True, timeout=5).strip()
+                stage = "ldap_exit"
                 if code != "0":
                     raise ValueError("uac_evidence_invalid:cleanup")
-                retained = self._read_uac_evidence()
+                stage = "ldap_retained_read"
+                retained = self._read_uac_evidence(_entered=entered)
             elif self._uac_nonce is not None:
-                failed = True
+                failure_stage = "ldap_retained_read"
         except BaseException:
-            failed = True
+            failure_stage = stage
         operations = []
         if self.created_container:
-            operations.append(lambda: subprocess.run(["docker", "rm", "--force", self.name], check=True, capture_output=True, timeout=20))
+            operations.append(("ldap_container_remove", lambda: subprocess.run(["docker", "rm", "--force", self.name], check=True, capture_output=True, timeout=20)))
         if self.created_network:
-            operations.append(lambda: subprocess.run(["docker", "network", "rm", self.network], check=True, capture_output=True, timeout=20))
-        operations.extend(directory.cleanup for directory in (self.directory, self.control_directory, self.empty_transition_directory, self.uac_evidence_directory) if directory is not None)
-        for operation in operations:
+            operations.append(("ldap_network_remove", lambda: subprocess.run(["docker", "network", "rm", self.network], check=True, capture_output=True, timeout=20)))
+        operations.extend(("ldap_private_remove", directory.cleanup) for directory in (self.directory, self.control_directory, self.empty_transition_directory, self.uac_evidence_directory) if directory is not None)
+        for stage, operation in operations:
             try:
                 operation()
             except BaseException:
-                failed = True
+                if failure_stage is None:
+                    failure_stage = stage
         self._uac_closed = True
-        if failed:
+        if failure_stage is not None:
             self._uac_close_failed = True
-            raise RuntimeError("uac_evidence_invalid:cleanup") from None
+            self._uac_close_failure_stage = failure_stage
+            raise _uac_ldap_error(failure_stage) from None
         self._retained_uac_evidence = retained

@@ -134,3 +134,40 @@ E解析/扫描后在finally清零自身buffer。原观察器已有response原文
 body_bom、body_utf8、body_json、body_object、body_privacy。它表示失败发生的检查区间，不输出实际值，
 不把post_binding名称解释成一定存在POST。旧run的具体失败分支仍未知；本变更修复已离线复现的inspector-copy依赖机制，
 不改写旧失败结论，真实C与九件发布仍必须由新精确head CI证明。
+
+## Python固定阶段诊断（诊断不授权发布）
+
+Python runner/finalizer的失败输出保留既有14个固定UAC错误码，并可附固定`stage`；
+它表示已进入哪个检查区间，不表示该检查已通过。没有owned阶段时固定为`runner_main`。
+`uac_diagnostic_error(code, stage, kind=...)`只创建新的安全异常；kind默认evidence供finalizer使用，
+runtime用于保留cleanup既有RuntimeError父类/消息约定，value用于ValueError约定；它不接受原异常对象。
+`uac_failure_code`只对exact UACEvidenceError保留完整allowlisted码，runtime/value必须携同工厂owned标签；
+`uac_failure_stage`只接受闭集owned阶段，未知/伪造标签均回退固定阶段，不能成为成功凭证。
+`uac_failure_message`不调用任意str/repr/getter，不读cause/context/traceback，也不输出路径、原值或proof。
+类型用逐个identity检查，args通过BaseException描述符读取，防止恶意metaclass及属性钩子。
+
+阶段字段在当前runner统一publication会掩盖cleanup/discovery/schema等不同原因时必需；
+删除诊断不会改变拒绝条件，但会再次丢失定位信息。副作用仅为错误日志增加固定短标签、
+安全异常增加仅含常量的私有标签，不新增artifact/schema/path、依赖或预算。
+Finalizer检查、原子exclusive发布、失败staging清理和主错误优先保持；所有成功路径数据不变。
+Python `raise ... from None`只抑制常规异常链展示，仍可能隐式保留`__context__`，不承诺物理清除。
+原异常不得进入诊断元数据/输出，formatter不读取该链。
+
+## 冻结schema勘误：naming_context的精确生产值
+
+旧冻结schema snapshot SHA256 `1db027bfbb0f403f572cfc4352927e47d18b4f3aa3faa2c6a9efee84057a6274`
+保持不改；勘误snapshot SHA256 `850195b7b222dd707a9e5702f7f81853f3134386c16c4c7d0e725ccaff81e7e7`
+仅改变JSON pointer `/$defs/DirectorySource/properties/naming_context/const`：
+`DC=synthetic,DC=invalid` → `dc=synthetic,dc=invalid`。
+
+这是与固定mixed33生产链对齐的精确常量纠错，不兼容两种写法、不normalize证据、也不改oracle。
+reader的directoryBaseDN按小写dc=生成；executor/codec验证域绑定后保留该naming_context，
+PG loader/list再原样返回，C candidate原样保留。旧单元specimen手填uppercase掩盖了schema冲突。
+主机名不同：executor和codec会CanonicalDNS，`dc_host_name`仍严格等于`dc.synthetic.invalid`，
+大写或尾点host继续拒绝。命名上下文的大写、标签大小写、空格、尾点、错误域也继续拒绝。
+
+此常量在真实lowercase源进入CandidateEvidence验证时必须纠正；恢复旧值会确定拒绝该精确生产值，
+接受任意DN或改成双值enum则会放松契约，均不采用。副作用仅为修正正向specimen及其派生SHA；
+全部源字节、task binding、wire、XLSX、cleanup和发布校验仍执行，不修改production/fixture。
+该静态矛盾已由最小及完整合成candidate反事实验证；本轮真实run的统一publication日志仍不能证明
+它已经到达这个拒绝点，原失败及主机名不完整推断的撤回记录均保留。

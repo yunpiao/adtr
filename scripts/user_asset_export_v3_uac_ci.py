@@ -47,6 +47,106 @@ class FinalizedUACArtifacts:
     files: tuple[ArtifactDigest, ...]
 
 
+# Diagnostics never authorize evidence. Codes and entered stages are closed
+# constants; unknown errors, subclasses and mutable external attributes cannot
+# contribute text. Keep the validator/schema and its exception type unchanged.
+_UAC_CODES = frozenset("configuration provenance candidate_discovery candidate_schema source_binding task_binding raw_transcript terminal_seal post_parse post_binding post_count artifact_binding cleanup publication".split())
+_UAC_STAGES = frozenset("""
+runner_main candidate_discovery
+cleanup_snapshot cleanup_worker cleanup_api cleanup_ldap_close cleanup_ldap_retained
+cleanup_log_scan cleanup_log_close cleanup_database_remove cleanup_diagnostic_phase
+cleanup_diagnostic_write cleanup_diagnostic_result
+finalize_preflight finalize_cleanup_receipt finalize_provenance finalize_candidate_discovery
+finalize_candidate_schema finalize_wire finalize_seal finalize_wire_binding finalize_schema
+finalize_artifact_inventory finalize_artifact_read finalize_validate finalize_destination
+finalize_stage_write finalize_stage_readback finalize_atomic_publish finalize_stage_cleanup
+ldap_stop ldap_inspect ldap_exit ldap_retained_read ldap_container_remove ldap_network_remove ldap_private_remove
+ldap_evidence_open ldap_evidence_file ldap_evidence_read ldap_evidence_json ldap_evidence_schema
+ldap_evidence_binding ldap_evidence_counts ldap_evidence_state ldap_evidence_sequence
+""".split())
+_UAC_DIAGNOSTIC_MARKER = object()
+_UAC_DIAGNOSTIC_ATTRIBUTE = '_adtr_uac_diagnostic'
+
+
+def _uac_literal(value, allowed, fallback):
+    return value if type(value) is str and value in allowed else fallback
+
+
+def _uac_args_code(error):
+    error_type = type(error)
+    # Do not use type-set/tuple membership: hostile metaclasses can implement
+    # equality/hash hooks even when type(error) itself did not call user code.
+    if not (error_type is UACEvidenceError or error_type is RuntimeError or error_type is ValueError):
+        return None
+    try:
+        args = BaseException.args.__get__(error)
+        if type(args) is not tuple or len(args) != 1 or type(args[0]) is not str:
+            return None
+        return next((code for code in _UAC_CODES if args[0] == 'uac_evidence_invalid:' + code), None)
+    except Exception:
+        return None
+
+
+def _uac_owned_diagnostic(error):
+    code = _uac_args_code(error)
+    if code is None:
+        return None
+    try:
+        attributes = object.__getattribute__(error, '__dict__')
+        if type(attributes) is not dict:
+            return None
+        # A dict lookup can invoke __eq__ on a colliding non-string key even
+        # when the dict and exception types are exact. Iterate with the builtin
+        # method; inspect only exact-string keys before comparing their value.
+        tag = None
+        for key, value in dict.items(attributes):
+            if type(key) is str and key == _UAC_DIAGNOSTIC_ATTRIBUTE:
+                tag = value
+                break
+        if (type(tag) is tuple and len(tag) == 3 and tag[0] is _UAC_DIAGNOSTIC_MARKER
+                and type(tag[1]) is str and tag[1] in _UAC_CODES and tag[1] == code
+                and type(tag[2]) is str and tag[2] in _UAC_STAGES):
+            return tag[1], tag[2]
+    except Exception:
+        pass
+    return None
+
+
+def uac_diagnostic_error(code, stage, *, kind='evidence'):
+    """Fresh fixed error; never accepts or stores an original exception."""
+    code = _uac_literal(code, _UAC_CODES, 'publication')
+    stage = _uac_literal(stage, _UAC_STAGES, 'runner_main')
+    kind = _uac_literal(kind, frozenset(('evidence', 'runtime', 'value')), 'evidence')
+    if kind == 'runtime':
+        error = RuntimeError('uac_evidence_invalid:' + code)
+    elif kind == 'value':
+        error = ValueError('uac_evidence_invalid:' + code)
+    else:
+        error = UACEvidenceError(code)
+    object.__setattr__(error, _UAC_DIAGNOSTIC_ATTRIBUTE, (_UAC_DIAGNOSTIC_MARKER, code, stage))
+    return error
+
+
+def uac_failure_code(error, *, fallback='publication'):
+    fallback = _uac_literal(fallback, _UAC_CODES, 'publication')
+    owned = _uac_owned_diagnostic(error)
+    if owned is not None:
+        return owned[0]
+    # Only the exact validator error can preserve a code without our own tag.
+    return (_uac_args_code(error) or fallback) if type(error) is UACEvidenceError else fallback
+
+
+def uac_failure_stage(error, *, fallback='runner_main'):
+    fallback = _uac_literal(fallback, _UAC_STAGES, 'runner_main')
+    owned = _uac_owned_diagnostic(error)
+    return owned[1] if owned is not None else fallback
+
+
+def uac_failure_message(error):
+    """No str/repr/getter, traceback or exception-chain inspection."""
+    return 'uac_evidence_invalid:' + uac_failure_code(error) + ';stage=' + uac_failure_stage(error)
+
+
 def configure_uac(env: MutableMapping[str, str], *, nonce: str) -> None:
     require(type(nonce) is str and re.fullmatch(r'[0-9a-f]{32}', nonce) is not None, 'configuration')
     require(not any(env.get('ADTR_E2E_LDAP_DIRECTORY_' + mode) not in (None, '', 'false') for mode in MIXED_MODES), 'configuration')
@@ -202,56 +302,72 @@ def _rename_new_directory(source, target):
 def finalize_uac_evidence(*, repo: Path, run_nonce: str, provenance_bytes: bytes, candidate_path: Path,
                           retained_ldap: tuple[bytes, bytes, int], cleanup_receipt: Mapping[str, object]) -> FinalizedUACArtifacts:
     staging = None
+    stage = 'finalize_preflight'
     try:
         repo = safe_ancestors(repo)
         schema(run_nonce, 'Nonce', 'configuration')
+        stage = 'finalize_cleanup_receipt'
         require(type(retained_ldap) is tuple and len(retained_ldap) == 3 and type(retained_ldap[2]) is int and retained_ldap[2] == 0, 'cleanup')
         cleanup = dict(cleanup_receipt)
         schema(cleanup, 'CleanupReceipt', 'cleanup')
         require(cleanup['nonce'] == run_nonce, 'cleanup')
+        stage = 'finalize_provenance'
         trusted = strict_json(provenance_bytes, 2 << 20, 'provenance')
         schema(trusted, 'Provenance', 'provenance')
         require(equal(trusted, _current(repo)), 'provenance')
         require(read_regular(repo / PROVENANCE, 2 << 20, 'provenance') == provenance_bytes, 'provenance')
+        stage = 'finalize_candidate_discovery'
         discovered = discover_uac_candidate(repo=repo)
         require(Path(os.path.abspath(candidate_path)) == discovered, 'candidate_discovery')
+        stage = 'finalize_candidate_schema'
         candidate = strict_json(read_regular(discovered, 8 << 20))
         schema(candidate, 'CandidateEvidence')
         require(candidate['nonce'] == run_nonce and equal(candidate['provenance'], trusted), 'provenance')
         wire, seal = retained_ldap[:2]
         # Parse originals before making any wrapper; don't normalize their bytes.
+        stage = 'finalize_wire'
         strict_json(wire, 160 << 10, 'raw_transcript')
+        stage = 'finalize_seal'
         strict_json(seal, 8 << 10, 'terminal_seal')
+        stage = 'finalize_wire_binding'
         require(candidate['candidateTranscriptSHA256'] == sha(wire), 'raw_transcript')
         raw = _json_bytes({'format': 1, 'profile': PROFILE, 'nonce': run_nonce,
             'candidateTranscriptBase64': base64.b64encode(wire).decode('ascii'), 'candidateTranscriptSHA256': sha(wire),
             'terminalSealBase64': base64.b64encode(seal).decode('ascii'), 'terminalSealSHA256': sha(seal)})
         require(len(raw) <= 256 << 10, 'raw_transcript')
+        stage = 'finalize_schema'
         final = {key: value for key, value in candidate.items() if key not in ('nonce', 'candidateTranscriptSHA256')}
         final.update(rawWire={'filename': RAW_NAME, 'sha256': sha(raw), 'candidateTranscriptSHA256': sha(wire), 'terminalSealSHA256': sha(seal)}, cleanupReceipt=cleanup)
         schema(final, 'FinalEvidence')
         evidence_bytes = _json_bytes(final)
         require(len(evidence_bytes) <= 8 << 20, 'candidate_schema')
+        stage = 'finalize_artifact_inventory'
         names = _artifact_names(final)
         payloads = {PROVENANCE.name: provenance_bytes, EVIDENCE_NAME: evidence_bytes, RAW_NAME: raw}
+        stage = 'finalize_artifact_read'
         for name in names:
             if name not in payloads:
                 payloads[name] = read_regular(discovered.parent / name, _cap(name))
+        stage = 'finalize_validate'
         validate_uac_evidence(final, lambda name: payloads[name], trusted, oracle=load_oracle(repo))
+        stage = 'finalize_destination'
         destination = safe_ancestors(repo / ARTIFACTS)
         require(not destination.exists(), 'publication')
         destination.parent.mkdir(parents=True, exist_ok=True)
+        stage = 'finalize_stage_write'
         staging = Path(tempfile.mkdtemp(prefix='.uac-validated-', dir=destination.parent))
         for name in names:
             _write_private(staging / name, payloads[name])
+        stage = 'finalize_stage_readback'
         digests = _validate_directory(repo, staging, trusted)
+        stage = 'finalize_atomic_publish'
         _rename_new_directory(staging, destination)
         staging = None
         return FinalizedUACArtifacts(ARTIFACTS.as_posix(), digests)
-    except UACEvidenceError:
-        raise
-    except Exception:
-        raise UACEvidenceError('publication') from None
+    except UACEvidenceError as error:
+        raise uac_diagnostic_error(uac_failure_code(error), uac_failure_stage(error, fallback=stage)) from None
+    except Exception as error:
+        raise uac_diagnostic_error(uac_failure_code(error), uac_failure_stage(error, fallback=stage)) from None
     finally:
         if staging is not None:
             primary = sys.exc_info()[1]
@@ -259,7 +375,7 @@ def finalize_uac_evidence(*, repo: Path, run_nonce: str, provenance_bytes: bytes
                 shutil.rmtree(staging)
             except Exception:
                 if primary is None:
-                    raise UACEvidenceError('publication') from None
+                    raise uac_diagnostic_error('publication', 'finalize_stage_cleanup') from None
 
 
 def _github_output(paths):
@@ -305,7 +421,7 @@ def main():
             if args.github_output:
                 _github_output([(ARTIFACTS / item.filename).as_posix() for item in files])
     except Exception as error:
-        print(str(error) if isinstance(error, UACEvidenceError) else 'uac_evidence_invalid:publication', file=sys.stderr)
+        print(uac_failure_message(error), file=sys.stderr)
         return 1
     return 0
 

@@ -88,7 +88,7 @@ def specimen():
     oracle = v.load_oracle(ROOT)
     records = sorted(oracle['users'] + oracle['reservedUnchangedDecoys'], key=lambda r: r['wireSlot'])
     metadata = {'server_name': 'dc.synthetic.invalid', 'dc_host_name': 'dc.synthetic.invalid', 'domain': 'synthetic.invalid',
-        'naming_context': 'DC=synthetic,DC=invalid', 'started_at': '2026-10-27T00:00:00Z', 'completed_at': '2026-10-27T00:00:01Z', 'elapsed_milliseconds': 1000, 'pages': 4}
+        'naming_context': 'dc=synthetic,dc=invalid', 'started_at': '2026-10-27T00:00:00Z', 'completed_at': '2026-10-27T00:00:01Z', 'elapsed_milliseconds': 1000, 'pages': 4}
     observation = {'dictionaryVersion': 3, 'objects': [observation_object(r) for r in records], 'source': metadata}
     raw = encoded(observation)
     producer = {'credentialSource': 'operation_account', 'connectionRevision': '2', 'connectionCredentialGeneration': '1',
@@ -211,6 +211,33 @@ class EvidenceTests(unittest.TestCase):
         self.assertEqual((len(self.oracle['users']), len(self.oracle['reservedUnchangedDecoys'])), (33, 18))
         for record in self.oracle['users'] + self.oracle['reservedUnchangedDecoys']:
             self.assertEqual(v.decoded_public(record['wire']['dn'], wire_attrs(record)), record['public12'])
+
+    def test_directory_source_exact_naming_context_erratum_and_unchanged_host(self):
+        metadata = self.template['listPages'][0]['response']['source']
+        self.assertEqual(metadata['naming_context'], 'dc=synthetic,dc=invalid')
+        self.assertEqual(metadata['dc_host_name'], 'dc.synthetic.invalid')
+        v.schema(metadata, 'DirectorySource')
+        old_defs = copy.deepcopy(v.SCHEMA)
+        old_defs['DirectorySource']['properties']['naming_context']['const'] = 'DC=synthetic,DC=invalid'
+        self.assertEqual(v.sha((json.dumps(old_defs, ensure_ascii=True, sort_keys=True, separators=(',', ':')) + '\n').encode()), 'ae0b82fb4b4af2d7819352aceab73817c01d38346cff56b97f81f8635e493897')
+        for bad in ('DC=synthetic,DC=invalid', 'dc=Synthetic,dc=invalid', 'dc=synthetic,dc=invalid.',
+                    'dc=synthetic, dc=invalid', 'dc=synthetic,dc=other', '', None):
+            with self.assertRaisesRegex(v.UACEvidenceError, '^uac_evidence_invalid:candidate_schema$'):
+                v.schema({**metadata, 'naming_context': bad}, 'DirectorySource')
+            data, files, _ = specimen()
+            for page in data['listPages']:
+                page['response']['source']['naming_context'] = bad
+            raw = json.loads(base64.b64decode(data['source']['bodyBase64']))
+            raw['source']['naming_context'] = bad
+            raw = encoded(raw)
+            data['source'].update(bodyBase64=b64(raw), sha256=v.sha(raw))
+            for case in data['cases']:
+                case['database']['sourceSHA256'] = v.sha(raw)
+            with self.assertRaisesRegex(v.UACEvidenceError, '^uac_evidence_invalid:candidate_schema$'):
+                v.validate_uac_evidence(data, lambda name: files[name], PROVENANCE, oracle=self.oracle)
+        for bad in ('DC.Synthetic.Invalid.', 'dc.synthetic.invalid.', 'DC.synthetic.invalid', 'other.synthetic.invalid'):
+            with self.assertRaisesRegex(v.UACEvidenceError, '^uac_evidence_invalid:candidate_schema$'):
+                v.schema({**metadata, 'dc_host_name': bad}, 'DirectorySource')
 
     def test_frozen_hash_vectors(self):
         self.assertEqual(v.task_hash(self.template['source']['taskBinding']['payload']), '48b68509ca9e5360f7833c1d8966834b3280129fb24903cea728efa2d35b6b9d')
@@ -932,6 +959,191 @@ async function run(at,error){target=at;injected=error;stages=[];mode='omitted';i
         self.assertIn("'payloadHash',t.payload_hash,'payload',t.payload", helper)
         self.assertIn('timeout: 5000, maxBuffer: cap', flat_helper)
         self.assertIn('PGOPTIONS=-c statement_timeout=2000', helper)
+
+
+class PythonDiagnosticTests(unittest.TestCase):
+    def test_exact_codes_owned_stages_kinds_and_safe_defaults(self):
+        self.assertEqual(ci._UAC_CODES, v.CODES)
+        self.assertIn('runner_main', ci._UAC_STAGES)
+        required = set('ldap_stop ldap_inspect ldap_exit ldap_retained_read ldap_container_remove ldap_network_remove ldap_private_remove ldap_evidence_open ldap_evidence_file ldap_evidence_read ldap_evidence_json ldap_evidence_schema ldap_evidence_binding ldap_evidence_counts ldap_evidence_state ldap_evidence_sequence candidate_discovery cleanup_snapshot'.split())
+        self.assertTrue(required <= ci._UAC_STAGES)
+        for code in v.CODES:
+            raw = v.UACEvidenceError(code)
+            self.assertEqual(ci.uac_failure_message(raw), 'uac_evidence_invalid:' + code + ';stage=runner_main')
+            for stage in ci._UAC_STAGES:
+                for kind in ('evidence', 'runtime', 'value'):
+                    error = ci.uac_diagnostic_error(code, stage, kind=kind)
+                    parent = v.UACEvidenceError if kind == 'evidence' else RuntimeError if kind == 'runtime' else ValueError
+                    self.assertIs(type(error), parent)
+                    self.assertEqual(BaseException.args.__get__(error), ('uac_evidence_invalid:' + code,))
+                    self.assertEqual(ci.uac_failure_message(error), 'uac_evidence_invalid:' + code + ';stage=' + stage)
+                    self.assertIsNot(error, ci.uac_diagnostic_error(code, stage, kind=kind))
+        for error in (RuntimeError('uac_evidence_invalid:cleanup'), ValueError('uac_evidence_invalid:terminal_seal'),
+                      Exception('uac_evidence_invalid:publication'), None, {'message': 'uac_evidence_invalid:cleanup'}):
+            self.assertEqual(ci.uac_failure_message(error), 'uac_evidence_invalid:publication;stage=runner_main')
+        self.assertEqual(ci.uac_failure_stage(None, fallback='candidate_discovery'), 'candidate_discovery')
+        self.assertEqual(ci.uac_failure_code(None, fallback='cleanup'), 'cleanup')
+        self.assertEqual(ci.uac_failure_message(ci.uac_diagnostic_error(None, object(), kind=None)),
+                         'uac_evidence_invalid:publication;stage=runner_main')
+
+    def test_hostile_types_args_tags_and_chains_never_read_or_report(self):
+        calls = []
+        secret = 'UNIT_PRIVATE_ERROR_DO_NOT_REPORT'
+        class Meta(type):
+            def __eq__(self, other): calls.append('meta-eq'); raise RuntimeError(secret)
+            def __hash__(self): calls.append('meta-hash'); raise RuntimeError(secret)
+        class Hostile(Exception, metaclass=Meta):
+            def __getattribute__(self, name): calls.append('getattribute'); raise RuntimeError(secret)
+            def __str__(self): calls.append('str'); raise RuntimeError(secret)
+            def __repr__(self): calls.append('repr'); raise RuntimeError(secret)
+        class ValidatorSubclass(v.UACEvidenceError):
+            @property
+            def args(self): calls.append('args'); raise RuntimeError(secret)
+            def __str__(self): calls.append('str'); raise RuntimeError(secret)
+        class StringSubclass(str):
+            def __hash__(self): calls.append('string-hash'); raise RuntimeError(secret)
+            def __eq__(self, other): calls.append('string-eq'); raise RuntimeError(secret)
+        class TupleSubclass(tuple):
+            def __len__(self): calls.append('tuple-len'); raise RuntimeError(secret)
+        class DictSubclass(dict):
+            def get(self, *args): calls.append('dict-get'); raise RuntimeError(secret)
+        # Even an override on the known Python validator class must not run:
+        # its original builtin BaseException storage is the sole args source.
+        def args_getter(error):
+            calls.append('known-args-getter')
+            raise RuntimeError(secret)
+        known = v.UACEvidenceError('cleanup')
+        with patch.object(v.UACEvidenceError, 'args', property(args_getter)):
+            self.assertEqual(ci.uac_failure_message(known), 'uac_evidence_invalid:cleanup;stage=runner_main')
+        for error in (Hostile(secret), ValidatorSubclass('cleanup')):
+            self.assertEqual(ci.uac_failure_message(error), 'uac_evidence_invalid:publication;stage=runner_main')
+        for args in [(secret,), ('uac_evidence_invalid:cleanup:' + secret,),
+                     ('uac_evidence_invalid:cleanup\n' + secret,),
+                     (StringSubclass('uac_evidence_invalid:cleanup'),), ('uac_evidence_invalid:cleanup', secret), ()]:
+            error = v.UACEvidenceError('cleanup'); error.args = args
+            self.assertEqual(ci.uac_failure_message(error), 'uac_evidence_invalid:publication;stage=runner_main')
+        for bad in (StringSubclass('cleanup'), Hostile(secret), None, [], {}):
+            error = ci.uac_diagnostic_error(bad, bad, kind=bad)
+            self.assertEqual(ci.uac_failure_message(error), 'uac_evidence_invalid:publication;stage=runner_main')
+            self.assertEqual(ci.uac_failure_stage(None, fallback=bad), 'runner_main')
+            self.assertEqual(ci.uac_failure_code(None, fallback=bad), 'publication')
+        owned = ci.uac_diagnostic_error('cleanup', 'cleanup_worker', kind='runtime')
+        marker, code, stage = object.__getattribute__(owned, '__dict__')[ci._UAC_DIAGNOSTIC_ATTRIBUTE]
+        for tag in (None, {}, [marker, code, stage], TupleSubclass((marker, code, stage)),
+                    (object(), code, stage), (marker, StringSubclass(code), stage),
+                    (marker, code, StringSubclass(stage)), (marker, code, secret),
+                    (marker, 'provenance', stage), (marker, code, stage, secret)):
+            error = ci.uac_diagnostic_error('cleanup', 'cleanup_worker', kind='runtime')
+            object.__getattribute__(error, '__dict__')[ci._UAC_DIAGNOSTIC_ATTRIBUTE] = tag
+            self.assertEqual(ci.uac_failure_message(error), 'uac_evidence_invalid:publication;stage=runner_main')
+        error = ci.uac_diagnostic_error('cleanup', 'cleanup_worker', kind='runtime')
+        error.__dict__ = DictSubclass(error.__dict__)
+        self.assertEqual(ci.uac_failure_message(error), 'uac_evidence_invalid:publication;stage=runner_main')
+        error = ci.uac_diagnostic_error('cleanup', 'cleanup_worker', kind='runtime')
+        error.__cause__ = Hostile(secret); error.__context__ = Hostile(secret)
+        error.private_value = secret
+        self.assertEqual(ci.uac_failure_message(error), 'uac_evidence_invalid:cleanup;stage=cleanup_worker')
+        # Exact dict does not imply safe lookup: an alien key may collide with
+        # the private name and run __eq__ before a get()/subscription can fail.
+        import contextlib
+        enabled = False
+        class CollidingKey:
+            def __hash__(self): return hash(ci._UAC_DIAGNOSTIC_ATTRIBUTE)
+            def __eq__(self, other):
+                if enabled:
+                    calls.append('dict-key-eq')
+                    print(secret)
+                return False
+        for include_tag in (False, True):
+            error = ci.uac_diagnostic_error('cleanup', 'cleanup_worker', kind='runtime')
+            tag = error.__dict__[ci._UAC_DIAGNOSTIC_ATTRIBUTE]
+            attributes = {CollidingKey(): secret}
+            if include_tag: attributes[ci._UAC_DIAGNOSTIC_ATTRIBUTE] = tag
+            error.__dict__ = attributes
+            enabled = True
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
+                message = ci.uac_failure_message(error)
+            enabled = False
+            expected = 'cleanup;stage=cleanup_worker' if include_tag else 'publication;stage=runner_main'
+            self.assertEqual(message, 'uac_evidence_invalid:' + expected)
+            self.assertTrue(output.getvalue() == '', 'closed output')
+        self.assertEqual(calls, [])
+
+    def test_actual_finalizer_all_entered_stages_keep_codes_and_no_success(self):
+        import ast
+        import inspect
+        node = ast.parse(inspect.getsource(ci.finalize_uac_evidence)).body[0]
+        boundary = next(item for item in node.body if isinstance(item, ast.Try))
+        def enter(stage):
+            return ast.Expr(ast.Call(ast.Name('_unit_enter', ast.Load()), [ast.Constant(stage)], []))
+        body = [enter('finalize_preflight')]
+        for item in boundary.body:
+            body.append(item)
+            if (isinstance(item, ast.Assign) and len(item.targets) == 1
+                    and isinstance(item.targets[0], ast.Name) and item.targets[0].id == 'stage'):
+                body.append(enter(item.value.value))
+        boundary.body = body
+        compiled = compile(ast.fix_missing_locations(ast.Module([node], type_ignores=[])), '<actual-finalizer-stage-probe>', 'exec')
+        stages = []
+        def run(target=None, injected=None):
+            unit = PublicationTests(); unit.setUp()
+            try:
+                def entered(stage):
+                    if target is None: stages.append(stage)
+                    if stage == target: raise injected
+                scope = dict(ci.__dict__, _unit_enter=entered)
+                exec(compiled, scope)
+                args = dict(repo=unit.root, run_nonce=NONCE, provenance_bytes=unit.provenance,
+                            candidate_path=unit.candidate, retained_ldap=unit.retained,
+                            cleanup_receipt=unit.data['cleanupReceipt'])
+                if target is None:
+                    result = scope['finalize_uac_evidence'](**args)
+                    self.assertEqual(len(result.files), 9)
+                else:
+                    caught = None
+                    try: scope['finalize_uac_evidence'](**args)
+                    except Exception as error: caught = error
+                    self.assertIs(type(caught), v.UACEvidenceError)
+                    code = 'task_binding' if type(injected) is v.UACEvidenceError else 'publication'
+                    self.assertEqual(ci.uac_failure_message(caught), 'uac_evidence_invalid:' + code + ';stage=' + target)
+                    self.assertIsNot(caught, injected)
+                    self.assertFalse((unit.root / ci.ARTIFACTS).exists())
+                    self.assertEqual(list((unit.root / ci.ARTIFACTS).parent.glob('.uac-validated-*')), [])
+            finally: unit.doCleanups()
+        run()
+        self.assertEqual(len(stages), 16)
+        self.assertEqual(len(set(stages)), 16)
+        for stage in stages:
+            run(stage, OSError('UNIT_PRIVATE_ERROR_DO_NOT_REPORT'))
+            run(stage, v.UACEvidenceError('task_binding'))
+
+    def test_actual_finalizer_preserves_owned_stage_and_primary_over_cleanup_failure(self):
+        unit = PublicationTests(); unit.setUp()
+        try:
+            error = ci.uac_diagnostic_error('terminal_seal', 'ldap_evidence_state', kind='runtime')
+            with patch.object(ci, '_write_private', side_effect=error), patch.object(ci.shutil, 'rmtree', side_effect=OSError('UNIT_PRIVATE_CLEANUP_ERROR')) as remove:
+                caught = None
+                try: unit.finalize()
+                except Exception as failure: caught = failure
+                self.assertIs(type(caught), v.UACEvidenceError)
+                self.assertEqual(ci.uac_failure_message(caught), 'uac_evidence_invalid:terminal_seal;stage=ldap_evidence_state')
+                self.assertIsNot(caught, error)
+                self.assertFalse((unit.root / ci.ARTIFACTS).exists())
+                remove.assert_called_once()
+        finally: unit.doCleanups()
+
+    def test_python_cli_uses_closed_formatter_for_unknown_and_known_errors(self):
+        import ast
+        source = (ROOT / 'scripts/user_asset_export_v3_uac_ci.py').read_text()
+        tree = ast.parse(source)
+        node = next(item for item in tree.body if isinstance(item, ast.FunctionDef) and item.name == 'main')
+        self.assertNotIn('str(error)', ast.get_source_segment(source, node))
+        self.assertIn('uac_failure_message(error)', ast.get_source_segment(source, node))
+        for error, expected in [(RuntimeError('UNIT_PRIVATE_CLI_ERROR'), 'publication'), (v.UACEvidenceError('provenance'), 'provenance')]:
+            with patch('sys.argv', ['uac_ci', 'capture', '--repo', '/unit-only']), patch.object(ci, 'capture_uac_provenance', side_effect=error), patch('sys.stderr', new_callable=io.StringIO) as stderr:
+                self.assertEqual(ci.main(), 1)
+                self.assertEqual(stderr.getvalue(), 'uac_evidence_invalid:' + expected + ';stage=runner_main\n')
 
 
 if __name__ == '__main__':

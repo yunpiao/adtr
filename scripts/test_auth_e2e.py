@@ -33,9 +33,10 @@ from group_asset_export_v3_ci import configure as configure_group_export, captur
 from group_asset_export_v3_terminal_ci import SUITES as GROUP_EXPORT_TERMINAL_SUITES, configure as configure_group_terminal, capture as capture_group_terminal, validate as validate_group_terminal
 from ci_postgres_image import postgres_image_args
 from test_integration import IMAGE
-from ldap_e2e_fixture import LDAPFixture
+from ldap_e2e_fixture import LDAPFixture, uac_ldap_failure_stage
 from user_asset_export_v3_uac_ci import (configure_uac, capture_uac_provenance,
-    discover_uac_candidate, finalize_uac_evidence)
+    discover_uac_candidate, finalize_uac_evidence, uac_diagnostic_error,
+    uac_failure_code, uac_failure_stage, uac_failure_message)
 from account_barrier_e2e_fixture import AccountBarrierFixture
 from directory_e2e_credentials import configure_directory_credentials
 from directory_v4_worker_control import DelayedOwnedWorker, URL_ENV, TOKEN_ENV
@@ -993,24 +994,30 @@ def cleanup_uac_run(worker, server, diagnostics, logs, ldap_fixture,
                    logsClosed=False, safeDiagnosticsPassed=False,
                    allOwnedCleanupSucceeded=False)
     failed = False
+    first_stage = None
     try:
         diagnostics.snapshot(server, worker)
     except Exception:
         failed = True
+        first_stage = first_stage or "cleanup_snapshot"
     for label, process in (("worker", worker), ("api", server)):
         try:
             reaped, code, forced, problems = cleanup_v4_process(
                 process, diagnostics.report["processes"][label])
             if process is None or not reaped or forced or problems or type(code) is not int or code != 0:
                 failed = True
+                first_stage = first_stage or ("cleanup_worker" if label == "worker" else "cleanup_api")
             else:
                 receipt[label + "ExitCode"] = code
         except Exception:
             failed = True
+            first_stage = first_stage or ("cleanup_worker" if label == "worker" else "cleanup_api")
+    ldap_stage = "cleanup_ldap_close"
     try:
         if ldap_fixture is None:
             raise RuntimeError("uac_evidence_invalid:cleanup")
         ldap_fixture.close()
+        ldap_stage = "cleanup_ldap_retained"
         retained = ldap_fixture.retained_uac_evidence
         if (type(retained) is not tuple or len(retained) != 3
                 or type(retained[0]) is not bytes or type(retained[1]) is not bytes
@@ -1020,8 +1027,19 @@ def cleanup_uac_run(worker, server, diagnostics, logs, ldap_fixture,
         # owned container/network/private-directory cleanup; None is not proof.
         receipt.update(ldapExitCode=0, ldapContainerRemoved=True,
                        ldapNetworkRemoved=True, ldapPrivateDirectoriesRemoved=True)
-    except Exception:
+    except Exception as error:
         failed = True
+        if first_stage is None:
+            first_stage = ldap_stage
+            if ldap_stage == "cleanup_ldap_close":
+                # F owns its exact-type, fixed-message, private stage tag.
+                # Even a broken diagnostic accessor cannot interrupt cleanup.
+                try:
+                    owned_stage = uac_ldap_failure_stage(error)
+                except Exception:
+                    owned_stage = None
+                if owned_stage is not None:
+                    first_stage = owned_stage
     diagnostic_ok = False
     try:
         panicked = http_handler_panicked(logs)
@@ -1029,15 +1047,19 @@ def cleanup_uac_run(worker, server, diagnostics, logs, ldap_fixture,
         diagnostic_ok = panicked is False
         if not diagnostic_ok:
             failed = True
+            first_stage = first_stage or "cleanup_log_scan"
     except Exception:
         failed = True
+        first_stage = first_stage or "cleanup_log_scan"
     try:
         logs.close()
         receipt["logsClosed"] = logs.closed is True
         if not receipt["logsClosed"]:
             failed = True
+            first_stage = first_stage or "cleanup_log_close"
     except Exception:
         failed = True
+        first_stage = first_stage or "cleanup_log_close"
     try:
         if not creation_attempted:
             raise RuntimeError("uac_evidence_invalid:cleanup")
@@ -1045,16 +1067,22 @@ def cleanup_uac_run(worker, server, diagnostics, logs, ldap_fixture,
         receipt["databaseContainerRemoved"] = True
     except Exception:
         failed = True
+        first_stage = first_stage or "cleanup_database_remove"
+    diagnostic_stage = "cleanup_diagnostic_phase"
     try:
         diagnostics.phase("after-cleanup")
+        diagnostic_stage = "cleanup_diagnostic_write"
         diagnostics.write(diagnostic_dir / "runtime.json")
+        diagnostic_stage = "cleanup_diagnostic_result"
         receipt["safeDiagnosticsPassed"] = diagnostic_ok and not diagnostics.report["collection_errors"]
         if not receipt["safeDiagnosticsPassed"]:
             failed = True
+            first_stage = first_stage or diagnostic_stage
     except Exception:
         failed = True
+        first_stage = first_stage or diagnostic_stage
     if failed:
-        raise RuntimeError("uac_evidence_invalid:cleanup") from None
+        raise uac_diagnostic_error("cleanup", first_stage, kind="runtime") from None
     receipt["allOwnedCleanupSucceeded"] = True
     return receipt
 
@@ -1415,10 +1443,12 @@ def main():
             try:
                 uac_cleanup = cleanup_uac_run(worker, server, diagnostics, logs,
                     ldap_fixture, creation_attempted, name, owner, uac_nonce, diagnostic_dir)
-            except Exception:
+            except Exception as error:
+                cleanup_error = uac_diagnostic_error("cleanup",
+                    uac_failure_stage(error, fallback="runner_main"), kind="runtime")
                 if not primary_error:
-                    raise RuntimeError("uac_evidence_invalid:cleanup") from None
-                print("uac_evidence_invalid:cleanup", file=sys.stderr)
+                    raise cleanup_error from None
+                print(uac_failure_message(cleanup_error), file=sys.stderr)
         elif args.suite in V4_CONTROLS_BUDGETS:
             primary_error = sys.exc_info()[0] is not None
             try:
@@ -1563,8 +1593,13 @@ def main():
                     print("Safe runtime diagnostics could not be retained", file=sys.stderr)
     if args.suite == UAC_SUITE:
         try:
+            try:
+                uac_candidate = discover_uac_candidate(repo=Path.cwd())
+            except Exception as error:
+                raise uac_diagnostic_error(uac_failure_code(error),
+                    uac_failure_stage(error, fallback="candidate_discovery")) from None
             finalize_uac_evidence(repo=Path.cwd(), run_nonce=uac_nonce,
-                provenance_bytes=uac_provenance, candidate_path=discover_uac_candidate(repo=Path.cwd()),
+                provenance_bytes=uac_provenance, candidate_path=uac_candidate,
                 retained_ldap=ldap_fixture.retained_uac_evidence, cleanup_receipt=uac_cleanup)
         finally:
             # Release retained private bytes without mutating F's read-only slot.
@@ -1582,12 +1617,12 @@ def main():
 if __name__ == "__main__":
     try:
         main()
-    except Exception:
+    except Exception as error:
         if ("--suite=" + UAC_SUITE in sys.argv[1:]
                 or any(a == "--suite" and b == UAC_SUITE
                        for a, b in zip(sys.argv[1:], sys.argv[2:]))):
             # Never print the underlying exception/cause or a request/SQL value.
-            print("uac_evidence_invalid:publication", file=sys.stderr)
+            print(uac_failure_message(error), file=sys.stderr)
             sys.exit(1)
         if ("--suite=tasks-health-recovery" in sys.argv[1:]
                 or any(a == "--suite" and b == "tasks-health-recovery"

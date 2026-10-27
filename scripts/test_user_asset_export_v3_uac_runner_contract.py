@@ -5,6 +5,7 @@ strips C exactly once; explicit predecessor functions retain historical tests.
 No imports of historical test modules at module load (avoids recursive chains).
 """
 import ast
+import contextlib
 import copy
 import hashlib
 import io
@@ -12,6 +13,7 @@ import json
 from pathlib import Path
 import re
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
@@ -19,7 +21,7 @@ SUITE = 'user-asset-export-v3-uac-mixed33'
 BASE_COMMIT = '59716a3d9dc7dae83f6c8c45cb0d222926dc066b'
 BASE_TREE = 'c7d2a54d325ddcf38e9b59087e691845191fb64b'
 
-DELTA_SHA256 = {'ci': '5beab043c94c3e833508d8577fe2a2317620083cc69e11b397f93203f2d8cb26', 'runner': 'd87aec5853b0ef3659776c902af1f56af8fc155abed14f3baa872fce2584c5a0'}
+DELTA_SHA256 = {'ci': '5beab043c94c3e833508d8577fe2a2317620083cc69e11b397f93203f2d8cb26', 'runner': '285c43b57abad898198e946a60c0da860d15574a8b8c7d6b6e2a0b522556acdf'}
 
 # Fixed anchors for independent review, outside both mutable delta files. Never rederive at runtime.
 ANCHORS = {'ci': {'workflow': {'path': '.github/workflows/ci.yml',
@@ -68,13 +70,13 @@ ANCHORS = {'ci': {'workflow': {'path': '.github/workflows/ci.yml',
                                 '36be8574f37d470baa4c88548592e04db84efd18faeda2f4f937920c014f08ea'))}},
  'runner': {'runner': {'path': 'scripts/test_auth_e2e.py',
                        'baseline': '6d55979bcaff97f5ab23b4c3d8eafbb65a080a3c49555eb2e17823750f6aa2a9',
-                       'current': '7e116749cb729e530907918dfbc10bf1b32075d035c26f403f46d09bcfb69ba9',
+                       'current': '26f3a500814d507f47e4226b883864f21a8c3d5010620fa5f19a2e52af7b822a',
                        'hunks': (('d72b2528f556cd87cf1bf00ba9fba45d2b78bb331c87eb47fa95c2d685014109',
-                                  '83b15a5e8151a6f188502f375e00d03f143e1a420d731078e58b808caa88d936'),
+                                  'bc883455413591b9a28a2469c97c78dd05beb6315d0008ae0f00f9b1a2b218a3'),
                                  ('7c5769439d5522c91f9c233bc8bd417f0c2006921f5c2460460dd40e55c8a343',
                                   '94a4ff25d09ab71e01e95b7ae776b1e6276f0f24872a081801187b9b6b9f945c'),
                                  ('0f5b542146a77ea266b96dfb181c53c27c949eec99d34189bd42864c19fad71d',
-                                  '88dd5fab22aa6d0a094229ad153d028c76198799430f1ddfc2612ff35061c169'),
+                                  'd634904af538c62b7851c14fd4f5804d55c36bb7759fcf5f5c1ac959bda53c1e'),
                                  ('6456246cd35582ce23f7f7ad83d8a16f71f3c6b7fb402fa4daec8c51e563f871',
                                   '9700e31dd6aa40b417d60395b3a236e926fb7c7a4d30301ab8affd6dcc2558f5'),
                                  ('7b2e8ca1da68223efe2be0a7eaaa995a1b5512f947bd966cc4ec589f32d9df83',
@@ -84,11 +86,11 @@ ANCHORS = {'ci': {'workflow': {'path': '.github/workflows/ci.yml',
                                  ('9d8716aa3a0eca79909803e74d82531af603bb4061242b16d53143de03d42945',
                                   '1f2c013fda310e429ffa871b2fc689596251b1cd1dd7f0d1b5b59fe198095d54'),
                                  ('648a6eb9fc2ccc617953a5f1d692a8cbccc94cabae3cc8bfee4c33fd9f56fa73',
-                                  '422a01576ed893bcaf2855c4f9e381add10e6218e283bfe87e0c8135c17dca9f'),
+                                  '33af4107aca4d5e1ad0a4ad93b2fd2aeaab24d7ed33770615810c576616bffdb'),
                                  ('7d97adc64dbda4d35364e1499a8bb47029aac2ad734ee99331c9e0943aa5ea82',
-                                  'de78ff6554f3b7fc052c990659af161bbea687305ab268b33e9333f7dfd8dd39'),
+                                  'eb2f447ae60aac2b4b74ad7f68ed1434374b0e1767da7b3f3dd19ff1f56841dc'),
                                  ('d7f971e764d6edf385e545028231f87e4c601895ce0eee15f07d5c56370040e7',
-                                  'efad1defb868c220de19b40676762468f31dea855417d91bc7e9c53daf6cec3f'))}}}
+                                  '8c7cb8dc85440d17a75798bf917c17dd2bfb0911591f3d2471e42dd6c8530a38'))}}}
 
 def _require(value):
     if not value:
@@ -204,10 +206,22 @@ def restore_user_uac_runner(text):
 
 
 def _function(name, **scope):
+    scope = {**_diagnostic_scope(), **scope}
     tree = ast.parse(Path('scripts/test_auth_e2e.py').read_text())
     node = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == name)
     exec(compile(ast.Module(body=[node], type_ignores=[]), '<actual-uac-runner>', 'exec'), scope)
     return scope[name]
+
+
+def _diagnostic_scope():
+    from user_asset_export_v3_uac_ci import (uac_diagnostic_error,
+        uac_failure_code, uac_failure_stage, uac_failure_message)
+    from ldap_e2e_fixture import uac_ldap_failure_stage
+    return dict(uac_diagnostic_error=uac_diagnostic_error,
+                uac_failure_code=uac_failure_code,
+                uac_failure_stage=uac_failure_stage,
+                uac_failure_message=uac_failure_message,
+                uac_ldap_failure_stage=uac_ldap_failure_stage)
 
 
 class UACProjectionContract(unittest.TestCase):
@@ -587,6 +601,200 @@ class UACCleanupContract(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             function(*args)
         self.assertTrue(logs.closed)
+
+    def test_exact_entered_stage_for_each_cleanup_failure(self):
+        diagnostic = _diagnostic_scope()
+        cases = {'snapshot': 'cleanup_snapshot', 'worker': 'cleanup_worker',
+                 'worker-bad': 'cleanup_worker', 'api': 'cleanup_api',
+                 'api-bad': 'cleanup_api', 'ldap': 'cleanup_ldap_close',
+                 'panic': 'cleanup_log_scan', 'panic-true': 'cleanup_log_scan',
+                 'database': 'cleanup_database_remove',
+                 'diagnostics-phase': 'cleanup_diagnostic_phase',
+                 'diagnostics-write': 'cleanup_diagnostic_write'}
+        for failure, stage in cases.items():
+            function, args, calls, logs, _, _ = self.setup_cleanup(failure)
+            with self.subTest(failure=failure), self.assertRaises(RuntimeError) as caught:
+                function(*args)
+            self.assertEqual(type(caught.exception), RuntimeError)
+            self.assertEqual(caught.exception.args, ('uac_evidence_invalid:cleanup',))
+            self.assertEqual(diagnostic['uac_failure_message'](caught.exception),
+                             'uac_evidence_invalid:cleanup;stage=' + stage)
+            self.assertIsNone(caught.exception.__cause__)
+            self.assertTrue(caught.exception.__suppress_context__)
+            self.assertTrue(logs.closed)
+            self.assertIn('database', calls)
+        function, args, calls, logs, ldap, report = self.setup_cleanup()
+        ldap.retained_uac_evidence = None
+        report['collection_errors'].append('synthetic')
+        with self.assertRaises(RuntimeError) as caught:
+            function(*args)
+        self.assertEqual(diagnostic['uac_failure_stage'](caught.exception), 'cleanup_ldap_retained')
+        self.assertIn('diagnostics-write', calls)
+        function, args, _, logs, _, report = self.setup_cleanup()
+        report['collection_errors'].append('synthetic')
+        with self.assertRaises(RuntimeError) as caught:
+            function(*args)
+        self.assertEqual(diagnostic['uac_failure_stage'](caught.exception), 'cleanup_diagnostic_result')
+        function, args, calls, real_logs, _, _ = self.setup_cleanup()
+        broken = Mock(closed=False)
+        broken.close.side_effect = RuntimeError('PRIVATE_PROOF_DO_NOT_OUTPUT')
+        args = list(args); args[3] = broken
+        try:
+            with self.assertRaises(RuntimeError) as caught:
+                function(*args)
+            self.assertEqual(diagnostic['uac_failure_stage'](caught.exception), 'cleanup_log_close')
+            self.assertIn('diagnostics-write', calls)
+        finally:
+            real_logs.close()
+
+    def test_first_failure_sticky_and_owned_ldap_stage_cannot_stop_remaining_cleanup(self):
+        diagnostic = _diagnostic_scope()
+        stages = ('ldap_stop', 'ldap_inspect', 'ldap_exit', 'ldap_retained_read',
+                  'ldap_container_remove', 'ldap_network_remove', 'ldap_private_remove',
+                  'ldap_evidence_open', 'ldap_evidence_file', 'ldap_evidence_read',
+                  'ldap_evidence_json', 'ldap_evidence_schema', 'ldap_evidence_binding',
+                  'ldap_evidence_counts', 'ldap_evidence_state', 'ldap_evidence_sequence')
+        cases = [(None, lambda error, stage=stage: stage, stage) for stage in stages]
+        cases += [('snapshot', lambda error: 'ldap_evidence_binding', 'cleanup_snapshot'),
+                  (None, Mock(side_effect=RuntimeError('PRIVATE_ACCESSOR')), 'cleanup_ldap_close')]
+        for first, accessor, expected in cases:
+            function, args, calls, logs, ldap, report = self.setup_cleanup(first)
+            ldap.close.side_effect = RuntimeError('PRIVATE_LDAP')
+            function.__globals__['uac_ldap_failure_stage'] = accessor
+            report['collection_errors'].append('synthetic')
+            with self.assertRaises(RuntimeError) as caught:
+                function(*args)
+            self.assertEqual(diagnostic['uac_failure_stage'](caught.exception), expected)
+            self.assertTrue(logs.closed)
+            self.assertIn('database', calls)
+            self.assertIn('diagnostics-write', calls)
+        function, args, calls, logs, ldap, _ = self.setup_cleanup()
+        forged = RuntimeError('uac_evidence_invalid:cleanup')
+        forged.stage = 'ldap_evidence_binding'
+        ldap.close.side_effect = forged
+        with self.assertRaises(RuntimeError) as caught:
+            function(*args)
+        self.assertEqual(diagnostic['uac_failure_stage'](caught.exception), 'cleanup_ldap_close')
+
+
+class UACClosedRunnerDiagnosticContract(unittest.TestCase):
+    def run_boundaries(self, *, primary=None, cleanup_error=None, discovery_error=None,
+                       finalizer_error=None):
+        import sys
+        scope = _diagnostic_scope()
+        tree = ast.parse(Path('scripts/test_auth_e2e.py').read_text())
+        main = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == 'main')
+        outer = next(n for n in main.body if isinstance(n, ast.Try))
+        cleanup = next(n for n in ast.walk(outer) if isinstance(n, ast.If)
+                       and ast.unparse(n.test) == 'args.suite == UAC_SUITE'
+                       and any(isinstance(c, ast.Call) and isinstance(c.func, ast.Name)
+                               and c.func.id == 'cleanup_uac_run' for c in ast.walk(n)))
+        cleanup = copy.deepcopy(cleanup); cleanup.orelse = []
+        final = next(n for n in main.body if isinstance(n, ast.If)
+                     and ast.unparse(n.test) == 'args.suite == UAC_SUITE'
+                     and any(isinstance(c, ast.Call) and isinstance(c.func, ast.Name)
+                             and c.func.id == 'finalize_uac_evidence' for c in ast.walk(n)))
+        owned_cleanup = Mock(return_value={'synthetic': True}, side_effect=cleanup_error)
+        discovery = Mock(return_value=Path('synthetic-candidate'), side_effect=discovery_error)
+        finalize = Mock(side_effect=finalizer_error)
+        scope.update(sys=sys, Path=Path, args=SimpleNamespace(suite=SUITE), UAC_SUITE=SUITE,
+            primary=primary, cleanup_uac_run=owned_cleanup, worker=object(), server=object(),
+            diagnostics=object(), logs=object(), ldap_fixture=SimpleNamespace(retained_uac_evidence=(b'w', b's', 0)),
+            creation_attempted=True, name='synthetic', owner='synthetic', uac_nonce='a'*32,
+            diagnostic_dir=Path('.e2e-diagnostics'), uac_provenance=b'synthetic',
+            discover_uac_candidate=discovery, finalize_uac_evidence=finalize)
+        body = ast.parse('if primary is not None:\n    raise primary\n').body
+        module = ast.fix_missing_locations(ast.Module(body=[ast.Try(body=body, handlers=[],
+            orelse=[], finalbody=[cleanup]), copy.deepcopy(final)], type_ignores=[]))
+        stream = io.StringIO(); error = None
+        with contextlib.redirect_stderr(stream):
+            try:
+                exec(compile(module, '<actual-runner-boundaries>', 'exec'), scope)
+            except Exception as caught:
+                error = caught
+        return scope, error, stream.getvalue(), owned_cleanup, discovery, finalize
+
+    def test_actual_primary_error_wins_secondary_cleanup_and_never_finalizes(self):
+        diagnostic = _diagnostic_scope()
+        for primary in (RuntimeError('PRIVATE_PRIMARY'),
+                        diagnostic['uac_diagnostic_error']('post_binding', 'runner_main')):
+            for cleanup in (None, RuntimeError('PRIVATE_CLEANUP'),
+                            diagnostic['uac_diagnostic_error']('cleanup', 'cleanup_database_remove', kind='runtime')):
+                scope, error, output, owned, discovery, final = self.run_boundaries(
+                    primary=primary, cleanup_error=cleanup)
+                self.assertIs(error, primary)
+                owned.assert_called_once()
+                discovery.assert_not_called(); final.assert_not_called()
+                if cleanup is None:
+                    self.assertEqual(output, '')
+                else:
+                    stage = 'runner_main' if type(cleanup) is RuntimeError and cleanup.args == ('PRIVATE_CLEANUP',) else 'cleanup_database_remove'
+                    self.assertEqual(output, 'uac_evidence_invalid:cleanup;stage=' + stage + '\n')
+
+    def test_actual_success_cleanup_discovery_and_finalizer_order_and_fail_closed(self):
+        diagnostic = _diagnostic_scope()
+        scope, error, output, cleanup, discovery, final = self.run_boundaries()
+        self.assertIsNone(error); self.assertEqual(output, '')
+        cleanup.assert_called_once(); discovery.assert_called_once(); final.assert_called_once()
+        self.assertIsNone(scope['ldap_fixture']); self.assertIsNone(scope['uac_provenance'])
+        self.assertEqual(final.call_args.kwargs['candidate_path'], Path('synthetic-candidate'))
+        for failure in (RuntimeError('PRIVATE_CLEANUP'),
+                        diagnostic['uac_diagnostic_error']('cleanup', 'ldap_stop', kind='runtime')):
+            _, error, output, cleanup, discovery, final = self.run_boundaries(cleanup_error=failure)
+            self.assertEqual(error.args, ('uac_evidence_invalid:cleanup',))
+            self.assertEqual(output, ''); discovery.assert_not_called(); final.assert_not_called()
+        from validate_user_asset_export_v3_uac_evidence import UACEvidenceError
+        for failure, code in ((UACEvidenceError('candidate_discovery'), 'candidate_discovery'),
+                              (RuntimeError('PRIVATE_DISCOVERY'), 'publication')):
+            scope, error, output, _, discovery, final = self.run_boundaries(discovery_error=failure)
+            self.assertEqual(diagnostic['uac_failure_message'](error),
+                             'uac_evidence_invalid:' + code + ';stage=candidate_discovery')
+            self.assertEqual(output, ''); final.assert_not_called()
+            self.assertIsNone(scope['ldap_fixture']); self.assertIsNone(scope['uac_provenance'])
+        failure = diagnostic['uac_diagnostic_error']('artifact_binding', 'finalize_artifact_read')
+        scope, error, _, _, _, final = self.run_boundaries(finalizer_error=failure)
+        self.assertIs(error, failure); final.assert_called_once()
+        self.assertIsNone(scope['ldap_fixture']); self.assertIsNone(scope['uac_provenance'])
+
+    def test_actual_outer_catch_preserves_all_codes_and_never_formats_hostile_error(self):
+        import sys
+        from validate_user_asset_export_v3_uac_evidence import CODES, UACEvidenceError
+        diagnostic = _diagnostic_scope()
+        class Hostile(RuntimeError):
+            def __str__(self):
+                raise AssertionError('str must not be called')
+            def __repr__(self):
+                raise AssertionError('repr must not be called')
+            @property
+            def args(self):
+                raise AssertionError('args property must not be called')
+        tree = ast.parse(Path('scripts/test_auth_e2e.py').read_text())
+        outer = next(n for n in tree.body if isinstance(n, ast.If)
+                     and ast.unparse(n.test) == "__name__ == '__main__'")
+        module = ast.fix_missing_locations(ast.Module(body=[copy.deepcopy(outer)], type_ignores=[]))
+        cases = [(UACEvidenceError(code), 'uac_evidence_invalid:' + code + ';stage=runner_main')
+                 for code in sorted(CODES)]
+        cases += [(Hostile('PRIVATE'), 'uac_evidence_invalid:publication;stage=runner_main'),
+                  (RuntimeError('uac_evidence_invalid:cleanup\nPRIVATE'), 'uac_evidence_invalid:publication;stage=runner_main'),
+                  (diagnostic['uac_diagnostic_error']('cleanup', 'ldap_inspect', kind='runtime'),
+                   'uac_evidence_invalid:cleanup;stage=ldap_inspect')]
+        for error, expected in cases:
+            for argv in (['runner', '--suite', SUITE], ['runner', '--suite=' + SUITE]):
+                def main():
+                    raise error
+                scope = dict(diagnostic, __name__='__main__', UAC_SUITE=SUITE, sys=sys, main=main)
+                output = io.StringIO()
+                with patch.object(sys, 'argv', argv), contextlib.redirect_stderr(output), self.assertRaises(SystemExit) as caught:
+                    exec(compile(module, '<actual-runner-outer>', 'exec'), scope)
+                self.assertEqual(caught.exception.code, 1)
+                self.assertEqual(output.getvalue(), expected + '\n')
+        original = RuntimeError('NON_UAC_UNCHANGED')
+        def main():
+            raise original
+        with patch.object(sys, 'argv', ['runner', '--suite', 'auth']), self.assertRaises(RuntimeError) as caught:
+            exec(compile(module, '<actual-runner-outer>', 'exec'), dict(diagnostic,
+                __name__='__main__', UAC_SUITE=SUITE, sys=sys, main=main))
+        self.assertIs(caught.exception, original)
 
 
 if __name__ == '__main__':
