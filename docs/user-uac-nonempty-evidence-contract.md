@@ -91,9 +91,46 @@ finalizer验证所有原件及13键cleanup receipt，原子发布至唯一
 CLI仅有`capture --repo .`与`validate --repo . [--github-output]`；不提供可伪造success的finalize CLI。
 workflow复验同九件成功后，才输出一次`artifact_paths`九个排序精确路径并上传，禁止目录/glob兜底。
 Python 校验/发布失败仍只输出固定 `uac_evidence_invalid:<code>`。
-浏览器最外层失败只输出 `uac_evidence_invalid:<code>;stage=<stage>`：stage 为源码固定阶段枚举，
+浏览器最外层失败只输出 `uac_evidence_invalid:<code>;stage=<stage>`，safeResponse 失败可追加固定 `;check=<check>`：stage/check 为源码固定枚举，
 code 仅从完整匹配既有固定错误码的 Error 自有 message 数据属性映射；其他异常统一 unexpected。
 不转发原异常、message 后缀、stack、cause、DOM、URL、key 或 proof；getter 不执行。
 阶段表示最后进入的操作区间，不证明该区间已完成，也不将未知错误认定为 candidate schema 错误。
 这项诊断只为下次真实失败定位；删除会恢复不可定位的泛化失败，不影响验收判定。
 它不新增 artifact/schema/path/预算，不修改 validator、成功证据、重试或生产行为。
+
+
+## C响应原字节等价读取与固定诊断（新增共享范围34路径）
+
+C的 `safeResponse` 使用新增只读 `directoryUACResponseBytes`，不依赖 Playwright inspector 的
+`Response.body()` 副本，也不降级到 legacy JSON。既有observer只记录应用实际读取的native chunks，
+完整读取/释放后保存原文及原chunk字节数/SHA；完成后没有持久raw buffer可直接取出。
+新host接口复用原请求epoch/method/URL/ordinal/count、metadata和atomic take，不改原app fetch/read、
+promise/response/reader身份、原观察器捕获或旧JSON/witness API。只允许注册legacy模式的C四对endpoint/method，
+不refetch/clone/tee/route，不接收别页/别请求。
+
+在任何新Buffer分配前，native字节数与原文UTF8字节数必须都是1..1MiB且精确相等；
+host只读取一次原文/count/hash为同一局部快照，测量与编码必须使用同一string，防止getter换值绕开预分配上限。
+然后UTF8编码**未parse的原文**，SHA必须等于原native chunks的SHA。这是受hash绑定的原字节等价，
+不是把已parse的JSON重新stringify。TextDecoder吞掉前缀BOM（包括跨chunk）会使长度/hash不等，立即拒绝；
+原重复/escaped重复键仍保留给同一 `parseDirectoryV4UniqueJSON` 校验。E继续独立执行1MiB、BOM、
+fatal UTF8、unique JSON、object/scalar、最新proof/secret/raw-key扫描，不以共享接口代替这些检查。
+
+此读取沿用observer的15秒完成等待及15秒count-parity deadline；没有提高任何timeout或cap，
+C总体900秒不变。它采用历史completedRead政策：应用已完整解析并释放后允许UI清理abort留下的历史内容，
+不声称这是live未abort witness；原严格witness行为不改。
+
+同一Response的两个C消费者只作一次take：E内部cache的ready Promise仅resolve void，
+另存严验JSON；每caller返回独立clone，按当前actor/status/cache header及最新secret集合复核，
+最后metadata/secret检查到return之间无await。entry同时绑定最初actor，不能用变更后的header跨身份命中。
+任何失败都粘性poison并丢cached value；异步producer不得恢复ready，后续caller即使用空secret集合也拒绝。
+cache只存固定失败category，每次构造新safe Error，不能用改写旧Error污染另一caller。
+legacy/strict混用竞争原atomic take：最多一次成功转移/清理，失败方不使用legacy parsed值或inspector兜底。
+
+共享API只返回短时Buffer，不cache raw text/bytes；host私有原文在finally释放，失败buffer清零，
+E解析/扫描后在finally清零自身buffer。原观察器已有response原文可能含反射proof，B不新增request-body捕获或
+延长browser保留，不向日志/产物输出它；JavaScript不可变字符串及框架缓存仍不承诺物理擦除。
+
+固定check仅区分status、actor_header、cache_header、observed_body_read、observed_byte_binding、body_size、
+body_bom、body_utf8、body_json、body_object、body_privacy。它表示失败发生的检查区间，不输出实际值，
+不把post_binding名称解释成一定存在POST。旧run的具体失败分支仍未知；本变更修复已离线复现的inspector-copy依赖机制，
+不改写旧失败结论，真实C与九件发布仍必须由新精确head CI证明。

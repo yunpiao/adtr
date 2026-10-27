@@ -469,6 +469,7 @@ const unused = stub('const fail = () => { throw new Error("unexpected_offline_de
 const imports = new Map([
   [parserURL, { "./api": stub('export class ApiError extends Error { constructor() { super("invalid_response"); } }') }],
   [helperURL, { "../src/directory-v4-controls-json": parserURL,
+    "./directory-v2-response-observer": stub('export const directoryUACResponseBytes = async (response) => response.body(); export const directoryUACResponseFailureCheck = () => undefined;'),
     "./user-asset-export-v3-helpers": stub('import { createHash } from "node:crypto"; export const hash = (v) => createHash("sha256").update(v).digest("hex");') }],
   [fixtureURL, { "./navigation": unused, "@playwright/test": unused, "./directory-v2-response-observer": unused }],
 ]);
@@ -618,6 +619,122 @@ async function reject(input, reader=async () => storage, secrets=[]) {
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(result.stdout.strip(), 'offline_parser_observer_contract_pass')
 
+    def test_safe_response_closed_checks_cache_and_late_secret(self):
+        # Actual TS sources run in Node before npm ci. Explicit unit seams are
+        # distinct from the native observer/Response/ReadableStream pipeline.
+        # Test-only cache inspection never changes production exports or files.
+        script = r'''const path=require('node:path'),crypto=require('node:crypto');
+const {registerHooks,isBuiltin}=require('node:module');const{pathToFileURL}=require('node:url');
+const root=process.argv[1],local=n=>pathToFileURL(path.join(root,n)).href,stub=s=>'data:text/javascript,'+encodeURIComponent(s);
+const helperURL=local('web/e2e/user-asset-export-v3-uac-helpers.ts'),parserURL=local('web/src/directory-v4-controls-json.ts');
+const tags=new WeakMap();globalThis.__uacUnitBytes=r=>r.read();globalThis.__uacUnitFailure=e=>e!==null&&typeof e==='object'?tags.get(e):undefined;
+const imports=new Map([[helperURL,{'../src/directory-v4-controls-json':parserURL,'./user-asset-export-v3-helpers':stub('import{createHash}from"node:crypto";export const hash=v=>createHash("sha256").update(v).digest("hex");'),'./directory-v2-response-observer':stub('export const directoryUACResponseBytes=r=>globalThis.__uacUnitBytes(r);export const directoryUACResponseFailureCheck=e=>globalThis.__uacUnitFailure(e);')}],[parserURL,{'./api':stub('export class ApiError extends Error{}')}] ]);
+const hooks=registerHooks({resolve(s,c,n){const d=imports.get(c.parentURL);if(d&&Object.hasOwn(d,s))return{url:d[s],shortCircuit:true};if(d&&!isBuiltin(s))throw new Error('unexpected_offline_dependency');return n(s,c);},load(url,c,n){const out=n(url,c);return url===helperURL?{...out,source:Buffer.from(out.source).toString()+'\nglobalThis.__uacUnitCache=safeResponses;\n'}:out;}});
+let h;try{h=require(path.join(root,'web/e2e/user-asset-export-v3-uac-helpers.ts'));}finally{hooks.deregister();}
+const check=x=>{if(!x)throw new Error('unit_assertion');};
+const secret='UNIT_PRIVATE_ERROR_DO_NOT_REPORT';
+const checks=['status','actor_header','cache_header','observed_body_read','observed_byte_binding','body_size','body_bom','body_utf8','body_json','body_object','body_privacy'];
+function make(raw=JSON.stringify({nested:{value:'safe'}})){
+ const r={http:200,actor:'1',cache:'no-store',reads:0,buffers:[],status(){return this.http;},headers(){return{'x-adtr-user-id':this.actor,'cache-control':this.cache};},async read(){this.reads++;const b=Buffer.isBuffer(raw)?Buffer.from(raw):Buffer.from(raw);this.buffers.push(b);return b;}};return r;
+}
+async function rejection(r,expected,secrets=[],actor=1,waitReady=true){let error;try{await h.safeResponse(r,actor,secrets);}catch(e){error=e;}
+ check(error instanceof Error&&error.message==='uac_evidence_invalid:post_binding'&&error.cause===undefined&&!error.stack.includes(secret));
+ check(h.uacFailureMessage(error,'list_read')===`uac_evidence_invalid:post_binding;stage=list_read;check=${expected}`);
+ const entry=globalThis.__uacUnitCache.get(r);check(entry.state==='failed'&&entry.value===undefined&&checks.includes(entry.failure));if(waitReady)check(await entry.ready===undefined);
+ return error;
+}
+(async()=>{
+ const r=make();const [a,b]=await Promise.all([h.safeResponse(r,1,[]),h.safeResponse(r,1,[])]);check(r.reads===1&&a!==b&&a.nested!==b.nested);
+ a.nested.value='changed';const c=await h.safeResponse(r,1,[]);check(c.nested.value==='safe'&&r.buffers.every(b=>b.every(x=>x===0))&&await globalThis.__uacUnitCache.get(r).ready===undefined);
+ const cases=[['body_size',Buffer.alloc(0)],['body_size',Buffer.alloc((1<<20)+1)],['body_bom',Buffer.from('\uFEFF{}')],['body_utf8',Buffer.from([255])],['body_json','{"x":'],['body_json','{"x":1,"x":2}'],['body_json','{"x":1,"\\u0078":2}'],['body_object','null'],['body_object','[]'],['body_object','1'],['body_privacy','{"x":"\\ud800"}'],['body_privacy','{"x":1e999}']];
+ for(const [category,raw]of cases){const x=make(raw);await rejection(x,category);check(x.reads===1&&x.buffers.every(b=>b.every(v=>v===0)));}
+ for(const [field,value,category]of [['http',503,'status'],['actor','2','actor_header'],['cache','public','cache_header']]){const x=make();x[field]=value;await rejection(x,category);check(x.reads===0);}
+ const headersChanged=make();await h.safeResponse(headersChanged,1,[]);headersChanged.actor='2';await rejection(headersChanged,'actor_header',[],2);check(headersChanged.reads===1);
+ for(const [field,value,category]of [['http',503,'status'],['actor','2','actor_header'],['cache','public','cache_header']]){const x=make();await h.safeResponse(x,1,[]);x[field]=value;await rejection(x,category);check(x.reads===1);}
+ for(const [method,category]of [['status','status'],['headers','actor_header'],['read','observed_body_read']]){const x=make();x[method]=()=>{throw new Error(secret,{cause:new Error(secret)});};await rejection(x,category);}
+ const typed=make();typed.read=async()=>{const e=new Error('fixed_observed_error');tags.set(e,'observed_byte_binding');throw e;};await rejection(typed,'observed_byte_binding');
+ const untyped=make();untyped.read=async()=>{const e=new Error(secret);tags.set(e,secret);throw e;};await rejection(untyped,'observed_body_read');
+ let getterCalls=0;const hostile=make();hostile.read=async()=>{const e=new Error();Object.defineProperty(e,'message',{get(){getterCalls++;throw new Error(secret);}});throw e;};await rejection(hostile,'observed_body_read');check(getterCalls===0);
+ const late=make('{"value":"late-private"}'),secrets=[];await h.safeResponse(late,1,secrets);secrets.push('late-private');const error=await rejection(late,'body_privacy',secrets);error.message=secret;error.stack=secret;const second=await rejection(late,'body_privacy',[]);check(error!==second&&late.reads===1);
+ // Register a newly observed real parser proof, without mutating the private list.
+ const proofList=[],reflected=make('{"value":"843921"}');await h.safeResponse(reflected,1,proofList);
+ const source={taskUUID:'synthetic-observation',selection:{domainId:'synthetic-domain',revision:'2',credentialRevision:'1'}},expected=h.expectedUACRequest(source,'set');
+ const frame={},page={mainFrame:()=>frame},key='01234567-89ab-4cde-8123-456789abcdef';
+ const raw=Buffer.from(JSON.stringify({...expected,idempotencyKey:key,actorPassword:'unit-password',totpCode:'843921'}));
+ await h.inspectUACCreateRequest({frame:()=>frame,method:()=>'POST',url:()=>'http://127.0.0.1:12345'+h.exportPrefix,postDataBuffer:()=>raw},expected,1,page,'http://127.0.0.1:12345',async()=>JSON.stringify({version:1,kind:'user_assets.v3.export',actorID:1,domainId:'synthetic-domain',idempotencyKey:key}),proofList);
+ await rejection(reflected,'body_privacy',proofList);await rejection(reflected,'body_privacy',[]);check(reflected.reads===1);
+ // Poison while a producer waits, then ensure neither producer nor other caller revives data.
+ for(const kind of ['actor','secret']){const x=make('{"value":"late-private"}');let release;const barrier=new Promise(r=>release=r),read=x.read.bind(x);x.read=async()=>{await barrier;return read();};const list=[];
+ const first=h.safeResponse(x,1,list).then(()=>false,e=>h.uacFailureMessage(e,'list_read'));
+ if(kind==='actor'){const bad=await rejection(x,'actor_header',[],2,false);check(bad);}
+ else list.push('late-private');
+ release();const outcome=await first;check(outcome===`uac_evidence_invalid:post_binding;stage=list_read;check=${kind==='actor'?'actor_header':'body_privacy'}`);
+ await rejection(x,kind==='actor'?'actor_header':'body_privacy',[]);check(x.reads===1&&x.buffers.every(b=>b.every(v=>v===0)));}
+ // Metadata changes while awaiting are rechecked before cache data can return.
+ const changing=make();let release;const gate=new Promise(r=>release=r),read=changing.read.bind(changing);changing.read=async()=>{await gate;return read();};
+ const pending=h.safeResponse(changing,1,[]).then(()=>false,e=>h.uacFailureMessage(e,'list_read'));changing.cache='public';release();check(await pending==='uac_evidence_invalid:post_binding;stage=list_read;check=cache_header');await rejection(changing,'cache_header');
+ const cap=make('{"x":"'+'a'.repeat((1<<20)-8)+'"}');check((await h.safeResponse(cap,1,[])).x.length===(1<<20)-8);check(cap.reads===1&&cap.buffers[0].every(v=>v===0));
+ console.log('offline_safe_response_checks_cache_privacy_pass');
+})().catch(()=>{console.error('offline_safe_response_checks_cache_privacy_failed');process.exitCode=1;});
+'''
+        result = subprocess.run(['node', '-e', script, str(ROOT)],
+                                capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(result.stdout.strip(), 'offline_safe_response_checks_cache_privacy_pass')
+
+    def test_actual_native_observer_and_uac_strict_response_pipeline(self):
+        # Actual TS sources run in Node before npm ci. Explicit unit seams are
+        # distinct from the native observer/Response/ReadableStream pipeline.
+        # Test-only cache inspection never changes production exports or files.
+        script = r'''const path=require('node:path'),crypto=require('node:crypto');const{registerHooks,isBuiltin}=require('node:module'),{pathToFileURL}=require('node:url'),{EventEmitter}=require('node:events');
+const root=process.argv[1],local=n=>pathToFileURL(path.join(root,n)).href,stub=s=>'data:text/javascript,'+encodeURIComponent(s);
+const helperURL=local('web/e2e/user-asset-export-v3-uac-helpers.ts'),observerURL=local('web/e2e/directory-v2-response-observer.ts'),parserURL=local('web/src/directory-v4-controls-json.ts'),readerURL=local('web/src/directory-v2-json.ts');
+const api=stub('export class ApiError extends Error{constructor(code){super(code);}}');
+const imports=new Map([[helperURL,{'../src/directory-v4-controls-json':parserURL,'./directory-v2-response-observer':observerURL,'./user-asset-export-v3-helpers':stub('import{createHash}from"node:crypto";export const hash=v=>createHash("sha256").update(v).digest("hex");')}],[observerURL,{'../src/directory-v4-controls-json':parserURL}],[parserURL,{'./api':api}],[readerURL,{'./api':api}]]);
+const hooks=registerHooks({resolve(s,c,n){const d=imports.get(c.parentURL);if(d&&Object.hasOwn(d,s))return{url:d[s],shortCircuit:true};if(d&&!isBuiltin(s))throw new Error('unexpected_offline_dependency');return n(s,c);},load(url,c,n){const out=n(url,c);return url===helperURL?{...out,source:Buffer.from(out.source).toString()+'\nglobalThis.__uacPipelineCache=safeResponses;\n'}:out;}});
+let h,o,reader;try{h=require(path.join(root,'web/e2e/user-asset-export-v3-uac-helpers.ts'));o=require(path.join(root,'web/e2e/directory-v2-response-observer.ts'));reader=require(path.join(root,'web/src/directory-v2-json.ts'));}finally{hooks.deregister();}
+const check=x=>{if(!x)throw new Error('unit_assertion');};const origin='http://127.0.0.1:12345';
+async function harness(chunks){let register,captured,inspectorCalls=0,nativeCalls=0,takeAttempts=0,successfulTakes=0;
+ const frame={page:()=>page,url:()=>origin+'/'},page={mainFrame:()=>frame,evaluate:async(fn,arg)=>fn(arg),waitForFunction:async(fn,arg)=>{const until=Date.now()+3000;while(!fn(arg)){check(Date.now()<until);await new Promise(r=>setTimeout(r,1));}}};
+ class Context extends EventEmitter{async exposeBinding(_,fn){register=fn;}async addInitScript(){}}
+ const context=new Context();await o.observeDirectoryV2Responses(context);
+ const native=new Response(new ReadableStream({start(c){for(const chunk of chunks)c.enqueue(new Uint8Array(chunk));c.close();}}),{headers:{'Cache-Control':'no-store','X-ADTR-User-ID':'1'}});
+ const nativePromise=Promise.resolve(native);
+ globalThis.location=new URL(origin);globalThis.window={__adtrDirectoryV2Document:async(epoch)=>register({page,frame},epoch),fetch:(url,init)=>{nativeCalls++;
+  const request={frame:()=>frame,resourceType:()=>'fetch',url:()=>origin+url,method:()=>init?.method??'GET'};context.emit('request',request);
+  captured={currentActor:'1',currentCache:'no-store',url:request.url,request:()=>request,status:()=>200,headers(){return{'x-adtr-user-id':this.currentActor,'cache-control':this.currentCache};},body:async()=>{inspectorCalls++;throw new Error('UNIT_PRIVATE_INSPECTOR_ERROR');},json:async()=>{inspectorCalls++;throw new Error('UNIT_PRIVATE_INSPECTOR_ERROR');}};
+  return nativePromise;
+ }};window.top=window;o.installDirectoryV2ResponseObserver();const obs=window.__adtrDirectoryV2ResponseObserver,take=obs.take.bind(obs);
+ obs.take=(...args)=>{takeAttempts++;const value=take(...args);successfulTakes++;return value;};
+ const pending=window.fetch('/api/user-assets/v3');check(pending===nativePromise);const response=await pending;check(response===native);
+ let appAccepted=true;try{await reader.readDirectoryV2JSON(response,new AbortController().signal);}catch{appAccepted=false;}
+ return{response:captured,appAccepted,counts:()=>({inspectorCalls,nativeCalls,takeAttempts,successfulTakes}),record:()=>obs.peek('GET '+origin+'/api/user-assets/v3',0)};
+}
+async function reject(response,category,secrets=[]){let error;try{await h.safeResponse(response,1,secrets);}catch(e){error=e;}
+ check(error instanceof Error&&error.cause===undefined&&h.uacFailureMessage(error,'list_read')===`uac_evidence_invalid:post_binding;stage=list_read;check=${category}`);
+ check(!error.stack.includes('UNIT_PRIVATE'));const entry=globalThis.__uacPipelineCache.get(response);check(entry.state==='failed'&&entry.value===undefined&&await entry.ready===undefined);return error;}
+(async()=>{
+ const valid=Buffer.from('{ "nested": {"x":"😀"}, "escape":"\\u0078" }');
+ const good=await harness(Array.from(valid,b=>Buffer.from([b])));check(good.appAccepted);
+ const [a,b]=await Promise.all([h.safeResponse(good.response,1,[]),h.safeResponse(good.response,1,[])]);check(a!==b&&a.nested!==b.nested&&a.nested.x==='😀');a.nested.x='changed';check((await h.safeResponse(good.response,1,[])).nested.x==='😀');
+ check(JSON.stringify(good.counts())===JSON.stringify({inspectorCalls:0,nativeCalls:1,takeAttempts:1,successfulTakes:1}));check(good.record().text==='');
+ const bom=Buffer.from([239,187,191]);for(const chunks of [[Buffer.concat([bom,valid])],[bom.subarray(0,1),bom.subarray(1),valid],[bom.subarray(0,2),bom.subarray(2),valid],[bom.subarray(0,1),bom.subarray(1,2),bom.subarray(2),valid],[Buffer.alloc(0),bom.subarray(0,1),Buffer.alloc(0),bom.subarray(1,2),Buffer.alloc(0),bom.subarray(2),valid]]){
+  const x=await harness(chunks);check(x.appAccepted);await reject(x.response,'observed_byte_binding');check(x.counts().inspectorCalls===0&&x.counts().successfulTakes===1&&x.record().text==='');
+ }
+ for(const raw of ['{"x":1,"x":2}','{"x":1,"\\u0078":2}']){const x=await harness([Buffer.from(raw)]);check(x.appAccepted);await reject(x.response,'body_json');check(x.counts().inspectorCalls===0);}
+ const invalid=await harness([Buffer.from('{"x":"'),Buffer.from([255]),Buffer.from('"}')]);check(!invalid.appAccepted);await reject(invalid.response,'observed_body_read');
+ const exact=await harness([Buffer.from('{"x":"'+'a'.repeat((1<<20)-8)+'"}')]);check((await h.safeResponse(exact.response,1,[])).x.length===(1<<20)-8);
+ const over=await harness([Buffer.from('{"x":"'+'a'.repeat((1<<20)-7)+'"}')]);check(over.appAccepted);await reject(over.response,'observed_byte_binding');
+ const privateValue=await harness([Buffer.from('{"x":"UNIT_PRIVATE_VALUE"}')]);const secrets=[];await h.safeResponse(privateValue.response,1,secrets);secrets.push('UNIT_PRIVATE_VALUE');await reject(privateValue.response,'body_privacy',secrets);await reject(privateValue.response,'body_privacy',[]);check(privateValue.counts().successfulTakes===1&&privateValue.counts().inspectorCalls===0);
+ const metadata=await harness([valid]);await h.safeResponse(metadata.response,1,[]);metadata.response.currentCache='public';await reject(metadata.response,'cache_header');check(metadata.counts().successfulTakes===1);
+ console.log('offline_actual_native_observer_uac_pipeline_pass');
+})().catch(()=>{console.error('offline_actual_native_observer_uac_pipeline_failed');process.exitCode=1;});
+'''
+        result = subprocess.run(['node', '-e', script, str(ROOT)],
+                                capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(result.stdout.strip(), 'offline_actual_native_observer_uac_pipeline_pass')
+
     def test_actual_spec_closed_failure_stages_and_secret_errors(self):
         # Execute the actual spec and its safety primitives with closed offline
         # browser/IO seams. The load hook only injects throws immediately after
@@ -719,7 +836,8 @@ globalThis.__uacMocks = {test:testMock,expect:expectMock,navigateTo:async()=>{},
 const stubExports = (names) => stub(names.map(n=>`export const ${n}=globalThis.__uacMocks.${n};`).join('\n'));
 const helperStub = stub('export const '+['captureUACReadOnlyScreenshot','storedUACSource','storedUACExport','readUACOriginalReceipt','observeUACExportWrites'].map(n=>`${n}=globalThis.__uacMocks.${n}`).join(',')+';\n'+['expectedUACRequest','safeResponse','safeValue','sameValue','uacRequire','uacFailureMessage','exportPrefix'].map(n=>`export const ${n}=globalThis.__actualUAC.${n};`).join('\n'));
 const imports = new Map([
- [helperURL,{'../src/directory-v4-controls-json':parserURL,'./user-asset-export-v3-helpers':stubExports(['hash'])}],
+ [helperURL,{'../src/directory-v4-controls-json':parserURL,'./user-asset-export-v3-helpers':stubExports(['hash']),
+ './directory-v2-response-observer':stub('export const directoryUACResponseBytes = async (response) => response.body(); export const directoryUACResponseFailureCheck = (error) => globalThis.__uacObservedCheck?.(error);')}],
  [parserURL,{'./api':stub('export class ApiError extends Error {}')}],
  [specURL,{'@playwright/test':stubExports(['test','expect']),'node:fs/promises':stubExports(Object.keys(fsMock)),
  './navigation':stubExports(['navigateTo']),'./group-assets-v3-fixture':stubExports(['setupUACGroupFixture','proof','readJSON']),
@@ -759,14 +877,31 @@ async function run(at,error){target=at;injected=error;stages=[];mode='omitted';i
  }
  check(getterCalls===0 && h.uacFailureMessage(new Error(secret),secret)==='uac_evidence_invalid:unexpected;stage=unexpected');
  for(const code of unit.codes)check(h.uacFailureMessage(new Error('uac_evidence_invalid:'+code),'initial_list')===`uac_evidence_invalid:${code};stage=initial_list`);
- console.log('offline_actual_spec_closed_diagnostic_pass stages='+stageSet.length+' injections='+stageSet.length*2);
+ // Pass actual safeResponse-owned closed checks through the actual spec catch.
+ const observedChecks=new WeakMap();globalThis.__uacObservedCheck=e=>e&&typeof e==='object'?observedChecks.get(e):undefined;
+ const predicateCases=[['status',{}],['actor_header',{}],['cache_header',{}],['observed_body_read',{}],['observed_byte_binding',{}],
+  ['body_size',Buffer.alloc(0)],['body_bom',Buffer.from('\uFEFF{}')],['body_utf8',Buffer.from([255])],['body_json',Buffer.from('{"x":1,"x":2}')],
+  ['body_object',Buffer.from('[]')],['body_privacy',Buffer.from(JSON.stringify({value:secret}))]];
+ for(const [category,raw]of predicateCases){
+  const r=response('/api/user-assets/v3',{});
+  if(category==='status')r.status=()=>503;
+  if(category==='actor_header')r.headers=()=>({'x-adtr-user-id':'2','cache-control':'no-store'});
+  if(category==='cache_header')r.headers=()=>({'x-adtr-user-id':'1','cache-control':'public'});
+  if(category.startsWith('observed_'))r.body=async()=>{const e=new Error(secret,{cause:new Error(secret)});if(category==='observed_byte_binding')observedChecks.set(e,category);throw e;};
+  else if(Buffer.isBuffer(raw))r.body=async()=>Buffer.from(raw);
+  let tagged;try{await h.safeResponse(r,1,[secret]);}catch(e){tagged=e;}
+  check(tagged instanceof Error);const result=await run('list_read',tagged);
+  check(result.failure instanceof Error&&result.failure.message===`uac_evidence_invalid:post_binding;stage=list_read;check=${category}`);
+  check(result.writes===0&&result.closed>=1&&result.failure.cause===undefined&&!result.failure.stack.includes(secret));
+ }
+ console.log('offline_actual_spec_closed_diagnostic_pass stages='+stageSet.length+' injections='+stageSet.length*2+' response_checks='+predicateCases.length);
 })().catch(()=>{console.error('offline_actual_spec_closed_diagnostic_failed');process.exitCode=1;});
 '''
         result = subprocess.run(['node', '-e', script, str(ROOT)], input=json.dumps(payload),
                                 capture_output=True, text=True, timeout=30)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(result.stdout.strip(),
-                         'offline_actual_spec_closed_diagnostic_pass stages=29 injections=58')
+                         'offline_actual_spec_closed_diagnostic_pass stages=29 injections=58 response_checks=11')
 
     def test_browser_and_sql_safety_source_contract(self):
         helper = (ROOT / 'web/e2e/user-asset-export-v3-uac-helpers.ts').read_text()
@@ -778,6 +913,9 @@ async function run(at,error){target=at;injected=error;stages=[];mode='omitted';i
         self.assertNotIn('.screenshot(', spec)
         self.assertNotIn('removeItem(', spec + helper)
         self.assertNotIn('route(', spec + helper)
+        self.assertNotIn('response.body()', helper)
+        self.assertNotIn('directoryV2ResponseJSON', helper)
+        self.assertIn('await directoryUACResponseBytes(response)', helper)
         self.assertNotIn('mask:', spec + helper)
         fixture = (ROOT / 'web/e2e/group-assets-v3-fixture.ts').read_text()
         self.assertIn('options: { emptyRefresh?: boolean; userAssetExport?: boolean } = {}', fixture)

@@ -9,6 +9,10 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { parseDirectoryV4UniqueJSON } from "../src/directory-v4-controls-json";
 import { hash } from "./user-asset-export-v3-helpers";
+import {
+  directoryUACResponseBytes,
+  directoryUACResponseFailureCheck,
+} from "./directory-v2-response-observer";
 
 export const exportPrefix = "/api/user-assets/v3/exports";
 const recoveryStorage = "adtr.user-assets-v3.export-recovery";
@@ -184,6 +188,32 @@ const uacFailureCodes = [
   "cleanup",
   "publication",
 ] as const;
+const uacResponseChecks = [
+  "status",
+  "actor_header",
+  "cache_header",
+  "observed_body_read",
+  "observed_byte_binding",
+  "body_size",
+  "body_bom",
+  "body_utf8",
+  "body_json",
+  "body_object",
+  "body_privacy",
+] as const;
+type UACResponseCheck = (typeof uacResponseChecks)[number];
+const responseFailureChecks = new WeakMap<object, UACResponseCheck>();
+function responseFailure(check: UACResponseCheck): Error {
+  const error = new Error("uac_evidence_invalid:post_binding");
+  responseFailureChecks.set(error, check);
+  return error;
+}
+function ownedResponseCheck(error: unknown): UACResponseCheck | undefined {
+  return error !== null && typeof error === "object"
+    ? responseFailureChecks.get(error)
+    : undefined;
+}
+
 export function uacFailureMessage(
   error: unknown,
   stage: UACFailureStage,
@@ -204,7 +234,11 @@ export function uacFailureMessage(
   }
   const safeStage =
     uacFailureStages.find((value) => value === stage) ?? "unexpected";
-  return `uac_evidence_invalid:${code};stage=${safeStage}`;
+  const check =
+    code === "post_binding"
+      ? uacResponseChecks.find((value) => value === ownedResponseCheck(error))
+      : undefined;
+  return `uac_evidence_invalid:${code};stage=${safeStage}${check ? `;check=${check}` : ""}`;
 }
 
 export function uacRequire(
@@ -504,31 +538,133 @@ export async function inspectUACCreateRequest(
   }
 }
 
+type SafeResponseEntry = {
+  actor: number;
+  ready: Promise<void>;
+  state: "pending" | "ready" | "failed";
+  value?: Record<string, unknown>;
+  failure?: UACResponseCheck;
+};
+// Raw bytes/text never enter this cache. A readiness promise resolves only void,
+// so a later poison can drop the sole cached value instead of retaining it in a
+// fulfilled Promise. Failure categories, not mutable Error objects, are shared.
+const safeResponses = new WeakMap<Response, SafeResponseEntry>();
+function poisonResponse(
+  entry: SafeResponseEntry,
+  check: UACResponseCheck,
+): void {
+  if (entry.state !== "failed") entry.failure = check;
+  entry.state = "failed";
+  entry.value = undefined;
+}
+function responseMetadataCheck(
+  response: Response,
+  actor: number,
+): UACResponseCheck | undefined {
+  let check: UACResponseCheck = "status";
+  try {
+    if (response.status() !== 200) return check;
+    check = "actor_header";
+    const headers = response.headers();
+    if (headers["x-adtr-user-id"] !== String(actor)) return check;
+    check = "cache_header";
+    if (headers["cache-control"] !== "no-store") return check;
+    return undefined;
+  } catch {
+    return check;
+  }
+}
+async function loadSafeResponse(
+  response: Response,
+  knownSecrets: readonly string[],
+  entry: SafeResponseEntry,
+): Promise<void> {
+  let bytes: Buffer | undefined;
+  let check: UACResponseCheck = "observed_body_read";
+  try {
+    bytes = await directoryUACResponseBytes(response);
+    if (entry.state === "failed") return;
+    check = "body_size";
+    uacRequire(
+      Buffer.isBuffer(bytes) && bytes.length > 0 && bytes.length <= 1 << 20,
+    );
+    check = "body_bom";
+    uacRequire(!(bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf));
+    check = "body_utf8";
+    const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    check = "body_json";
+    const value = parseDirectoryV4UniqueJSON(text);
+    check = "body_object";
+    uacRequire(object(value));
+    check = "body_privacy";
+    safeValue(value, knownSecrets);
+    // A concurrent caller may have poisoned this entry while the body awaited.
+    // Never restore ready state or republish a value after any failure.
+    if (entry.state === "pending") {
+      entry.value = value;
+      entry.state = "ready";
+    }
+  } catch (error) {
+    const observed = directoryUACResponseFailureCheck(error);
+    poisonResponse(
+      entry,
+      observed === "observed_body_read" || observed === "observed_byte_binding"
+        ? observed
+        : check,
+    );
+  } finally {
+    if (Buffer.isBuffer(bytes)) bytes.fill(0);
+    bytes = undefined;
+  }
+}
+
 export async function safeResponse(
   response: Response,
   actor: number,
   knownSecrets: readonly string[],
 ): Promise<Record<string, unknown>> {
+  let entry: SafeResponseEntry | undefined;
+  let check: UACResponseCheck = "status";
   try {
-    uacRequire(
-      response.status() === 200 &&
-        response.headers()["x-adtr-user-id"] === String(actor) &&
-        response.headers()["cache-control"] === "no-store",
-    );
-    const bytes = await response.body();
-    uacRequire(
-      bytes.length > 0 &&
-        bytes.length <= 1 << 20 &&
-        !(bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf),
-    );
-    const value = parseDirectoryV4UniqueJSON(
-      new TextDecoder("utf-8", { fatal: true }).decode(bytes),
-    );
-    uacRequire(object(value));
+    entry = safeResponses.get(response);
+    const firstMetadata = responseMetadataCheck(response, actor);
+    if (firstMetadata) {
+      check = firstMetadata;
+      if (!entry) {
+        entry = { actor, state: "pending", ready: Promise.resolve() };
+        safeResponses.set(response, entry);
+      }
+      poisonResponse(entry, check);
+      throw responseFailure(entry.failure ?? check);
+    }
+    if (!entry) {
+      entry = { actor, state: "pending", ready: Promise.resolve() };
+      safeResponses.set(response, entry);
+      entry.ready = loadSafeResponse(response, knownSecrets, entry);
+    }
+    check = "actor_header";
+    uacRequire(entry.actor === actor);
+    check = "observed_body_read";
+    await entry.ready;
+    if (entry.state === "failed") throw responseFailure(entry.failure ?? check);
+    check = "body_object";
+    uacRequire(entry.state === "ready" && object(entry.value));
+    const value = structuredClone(entry.value);
+    // No await between the final per-caller metadata/secret checks and return.
+    const finalMetadata = responseMetadataCheck(response, actor);
+    if (finalMetadata) {
+      check = finalMetadata;
+      poisonResponse(entry, check);
+      throw responseFailure(entry.failure ?? check);
+    }
+    check = "body_privacy";
     safeValue(value, knownSecrets);
     return value;
-  } catch {
-    throw new Error("uac_evidence_invalid:post_binding");
+  } catch (error) {
+    const failure = ownedResponseCheck(error) ?? check;
+    if (entry) poisonResponse(entry, failure);
+    // Every caller receives a new safe Error; mutating one cannot affect another.
+    throw responseFailure(entry?.failure ?? failure);
   }
 }
 
