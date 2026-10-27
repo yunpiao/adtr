@@ -215,7 +215,7 @@ jobs:
     if: ${{ needs.plan.outputs.browser == 'true' }}
     needs: [plan, prepare-postgres]
     env:
-      ADTR_E2E_NATIVE_STREAM_MODE: ${{ (matrix.name == 'group-asset-export-v3-running-cancel' || matrix.name == 'computer-asset-export-v3-running-cancel' || matrix.name == 'user-asset-export-v3-running-cancel' || matrix.name == 'computer-asset-export-v3' || matrix.name == 'computer-asset-export-v3-failure' || matrix.name == 'computer-asset-export-v3-cancel' || matrix.name == 'group-asset-export-v3' || matrix.name == 'group-asset-export-v3-failure' || matrix.name == 'group-asset-export-v3-cancel' || matrix.name == 'user-asset-export-v3-failure' || matrix.name == 'user-asset-export-v3-cancel' || matrix.name == 'user-asset-export-v3' || matrix.name == 'user-assets-v2' || matrix.name == 'user-assets-v2-readers' || matrix.name == 'user-assets-v3' || matrix.name == 'computer-assets-v3' || matrix.name == 'computer-assets-v3-readers' || matrix.name == 'group-assets-v3' || matrix.name == 'group-assets-v3-readers') && 'stable-body' || 'native-finish' }}
+      ADTR_E2E_NATIVE_STREAM_MODE: ${{ (matrix.name == 'group-asset-export-v3-running-cancel' || matrix.name == 'computer-asset-export-v3-running-cancel' || matrix.name == 'user-asset-export-v3-running-cancel' || matrix.name == 'computer-asset-export-v3' || matrix.name == 'computer-asset-export-v3-failure' || matrix.name == 'computer-asset-export-v3-cancel' || matrix.name == 'group-asset-export-v3' || matrix.name == 'group-asset-export-v3-failure' || matrix.name == 'group-asset-export-v3-cancel' || matrix.name == 'user-asset-export-v3-failure' || matrix.name == 'user-asset-export-v3-cancel' || matrix.name == 'user-asset-export-v3-uac-mixed33' || matrix.name == 'user-asset-export-v3' || matrix.name == 'user-assets-v2' || matrix.name == 'user-assets-v2-readers' || matrix.name == 'user-assets-v3' || matrix.name == 'computer-assets-v3' || matrix.name == 'computer-assets-v3-readers' || matrix.name == 'group-assets-v3' || matrix.name == 'group-assets-v3-readers') && 'stable-body' || 'native-finish' }}
     runs-on: ubuntu-24.04
     timeout-minutes: ${{ matrix.name == 'tasks-health-recovery' && 30 || 20 }}
     permissions:
@@ -638,6 +638,18 @@ jobs:
             web/playwright-report/user-export-validated/empty-ready.png
           # No trace, videos, logs, storage state, credentials or raw failures.
           # Only independently validated synthetic JSON, XLSX and safe PNGs.
+          if-no-files-found: error
+          retention-days: 14
+      - name: Validate nonempty UAC mixed33 post-cleanup evidence
+        id: user-uac-evidence
+        if: ${{ success() && matrix.name == 'user-asset-export-v3-uac-mixed33' }}
+        run: python3 scripts/user_asset_export_v3_uac_ci.py validate --repo . --github-output
+      - name: Retain exact nine validated nonempty UAC artifacts
+        if: ${{ success() && matrix.name == 'user-asset-export-v3-uac-mixed33' && steps.user-uac-evidence.outcome == 'success' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: user-asset-export-v3-uac-mixed33-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ steps.user-uac-evidence.outputs.artifact_paths }}
           if-no-files-found: error
           retention-days: 14
       - name: Validate refreshed group membership dictionary4 browser evidence

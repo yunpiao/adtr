@@ -48,8 +48,11 @@ def restore_auth_selector_source(raw):
 
 
 def restore_auth_helper_source(text):
+    return restore_auth_helper_source_predecessor(restore_native_budget_helper_source(text))
+
+
+def restore_auth_helper_source_predecessor(text):
     """Remove only the frozen new function and its exact-position single hook."""
-    text = restore_native_budget_helper_source(text)
     start = 'def restore_auth_shards16(text):\n'
     end = 'def restore_access_role_bulk(text):\n'
     hook = '    text = restore_auth_shards16(text)\n'
@@ -64,8 +67,12 @@ def restore_auth_helper_source(text):
 
 
 def actual_auth_ids(text):
+    return actual_auth_ids_predecessor(workflow.restore_native_phase_budgets(text))
+
+
+def actual_auth_ids_predecessor(text):
     """Raw current matrix, never the intentionally eight-shard projection."""
-    workflow.restore_auth_shards16(text)  # complete predecessor identity too
+    workflow.restore_auth_shards16_predecessor(text)  # explicit old layer, no second C inverse
     require(text.count('  auth-integration:\n') == 1)
     auth = text.split('  auth-integration:\n', 1)[1].split('  browser:\n', 1)[0]
     matrices = re.findall(r'^        shard: \[([0-9, ]+)\]$', auth, re.M)
@@ -78,9 +85,18 @@ def actual_auth_ids(text):
 class AuthShards16Contract(unittest.TestCase):
     def setUp(self):
         self.raw = Path('.github/workflows/ci.yml').read_text()
-        self.inventory = selection.inventory_checked(json.loads(Path('scripts/ci_inventory.json').read_text()))
+        from test_user_asset_export_v3_uac_runner_contract import restore_user_uac_inventory
+        self.current_inventory = selection.inventory_checked(json.loads(Path('scripts/ci_inventory.json').read_bytes()))
+        self.inventory = selection.inventory_checked(json.loads(restore_user_uac_inventory(Path('scripts/ci_inventory.json').read_bytes())))
 
-    def test_raw_workflow_runner_plan_and_summary_agree_on_current_85_gates(self):
+    def test_raw_current_c_inventory_and_plan_has_exactly_86_gates(self):
+        self.assertEqual(len(self.current_inventory['browser']), 57)
+        self.assertEqual(len(self.current_inventory['fixed']), 7)
+        plan = selection.make_plan('push', 'a' * 40, 'b' * 40, self.current_inventory,
+                                   loader=lambda _: self.fail('full event read PR snapshots'))
+        self.assertEqual(len(plan['auth']) + len(plan['browser']) + len(plan['fixed']) + 6, 86)
+
+    def test_pre_c_workflow_runner_plan_and_summary_agree_on_85_gates(self):
         ids = actual_auth_ids(self.raw)
         self.assertEqual(runner.AUTH_SHARDS, 16)
         self.assertEqual(ids, list(range(1, runner.AUTH_SHARDS + 1)))
@@ -101,7 +117,8 @@ class AuthShards16Contract(unittest.TestCase):
                 self.assertTrue(all(plan['groups'].values()))
                 self.assertEqual(len(jobs) - 3 + len(plan['auth']) + len(plan['browser']) + len(plan['fixed']), 85)
                 needs = {name: {'result': 'success'} for name in summary.GROUPS + ('plan',)}
-                summary.verify(plan, needs, event, 'a' * 40, 'b' * 40, plan)
+                with patch.object(summary, 'INVENTORY', self.inventory):
+                    summary.verify(plan, needs, event, 'a' * 40, 'b' * 40, plan)
         # Old checks stay historical rather than being silently relabelled16.
         old = workflow.reviewed_workflow()
         auth = old.split('  auth-integration:\n', 1)[1].split('  browser:\n', 1)[0]
@@ -129,6 +146,7 @@ class AuthShards16Contract(unittest.TestCase):
         restore_auth_helper_source(Path('scripts/ci_workflow_contract.py').read_text())
 
     def test_matrix_missing_duplicate_reordered_old_and_extra_ids_fail_closed(self):
+        raw = workflow.restore_native_phase_budgets(self.raw)
         variants = ['', OLD_MATRIX, NEW_MATRIX * 2]
         for ids in (list(range(1, 16)), list(range(2, 17)), list(range(1, 18)),
                     list(range(1, 16)) + [15], list(range(16, 0, -1)),
@@ -136,28 +154,31 @@ class AuthShards16Contract(unittest.TestCase):
             variants.append('        shard: [' + ', '.join(map(str, ids)) + ']\n')
         for line in variants:
             with self.subTest(line=line), self.assertRaises(ValueError):
-                actual_auth_ids(self.raw.replace(NEW_MATRIX, line, 1))
-        moved = self.raw.replace(NEW_MATRIX, '', 1) + NEW_MATRIX
+                actual_auth_ids_predecessor(raw.replace(NEW_MATRIX, line, 1))
+        moved = raw.replace(NEW_MATRIX, '', 1) + NEW_MATRIX
         with self.assertRaises(ValueError):
-            actual_auth_ids(moved)
+            actual_auth_ids_predecessor(moved)
 
     def test_workflow_inverse_rejects_every_matrix_line_edit_and_unrelated_semantic_change(self):
-        variants = [self.raw + '\n', self.raw.replace('\n', '\r\n')]
+        raw = workflow.restore_native_phase_budgets(self.raw)
+        variants = [raw + '\n', raw.replace('\n', '\r\n')]
         for before, after in [('timeout-minutes: 20', 'timeout-minutes: 21'),
                               ('max-parallel: 2', 'max-parallel: 3'),
                               ('fail-fast: false', 'fail-fast: true'),
                               ('contents: read', 'contents: write'),
                               ('run: make check', 'run: true'),
                               ('--suite auth --shard', '--suite non-auth --shard')]:
-            self.assertIn(before, self.raw)
-            variants.append(self.raw.replace(before, after, 1))
+            self.assertIn(before, raw)
+            variants.append(raw.replace(before, after, 1))
         for offset in range(len(NEW_MATRIX)):
-            variants.append(self.raw.replace(NEW_MATRIX, NEW_MATRIX[:offset] + NEW_MATRIX[offset + 1:], 1))
+            variants.append(raw.replace(NEW_MATRIX, NEW_MATRIX[:offset] + NEW_MATRIX[offset + 1:], 1))
         for bad in variants:
             with self.subTest(sha256=digest(bad.encode())), self.assertRaises(ValueError):
-                workflow.restore_auth_shards16(bad)
+                workflow.restore_auth_shards16_predecessor(bad)
 
     def test_bounded_delta_schema_cannot_authorize_an_alternate_matrix_or_hash(self):
+        workflow_text = workflow.restore_native_phase_budgets(self.raw)
+        self.assertIs(type(workflow_text), str)
         delta = json.loads(Path(DELTA).read_text())
         self.assertEqual(delta, {'baselineSHA256': BASE_WORKFLOW,
                                 'replacements': [{'old': OLD_MATRIX, 'new': NEW_MATRIX}]})
@@ -182,14 +203,14 @@ class AuthShards16Contract(unittest.TestCase):
         raws += [b'', b'{' + b' ' * 8192, b'[' * 1000 + b']' * 1000,
                  b'{"baselineSHA256":1,"baselineSHA256":2}', b'{', b'\xff']
         original = Path.read_bytes
-        for raw in raws:
+        for fixture_raw in raws:
             def read(path):
-                return raw if str(path) == DELTA else original(path)
-            with self.subTest(rawSHA256=digest(raw)), patch.object(Path, 'read_bytes', read), self.assertRaises(ValueError):
-                workflow.restore_auth_shards16(self.raw)
+                return fixture_raw if str(path) == DELTA else original(path)
+            with self.subTest(rawSHA256=digest(fixture_raw)), patch.object(Path, 'read_bytes', read), self.assertRaises(ValueError):
+                workflow.restore_auth_shards16_predecessor(workflow_text)
 
     def test_new_helper_inverse_rejects_each_line_hook_move_duplicate_and_old_byte_change(self):
-        text = Path('scripts/ci_workflow_contract.py').read_text()
+        text = restore_native_budget_helper_source(Path('scripts/ci_workflow_contract.py').read_text())
         left = text.index('def restore_auth_shards16(text):\n')
         right = text.index('def restore_access_role_bulk(text):\n')
         block = text[left:right]
@@ -204,8 +225,8 @@ class AuthShards16Contract(unittest.TestCase):
             variants.append(text.replace(block, ''.join(lines[:index] + lines[index + 1:]), 1))
         for bad in variants:
             with self.subTest(sha256=digest(bad.encode())), self.assertRaises(ValueError):
-                restore_auth_helper_source(bad)
-        self.assertEqual(digest(restore_auth_helper_source(text).encode()), BASE_HELPER)
+                restore_auth_helper_source_predecessor(bad)
+        self.assertEqual(digest(restore_auth_helper_source_predecessor(text).encode()), BASE_HELPER)
 
     def test_selector_inverse_rejects_old_partial_displaced_and_unrelated_source_edits(self):
         raw = Path('scripts/ci_selection.py').read_bytes()

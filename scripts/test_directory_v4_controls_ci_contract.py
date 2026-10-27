@@ -13,7 +13,12 @@ import validate_directory_v4_controls_evidence as evidence
 
 class DirectoryV4ControlsCI(unittest.TestCase):
     def test_exact_three_new_matrix_entries_and_all_legacy_entries(self):
-        inventory = json.loads(Path('scripts/ci_inventory.json').read_text())
+        from test_user_asset_export_v3_uac_runner_contract import restore_user_uac_inventory
+        raw = Path('scripts/ci_inventory.json').read_bytes()
+        current = json.loads(raw)
+        self.assertEqual((len(current['browser']), len(current['frontend_roots']['web/src/TaskWorkspace.tsx'])), (57, 20))
+        self.assertEqual(len(current['browser']) + len(current['fixed']) + 16 + 6, 86)
+        inventory = json.loads(restore_user_uac_inventory(raw))
         expected = ['directory-v4-controls', 'directory-v4-cancel', 'directory-v4-readers']
         additions = [entry for entry in inventory['browser'] if entry['name'] in expected]
         self.assertEqual(additions, [{'name': suite, 'command': 'python3 scripts/test_auth_e2e.py --suite ' + suite, 'specs': ['web/e2e/' + suite + '.spec.ts']} for suite in expected])

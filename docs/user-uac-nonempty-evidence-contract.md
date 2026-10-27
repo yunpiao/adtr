@@ -1,0 +1,93 @@
+# 用户 UAC 非空证据：mixed-33-v1
+
+## 范围与结论
+
+`user-asset-export-v3-uac-mixed33` 是独立、只使用合成数据的验收套件。
+它补齐 `set`、`clear`、`not_returned` 三个非空分区，每个分区11行、列表10+1，
+从第2页发起完整11行导出。未指定禁用位的列表还需覆盖33行四页。
+默认30对象/12用户/两LDAP页、旧两次导出及旧六件证据不变。
+本文件描述门禁，不把源码、离线单元样本或类型检查当成真实浏览器验收。
+真实 AD/Windows、容量及完整产品验收仍不在此切片内。
+
+## 必需开关与代价
+
+- 仅专用runner设置 `ADTR_E2E_USER_ASSET_EXPORT_V3_UAC=true`；fixture profile固定
+  `mixed-33-v1`。其作用是选择51对象、四LDAP页，默认不启用；漏设、混合其它模式、
+  非法profile均拒绝，不自动退回默认。副作用是该suite需独立运行和独立证据路径。
+- `ADTR_LDAP_FIXTURE_UAC_RUN_NONCE` 由runner每次生成一次32位小写hex，同值传给
+  fixture和Node。它关联本次candidate/seal/cleanup，并非授权token；缺失或不匹配即拒绝。
+- `ADTR_E2E_LDAP_UAC_EVIDENCE_DIR` 只指向launcher拥有的私有目录；移除后无法读取真实
+  wire candidate，故C失败；不允许任意上传目录或URI。默认launcher清除继承的C标记。
+- C沿用StartTLS/389、64连接、8请求、15秒连接界及既有运行时限；不新增预算。
+  owner敏感动作7→8→9→10，producer保持9，仅一次采集/use/observation。
+  三次真实create后余量为0；失败不得自动重放或拿第4份proof重试。
+
+## 三个独立证据域
+
+1. fixture只记录实际完整写出的51条Entry BER；四个Done只将cookie值octets原位清零。
+   request/Bind凭据不存储。`candidate-wire.json`的原始bytes SHA绑定nonce与首次完整exchange。
+2. 所有监听器关闭、owned连接关闭、acceptor/handler join后才封存 `terminal-seal.json`。
+   sticky poison、late request、重绑、部分写、未join、非零退出均拒绝。早期candidate不证明终态。
+3. Node的私有candidate持有真实PG source/task payload、十页GET pairs+响应、三次安全POST投影、
+   原key GET回执、detail、chunk、两次下载与三张PNG；不伪造cleanup成功。
+   runner在Worker/API、LDAP、诊断、DB等全部cleanup成功后才调用Python finalizer。
+   首错误保留，全部清理仍尝试，任一失败均不得发布成功目录。
+
+## 独立校验
+
+完整literal oracle固定SHA256
+`833245587fd68cca1f32f3b140703b8b18a13332a94f04e7f8c83db30a1d210b`。
+它来自审查过的手写33用户、18完整decoy、四模式分页和三套工作簿单元格，
+不是fixture或生产predicate的运行输出。fixture不得读取它生成实际LDAP数据。
+
+validator用标准库独立解码BER/UUID/SID/时间/uint32/null及原始字段，与全部51对象和literal
+逐项比较，再绑定真实列表全部12公共字段及三份完整工作簿。不得先筛user再漏验decoy。
+保重复query entries；unknown/duplicate JSON键、BOM、非UTF8、未配对surrogate、nonfinite、
+bool/浮点冒充整数均拒绝。合法emoji保留。
+
+两个hash域不能混用：task payload hash是`SHA256("1::" + 按ASCII键序canonicalJSON(payload))`；
+安全POST hash是11业务键按客户端顺序的紧凑JSON SHA，不含prefix、idem或proof。
+producer/export的payload、version、parent和hash都来自本次PG `adtr.tasks`；
+PG只计算并返回idempotency key的SHA，不读取/输出raw key。
+create/receipt/detail/original readback/request/PG payload必须绑定同一case。
+
+## 出站请求与截图隐私
+
+全context监听器在导出操作前安装，request事件同步计数并冻结case归属，然后异步解析body、
+读取固定page已有sessionStorage locator、关联response；`settleCase(taskID)`完成前不能换case、
+清locator或导航。wrong page/frame/origin、重复create、cancel、未知写、requestfailed或缺response
+均sticky失败。真实双激活只允许一个POST；关闭/Escape/放弃恢复不允许POST。
+
+app在submit里生成UUID、先同步写locator再发POST。Node不声称点击前已预知key。
+11业务expected在点击前冻结；request后只读现有locator，检查精确5键、actor/domain/kind/version
+与UUIDv4，再与出站key及PG SHA交叉绑定。缺失storage不使用memory fallback或hook。
+原key GET由`readUACOriginalReceipt`短时私有拥有，只返回安全回执；raw key、proof、body、
+headers、完整URL/query不落文件/日志/断言diff。C生成验证码时先加入私有本次扫描列表；
+POST parser还独立将实际出站proof记入WeakMap私有扫描上下文，覆盖其后全部response、
+candidate、console和PNG检查，不把proof加入SafeCreateRequest或证据。已验证idem只把SHA存于
+私有run域，后续response/candidate/console的decoded键和值以及PNG文本/value都提取UUID候选
+逐个比较所有历史case的SHA；反射raw key在任何candidate落盘前拒绝，raw key不延长保存。
+JS字符串和Playwright缓存不能保证物理擦除。
+
+主导出面板会显示raw key，因此**禁止截图该面板**。三张PNG只来自`context.newPage()`创建、
+`opener()===null`的后台任务“原导出只读详情”。进入前和拍摄前locator必须自然为null，
+不能先removeItem掩盖继承。二次下载按字节及header绑定原件；拍摄前全页password input为0、
+主面板不存在、knownSecrets不存在，所有可见文本与input/textarea内canonical UUID候选SHA
+均不等于当前keySHA。固定1440×900，无横向溢出，无mask/DOM/CSS隐藏。
+trace/video/自动失败截图显式off；三张PNG仍须真正像素独审。
+
+## caps与发布
+
+同时执行：source body256KiB、source SQL stdout1MiB、export SQL stdout2MiB、
+create body32768B、Entry单条2KiB、Done合计4KiB、raw frame合计128KiB、
+wire candidate160KiB、seal8KiB、final wire256KiB、candidate/final evidence8MiB、
+provenance2MiB、单XLSX32MiB、单PNG10MiB。不能用宽cap覆盖窄cap。
+SQL沿用2秒statement/5秒命令限制。安全文件读取拒绝symlink/FIFO/路径逃逸和超cap。
+
+finalizer验证所有原件及13键cleanup receipt，原子发布至唯一
+`web/playwright-report/user-asset-export-v3-uac-mixed33-validated`，拒绝覆盖既存目录。
+最终exact9：provenance、final evidence、嵌入原candidate与seal的raw-wire、三taskID命名XLSX、
+`set-ready.png`、`clear-ready.png`、`not_returned-ready.png`。没有第十个manifest。
+CLI仅有`capture --repo .`与`validate --repo . [--github-output]`；不提供可伪造success的finalize CLI。
+workflow复验同九件成功后，才输出一次`artifact_paths`九个排序精确路径并上传，禁止目录/glob兜底。
+所有失败只输出固定`uac_evidence_invalid:<code>`，不输出原异常内容。

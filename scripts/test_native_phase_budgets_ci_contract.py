@@ -30,6 +30,11 @@ def require(condition):
 
 
 def restore_native_budget_helper_source(text):
+    from test_user_asset_export_v3_uac_runner_contract import restore_user_uac_helper_source
+    return restore_native_budget_helper_source_predecessor(restore_user_uac_helper_source(text))
+
+
+def restore_native_budget_helper_source_predecessor(text):
     """Remove only this frozen function and the single exact-position auth hook."""
     start = 'def restore_native_phase_budgets(text):\n'
     end = 'def restore_auth_shards16(text):\n'
@@ -51,12 +56,17 @@ def native_block(text, job):
 
 class NativePhaseBudgetsCI(unittest.TestCase):
     def setUp(self):
-        self.raw = Path('.github/workflows/ci.yml').read_text()
+        self.current = Path('.github/workflows/ci.yml').read_text()
+        self.raw = workflow.restore_user_uac_workflow(self.current)
         self.delta = json.loads(Path(DELTA).read_text())
 
     def reject_workflow(self, bad):
         # Exercise the new layer and every current full-workflow consumer, not
         # merely a direct helper detached from the historical chain.
+        # Prove the actual native layer sees every historical mutation before
+        # exercising the combined current-only entrypoints below.
+        with self.assertRaises(ValueError):
+            workflow.restore_native_phase_budgets_predecessor(bad)
         consumers = [workflow.restore_native_phase_budgets, workflow.restore_auth_shards16,
                      workflow.restore_access_role_bulk, workflow.restore_archive_target_observation,
                      workflow.restore_health_recovery, workflow.restore_messages_isolation,
@@ -66,6 +76,7 @@ class NativePhaseBudgetsCI(unittest.TestCase):
                 consumer(bad)
 
     def test_raw_current_seventeen_limits_and_explicit_resource_change(self):
+        self.raw = self.current
         total = 0
         for job, (outer, budgets) in BUDGETS.items():
             block = native_block(self.raw, job)
@@ -79,7 +90,11 @@ class NativePhaseBudgetsCI(unittest.TestCase):
             total += len(budgets) + 1
         self.assertEqual(total, 17)
         self.assertEqual([sum(v[1]) for v in BUDGETS.values()], [39, 49])
-        inventory = json.loads(Path('scripts/ci_inventory.json').read_text())
+        from test_user_asset_export_v3_uac_runner_contract import restore_user_uac_inventory
+        current = json.loads(Path('scripts/ci_inventory.json').read_bytes())
+        self.assertEqual((len(current['browser']), len(current['fixed'])), (57, 7))
+        self.assertEqual(1752 + 20, 1772)
+        inventory = json.loads(restore_user_uac_inventory(Path('scripts/ci_inventory.json').read_bytes()))
         self.assertEqual((len(inventory['browser']), len(inventory['fixed'])), (56, 7))
         self.assertEqual(sum(row['name'] == 'tasks-health-recovery' for row in inventory['browser']), 1)
         old = 10 + 20 + 20 + 16 * 20 + 55 * 20 + 30 + 10 + 10 + 7 * 20 + 20
@@ -116,7 +131,7 @@ class NativePhaseBudgetsCI(unittest.TestCase):
 
     def test_current_only_missing_duplicate_reordered_jobs_steps_and_partial_conversion_rejected(self):
         blocks = [native_block(self.raw, job) for job in BUDGETS]
-        predecessor = workflow.restore_native_phase_budgets(self.raw)
+        predecessor = workflow.restore_native_phase_budgets_predecessor(self.raw)
         variants = [predecessor, self.raw.replace(blocks[0] + blocks[1], blocks[1] + blocks[0], 1)]
         for block, change in zip(blocks, self.delta['replacements']):
             variants += [self.raw.replace(block, '', 1), self.raw.replace(block, block * 2, 1),
@@ -209,8 +224,9 @@ class NativePhaseBudgetsCI(unittest.TestCase):
                 self.reject_workflow(bad)
 
     def test_frozen_helper_addition_hook_and_every_legacy_byte_remain_bound(self):
-        text = Path('scripts/ci_workflow_contract.py').read_text()
-        self.assertEqual(digest(restore_native_budget_helper_source(text).encode()), BASE_HELPER)
+        from test_user_asset_export_v3_uac_runner_contract import restore_user_uac_helper_source
+        text = restore_user_uac_helper_source(Path('scripts/ci_workflow_contract.py').read_text())
+        self.assertEqual(digest(restore_native_budget_helper_source_predecessor(text).encode()), BASE_HELPER)
         left = text.index('def restore_native_phase_budgets(text):\n')
         right = text.index('def restore_auth_shards16(text):\n')
         block = text[left:right]; hook = '    text = restore_native_phase_budgets(text)\n'
@@ -225,10 +241,11 @@ class NativePhaseBudgetsCI(unittest.TestCase):
             variants.append(text.replace(block, ''.join(lines[:index] + [line.rstrip('\n') + ' # changed\n'] + lines[index + 1:]), 1))
         for bad in variants:
             with self.subTest(sha=digest(bad.encode())), self.assertRaises(ValueError):
-                restore_native_budget_helper_source(bad)
+                restore_native_budget_helper_source_predecessor(bad)
 
     def test_auth_test_migration_preserves_every_previous_hash_and_negative_test_byte(self):
-        raw = Path('scripts/test_auth_shards16_contract.py').read_text()
+        from test_user_asset_export_v3_uac_runner_contract import restore_user_uac_auth_test_source
+        raw = restore_user_uac_auth_test_source(Path('scripts/test_auth_shards16_contract.py').read_text())
         added_import = 'from test_native_phase_budgets_ci_contract import restore_native_budget_helper_source\n'
         hook = '    text = restore_native_budget_helper_source(text)\n'
         self.assertEqual(raw.count(added_import), 1); self.assertEqual(raw.count(hook), 1)
@@ -237,6 +254,7 @@ class NativePhaseBudgetsCI(unittest.TestCase):
 
     def test_independent_directory_guard_rejects_every_limit_and_outer999_step10_decoy(self):
         import test_directory_v4_controls_ci_contract as directory
+        self.raw = self.current
         check = directory.DirectoryV4ControlsCI('test_both_native_families_direct_exports_and_all_legacy_assertions')
         original = Path.read_text
         variants = []
@@ -254,7 +272,12 @@ class NativePhaseBudgetsCI(unittest.TestCase):
                 return bad if str(path) == '.github/workflows/ci.yml' else original(path, *args, **kwargs)
             with patch.object(Path, 'read_text', read), self.assertRaises(AssertionError):
                 check.test_both_native_families_direct_exports_and_all_legacy_assertions()
-            self.reject_workflow(bad)
+            pre = workflow.restore_user_uac_workflow(self.current)
+            for change in json.loads(Path(DELTA).read_text())["replacements"]:
+                if change["new"] not in bad:
+                    block = native_block(bad, "native-no-store-fixed" if "  native-no-store-fixed:" in change["new"] else "native-no-store")
+                    pre = pre.replace(change["new"], block, 1)
+            self.reject_workflow(pre)
 
 
 if __name__ == '__main__':

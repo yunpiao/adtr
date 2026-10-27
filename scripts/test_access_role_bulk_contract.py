@@ -730,6 +730,12 @@ class AccessRoleBulkWorkflowContract(unittest.TestCase):
             if path == "scripts/ci_selection.py":
                 from test_auth_shards16_contract import restore_auth_selector_source
                 raw = restore_auth_selector_source(raw)
+            elif path == "scripts/test_auth_e2e.py":
+                from test_user_asset_export_v3_uac_runner_contract import restore_user_uac_runner
+                raw = restore_user_uac_runner(raw.decode('utf-8')).encode('utf-8')
+            elif path == "scripts/ci_inventory.json":
+                from test_user_asset_export_v3_uac_runner_contract import restore_user_uac_inventory
+                raw = restore_user_uac_inventory(raw)
             self.assertEqual(evidence.digest(raw), expected)
 
 

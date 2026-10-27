@@ -52,6 +52,11 @@ PRE_LOG_NAVIGATION_INVENTORY_SHA256 = '410601823ee66f9f84caa6847e46206b9c66c0fca
 
 
 def restore_log_navigation_inventory(raw):
+    from test_user_asset_export_v3_uac_runner_contract import restore_user_uac_inventory
+    return restore_log_navigation_inventory_predecessor(restore_user_uac_inventory(raw))
+
+
+def restore_log_navigation_inventory_predecessor(raw):
     """Test-only outer projection: accept exactly the frozen append-only bytes."""
     if not isinstance(raw, bytes) or raw.count(TASK_WORKSPACE_LOG_NAVIGATION) != 1:
         raise ValueError('original-log navigation consumer block differs')
@@ -125,7 +130,7 @@ class SelectionContract(unittest.TestCase):
         root='web/src/TaskWorkspace.tsx'
         expected={
             'tasks', 'audit', 'messages', 'messages-isolation', 'maintenance', 'user-assets-v2',
-            'tasks-health-recovery', 'operational-logs',
+            'tasks-health-recovery', 'operational-logs', 'user-asset-export-v3-uac-mixed33',
             'directory-v3', 'group-members-v4',
             'user-asset-export-v3', 'user-asset-export-v3-failure',
             'user-asset-export-v3-cancel', 'computer-asset-export-v3',
@@ -147,27 +152,31 @@ class SelectionContract(unittest.TestCase):
         self.assertTrue(all(self.choose(['scripts/ci_inventory.json'])['groups'].values()))
 
     def test_log_navigation_inventory_is_exact_byte_preserving_outer_addition(self):
-        raw = Path('scripts/ci_inventory.json').read_bytes()
-        predecessor = restore_log_navigation_inventory(raw)
+        from test_user_asset_export_v3_uac_runner_contract import restore_user_uac_inventory
+        raw = restore_user_uac_inventory(Path('scripts/ci_inventory.json').read_bytes())
+        inventory = json.loads(raw)
+        predecessor = restore_log_navigation_inventory_predecessor(raw)
         self.assertEqual(hashlib.sha256(predecessor).hexdigest(), PRE_LOG_NAVIGATION_INVENTORY_SHA256)
         self.assertEqual(predecessor.count(TASK_WORKSPACE_PRE_LOG_NAVIGATION), 1)
         self.assertEqual(predecessor.replace(TASK_WORKSPACE_PRE_LOG_NAVIGATION, TASK_WORKSPACE_LOG_NAVIGATION, 1), raw)
         old = json.loads(predecessor)
         root = 'web/src/TaskWorkspace.tsx'
-        self.assertEqual(self.inventory['frontend_roots'][root], old['frontend_roots'][root] + ['operational-logs'])
+        self.assertEqual(inventory['frontend_roots'][root], old['frontend_roots'][root] + ['operational-logs'])
         self.assertEqual(len(old['frontend_roots'][root]), 18)
-        self.assertEqual(self.inventory['frontend_roots'][root].count('operational-logs'), 1)
-        self.assertEqual(self.inventory['browser'], old['browser'])
-        self.assertEqual(self.inventory['fixed'], old['fixed'])
-        self.assertEqual(len(self.inventory['browser']), 56)
-        self.assertEqual(len(self.inventory['fixed']), 7)
+        self.assertEqual(inventory['frontend_roots'][root].count('operational-logs'), 1)
+        self.assertEqual(inventory['browser'], old['browser'])
+        self.assertEqual(inventory['fixed'], old['fixed'])
+        self.assertEqual(len(inventory['browser']), 56)
+        self.assertEqual(len(inventory['fixed']), 7)
 
     def test_log_navigation_outer_projection_rejects_consumer_and_unrelated_mutations(self):
-        raw = Path('scripts/ci_inventory.json').read_bytes()
+        from test_user_asset_export_v3_uac_runner_contract import restore_user_uac_inventory
+        raw = restore_user_uac_inventory(Path('scripts/ci_inventory.json').read_bytes())
+        inventory = json.loads(raw)
         root = 'web/src/TaskWorkspace.tsx'
         added = 'operational-logs'
-        consumers = self.inventory['frontend_roots'][root]
-        self.assertEqual((json.dumps(self.inventory, indent=2) + '\n').encode(), raw)
+        consumers = inventory['frontend_roots'][root]
+        self.assertEqual((json.dumps(inventory, indent=2) + '\n').encode(), raw)
         variants = {
             'missing addition': raw.replace(TASK_WORKSPACE_LOG_NAVIGATION, TASK_WORKSPACE_PRE_LOG_NAVIGATION, 1),
             'duplicate root block': raw.replace(TASK_WORKSPACE_LOG_NAVIGATION, TASK_WORKSPACE_LOG_NAVIGATION * 2, 1),
@@ -177,7 +186,7 @@ class SelectionContract(unittest.TestCase):
         }
 
         def changed(label, mutate):
-            candidate = copy.deepcopy(self.inventory)
+            candidate = copy.deepcopy(inventory)
             mutate(candidate)
             variants[label] = (json.dumps(candidate, indent=2) + '\n').encode()
 
@@ -194,7 +203,7 @@ class SelectionContract(unittest.TestCase):
         changed('additional old consumer', lambda candidate: candidate['frontend_roots'][root].insert(0, 'system'))
         changed('reordered old consumers', lambda candidate: candidate['frontend_roots'][root].__setitem__(
             slice(0, 2), list(reversed(candidate['frontend_roots'][root][:2]))))
-        for other_root in self.inventory['frontend_roots']:
+        for other_root in inventory['frontend_roots']:
             if other_root == root:
                 continue
             changed('addition at wrong root ' + other_root,
@@ -211,13 +220,13 @@ class SelectionContract(unittest.TestCase):
             with self.subTest(mutation=label):
                 self.assertNotEqual(variant, raw)
                 with self.assertRaises(ValueError):
-                    restore_log_navigation_inventory(variant)
+                    restore_log_navigation_inventory_predecessor(variant)
 
     def test_unmapped_production_consumer_widens_shared_dependency(self):
         dep='web/src/shared.ts';other='web/src/UnmappedPage.tsx'
         src=dict(self.sources,**{dep:'',other:''})
         self.graph['web/src/MessagesWorkspace.tsx']={dep};self.graph[other]={dep}
-        self.assertEqual(len(self.choose([dep],src)['browser']),56)
+        self.assertEqual(len(self.choose([dep],src)['browser']),57)
 
     def helper_graph(self):
         api='web/src/messages-api.ts'; helper='web/src/sample-data.ts'
@@ -244,7 +253,7 @@ class SelectionContract(unittest.TestCase):
             src[consumer]='';self.graph[consumer]={helper}
             with self.subTest(consumer=consumer):
                 self.assertNotIn(helper,selection.test_only_dependencies(self.graph,set(),self.inventory))
-                self.assertEqual(len(self.choose([api],src)['browser']),56)
+                self.assertEqual(len(self.choose([api],src)['browser']),57)
             self.graph.pop(consumer)
 
     def test_unknown_edges_or_cycles_or_orphans_never_prove_helpers(self):
@@ -252,12 +261,12 @@ class SelectionContract(unittest.TestCase):
         self.assertEqual(self.names(self.choose([api],src,uncertain={test})),{'messages','messages-isolation'})
         for unknown in (helper, 'web/src/MessagesWorkspace.tsx', 'web/e2e/messages.spec.ts'):
             with self.subTest(unknown=unknown):
-                self.assertEqual(len(self.choose([api],src,uncertain={unknown})['browser']),56)
+                self.assertEqual(len(self.choose([api],src,uncertain={unknown})['browser']),57)
         self.graph[helper].add(bridge)
-        self.assertEqual(len(self.choose([api],src)['browser']),56)
+        self.assertEqual(len(self.choose([api],src)['browser']),57)
         self.graph[helper].remove(bridge)
         self.graph[test]=set()
-        self.assertEqual(len(self.choose([api],src)['browser']),56)
+        self.assertEqual(len(self.choose([api],src)['browser']),57)
 
     def test_uncertain_test_imported_by_runtime_is_not_a_test_only_seed(self):
         for consumer in ('web/src/MessagesWorkspace.tsx', 'web/e2e/messages.spec.ts'):
@@ -265,7 +274,7 @@ class SelectionContract(unittest.TestCase):
             self.graph[consumer]={test,api}
             with self.subTest(consumer=consumer):
                 self.assertEqual(selection.test_only_dependencies(self.graph,{test},self.inventory),set())
-                self.assertEqual(len(self.choose([api],src,uncertain={test})['browser']),56)
+                self.assertEqual(len(self.choose([api],src,uncertain={test})['browser']),57)
             self.graph[consumer]=set()
 
     def test_old_or_base_runtime_consumer_cannot_be_erased_by_new_test_only_graph(self):
@@ -287,7 +296,7 @@ class SelectionContract(unittest.TestCase):
         path='web/src/Example.test.tsx';src=dict(self.sources,**{path:''})
         self.assertFalse(self.choose([path],src)['groups']['browser'])
         self.graph['web/src/MessagesWorkspace.tsx']={path}
-        self.assertEqual(len(self.choose([path],src)['browser']),56)
+        self.assertEqual(len(self.choose([path],src)['browser']),57)
 
     def test_native_both_engines_and_order_independence(self):
         native='web/e2e/native-no-store-completion.spec.ts';unknown='web/src/NewPage.tsx'
@@ -295,7 +304,7 @@ class SelectionContract(unittest.TestCase):
         plans=[self.choose(list(paths),src) for paths in itertools.permutations([native,unknown])]
         self.assertEqual(plans[0]['groups'],plans[1]['groups'])
         self.assertEqual(plans[0]['browser'],plans[1]['browser'])
-        self.assertEqual(len(plans[0]['browser']),56)
+        self.assertEqual(len(plans[0]['browser']),57)
         native_plan=self.choose([native])
         self.assertTrue(native_plan['groups']['native-no-store'])
         self.assertTrue(native_plan['groups']['native-no-store-fixed'])
@@ -305,11 +314,11 @@ class SelectionContract(unittest.TestCase):
         dep='web/src/messages-api.ts';root='web/src/MessagesWorkspace.tsx'
         other='web/src/UnknownPage.tsx';src=dict(self.sources,**{dep:'',other:''})
         self.graph[root]={dep}
-        self.assertEqual(len(self.choose([dep],src,uncertain={other})['browser']),56)
+        self.assertEqual(len(self.choose([dep],src,uncertain={other})['browser']),57)
 
     def test_uncertain_graph_fails_safe(self):
         p='web/e2e/messages.spec.ts'
-        self.assertEqual(len(self.choose([p],uncertain={p})['browser']),56)
+        self.assertEqual(len(self.choose([p],uncertain={p})['browser']),57)
 
     def test_docs_only_is_explicit_without_fake_test(self):
         p=self.choose(['docs/design.md','README.md'])
@@ -396,12 +405,15 @@ class SelectionContract(unittest.TestCase):
         expected={str(p) for p in Path('web/e2e').glob('*.spec.ts')}
         actual={p for e in self.inventory['browser'] for p in e['specs']}|{'web/e2e/native-no-store-completion.spec.ts'}
         self.assertEqual(actual,expected)
-        self.assertEqual(len(self.inventory['browser']),56)
+        self.assertEqual(len(self.inventory['browser']),57)
         self.assertEqual(len(self.inventory['fixed']),7)
         self.assertEqual(summary.INVENTORY,self.inventory)
+        from test_user_asset_export_v3_uac_runner_contract import restore_user_uac_inventory
+        historical_inventory = json.loads(restore_user_uac_inventory(Path('scripts/ci_inventory.json').read_bytes()))
+        self.assertEqual(len(historical_inventory['browser']), 56)
         old=restore_selection(Path('.github/workflows/ci.yml').read_text())
         matrix=old.split('  browser:\n',1)[1].split('    steps:\n',1)[0]
-        self.assertEqual([(e['name'],e['command']) for e in self.inventory['browser'] if e['name'] not in {'tasks-health-recovery', 'messages-isolation', 'directory-v4-controls', 'directory-v4-cancel', 'directory-v4-readers'}], re.findall(r'          - name: ([^\n]+)\n            command: ([^\n]+)',matrix))
+        self.assertEqual([(e['name'],e['command']) for e in historical_inventory['browser'] if e['name'] not in {'tasks-health-recovery', 'messages-isolation', 'directory-v4-controls', 'directory-v4-cancel', 'directory-v4-readers'}], re.findall(r'          - name: ([^\n]+)\n            command: ([^\n]+)',matrix))
         for command in ('true','python3 scripts/test_auth_e2e.py; true','python3 scripts/test_auth_e2e.py --suite messages || true'):
             bad=copy.deepcopy(self.inventory);bad['browser'][0]['command']=command
             with self.assertRaises(ValueError):selection.inventory_checked(bad)
@@ -452,7 +464,7 @@ class SelectionContract(unittest.TestCase):
             p=selection.make_plan(event,'a'*40,'b'*40,self.inventory,loader=lambda _:self.fail('no PR snapshots'))
             n={g:{'result':'success'} for g in selection.GROUPS};n['plan']={'result':'success'}
             summary.verify(p,n,event,'a'*40,'b'*40,p)
-            self.assertEqual(len(p['browser']),56)
+            self.assertEqual(len(p['browser']),57)
             self.assertEqual(p['auth'],list(range(1,17)))
             self.assertEqual(p['fixed'],self.inventory['fixed'])
 
@@ -715,7 +727,7 @@ class SelectionContract(unittest.TestCase):
         projected = [{k: v for k, v in entry.items() if k != 'specs'} for entry in expected]
         actual = selection.browser_matrix_entries(entries)
         self.assertEqual(actual, projected)
-        self.assertEqual(len(actual), 56)
+        self.assertEqual(len(actual), 57)
         self.assertEqual(sorted((entry['name'], entry['command']) for entry in actual),
                          sorted((entry['name'], entry['command']) for entry in entries))
         self.assertEqual([entry for entry in actual if entry['name'] not in {health['name'], group['name']}],
@@ -896,13 +908,15 @@ class SelectionContract(unittest.TestCase):
         self.assertIn("failure() && matrix.name != 'tasks-health-recovery' && steps.safe-diagnostics.outcome == 'success'", diagnostics)
 
     def test_health_outer_projection_preserves_complete_predecessor_and_rejects_mutations(self):
-        text = Path('.github/workflows/ci.yml').read_text()
+        from ci_workflow_contract import restore_archive_target_observation, restore_health_recovery_predecessor
+        current = Path('.github/workflows/ci.yml').read_text()
+        text = restore_archive_target_observation(current)
         delta = json.loads(Path('scripts/fixtures/tasks_health_recovery_ci_delta.json').read_text())
         self.assertEqual(delta['baselineSHA256'], 'f4e8111f36a7441951012027b1371059ca8f86c5a21663f1546ff78b64b89c13')
         self.assertEqual(len(delta['replacements']), 5)
-        predecessor = restore_health_recovery(text)
+        predecessor = restore_health_recovery_predecessor(text)
         self.assertEqual(hashlib.sha256(predecessor.encode()).hexdigest(), delta['baselineSHA256'])
-        self.assertEqual(restore_selection(text), restore_selection_predecessor(predecessor))
+        self.assertEqual(restore_selection(current), restore_selection_predecessor(predecessor))
         variants = [predecessor]
         for change in delta['replacements']:
             self.assertEqual(text.count(change['new']), 1)
@@ -921,7 +935,7 @@ class SelectionContract(unittest.TestCase):
         for variant in variants:
             with self.subTest(sha256=hashlib.sha256(variant.encode()).hexdigest()):
                 with self.assertRaises(ValueError):
-                    restore_health_recovery(variant)
+                    restore_health_recovery_predecessor(variant)
                 with self.assertRaises(ValueError):
                     restore_selection(variant)
 

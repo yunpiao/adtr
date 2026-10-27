@@ -7,6 +7,7 @@ import (
 	"crypto/subtle"
 	"crypto/tls"
 	"errors"
+	"io"
 	"net"
 	"strings"
 	"sync"
@@ -21,6 +22,8 @@ const (
 )
 
 type server struct {
+	userUACV3Profile         userUACV3Profile
+	uacRecorder              *userUACWireRecorder
 	tlsConfig                *tls.Config
 	username, password       []byte
 	control                  *fixtureControl
@@ -48,6 +51,14 @@ type endpoint struct {
 // serve owns the listeners and all accepted connections. Shutdown closes the
 // raw transports (including stalled TLS handshakes), then joins every goroutine.
 func (s *server) serve(ctx context.Context, endpoints []endpoint) error {
+	parent := ctx
+	if s.uacRecorder != nil {
+		// The C ledger must mark owned drain before cancellation can close a
+		// transport. Direct parent propagation would race the handler watcher
+		// and misclassify our own close as a post-root transport failure.
+		// We still select the real parent below and keep every existing limit.
+		ctx = context.WithoutCancel(ctx)
+	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	var acceptors, handlers sync.WaitGroup
@@ -68,6 +79,7 @@ func (s *server) serve(ctx context.Context, endpoints []endpoint) error {
 				select {
 				case capacity <- struct{}{}:
 				default:
+					s.uacRecorder.recordFailure("handler_failure")
 					_ = conn.Close()
 					continue
 				}
@@ -91,12 +103,15 @@ func (s *server) serve(ctx context.Context, endpoints []endpoint) error {
 	}
 	var err error
 	select {
-	case <-ctx.Done():
+	case <-parent.Done():
 	case err = <-failures:
 	}
+	s.uacRecorder.BeginDrain()
 	cancel()
 	for _, endpoint := range endpoints {
-		_ = endpoint.listener.Close()
+		if closeErr := endpoint.listener.Close(); closeErr != nil {
+			s.uacRecorder.recordFailure("shutdown_incomplete")
+		}
 	}
 	acceptors.Wait()
 	mu.Lock()
@@ -105,10 +120,32 @@ func (s *server) serve(ctx context.Context, endpoints []endpoint) error {
 	}
 	mu.Unlock()
 	handlers.Wait()
+	if err != nil {
+		s.uacRecorder.recordFailure("handler_failure")
+	}
+	if sealErr := s.uacRecorder.SealAfterJoin(); sealErr != nil {
+		return sealErr
+	}
 	return err
 }
 
 func (s *server) handle(ctx context.Context, raw net.Conn, ldaps bool) {
+	transport := uacStartTLS
+	if ldaps {
+		transport = uacLDAPS
+	}
+	uacConnectionID, recordErr := s.uacRecorder.OpenConnection(transport)
+	if recordErr != nil {
+		return
+	}
+	closeReason := uacTransportFailure
+	defer func() {
+		if s.uacRecorder.draining() && closeReason == uacTransportFailure {
+			closeReason = uacOwnedDrain
+		}
+		s.uacRecorder.CloseConnection(uacConnectionID, closeReason)
+	}()
+
 	ctx, cancel := context.WithTimeout(ctx, connectionTime)
 	defer cancel()
 	stopClose := context.AfterFunc(ctx, func() { _ = raw.Close() })
@@ -127,7 +164,7 @@ func (s *server) handle(ctx context.Context, raw net.Conn, ldaps bool) {
 	conn := raw
 	secure, bound := false, false
 	rootRead := false
-	directory := directorySession{v2: s.directoryV2, v3: s.directoryV3, userExportFailureV3: s.userExportFailureV3, groupExportFailureV3: s.groupExportFailureV3, computerExportFailureV3: s.computerExportFailureV3, v4: s.directoryV4, groupMembersV4Pagination: s.groupMembersV4Pagination, userAssetsV2: s.userAssetsV2, computerAssetsV3: s.computerAssetsV3, groupAssetsV3: s.groupAssetsV3, empty: s.directoryEmpty, slow: s.directorySlow, emptyTransition: s.emptyTransition}
+	directory := directorySession{userUACV3Profile: s.userUACV3Profile, uacRecorder: s.uacRecorder, uacConnectionID: uacConnectionID, v2: s.directoryV2, v3: s.directoryV3, userExportFailureV3: s.userExportFailureV3, groupExportFailureV3: s.groupExportFailureV3, computerExportFailureV3: s.computerExportFailureV3, v4: s.directoryV4, groupMembersV4Pagination: s.groupMembersV4Pagination, userAssetsV2: s.userAssetsV2, computerAssetsV3: s.computerAssetsV3, groupAssetsV3: s.groupAssetsV3, empty: s.directoryEmpty, slow: s.directorySlow, emptyTransition: s.emptyTransition}
 	defer directory.reset()
 	upgrade := func() bool {
 		tlsConn := tls.Server(raw, s.tlsConfig)
@@ -141,13 +178,46 @@ func (s *server) handle(ctx context.Context, raw net.Conn, ldaps bool) {
 		return
 	}
 	for range maxRequests {
-		req, err := readRequest(conn)
+		reader := &uacCountingReader{reader: conn}
+		req, err := readRequest(reader)
 		if err != nil {
+			if errors.Is(err, io.EOF) && reader.count == 0 {
+				closeReason = uacCleanEOF
+			} else if reader.count > 0 {
+				closeReason = uacIncompleteRead
+			} else if errors.Is(err, errProtocol) {
+				closeReason = uacProtocolFailure
+			}
 			return
 		}
+		// Observe every request before clearing or any matcher rejection. This
+		// includes stale cookies, rebinds, and post-completion attempts.
+		if s.uacRecorder != nil {
+			event := uacRequestEvent{kind: uacOther, messageID: req.id, tlsVerified: secure, bindSucceeded: bound, rootResponseComplete: rootRead}
+			switch req.tag {
+			case 0x60:
+				event.kind = uacBind
+			case 0x77:
+				event.kind = uacStartTLSRequest
+			case 0x63:
+				_, rootRequest := parseSearch(req.body)
+				if rootRequest && len(req.controls) == 0 {
+					event.kind = uacRootDSE
+				} else {
+					event = uacDirectoryEvent(req, &directory, secure, bound, rootRead)
+				}
+			}
+			if s.uacRecorder.ObserveRequest(uacConnectionID, event) != nil {
+				clear(req.packet)
+				closeReason = uacProtocolFailure
+				return
+			}
+		}
+
 		// Only the explicit directory mode accepts a single fixed paging
 		// control, and only on Search. Existing RootDSE-only behavior stays shut.
 		if len(req.controls) != 0 && (!s.directoryMode || req.tag != 0x63) {
+			closeReason = uacProtocolFailure
 			clear(req.packet)
 			return
 		}
@@ -207,6 +277,9 @@ func (s *server) handle(ctx context.Context, raw net.Conn, ldaps bool) {
 					err = result(conn, req.id, 0x65, 0, "")
 				}
 				rootRead = err == nil
+				if rootRead {
+					s.uacRecorder.rootResponseCompleted(uacConnectionID)
+				}
 				if err == nil && heldTicket != "" && !responseWritten {
 					if s.control.mark(heldTicket, "response_written") != nil {
 						return
@@ -220,6 +293,7 @@ func (s *server) handle(ctx context.Context, raw net.Conn, ldaps bool) {
 		default:
 			// Unbind and all unsupported directory operations simply close. No
 			// writes, referrals, or general directory operations exist.
+			closeReason = uacProtocolFailure
 			clear(req.packet)
 			return
 		}

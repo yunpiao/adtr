@@ -16,6 +16,11 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 def restore_health_runner(text):
+    from test_user_asset_export_v3_uac_runner_contract import restore_user_uac_runner
+    return restore_health_runner_predecessor(restore_user_uac_runner(text))
+
+
+def restore_health_runner_predecessor(text):
     delta = json.loads((ROOT / "scripts/fixtures/tasks_health_recovery_runner_delta.json").read_text())
     for change in reversed(delta["replacements"]):
         if not change["new"] or text.count(change["new"]) != 1:

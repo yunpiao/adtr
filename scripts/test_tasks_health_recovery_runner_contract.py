@@ -19,7 +19,8 @@ import unittest
 import uuid
 from unittest.mock import Mock, patch
 
-from test_directory_v4_runner_contract import restore_health_runner, restore_v4_runner
+from test_directory_v4_runner_contract import (restore_health_runner, restore_v4_runner,
+    restore_health_runner_predecessor)
 
 ROOT = Path(__file__).resolve().parent.parent
 SOURCE = ROOT / "scripts/test_auth_e2e.py"
@@ -40,28 +41,30 @@ def function(name, **overrides):
 
 class HealthActualRunner(unittest.TestCase):
     def test_frozen_predecessor_and_outer_mutation_rejection(self):
-        source = SOURCE.read_text()
+        from test_user_asset_export_v3_uac_runner_contract import restore_user_uac_runner
+        current = SOURCE.read_text()
+        source = restore_user_uac_runner(current)
         delta = json.loads((ROOT / 'scripts/fixtures/tasks_health_recovery_runner_delta.json').read_text())
         self.assertEqual(delta['baselineSHA256'], '1a90e44c24886a7815efb724dadbe694d07f49da7c89136e0f875ab101aeba2c')
-        predecessor = restore_health_runner(source)
+        predecessor = restore_health_runner_predecessor(source)
         self.assertEqual(hashlib.sha256(predecessor.encode()).hexdigest(), delta['baselineSHA256'])
-        restore_v4_runner(source)  # All prior hashes remain authoritative.
+        restore_v4_runner(current)  # All prior hashes remain authoritative.
         with self.assertRaises(ValueError):
-            restore_health_runner(predecessor)
+            restore_health_runner_predecessor(predecessor)
         for before, after in [('"--suite", choices=', '"--other", choices='),
                               ('timeout=30', 'timeout=31'),
                               ('health_timeout(660, health_run_deadline)', '660'),
                               ('start_new_session=True', 'start_new_session=False')]:
             self.assertIn(before, source)
             with self.subTest(before=before), self.assertRaises(ValueError):
-                restore_health_runner(source.replace(before, after, 1))
+                restore_health_runner_predecessor(source.replace(before, after, 1))
         for change in delta['replacements']:
             self.assertEqual(source.count(change['new']), 1)
             for replacement in ('', change['new'] * 2, change['old'], change['new'] + '# drift\n'):
                 with self.assertRaises(ValueError):
-                    restore_health_runner(source.replace(change['new'], replacement, 1))
+                    restore_health_runner_predecessor(source.replace(change['new'], replacement, 1))
         with self.assertRaises(ValueError):
-            restore_health_runner(source + '# unrelated legacy drift\n')
+            restore_health_runner_predecessor(source + '# unrelated legacy drift\n')
 
     def test_registration_has_independent_health_without_directory_membership(self):
         source = SOURCE.read_text()
