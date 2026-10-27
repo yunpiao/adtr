@@ -16,6 +16,7 @@ from unittest.mock import patch
 import ci_selection as selection
 import ci_selection_summary as summary
 import ci_workflow_contract as workflow
+from test_native_phase_budgets_ci_contract import restore_native_budget_helper_source
 import run_integration as runner
 
 DELTA = 'scripts/fixtures/auth_shards16_ci_delta.json'
@@ -48,6 +49,7 @@ def restore_auth_selector_source(raw):
 
 def restore_auth_helper_source(text):
     """Remove only the frozen new function and its exact-position single hook."""
+    text = restore_native_budget_helper_source(text)
     start = 'def restore_auth_shards16(text):\n'
     end = 'def restore_access_role_bulk(text):\n'
     hook = '    text = restore_auth_shards16(text)\n'

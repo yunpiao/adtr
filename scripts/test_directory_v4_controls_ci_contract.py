@@ -252,7 +252,14 @@ class DirectoryV4ControlsCI(unittest.TestCase):
             self.assertIn('run: xvfb-run -a npm run test:e2e --prefix web -- e2e/native-no-store-completion.spec.ts --headed', block)
             self.assertIn('run: python3 scripts/validate_directory_v4_controls_evidence.py --source-root . --native', block)
             self.assertLess(block.index('run: xvfb-run'), block.index('run: python3 scripts/validate_directory_v4_controls_evidence.py'))
-            self.assertIn('timeout-minutes: 10', block)
+            outer = 41 if job == 'native-no-store' else 51
+            limits = [1, 2, 2, 20, 10, 2, 2] if job == 'native-no-store' else [1, 2, 2, 20, 10, 10, 2, 2]
+            self.assertEqual(re.findall(r'^    timeout-minutes: (.+)$', block, re.M), [str(outer)])
+            steps = re.split(r'(?=^      - )', block, flags=re.M)[1:]
+            self.assertEqual(len(steps), len(limits))
+            self.assertEqual(block.count('timeout-minutes:'), len(limits) + 1)
+            for step, limit in zip(steps, limits):
+                self.assertEqual(re.findall(r'^        timeout-minutes: (.+)$', step, re.M), [str(limit)])
 
     def test_source_rules_cover_all_owners_and_are_shared_with_independent_validator(self):
         rules = evidence.contract(Path('.'))

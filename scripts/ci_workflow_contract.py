@@ -9,8 +9,109 @@ import json
 from pathlib import Path
 
 
+def restore_native_phase_budgets(text):
+    """Validate current native phase limits, then reverse only their reviewed delta.
+
+    This is a historical source projection, NOT preservation of old job budgets.
+    The raw workflow now permits 41/51 minutes instead of 10/10 minutes.
+    """
+    import re
+
+    def require(condition):
+        if not condition:
+            raise ValueError('native phase budget workflow differs from reviewed delta')
+
+    baseline = '0fd9599e994b86e28d72d2fbf28be4fffa14f7bbff171b3d47c96069e592b195'
+    # Literal reviewed step identities/limits and whole-block hashes: the mutable
+    # fixture cannot authorize a different limit, command or replacement.
+    jobs = (('native-no-store',
+      41,
+      (('      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2', 1),
+       ('      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0', 2),
+       ('      - name: Install locked browser test dependencies', 2),
+       ('      - name: Install pinned Chromium and headed dependencies', 20),
+       ('      - name: Require complete application reads and record native outcomes', 10),
+       ('      - name: Validate both production readers and exact native evidence', 2),
+       ('      - name: Retain synthetic native stream diagnostics', 2)),
+      '657d3a6be156163e9fa09f2833e7999bff2f76525edd7b10f18b5f0bb4df0743',
+      'e1f510bdb30a35e7630fe0e327e3a0f5b1e45bb1f196614a14d0b94aaf60ce93'),
+     ('native-no-store-fixed',
+      51,
+      (('      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2', 1),
+       ('      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0', 2),
+       ('      - name: Install locked browser test dependencies', 2),
+       ('      - name: Install headed browser system dependencies', 20),
+       ('      - name: Verify official fixed-build diagnostic browser', 10),
+       ('      - name: Require identical native stream proof on the fixed engine', 10),
+       ('      - name: Validate both production readers and exact native evidence', 2),
+       ('      - name: Retain fixed-build synthetic diagnostics and provenance', 2)),
+      '08ea09e66ffbc85e2f11946b585dc0b99b832ddd74829879f786a92017e7852f',
+      'f43edcc9e8a027c910e850e4a665cd6398994daca9bb9224cbc87e36dfeb7c4b'))
+    require(type(text) is str)
+    actual = []
+    for job, outer, steps, old_sha, new_sha in jobs:
+        marker = '  ' + job + ':\n'
+        require(text.count(marker) == 1)
+        tail = text[text.index(marker):]
+        block = re.split(r'(?=^  [a-z][a-z-]+:\n)', tail, flags=re.M)[1]
+        require(re.findall(r'^    timeout-minutes: (.+)$', block, re.M) == [str(outer)])
+        parts = re.split(r'(?=^      - )', block, flags=re.M)
+        require(len(parts) == len(steps) + 1)
+        require(block.count('timeout-minutes:') == len(steps) + 1)
+        for part, (header, minutes) in zip(parts[1:], steps):
+            require(part.splitlines()[0] == header)
+            require(re.findall(r'^        timeout-minutes: (.+)$', part, re.M) == [str(minutes)])
+        require(hashlib.sha256(block.encode('utf-8')).hexdigest() == new_sha)
+        actual.append(block)
+
+    def unique(pairs):
+        result = {}
+        for key, value in pairs:
+            require(key not in result)
+            result[key] = value
+        return result
+
+    raw = Path('scripts/fixtures/native_phase_budgets_ci_delta.json').read_bytes()
+    # Two complete native blocks, old and new: intentionally larger than the
+    # one-line auth delta's 8192-byte cap, still bounded before JSON parsing.
+    require(0 < len(raw) <= 16384)
+    decoded = raw.decode('utf-8')
+    depth, quoted, escaped = 0, False, False
+    for char in decoded:
+        if quoted:
+            if escaped:
+                escaped = False
+            elif char == '\\':
+                escaped = True
+            elif char == '"':
+                quoted = False
+        elif char == '"':
+            quoted = True
+        elif char in '[{':
+            depth += 1
+            require(depth <= 3)
+        elif char in ']}':
+            depth -= 1
+            require(depth >= 0)
+    require(not quoted and depth == 0)
+    delta = json.loads(decoded, object_pairs_hook=unique)
+    require(type(delta) is dict and set(delta) == {'baselineSHA256', 'replacements'})
+    require(delta['baselineSHA256'] == baseline and type(delta['replacements']) is list)
+    require(len(delta['replacements']) == 2)
+    for change, current, (_, _, _, old_sha, new_sha) in zip(delta['replacements'], actual, jobs):
+        require(type(change) is dict and set(change) == {'old', 'new'})
+        require(type(change['old']) is str and type(change['new']) is str)
+        require(hashlib.sha256(change['old'].encode('utf-8')).hexdigest() == old_sha)
+        require(hashlib.sha256(change['new'].encode('utf-8')).hexdigest() == new_sha)
+        require(change['new'] == current and text.count(current) == 1)
+        text = text.replace(current, change['old'], 1)
+    require(hashlib.sha256(text.encode('utf-8')).hexdigest() == baseline)
+    return text
+
+
 def restore_auth_shards16(text):
     """Reverse only the reviewed 16-to-8 auth matrix line, not runtime coverage."""
+    text = restore_native_phase_budgets(text)
     def unique(pairs):
         result = {}
         for key, value in pairs:

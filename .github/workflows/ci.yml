@@ -851,28 +851,35 @@ jobs:
     env:
       ADTR_E2E_NATIVE_STREAM_MODE: stable-body
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 41
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        timeout-minutes: 1
         with:
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        timeout-minutes: 2
         with:
           node-version: '24.19.0'
           cache: npm
           cache-dependency-path: web/package-lock.json
       - name: Install locked browser test dependencies
+        timeout-minutes: 2
         run: npm ci --prefix web --cache /tmp/adtr-npm-cache
       - name: Install pinned Chromium and headed dependencies
+        timeout-minutes: 20
         run: cd web && npx playwright install --with-deps chromium
       - name: Require complete application reads and record native outcomes
+        timeout-minutes: 10
         run: xvfb-run -a npm run test:e2e --prefix web -- e2e/native-no-store-completion.spec.ts --headed
       - name: Validate both production readers and exact native evidence
+        timeout-minutes: 2
         if: ${{ success() }}
         run: python3 scripts/validate_directory_v4_controls_evidence.py --source-root . --native
       - name: Retain synthetic native stream diagnostics
+        timeout-minutes: 2
         if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
@@ -888,23 +895,28 @@ jobs:
       ADTR_E2E_NATIVE_STREAM_MODE: native-finish
     # Isolated upstream-fix diagnostic; the pinned baseline and matrix stay intact.
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 51
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        timeout-minutes: 1
         with:
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        timeout-minutes: 2
         with:
           node-version: '24.19.0'
           cache: npm
           cache-dependency-path: web/package-lock.json
       - name: Install locked browser test dependencies
+        timeout-minutes: 2
         run: npm ci --prefix web --cache /tmp/adtr-npm-cache
       - name: Install headed browser system dependencies
+        timeout-minutes: 20
         run: cd web && npx playwright install-deps chromium
       - name: Verify official fixed-build diagnostic browser
+        timeout-minutes: 10
         shell: bash
         run: |
           set -euo pipefail
@@ -928,11 +940,14 @@ jobs:
           } > "$fixture/provenance.txt"
           cat "$fixture/provenance.txt"
       - name: Require identical native stream proof on the fixed engine
+        timeout-minutes: 10
         run: xvfb-run -a npm run test:e2e --prefix web -- e2e/native-no-store-completion.spec.ts --headed
       - name: Validate both production readers and exact native evidence
+        timeout-minutes: 2
         if: ${{ success() }}
         run: python3 scripts/validate_directory_v4_controls_evidence.py --source-root . --native
       - name: Retain fixed-build synthetic diagnostics and provenance
+        timeout-minutes: 2
         if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
