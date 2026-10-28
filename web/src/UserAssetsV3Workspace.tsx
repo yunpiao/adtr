@@ -871,17 +871,33 @@ function Assets({
                 <caption>用户资产列表</caption>
                 <thead>
                   <tr>
-                    <th scope="col">SAM</th>
-                    <th scope="col">GUID</th>
-                    <th scope="col">DN</th>
-                    <th scope="col">SID</th>
-                    <th scope="col">mail</th>
-                    <th scope="col">详情</th>
+                    <th scope="col" style={{ width: "9%" }}>
+                      本页序号
+                    </th>
+                    <th scope="col" style={{ width: "14%" }}>
+                      SAM
+                    </th>
+                    <th scope="col" style={{ width: "17%" }}>
+                      GUID
+                    </th>
+                    <th scope="col" style={{ width: "19%" }}>
+                      DN
+                    </th>
+                    <th scope="col" style={{ width: "16%" }}>
+                      SID
+                    </th>
+                    <th scope="col" style={{ width: "15%" }}>
+                      mail
+                    </th>
+                    <th scope="col" style={{ width: "10%" }}>
+                      详情
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
-                  {list.list.map((row) => (
+                  {list.list.map((row, index) => (
                     <tr key={row.objectGUID}>
+                      <td data-label="本页序号">{index + 1}</td>
                       <td data-label="SAM" className="asset-name">
                         <span>
                           {nullable(row.samAccountName)}

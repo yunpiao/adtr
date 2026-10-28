@@ -1005,6 +1005,30 @@ test("UserAssetsV3 real workspace, pins, identity facts and native reader invali
     credentialRevision: beforeConnection.credentialRevision,
   };
   const table = page.getByRole("table", { name: "用户资产列表", exact: true });
+  // UI-0495 is a page-local display position bound to accepted response order.
+  // It is not a global rank, object identity or additional API parameter.
+  const expectUserPositions = async (expected: DirectoryObject[]) => {
+    if (expected.length === 0) {
+      await expect(table).toHaveCount(0);
+      return;
+    }
+    const header = table.getByRole("columnheader", {
+      name: "本页序号",
+      exact: true,
+    });
+    await expect(header).toHaveAttribute("scope", "col");
+    await expect(header).not.toHaveAttribute("aria-sort");
+    await expect(header.getByRole("button")).toHaveCount(0);
+    const rows = table.locator("tbody tr");
+    await expect(rows).toHaveCount(expected.length);
+    for (let index = 0; index < expected.length; index++) {
+      const cells = rows.nth(index).getByRole("cell");
+      await expect(cells).toHaveCount(7);
+      await expect(cells.nth(0)).toHaveAttribute("data-label", "本页序号");
+      await expect(cells.nth(0)).toHaveText(String(index + 1));
+      await expect(cells.nth(2)).toHaveText(expected[index].objectGUID);
+    }
+  };
   const panel = page.getByRole("region", { name: "用户详情", exact: true });
   const fact = (label: string) =>
     panel
@@ -1016,6 +1040,9 @@ test("UserAssetsV3 real workspace, pins, identity facts and native reader invali
     [taskUUID, { sha256: evidence.sha256, source: observed.source }],
   ]);
   const capture = async (filename: string, list: any, object?: any) => {
+    // An open detail drawer makes the underlying list inert; list captures
+    // assert positions without weakening that accessibility boundary.
+    if (!object) await expectUserPositions(list.list);
     // Bind each clean image to browser-consumed bytes, task/source identity and
     // the independently hashed PostgreSQL observation. Never capture proof UI.
     expect(list.dictionaryVersion).toBe(3);
@@ -1128,6 +1155,7 @@ test("UserAssetsV3 real workspace, pins, identity facts and native reader invali
     page: { pageIdx: 1, pageSize: 10, total: 12, totalPage: 2 },
   });
   await expect(table.locator("tbody tr")).toHaveCount(10);
+  await expectUserPositions(first.value.list);
   await expect(table).not.toContainText("group-");
   await expect(table).not.toContainText("computer-");
   await expect(
@@ -1219,6 +1247,7 @@ test("UserAssetsV3 real workspace, pins, identity facts and native reader invali
     );
     expect(secondPage.query.get("observationId")).toBe(taskUUID);
     expect(secondPage.value.list).toEqual(users.slice(10));
+    await expectUserPositions(secondPage.value.list);
     const nullDetail = await assetAction(
       page,
       () =>
@@ -1245,6 +1274,7 @@ test("UserAssetsV3 real workspace, pins, identity facts and native reader invali
       page.getByRole("button", { name: "用户资产上一页", exact: true }).click(),
     );
     expect(back.value).toEqual(first.value);
+    await expectUserPositions(back.value.list);
   });
 
   await test.step("literal search, exact SAM, paired UTC creation bounds and stable ordering keep the pin", async () => {
@@ -1259,6 +1289,7 @@ test("UserAssetsV3 real workspace, pins, identity facts and native reader invali
       expect(found.query.get("search")).toBe(query);
       expect(found.query.get("observationId")).toBe(taskUUID);
       expect(found.value.list).toEqual(wanted);
+      await expectUserPositions(found.value.list);
     }
     await expect(
       page.getByText("此观测在当前筛选下没有匹配用户。", { exact: true }),
@@ -1305,10 +1336,12 @@ test("UserAssetsV3 real workspace, pins, identity facts and native reader invali
       page.getByRole("button", { name: "搜索用户", exact: true }).click(),
     );
     expect(descending.value.list).toEqual(users.slice(1, 11));
+    await expectUserPositions(descending.value.list);
     const descendingLast = await assetAction(page, () =>
       page.getByRole("button", { name: "用户资产下一页", exact: true }).click(),
     );
     expect(descendingLast.value.list).toEqual([users[11], users[0]]);
+    await expectUserPositions(descendingLast.value.list);
     const reset = await assetAction(page, () =>
       page.getByRole("button", { name: "清除用户筛选", exact: true }).click(),
     );
@@ -1324,6 +1357,7 @@ test("UserAssetsV3 real workspace, pins, identity facts and native reader invali
       );
       expect(resized.query.get("observationId")).toBe(taskUUID);
       expect(resized.value.list).toEqual(users.slice(0, size));
+      await expectUserPositions(resized.value.list);
     }
   });
 
@@ -1439,6 +1473,7 @@ test("UserAssetsV3 real workspace, pins, identity facts and native reader invali
     await capture("user-assets-v3-desktop-uac-clear.png", clearFirst.value);
     const clearLast = await assetAction(page, next);
     assertRead(clearLast, "clear", 2);
+    await expectUserPositions(clearLast.value.list);
     expect([...clearFirst.value.list, ...clearLast.value.list]).toEqual(
       originalUsers,
     );
@@ -1500,6 +1535,7 @@ test("UserAssetsV3 real workspace, pins, identity facts and native reader invali
     const restored = await assetAction(page, clear);
     assertRead(restored, "");
     expect(restored.value).toEqual(first.value);
+    await expectUserPositions(restored.value.list);
     await expect(control).toHaveValue("");
     await expect(table.locator("tbody tr")).toHaveCount(10);
     await expect(
@@ -1600,6 +1636,16 @@ test("UserAssetsV3 real workspace, pins, identity facts and native reader invali
         () => document.documentElement.scrollWidth <= innerWidth,
       ),
     ).toBe(true);
+    const firstMobileRow = table.locator("tbody tr").first();
+    await expect(firstMobileRow.getByRole("cell").nth(2)).toHaveText(
+      first.value.list[0].objectGUID,
+    );
+    await firstMobileRow.scrollIntoViewIfNeeded();
+    const firstMobilePosition = firstMobileRow.getByRole("cell").first();
+    await expect(firstMobilePosition).toHaveAttribute("data-label", "本页序号");
+    await expect(firstMobilePosition).toHaveText("1");
+    await expect(firstMobilePosition).toBeVisible();
+    await expect(firstMobilePosition).toBeInViewport({ ratio: 1 });
     await capture("user-assets-v3-mobile-list.png", first.value);
     const actual = await assetAction(
       page,
@@ -1851,6 +1897,7 @@ test("UserAssetsV3 real workspace, pins, identity facts and native reader invali
   expect(refreshed.query.get("search")).toBe("user-01");
   expect(refreshed.value.observationId).toBe(newerId);
   expect(refreshed.value.list).toEqual([users[0]]);
+  await expectUserPositions(refreshed.value.list);
   observations.set(newerId, {
     sha256: newerStored.sha256,
     source: refreshed.value.source,
