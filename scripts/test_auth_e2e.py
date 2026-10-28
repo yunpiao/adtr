@@ -33,7 +33,10 @@ from group_asset_export_v3_ci import configure as configure_group_export, captur
 from group_asset_export_v3_terminal_ci import SUITES as GROUP_EXPORT_TERMINAL_SUITES, configure as configure_group_terminal, capture as capture_group_terminal, validate as validate_group_terminal
 from ci_postgres_image import postgres_image_args
 from test_integration import IMAGE
-from ldap_e2e_fixture import LDAPFixture
+from ldap_e2e_fixture import LDAPFixture, uac_ldap_failure_stage
+from user_asset_export_v3_uac_ci import (configure_uac, capture_uac_provenance,
+    discover_uac_candidate, finalize_uac_evidence, uac_diagnostic_error,
+    uac_failure_code, uac_failure_stage, uac_failure_message)
 from account_barrier_e2e_fixture import AccountBarrierFixture
 from directory_e2e_credentials import configure_directory_credentials
 from directory_v4_worker_control import DelayedOwnedWorker, URL_ENV, TOKEN_ENV
@@ -51,7 +54,8 @@ GROUP_EXPORT_SUITES = GROUP_EXPORT_TERMINAL_SUITES | {"group-asset-export-v3"}
 GROUP_ASSETS_V3_SUITES = {"group-assets-v3", "group-assets-v3-readers"}
 EMPTY_TRANSITION_SUITES = {"group-assets-v3", "computer-assets-v3"}
 KIND_RUNNING_CANCEL_SUITES = {GROUP_RUNNING_CANCEL_SUITE, COMPUTER_RUNNING_CANCEL_SUITE}
-DIRECTORY_V3_SUITES = KIND_RUNNING_CANCEL_SUITES | {RUNNING_CANCEL_SUITE} | COMPUTER_EXPORT_SUITES | GROUP_EXPORT_SUITES | EXPORT_TERMINAL_SUITES | {"user-asset-export-v3", "directory-v3-backend", "user-assets-v3", "directory-v3", "directory-v3-controls", "directory-v3-readers"} | COMPUTER_ASSETS_V3_SUITES | GROUP_ASSETS_V3_SUITES
+UAC_SUITE = "user-asset-export-v3-uac-mixed33"
+DIRECTORY_V3_SUITES = {UAC_SUITE} | KIND_RUNNING_CANCEL_SUITES | {RUNNING_CANCEL_SUITE} | COMPUTER_EXPORT_SUITES | GROUP_EXPORT_SUITES | EXPORT_TERMINAL_SUITES | {"user-asset-export-v3", "directory-v3-backend", "user-assets-v3", "directory-v3", "directory-v3-controls", "directory-v3-readers"} | COMPUTER_ASSETS_V3_SUITES | GROUP_ASSETS_V3_SUITES
 DIRECTORY_V4_SUITES = {"directory-v4-backend", "group-members-v4", "group-members-v4-empty", "group-members-v4-pagination", "group-members-v4-refresh"}
 DIRECTORY_SUITES = DIRECTORY_V4_SUITES | DIRECTORY_V3_SUITES | {"directory", "directory-controls", "directory-readers"} | DIRECTORY_V2_SUITES
 EMPTY_DIRECTORY_SUITES = {"directory-controls", "directory-readers", "directory-v2-controls", "directory-v2-readers", "directory-v3-controls", "directory-v3-readers"}
@@ -980,9 +984,112 @@ def validate_asset_refresh_evidence(suite):
                        check=True, timeout=30)
 
 
+def cleanup_uac_run(worker, server, diagnostics, logs, ldap_fixture,
+                    creation_attempted, name, owner, nonce, diagnostic_dir):
+    """Collect actual owned teardown facts; no failure can authorize evidence."""
+    receipt = dict(format=1, profile="mixed-33-v1", nonce=nonce,
+                   workerExitCode=None, apiExitCode=None, ldapExitCode=None,
+                   ldapContainerRemoved=False, ldapNetworkRemoved=False,
+                   ldapPrivateDirectoriesRemoved=False, databaseContainerRemoved=False,
+                   logsClosed=False, safeDiagnosticsPassed=False,
+                   allOwnedCleanupSucceeded=False)
+    failed = False
+    first_stage = None
+    try:
+        diagnostics.snapshot(server, worker)
+    except Exception:
+        failed = True
+        first_stage = first_stage or "cleanup_snapshot"
+    for label, process in (("worker", worker), ("api", server)):
+        try:
+            reaped, code, forced, problems = cleanup_v4_process(
+                process, diagnostics.report["processes"][label])
+            if process is None or not reaped or forced or problems or type(code) is not int or code != 0:
+                failed = True
+                first_stage = first_stage or ("cleanup_worker" if label == "worker" else "cleanup_api")
+            else:
+                receipt[label + "ExitCode"] = code
+        except Exception:
+            failed = True
+            first_stage = first_stage or ("cleanup_worker" if label == "worker" else "cleanup_api")
+    ldap_stage = "cleanup_ldap_close"
+    try:
+        if ldap_fixture is None:
+            raise RuntimeError("uac_evidence_invalid:cleanup")
+        ldap_fixture.close()
+        ldap_stage = "cleanup_ldap_retained"
+        retained = ldap_fixture.retained_uac_evidence
+        if (type(retained) is not tuple or len(retained) != 3
+                or type(retained[0]) is not bytes or type(retained[1]) is not bytes
+                or type(retained[2]) is not int or retained[2] != 0):
+            raise RuntimeError("uac_evidence_invalid:cleanup")
+        # F publishes this tuple only after successful stop/inspect and all its
+        # owned container/network/private-directory cleanup; None is not proof.
+        receipt.update(ldapExitCode=0, ldapContainerRemoved=True,
+                       ldapNetworkRemoved=True, ldapPrivateDirectoriesRemoved=True)
+    except Exception as error:
+        failed = True
+        if first_stage is None:
+            first_stage = ldap_stage
+            if ldap_stage == "cleanup_ldap_close":
+                # F owns its exact-type, fixed-message, private stage tag.
+                # Even a broken diagnostic accessor cannot interrupt cleanup.
+                try:
+                    owned_stage = uac_ldap_failure_stage(error)
+                except Exception:
+                    owned_stage = None
+                if owned_stage is not None:
+                    first_stage = owned_stage
+    diagnostic_ok = False
+    try:
+        panicked = http_handler_panicked(logs)
+        diagnostics.report["http_panic"] = panicked
+        diagnostic_ok = panicked is False
+        if not diagnostic_ok:
+            failed = True
+            first_stage = first_stage or "cleanup_log_scan"
+    except Exception:
+        failed = True
+        first_stage = first_stage or "cleanup_log_scan"
+    try:
+        logs.close()
+        receipt["logsClosed"] = logs.closed is True
+        if not receipt["logsClosed"]:
+            failed = True
+            first_stage = first_stage or "cleanup_log_close"
+    except Exception:
+        failed = True
+        first_stage = first_stage or "cleanup_log_close"
+    try:
+        if not creation_attempted:
+            raise RuntimeError("uac_evidence_invalid:cleanup")
+        remove_owned_container(name, owner)
+        receipt["databaseContainerRemoved"] = True
+    except Exception:
+        failed = True
+        first_stage = first_stage or "cleanup_database_remove"
+    diagnostic_stage = "cleanup_diagnostic_phase"
+    try:
+        diagnostics.phase("after-cleanup")
+        diagnostic_stage = "cleanup_diagnostic_write"
+        diagnostics.write(diagnostic_dir / "runtime.json")
+        diagnostic_stage = "cleanup_diagnostic_result"
+        receipt["safeDiagnosticsPassed"] = diagnostic_ok and not diagnostics.report["collection_errors"]
+        if not receipt["safeDiagnosticsPassed"]:
+            failed = True
+            first_stage = first_stage or diagnostic_stage
+    except Exception:
+        failed = True
+        first_stage = first_stage or diagnostic_stage
+    if failed:
+        raise uac_diagnostic_error("cleanup", first_stage, kind="runtime") from None
+    receipt["allOwnedCleanupSucceeded"] = True
+    return receipt
+
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--suite", choices=["tasks-health-recovery", "directory-v4-controls", "directory-v4-cancel", "directory-v4-readers", "group-asset-export-v3-running-cancel", "computer-asset-export-v3-running-cancel", "user-asset-export-v3-running-cancel", "computer-asset-export-v3", "computer-asset-export-v3-failure", "computer-asset-export-v3-cancel", "group-asset-export-v3", "group-asset-export-v3-failure", "group-asset-export-v3-cancel", "user-asset-export-v3-failure", "user-asset-export-v3-cancel", "user-asset-export-v3", "auth", "access", "resource", "tasks", "messages", "messages-bulk", "messages-isolation", "audit", "system", "maintenance", "domains", "operations", "profile", "credential-use", "account-references", "operational-logs", "session-invalidation", "account-reference-barrier", "directory", "directory-controls", "directory-readers", "directory-v2", "directory-v2-controls", "directory-v2-readers", "directory-v3-backend", "directory-v4-backend", "group-members-v4", "group-members-v4-empty", "group-members-v4-pagination", "group-members-v4-refresh", "user-assets-v3", "computer-assets-v3", "computer-assets-v3-readers", "group-assets-v3", "group-assets-v3-readers", "directory-v3", "directory-v3-controls", "directory-v3-readers", "user-assets-v2", "user-assets-v2-readers"], default="auth")
+    parser.add_argument("--suite", choices=["user-asset-export-v3-uac-mixed33", "tasks-health-recovery", "directory-v4-controls", "directory-v4-cancel", "directory-v4-readers", "group-asset-export-v3-running-cancel", "computer-asset-export-v3-running-cancel", "user-asset-export-v3-running-cancel", "computer-asset-export-v3", "computer-asset-export-v3-failure", "computer-asset-export-v3-cancel", "group-asset-export-v3", "group-asset-export-v3-failure", "group-asset-export-v3-cancel", "user-asset-export-v3-failure", "user-asset-export-v3-cancel", "user-asset-export-v3", "auth", "access", "resource", "tasks", "messages", "messages-bulk", "messages-isolation", "audit", "system", "maintenance", "domains", "operations", "profile", "credential-use", "account-references", "operational-logs", "session-invalidation", "account-reference-barrier", "directory", "directory-controls", "directory-readers", "directory-v2", "directory-v2-controls", "directory-v2-readers", "directory-v3-backend", "directory-v4-backend", "group-members-v4", "group-members-v4-empty", "group-members-v4-pagination", "group-members-v4-refresh", "user-assets-v3", "computer-assets-v3", "computer-assets-v3-readers", "group-assets-v3", "group-assets-v3-readers", "directory-v3", "directory-v3-controls", "directory-v3-readers", "user-assets-v2", "user-assets-v2-readers"], default="auth")
     parser.add_argument("--expired", action="store_true")
     args = parser.parse_args()
     if args.suite == "tasks-health-recovery" and args.expired:
@@ -1001,6 +1108,9 @@ def main():
     if health_build_record is not None:
         env["ADTR_E2E_HEALTH_RUN_NONCE"] = health_build_record["identity"]["nonce"]
     health_cleanup = None
+    uac_nonce = secrets.token_hex(16) if args.suite == UAC_SUITE else None
+    uac_provenance = None
+    uac_cleanup = None
     # Ignore inherited controller handles and exact-suite selectors.
     for key in (URL_ENV, TOKEN_ENV, "ADTR_E2E_V4_CONTROLS_SUITE"):
         env.pop(key, None)
@@ -1024,6 +1134,11 @@ def main():
         (diagnostic_dir / filename).unlink(missing_ok=True)
     env["ADTR_E2E_SAFE_DIAGNOSTICS"] = str((diagnostic_dir / "browser.json").resolve())
     diagnostics.phase("setup")
+    if args.suite == UAC_SUITE:
+        if args.expired:
+            raise RuntimeError("uac_evidence_invalid:configuration")
+        configure_uac(env, nonce=uac_nonce)
+        uac_provenance = capture_uac_provenance(repo=Path.cwd())
     if args.suite == "user-asset-export-v3":
         configure_user_export(env)
         capture_user_export()
@@ -1130,7 +1245,8 @@ def main():
                                            user_assets_v2=args.suite in USER_ASSETS_V2_SUITES,
                                            user_export_failure_v3=args.suite == "user-asset-export-v3-failure",
                                            group_export_failure_v3=args.suite == "group-asset-export-v3-failure",
-                                           computer_export_failure_v3=args.suite == "computer-asset-export-v3-failure")
+                                           computer_export_failure_v3=args.suite == "computer-asset-export-v3-failure",
+                                           user_uac_v3_profile="mixed-33-v1" if args.suite == UAC_SUITE else "")
                 ldap_fixture.start(env)
                 if args.suite in DIRECTORY_SUITES:
                     env["ADTR_DIRECTORY_READ_ENABLED"] = "true"
@@ -1254,7 +1370,7 @@ def main():
             if exit_code != 0:
                 raise RuntimeError("health_browser_failed")
         else:
-            subprocess.run(command, env=env, check=True, timeout=720 if args.suite == "messages-isolation" else V4_CONTROLS_BUDGETS[args.suite] if args.suite in V4_CONTROLS_BUDGETS else 930 if args.suite in KIND_RUNNING_CANCEL_SUITES else 930 if args.suite == RUNNING_CANCEL_SUITE else 930 if args.suite in COMPUTER_EXPORT_SUITES else 930 if args.suite in GROUP_EXPORT_SUITES else 930 if args.suite in EXPORT_TERMINAL_SUITES else 930 if args.suite == "user-asset-export-v3" else 660 if args.suite == "account-references" else 930 if args.suite in EMPTY_DIRECTORY_SUITES | USER_ASSETS_V2_SUITES | {"user-assets-v3"} | COMPUTER_ASSETS_V3_SUITES | GROUP_ASSETS_V3_SUITES else 660 if args.suite in {"directory", "directory-v2", "directory-v3-backend", "directory-v4-backend", "group-members-v4", "group-members-v4-empty", "group-members-v4-pagination", "group-members-v4-refresh", "directory-v3"} else 600 if args.suite == "audit" else 540 if args.suite in {"maintenance", "domains", "operations", "credential-use", "account-references", "operational-logs", "account-reference-barrier"} else 480 if args.suite == "system" else 420)
+            subprocess.run(command, env=env, check=True, timeout=720 if args.suite == "messages-isolation" else V4_CONTROLS_BUDGETS[args.suite] if args.suite in V4_CONTROLS_BUDGETS else 930 if args.suite in KIND_RUNNING_CANCEL_SUITES else 930 if args.suite == RUNNING_CANCEL_SUITE else 930 if args.suite in COMPUTER_EXPORT_SUITES else 930 if args.suite in GROUP_EXPORT_SUITES else 930 if args.suite in EXPORT_TERMINAL_SUITES else 930 if args.suite in {"user-asset-export-v3", UAC_SUITE} else 660 if args.suite == "account-references" else 930 if args.suite in EMPTY_DIRECTORY_SUITES | USER_ASSETS_V2_SUITES | {"user-assets-v3"} | COMPUTER_ASSETS_V3_SUITES | GROUP_ASSETS_V3_SUITES else 660 if args.suite in {"directory", "directory-v2", "directory-v3-backend", "directory-v4-backend", "group-members-v4", "group-members-v4-empty", "group-members-v4-pagination", "group-members-v4-refresh", "directory-v3"} else 600 if args.suite == "audit" else 540 if args.suite in {"maintenance", "domains", "operations", "credential-use", "account-references", "operational-logs", "account-reference-barrier"} else 480 if args.suite == "system" else 420)
         if args.suite == "messages-isolation":
             validate_messages_isolation_evidence()
         if args.suite == "user-asset-export-v3":
@@ -1322,6 +1438,17 @@ def main():
                     diagnostics.write(diagnostic_dir / "runtime.json")
                 except Exception:
                     print("health_runtime_diagnostics_failed", file=sys.stderr)
+        elif args.suite == UAC_SUITE:
+            primary_error = sys.exc_info()[0] is not None
+            try:
+                uac_cleanup = cleanup_uac_run(worker, server, diagnostics, logs,
+                    ldap_fixture, creation_attempted, name, owner, uac_nonce, diagnostic_dir)
+            except Exception as error:
+                cleanup_error = uac_diagnostic_error("cleanup",
+                    uac_failure_stage(error, fallback="runner_main"), kind="runtime")
+                if not primary_error:
+                    raise cleanup_error from None
+                print(uac_failure_message(cleanup_error), file=sys.stderr)
         elif args.suite in V4_CONTROLS_BUDGETS:
             primary_error = sys.exc_info()[0] is not None
             try:
@@ -1464,6 +1591,20 @@ def main():
                     diagnostics.write(diagnostic_dir / "runtime.json")
                 except Exception:
                     print("Safe runtime diagnostics could not be retained", file=sys.stderr)
+    if args.suite == UAC_SUITE:
+        try:
+            try:
+                uac_candidate = discover_uac_candidate(repo=Path.cwd())
+            except Exception as error:
+                raise uac_diagnostic_error(uac_failure_code(error),
+                    uac_failure_stage(error, fallback="candidate_discovery")) from None
+            finalize_uac_evidence(repo=Path.cwd(), run_nonce=uac_nonce,
+                provenance_bytes=uac_provenance, candidate_path=uac_candidate,
+                retained_ldap=ldap_fixture.retained_uac_evidence, cleanup_receipt=uac_cleanup)
+        finally:
+            # Release retained private bytes without mutating F's read-only slot.
+            ldap_fixture = None
+            uac_provenance = None
     if args.suite == "tasks-health-recovery":
         close_health_evidence(health_cleanup, health_build_record, env, health_run_deadline)
     if args.suite == "messages":
@@ -1476,7 +1617,13 @@ def main():
 if __name__ == "__main__":
     try:
         main()
-    except Exception:
+    except Exception as error:
+        if ("--suite=" + UAC_SUITE in sys.argv[1:]
+                or any(a == "--suite" and b == UAC_SUITE
+                       for a, b in zip(sys.argv[1:], sys.argv[2:]))):
+            # Never print the underlying exception/cause or a request/SQL value.
+            print(uac_failure_message(error), file=sys.stderr)
+            sys.exit(1)
         if ("--suite=tasks-health-recovery" in sys.argv[1:]
                 or any(a == "--suite" and b == "tasks-health-recovery"
                        for a, b in zip(sys.argv[1:], sys.argv[2:]))):

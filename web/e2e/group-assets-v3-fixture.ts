@@ -32,7 +32,31 @@ type DirectoryObject = {
 // worker and TLS LDAPFixture(directory_enabled=True, directory_v3=True). The fixture has 30 objects
 // on two wire pages; it must never resolve or contact a real AD server.
 // A missing fixture is a failed acceptance run, never a skipped/passing test.
-function requireFixture(userAssetExport = false) {
+function requireFixture(
+  userAssetExport = false,
+  userUACProfile?: "mixed-33-v1",
+) {
+  const uac = userUACProfile === "mixed-33-v1";
+  if (userUACProfile !== undefined && !uac)
+    throw new Error("uac_evidence_invalid:configuration");
+  if (uac) {
+    if (
+      userAssetExport ||
+      process.env.ADTR_E2E_USER_ASSET_EXPORT_V3_UAC !== "true" ||
+      process.env.ADTR_E2E_USER_ASSET_EXPORT_V3 === "true" ||
+      process.env.ADTR_E2E_LDAP_DIRECTORY_USER_UAC_V3_PROFILE !==
+        "mixed-33-v1" ||
+      !/^[0-9a-f]{32}$/u.test(
+        process.env.ADTR_LDAP_FIXTURE_UAC_RUN_NONCE ?? "",
+      ) ||
+      !process.env.ADTR_E2E_LDAP_UAC_EVIDENCE_DIR
+    )
+      throw new Error("uac_evidence_invalid:configuration");
+  } else if (
+    process.env.ADTR_E2E_LDAP_DIRECTORY_USER_UAC_V3_PROFILE ||
+    process.env.ADTR_E2E_USER_ASSET_EXPORT_V3_UAC === "true"
+  )
+    throw new Error("uac_evidence_invalid:configuration");
   const names = [
     "ADTR_E2E_BASE_URL",
     "ADTR_E2E_USERNAME",
@@ -45,11 +69,25 @@ function requireFixture(userAssetExport = false) {
     names.some((name) => !process.env[name]) ||
     process.env.ADTR_E2E_LDAP_DIRECTORY_MODE !== "true" ||
     process.env.ADTR_E2E_LDAP_DIRECTORY_V3 !== "true" ||
-    (userAssetExport
-      ? process.env.ADTR_E2E_USER_ASSET_EXPORT_V3 !== "true" ||
-        ["GROUP_ASSETS_V3", "COMPUTER_ASSETS_V3", "V2", "V4", "EMPTY", "SLOW", "USER_ASSETS_V2", "GROUP_MEMBERS_V4_REFRESH", "GROUP_MEMBERS_V4_PAGINATION"].some(
-          (mode) => ![undefined, "false"].includes(process.env[`ADTR_E2E_LDAP_DIRECTORY_${mode}`]),
-        ) || Boolean(process.env.ADTR_E2E_LDAP_EMPTY_TRANSITION_DIR)
+    (userAssetExport || uac
+      ? (!uac && process.env.ADTR_E2E_USER_ASSET_EXPORT_V3 !== "true") ||
+        [
+          "GROUP_ASSETS_V3",
+          "COMPUTER_ASSETS_V3",
+          "V2",
+          "V4",
+          "EMPTY",
+          "SLOW",
+          "USER_ASSETS_V2",
+          "GROUP_MEMBERS_V4_REFRESH",
+          "GROUP_MEMBERS_V4_PAGINATION",
+        ].some(
+          (mode) =>
+            ![undefined, "false"].includes(
+              process.env[`ADTR_E2E_LDAP_DIRECTORY_${mode}`],
+            ),
+        ) ||
+        Boolean(process.env.ADTR_E2E_LDAP_EMPTY_TRANSITION_DIR)
       : process.env.ADTR_E2E_LDAP_DIRECTORY_GROUP_ASSETS_V3 !== "true")
   )
     throw new Error(
@@ -150,14 +188,24 @@ async function enrollMfa(page: Page, password: string): Promise<Authenticator> {
   return { secret, lastCounter: Math.floor(now / 30_000) };
 }
 
-export async function proof(page: Page, password: string, auth: Authenticator) {
+export async function proof(
+  page: Page,
+  password: string,
+  auth: Authenticator,
+  privateSecrets?: string[],
+) {
   await fillSecret(
     page.getByLabel("操作者当前密码", { exact: true }),
     password,
   );
+  const code = await freshCode(auth);
+  // C supplies its private per-run scanner list. Register before filling so a
+  // reflected proof is rejected in every later response, candidate and PNG.
+  // Default callers omit this argument and keep their existing behavior.
+  if (privateSecrets) privateSecrets.push(code);
   await fillSecret(
     page.getByLabel("未使用的认证器验证码", { exact: true }),
-    await freshCode(auth),
+    code,
   );
 }
 
@@ -251,13 +299,37 @@ export async function setupGroupFixture(
   context: BrowserContext,
   options: { emptyRefresh?: boolean; userAssetExport?: boolean } = {},
 ) {
+  return setupGroupFixtureMode(page, context, options);
+}
+
+// Typed, explicit C-only entry point; the default public options stay intact.
+export async function setupUACGroupFixture(
+  page: Page,
+  context: BrowserContext,
+  profile: "mixed-33-v1",
+) {
+  if (profile !== "mixed-33-v1")
+    throw new Error("uac_evidence_invalid:configuration");
+  return setupGroupFixtureMode(page, context, {}, profile);
+}
+
+async function setupGroupFixtureMode(
+  page: Page,
+  context: BrowserContext,
+  options: { emptyRefresh?: boolean; userAssetExport?: boolean },
+  userUACProfile?: "mixed-33-v1",
+) {
   if (options.emptyRefresh && !process.env.ADTR_E2E_LDAP_EMPTY_TRANSITION_DIR)
     throw new Error(
       "Empty refresh setup requires its isolated transition fixture",
     );
   if (options.emptyRefresh && options.userAssetExport)
     throw new Error("Export fixture cannot use group empty-refresh mode");
-  requireFixture(options.userAssetExport);
+  if (userUACProfile) {
+    if (options.emptyRefresh || options.userAssetExport)
+      throw new Error("uac_evidence_invalid:configuration");
+    requireFixture(false, userUACProfile);
+  } else requireFixture(options.userAssetExport);
   let username = process.env.ADTR_E2E_USERNAME!;
   const initialPassword = process.env.ADTR_E2E_PASSWORD!;
   let password = "Changed Directory Password 123";
@@ -325,6 +397,8 @@ export async function setupGroupFixture(
   await page
     .getByLabel("初始凭据来源", { exact: true })
     .selectOption("unconfigured");
+  if (userUACProfile)
+    await page.getByLabel("加密连接方式", { exact: true }).selectOption("389");
   await proof(page, password, auth);
   const createdDomain = await submit(
     page,
@@ -568,6 +642,9 @@ export async function setupGroupFixture(
   const beforeConnection = (
     await readJSON(context, `/api/domains/detail?domainId=${domainId}`, actorId)
   ).connection;
+
+  if (userUACProfile)
+    expect(beforeConnection).toMatchObject({ port: "389", mode: "starttls" });
 
   // Auth/me identifies the actor in its JSON body; unlike domain APIs it
   // does not emit X-ADTR-User-ID. Keep an explicit identity assertion.

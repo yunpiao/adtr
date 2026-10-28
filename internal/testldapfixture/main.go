@@ -20,6 +20,8 @@ import (
 )
 
 type configuration struct {
+	userUACV3Profile                         userUACV3Profile
+	userUACEvidenceDir, userUACNonce         string
 	cert, key, startTLSAddress, ldapsAddress string
 	controlDir                               string
 	emptyTransitionDir                       string
@@ -41,8 +43,11 @@ type configuration struct {
 
 func readConfiguration(args []string, getenv func(string) string) (configuration, error) {
 	var cfg configuration
+	var uacProfile string
 	flags := flag.NewFlagSet("adtr-ldap-fixture", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
+	flags.StringVar(&uacProfile, "user-uac-v3-profile", "", "fixed opt-in synthetic mixed33 evidence; requires exclusive dictionary3")
+	flags.StringVar(&cfg.userUACEvidenceDir, "user-uac-evidence-dir", "", "owned private evidence directory; required only with mixed33")
 	flags.StringVar(&cfg.cert, "cert", "", "synthetic server certificate PEM path")
 	flags.StringVar(&cfg.key, "key", "", "synthetic server private key PEM path")
 	flags.StringVar(&cfg.controlDir, "control-dir", "", "optional disposable integration control directory")
@@ -80,6 +85,13 @@ func readConfiguration(args []string, getenv func(string) string) (configuration
 			cfg.directoryEmpty || cfg.directorySlow || cfg.computerAssetsV3 == cfg.groupAssetsV3 || cfg.controlDir != "")) {
 		return configuration{}, errors.New("invalid synthetic LDAP fixture configuration")
 	}
+	profile, profileErr := parseUserUACV3Profile(uacProfile)
+	cfg.userUACV3Profile = profile
+	cfg.userUACNonce = getenv("ADTR_LDAP_FIXTURE_UAC_RUN_NONCE")
+	if profileErr != nil || (profile == userUACNone && (cfg.userUACEvidenceDir != "" || cfg.userUACNonce != "")) ||
+		(profile == userUACMixed33 && (!cfg.directoryMode || !cfg.directoryV3 || cfg.directoryV2 || cfg.directoryV4 || cfg.userAssetsV2 || cfg.computerAssetsV3 || cfg.groupAssetsV3 || cfg.userExportFailureV3 || cfg.groupExportFailureV3 || cfg.computerExportFailureV3 || cfg.directoryEmpty || cfg.directorySlow || cfg.groupMembersV4Pagination || cfg.groupMembersV4Refresh || cfg.controlDir != "" || cfg.emptyTransitionDir != "" || cfg.userUACEvidenceDir == "" || !uacHex(cfg.userUACNonce, 32))) {
+		return configuration{}, errUACConfiguration
+	}
 	cfg.username = []byte(getenv("ADTR_LDAP_FIXTURE_USERNAME"))
 	cfg.password = []byte(getenv("ADTR_LDAP_FIXTURE_PASSWORD"))
 	if len(cfg.username) == 0 || len(cfg.username) > 1024 || !utf8.Valid(cfg.username) ||
@@ -107,7 +119,7 @@ func validListenAddress(value, wantPort string) bool {
 	return err == nil && ip.Zone() == "" && !ip.IsMulticast()
 }
 
-func run(ctx context.Context, args []string, getenv func(string) string, output io.Writer) error {
+func run(ctx context.Context, args []string, getenv func(string) string, output io.Writer) (runErr error) {
 	cfg, err := readConfiguration(args, getenv)
 	if err != nil {
 		return err
@@ -128,6 +140,17 @@ func run(ctx context.Context, args []string, getenv func(string) string, output 
 	if emptyTransition != nil {
 		defer emptyTransition.root.Close()
 	}
+	uacRecorder, err := newUserUACWireRecorder(cfg.userUACV3Profile, cfg.userUACEvidenceDir, cfg.userUACNonce)
+	if err != nil {
+		return err
+	}
+	if uacRecorder != nil {
+		defer func() {
+			if uacRecorder.root.Close() != nil && runErr == nil {
+				runErr = errUACSeal
+			}
+		}()
+	}
 	certificate, err := tls.LoadX509KeyPair(cfg.cert, cfg.key)
 	if err != nil {
 		return errors.New("synthetic LDAP fixture certificate unavailable")
@@ -143,6 +166,7 @@ func run(ctx context.Context, args []string, getenv func(string) string, output 
 	}
 	defer ldaps.Close()
 	fixture := server{
+		userUACV3Profile: cfg.userUACV3Profile, uacRecorder: uacRecorder,
 		tlsConfig:                &tls.Config{MinVersion: tls.VersionTLS12, Certificates: []tls.Certificate{certificate}},
 		username:                 cfg.username,
 		password:                 cfg.password,

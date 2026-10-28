@@ -9,7 +9,102 @@ import json
 from pathlib import Path
 
 
+def restore_user_uac_workflow(text):
+    """Reverse C's workflow domain only; full delta bytes are frozen separately.
+
+    No hash of the helper's own source or of its containing CI delta is embedded
+    here. The independent C contract pins the complete four-domain delta file.
+    """
+    def require(condition):
+        if not condition:
+            raise ValueError('uac_evidence_invalid:configuration')
+
+    def unique(pairs):
+        result = {}
+        for key, value in pairs:
+            require(key not in result)
+            result[key] = value
+        return result
+
+    baseline = 'cc1a98f8f385e43f0498635c1b8c0138184b2e23600c963a490ec83f876f79ff'
+    current = 'a3b5ec391fb478352d289c032e19e52d617d9b08d769403562b10a63219e7a3b'
+    hunks = (('bbde010baa2a4019f39a7b4706a6720755a7c7bb0168ec8b987c02e502358b9c',
+  'e2a2fd8501d14d7d7860b64e4cec027ca3f4db626a23f31af289eb56477d37e1'),
+ ('48a0a4f778b7cbaf08f5e729731d192bcf3aba7339935c6da92e03b229ea8411',
+  'bc7c39e3ab9cb4ae4c04c3b9ceaa3093b5feef0c1a07e6d37c0c70bb95e31297'))
+    metadata = {
+        'workflow': ('.github/workflows/ci.yml', baseline),
+        'helper': ('scripts/ci_workflow_contract.py', 'db43de4f6a8668e14d2c9b2053fa115196a12e0399eea73decbdcc57a56b0f21'),
+        'inventory': ('scripts/ci_inventory.json', '1d9ef348def9d9b55ee4d0f8bb7da340a3c9049f9e90b5826bd71f3a39c47f24'),
+        'authTest': ('scripts/test_auth_shards16_contract.py', '543cb239b7799593f31b9636a245398f5bce84c2b358ab8bacfaeb617f4e7a20'),
+    }
+    try:
+        require(type(text) is str)
+        raw = Path('scripts/fixtures/user_uac_v3_ci_delta.json').read_bytes()
+        require(type(raw) is bytes and 0 < len(raw) <= 262144 and not raw.startswith(b'\xef\xbb\xbf'))
+        decoded = raw.decode('utf-8', errors='strict')
+        depth, quoted, escaped = 0, False, False
+        for char in decoded:
+            if quoted:
+                if escaped:
+                    escaped = False
+                elif char == '\\':
+                    escaped = True
+                elif char == '"':
+                    quoted = False
+            elif char == '"':
+                quoted = True
+            elif char in '[{':
+                depth += 1
+                require(depth <= 8)
+            elif char in ']}':
+                depth -= 1
+                require(depth >= 0)
+        require(not quoted and depth == 0)
+        delta = json.loads(decoded, object_pairs_hook=unique,
+                           parse_constant=lambda _: require(False))
+        require(type(delta) is dict and set(delta) == {'format', 'profile', 'baselineCommit', 'baselineTree', 'files'})
+        require(type(delta['format']) is int and delta['format'] == 1 and delta['profile'] == 'mixed-33-v1')
+        require(delta['baselineCommit'] == '59716a3d9dc7dae83f6c8c45cb0d222926dc066b'
+                and delta['baselineTree'] == 'c7d2a54d325ddcf38e9b59087e691845191fb64b')
+        require(type(delta['files']) is dict and set(delta['files']) == set(metadata))
+        cumulative = 0
+        for domain, (path, predecessor) in metadata.items():
+            item = delta['files'][domain]
+            require(type(item) is dict and set(item) == {'path', 'baselineSHA256', 'replacements'})
+            require(item['path'] == path and item['baselineSHA256'] == predecessor)
+            require(type(item['replacements']) is list and 1 <= len(item['replacements']) <= 32)
+            for change in item['replacements']:
+                require(type(change) is dict and set(change) == {'old', 'new'})
+                require(type(change['old']) is str and type(change['new']) is str and change['old'] != change['new'])
+                for value in (change['old'], change['new']):
+                    size = len(value.encode('utf-8', errors='strict'))
+                    require(0 < size <= 16384)
+                    cumulative += size
+                    require(cumulative <= 196608)
+        # Reject CRLF, surplus whitespace and encoding drift without introducing
+        # a self-referential full-delta hash into this helper source.
+        require(raw == (json.dumps(delta, indent=2) + '\n').encode('utf-8'))
+        changes = delta['files']['workflow']['replacements']
+        require(len(changes) == len(hunks))
+        for change, (old_sha, new_sha) in zip(changes, hunks):
+            require(hashlib.sha256(change['old'].encode()).hexdigest() == old_sha)
+            require(hashlib.sha256(change['new'].encode()).hexdigest() == new_sha)
+        require(hashlib.sha256(text.encode()).hexdigest() == current)
+        for change in reversed(changes):
+            require(text.count(change['new']) == 1)
+            text = text.replace(change['new'], change['old'], 1)
+        require(hashlib.sha256(text.encode()).hexdigest() == baseline)
+        return text
+    except (OSError, UnicodeError, ValueError, TypeError, RecursionError, KeyError):
+        raise ValueError('uac_evidence_invalid:configuration') from None
+
+
 def restore_native_phase_budgets(text):
+    return restore_native_phase_budgets_predecessor(restore_user_uac_workflow(text))
+
+
+def restore_native_phase_budgets_predecessor(text):
     """Validate current native phase limits, then reverse only their reviewed delta.
 
     This is a historical source projection, NOT preservation of old job budgets.
@@ -110,8 +205,11 @@ def restore_native_phase_budgets(text):
 
 
 def restore_auth_shards16(text):
+    return restore_auth_shards16_predecessor(restore_native_phase_budgets(text))
+
+
+def restore_auth_shards16_predecessor(text):
     """Reverse only the reviewed 16-to-8 auth matrix line, not runtime coverage."""
-    text = restore_native_phase_budgets(text)
     def unique(pairs):
         result = {}
         for key, value in pairs:
@@ -229,8 +327,10 @@ def restore_archive_target_observation(text):
 
 
 def restore_health_recovery(text):
-    """Reverse exactly the reviewed health-only build and six-file evidence wiring."""
-    text = restore_archive_target_observation(text)
+    return restore_health_recovery_predecessor(restore_archive_target_observation(text))
+
+
+def restore_health_recovery_predecessor(text):
     delta = json.loads(Path('scripts/fixtures/tasks_health_recovery_ci_delta.json').read_text())
     for change in reversed(delta['replacements']):
         if text.count(change['new']) != 1:

@@ -392,6 +392,13 @@
       "specs": [
         "web/e2e/tasks-health-recovery.spec.ts"
       ]
+    },
+    {
+      "name": "user-asset-export-v3-uac-mixed33",
+      "command": "python3 scripts/test_auth_e2e.py --suite user-asset-export-v3-uac-mixed33",
+      "specs": [
+        "web/e2e/user-asset-export-v3-uac-mixed33.spec.ts"
+      ]
     }
   ],
   "fixed": [
@@ -427,7 +434,8 @@
       "group-asset-export-v3-failure",
       "group-asset-export-v3-cancel",
       "tasks-health-recovery",
-      "operational-logs"
+      "operational-logs",
+      "user-asset-export-v3-uac-mixed33"
     ],
     "web/src/UserAssetsV3Workspace.tsx": [
       "user-assets-v3",
@@ -435,7 +443,8 @@
       "user-asset-export-v3",
       "user-asset-export-v3-failure",
       "user-asset-export-v3-cancel",
-      "user-asset-export-v3-running-cancel"
+      "user-asset-export-v3-running-cancel",
+      "user-asset-export-v3-uac-mixed33"
     ],
     "web/src/ComputerAssetsV3Workspace.tsx": [
       "computer-assets-v3",

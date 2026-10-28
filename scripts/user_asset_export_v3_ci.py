@@ -19,7 +19,7 @@ MIXED_MODES = ('GROUP_ASSETS_V3', 'COMPUTER_ASSETS_V3', 'V2', 'V4', 'EMPTY', 'SL
 
 
 def configure(env):
-    if any(env.get('ADTR_E2E_LDAP_DIRECTORY_' + mode) == 'true' for mode in MIXED_MODES) or env.get('ADTR_E2E_LDAP_EMPTY_TRANSITION_DIR') or any(env.get(key) == 'true' for key in ('ADTR_DIRECTORY_READ_V2_ENABLED', 'ADTR_DIRECTORY_READ_V4_ENABLED')):
+    if env.get('ADTR_E2E_LDAP_DIRECTORY_USER_UAC_V3_PROFILE') or env.get('ADTR_E2E_USER_ASSET_EXPORT_V3_UAC') == 'true' or any(env.get('ADTR_E2E_LDAP_DIRECTORY_' + mode) == 'true' for mode in MIXED_MODES) or env.get('ADTR_E2E_LDAP_EMPTY_TRANSITION_DIR') or any(env.get(key) == 'true' for key in ('ADTR_DIRECTORY_READ_V2_ENABLED', 'ADTR_DIRECTORY_READ_V4_ENABLED')):
         raise RuntimeError('User asset export requires the unmixed default dictionary3 fixture')
     env['ADTR_E2E_USER_ASSET_EXPORT_V3'] = 'true'
 

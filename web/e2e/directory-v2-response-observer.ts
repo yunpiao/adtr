@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type {
   BrowserContext,
   Page,
@@ -956,4 +957,119 @@ async function readObservedBody(response: Response): Promise<ObservedBody> {
     record.text = "";
   }
   return { value, record, identity: final.identity };
+}
+
+// C-only host ownership: no browser capture, default API, parser, or witness
+// semantics change. Completed historical reads may survive later UI cleanup;
+// this API does not claim a live uncanceled witness.
+type DirectoryUACResponseCheck = "observed_body_read" | "observed_byte_binding";
+const uacResponseFailures = new WeakMap<object, DirectoryUACResponseCheck>();
+export function directoryUACResponseFailureCheck(
+  error: unknown,
+): DirectoryUACResponseCheck | undefined {
+  return error !== null && typeof error === "object"
+    ? uacResponseFailures.get(error)
+    : undefined;
+}
+
+export async function directoryUACResponseBytes(
+  response: Response,
+): Promise<Buffer> {
+  let check: DirectoryUACResponseCheck = "observed_body_read";
+  let record: any;
+  let bytes: Buffer | undefined;
+  try {
+    const request = response.request();
+    const method = request.method();
+    const url = new URL(request.url());
+    const assetsPath = "/api/user-assets/v3";
+    const exportsPath = `${assetsPath}/exports`;
+    const allowed =
+      (method === "GET" &&
+        [
+          assetsPath,
+          `${exportsPath}/receipt`,
+          `${exportsPath}/detail`,
+        ].includes(url.pathname)) ||
+      (method === "POST" && url.pathname === exportsPath);
+    if (
+      identities.get(request)?.mode !== "legacy" ||
+      !allowed ||
+      response.url() !== request.url()
+    )
+      throw new Error("uac_observed_response_invalid:observed_body_read");
+    const identity = directoryV2RequestIdentity(request);
+    const id = `${identity.method} ${identity.url}`;
+    const page = request.frame().page();
+    // Identical existing completion bound, followed by finalRecord's existing
+    // count-parity bound. No additional observer, retry, or larger deadline.
+    await page.waitForFunction(
+      ({ id, identity }) => {
+        const observer = (window as any).__adtrDirectoryV2ResponseObserver;
+        if (observer && observer.epoch !== identity.epoch) return true;
+        const record = observer?.peek(id, identity.ordinal);
+        return record && !["pending", "hashing"].includes(record.state);
+      },
+      { id, identity },
+      { timeout: 15_000, polling: 50 },
+    );
+    const final = await finalRecord(response, true);
+    record = final.record;
+    validateRecord(response, record, final.identity, true);
+    if (
+      final.identity.epoch !== identity.epoch ||
+      final.identity.method !== identity.method ||
+      final.identity.url !== identity.url ||
+      final.identity.ordinal !== identity.ordinal ||
+      request.method() !== identity.method ||
+      request.url() !== identity.url ||
+      response.url() !== identity.url
+    )
+      throw new Error("uac_observed_response_invalid:observed_body_read");
+    check = "observed_byte_binding";
+    const limit = 1 << 20;
+    // Measure and encode one immutable snapshot, never re-read a host property
+    // after it has passed the allocation bound. Browser records are serialized.
+    const text = record.text;
+    const nativeByteLength = record.byteLength;
+    const nativeSHA256 = record.sha256;
+    if (
+      typeof text !== "string" ||
+      !Number.isSafeInteger(nativeByteLength) ||
+      nativeByteLength <= 0 ||
+      nativeByteLength > limit
+    )
+      throw new Error("uac_observed_response_invalid:observed_byte_binding");
+    const encodedLength = Buffer.byteLength(text, "utf8");
+    if (
+      encodedLength <= 0 ||
+      encodedLength > limit ||
+      encodedLength !== nativeByteLength
+    )
+      throw new Error("uac_observed_response_invalid:observed_byte_binding");
+    // Encode unparsed original text, never JSON.stringify(parsed). Native raw
+    // count+digest equality rejects a swallowed leading BOM (even split across
+    // chunks) and any altered representation before C's strict parser runs.
+    bytes = Buffer.from(text, "utf8");
+    if (createHash("sha256").update(bytes).digest("hex") !== nativeSHA256)
+      throw new Error("uac_observed_response_invalid:observed_byte_binding");
+    const owned = bytes;
+    bytes = undefined;
+    return owned;
+  } catch {
+    const error = new Error(`uac_observed_response_invalid:${check}`);
+    uacResponseFailures.set(error, check);
+    throw error;
+  } finally {
+    // The successful caller owns and clears returned bytes. No raw body cache
+    // is introduced here; immutable strings cannot be physically erased.
+    if (record) {
+      try {
+        record.text = "";
+      } catch {
+        /* Never expose an unknown setter. */
+      }
+    }
+    bytes?.fill(0);
+  }
 }

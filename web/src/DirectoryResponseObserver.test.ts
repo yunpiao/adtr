@@ -8,8 +8,15 @@ import {
   directoryV2ResponseWitness,
   directoryV2RequestIdentity,
   directoryV4ControlsResponseJSON,
+  directoryUACResponseBytes,
+  directoryUACResponseFailureCheck,
 } from "../e2e/directory-v2-response-observer";
 import { createHash, webcrypto } from "node:crypto";
+import { parseDirectoryV4UniqueJSON } from "./directory-v4-controls-json";
+import {
+  safeResponse,
+  uacFailureMessage,
+} from "../e2e/user-asset-export-v3-uac-helpers";
 import { EventEmitter } from "node:events";
 import type {
   BrowserContext,
@@ -1865,5 +1872,735 @@ describe("host directory response identity", () => {
     } finally {
       now.mockRestore();
     }
+  });
+
+  describe("C observed raw-byte-equivalent host transfer", () => {
+    const route = "/api/user-assets/v3";
+    const cIdentity = `GET ${origin}${route}`;
+    const stream = (chunks: Uint8Array[]) =>
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          for (const chunk of chunks) controller.enqueue(chunk);
+          controller.close();
+        },
+      });
+    const closed = async (work: Promise<unknown>, check?: string) => {
+      let caught: unknown;
+      try {
+        await work;
+      } catch (error) {
+        caught = error;
+      }
+      expect(caught).toBeInstanceOf(Error);
+      expect((caught as Error).message).toMatch(
+        /^uac_observed_response_invalid:observed_(body_read|byte_binding)$/u,
+      );
+      expect((caught as Error).cause).toBeUndefined();
+      if (check) expect(directoryUACResponseFailureCheck(caught)).toBe(check);
+      return caught as Error;
+    };
+
+    it.each([
+      ["GET", "/api/user-assets/v3"],
+      ["POST", "/api/user-assets/v3/exports"],
+      ["GET", "/api/user-assets/v3/exports/receipt"],
+      ["GET", "/api/user-assets/v3/exports/detail"],
+    ])(
+      "transfers exact native bytes for the closed %s %s pair without inspector reads",
+      async (method, route) => {
+        const raw = Buffer.from(' { "escaped" : "\\u0078", "emoji":"😀" } \n');
+        const { consume, fetch, page } = await harness({
+          path: route,
+          method,
+          body: stream([...raw].map((byte) => new Uint8Array([byte]))),
+        });
+        const captured = await consume();
+        const inspector = vi.fn(() => {
+          throw new Error("UNIT_PRIVATE_INSPECTOR_ERROR");
+        });
+        Object.assign(captured, {
+          body: inspector,
+          json: inspector,
+          text: inspector,
+        });
+        const take = vi.spyOn(observer(), "take");
+        const bytes = await directoryUACResponseBytes(captured);
+        expect(bytes.equals(raw)).toBe(true);
+        expect(fetch).toHaveBeenCalledOnce();
+        expect(inspector).not.toHaveBeenCalled();
+        expect(take).toHaveBeenCalledOnce();
+        expect(observer().peek(`${method} ${origin}${route}`, 0)?.text).toBe(
+          "",
+        );
+        expect(observer().buffers()).toMatchObject({
+          chunks: 0,
+          hashing: 0,
+          text: 0,
+        });
+        expect(page.waitForFunction).toHaveBeenLastCalledWith(
+          expect.any(Function),
+          expect.any(Object),
+          { timeout: 15_000, polling: 50 },
+        );
+        bytes.fill(0);
+      },
+    );
+
+    it.each([[3], [1, 2], [2, 1], [1, 1, 1], [0, 1, 0, 1, 0, 1, 0]])(
+      "rejects native BOM split %j before allocating returned bytes",
+      async (...sizes) => {
+        const raw = Buffer.from('{"value":"😀"}'),
+          bom = Buffer.from([239, 187, 191]);
+        let offset = 0;
+        const chunks = sizes.map((size) => {
+          const next = bom.subarray(offset, offset + size);
+          offset += size;
+          return next;
+        });
+        chunks.push(raw);
+        const { consume } = await harness({
+          path: route,
+          body: stream(chunks),
+        });
+        const captured = await consume();
+        expect(observer().peek(cIdentity, 0)?.byteLength).toBe(raw.length + 3);
+        const from = vi.spyOn(Buffer, "from");
+        let error: unknown;
+        try {
+          await directoryUACResponseBytes(captured);
+        } catch (caught) {
+          error = caught;
+        }
+        const allocations = from.mock.calls.length;
+        from.mockRestore();
+        expect(allocations).toBe(0);
+        expect(directoryUACResponseFailureCheck(error)).toBe(
+          "observed_byte_binding",
+        );
+        expect(observer().peek(cIdentity, 0)?.text).toBe("");
+      },
+    );
+
+    it.each([
+      [new Uint8Array([255])],
+      [new Uint8Array([0xe2]), new Uint8Array([0x28, 0xa1])],
+      [new Uint8Array([0xed, 0xa0]), new Uint8Array([0x80])],
+    ])(
+      "rejects invalid native UTF-8 %j without a raw-text fallback",
+      async (...invalid) => {
+        const chunks = [Buffer.from('{"x":"'), ...invalid, Buffer.from('"}')];
+        const { consume, latest } = await harness({
+          path: route,
+          body: stream(chunks),
+        });
+        await expect(consume()).rejects.toThrow();
+        await settle(cIdentity, 0);
+        await closed(directoryUACResponseBytes(latest()), "observed_body_read");
+        expect(observer().buffers()).toMatchObject({
+          chunks: 0,
+          hashing: 0,
+          text: 0,
+        });
+      },
+    );
+
+    it.each(['{"x":1,"x":2}', '{"x":1,"\\u0078":2}'])(
+      "preserves raw duplicate evidence for the existing strict parser: %s",
+      async (raw) => {
+        const { consume } = await harness({
+          path: route,
+          body: stream(
+            [...Buffer.from(raw)].map((byte) => new Uint8Array([byte])),
+          ),
+        });
+        const bytes = await directoryUACResponseBytes(await consume());
+        expect(bytes.toString("utf8") === raw).toBe(true);
+        expect(() =>
+          parseDirectoryV4UniqueJSON(bytes.toString("utf8")),
+        ).toThrow();
+        bytes.fill(0);
+      },
+    );
+
+    it.each([1 << 20, (1 << 20) + 1])(
+      "enforces the %i-byte cap before allocation",
+      async (size) => {
+        const raw = '{"x":"' + "a".repeat(size - 8) + '"}';
+        const { consume } = await harness({
+          path: route,
+          body: stream([Buffer.from(raw)]),
+        });
+        const captured = await consume();
+        const from = vi.spyOn(Buffer, "from");
+        let bytes: Buffer | undefined, error: unknown;
+        try {
+          bytes = await directoryUACResponseBytes(captured);
+        } catch (caught) {
+          error = caught;
+        }
+        const allocations = from.mock.calls.length;
+        from.mockRestore();
+        if (size === 1 << 20) {
+          expect(bytes?.length).toBe(size);
+          expect(error).toBeUndefined();
+          expect(allocations).toBe(1);
+          bytes?.fill(0);
+        } else {
+          expect(allocations).toBe(0);
+          expect(directoryUACResponseFailureCheck(error)).toBe(
+            "observed_byte_binding",
+          );
+        }
+      },
+    );
+
+    it.each([
+      "empty",
+      "oversized_text_small_native",
+      "text_mismatch",
+      "native_zero",
+      "native_fraction",
+      "native_nan",
+      "native_over_cap",
+      "text_type",
+    ])("rejects %s before Buffer.from", async (kind) => {
+      const { consume } = await harness({ path: route, body: '{"ok":true}' });
+      const captured = await consume(),
+        record = observer().peek(cIdentity, 0)!;
+      if (kind === "empty") {
+        record.text = "";
+        record.byteLength = 0;
+      }
+      if (kind === "oversized_text_small_native") {
+        record.text = "a".repeat((1 << 20) + 1);
+        record.byteLength = 1;
+      }
+      if (kind === "text_mismatch") record.text += " ";
+      if (kind === "native_zero") record.byteLength = 0;
+      if (kind === "native_fraction") record.byteLength = 1.5;
+      if (kind === "native_nan") record.byteLength = NaN;
+      if (kind === "native_over_cap") record.byteLength = (1 << 20) + 1;
+      if (kind === "text_type") Object.assign(record, { text: null });
+      const from = vi.spyOn(Buffer, "from");
+      let error: unknown;
+      try {
+        await directoryUACResponseBytes(captured);
+      } catch (caught) {
+        error = caught;
+      }
+      const allocations = from.mock.calls.length;
+      from.mockRestore();
+      expect(allocations).toBe(0);
+      expect(directoryUACResponseFailureCheck(error)).toBeDefined();
+    });
+
+    it("clears allocated bytes and both text owners when the native digest disagrees", async () => {
+      const { consume, page } = await harness({
+        path: route,
+        body: '{"x":"UNIT_PRIVATE_RESPONSE"}',
+      });
+      const captured = await consume();
+      observer().peek(cIdentity, 0)!.sha256 = "0".repeat(64);
+      let hostRecord: Observation | undefined;
+      page.evaluate.mockImplementationOnce(async (fn, argument) => {
+        const value = fn(argument);
+        hostRecord = value.record;
+        return value;
+      });
+      const from = vi.spyOn(Buffer, "from");
+      let error: unknown;
+      try {
+        await directoryUACResponseBytes(captured);
+      } catch (caught) {
+        error = caught;
+      }
+      const buffers = from.mock.results
+        .filter((result) => result.type === "return")
+        .map((result) => result.value as Buffer);
+      from.mockRestore();
+      expect(directoryUACResponseFailureCheck(error)).toBe(
+        "observed_byte_binding",
+      );
+      expect(buffers.length).toBe(1);
+      expect(buffers[0].every((byte) => byte === 0)).toBe(true);
+      expect(hostRecord?.text).toBe("");
+      expect(observer().peek(cIdentity, 0)?.text).toBe("");
+      expect((error as Error).message.includes("UNIT_PRIVATE")).toBe(false);
+      expect((error as Error).cause).toBeUndefined();
+    });
+
+    it.each([
+      ["GET", "/api/user-assets/v3/exports", "legacy"],
+      ["POST", "/api/user-assets/v3", "legacy"],
+      ["PUT", "/api/user-assets/v3/exports", "legacy"],
+      ["GET", "/api/user-assets/v2", "legacy"],
+      ["GET", "/api/directory/v4/task", "v4-controls"],
+    ] as const)(
+      "rejects a non-C pair/mode %s %s %s before taking",
+      async (method, route, mode) => {
+        const { consume } = await harness({ method, path: route, mode });
+        const captured = await consume(),
+          take = vi.spyOn(observer(), "take");
+        await closed(directoryUACResponseBytes(captured), "observed_body_read");
+        expect(take).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each(["registration", "response_url", "document", "frame"])(
+      "rejects %s mismatch without inspector fallback",
+      async (kind) => {
+        const { consume, newDocument } = await harness({ path: route });
+        const captured = await consume(),
+          request = captured.request();
+        if (kind === "registration")
+          Object.assign(captured, { request: () => ({ ...request }) });
+        if (kind === "response_url")
+          Object.assign(captured, {
+            url: () => origin + route + "?UNIT_PRIVATE",
+          });
+        if (kind === "document") newDocument();
+        if (kind === "frame")
+          Object.assign(request, { frame: () => ({ page: () => ({}) }) });
+        const error = await closed(
+          directoryUACResponseBytes(captured),
+          "observed_body_read",
+        );
+        expect(error.message.includes("UNIT_PRIVATE")).toBe(false);
+      },
+    );
+
+    it.each([
+      "epoch",
+      "ordinal",
+      "method",
+      "url",
+      "status",
+      "actor",
+      "cache",
+      "eof",
+      "readers",
+      "released",
+      "cancelCalls",
+    ])("rejects actual final-record %s tampering", async (key) => {
+      const { consume } = await harness({ path: route });
+      const captured = await consume(),
+        record = observer().peek(cIdentity, 0)!;
+      if (["epoch", "method", "url"].includes(key))
+        Object.assign(record.identity, { [key]: "UNIT_PRIVATE_IDENTITY" });
+      else if (key === "ordinal") record.identity.ordinal++;
+      else
+        Object.assign(record, {
+          [key]:
+            key === "status"
+              ? 201
+              : key === "eof"
+                ? false
+                : key === "readers"
+                  ? 2
+                  : key === "released"
+                    ? 0
+                    : key === "cancelCalls"
+                      ? 1
+                      : "UNIT_PRIVATE_METADATA",
+        });
+      const error = await closed(
+        directoryUACResponseBytes(captured),
+        "observed_body_read",
+      );
+      expect(error.message.includes("UNIT_PRIVATE")).toBe(false);
+    });
+
+    it("rejects host-count advancement during the atomic take", async () => {
+      const { consume, context, page } = await harness({ path: route });
+      const captured = await consume();
+      page.evaluate.mockImplementationOnce(async (fn, argument) => {
+        const snapshot = fn(argument);
+        context.emit("request", captured.request());
+        return snapshot;
+      });
+      await closed(directoryUACResponseBytes(captured), "observed_body_read");
+    });
+
+    it("rejects an invocation/request count mismatch within the existing parity deadline", async () => {
+      const { consume, omitNextRequest } = await harness({ path: route });
+      omitNextRequest();
+      await expect(window.fetch(route)).rejects.toThrow();
+      const captured = await consume();
+      const now = vi
+        .spyOn(Date, "now")
+        .mockReturnValueOnce(0)
+        .mockReturnValue(15_000);
+      try {
+        await closed(directoryUACResponseBytes(captured), "observed_body_read");
+      } finally {
+        now.mockRestore();
+      }
+    });
+
+    it.each([
+      "legacy_first",
+      "strict_first",
+      "concurrent_legacy_first",
+      "concurrent_strict_first",
+      "two_raw_callers",
+    ])("permits only one successful atomic raw take in %s", async (order) => {
+      const { consume } = await harness({ path: route });
+      const captured = await consume();
+      const take = vi.spyOn(observer(), "take");
+      const legacy = () => directoryV2ResponseJSON(captured),
+        strict = () => directoryUACResponseBytes(captured);
+      if (order === "legacy_first") {
+        await legacy();
+        await closed(strict(), "observed_body_read");
+      } else if (order === "strict_first") {
+        (await strict()).fill(0);
+        await expect(legacy()).rejects.toThrow();
+      } else {
+        const calls =
+          order === "concurrent_legacy_first"
+            ? [legacy(), strict()]
+            : order === "concurrent_strict_first"
+              ? [strict(), legacy()]
+              : [strict(), strict()];
+        const results = await Promise.allSettled(calls);
+        expect(
+          results.filter((result) => result.status === "fulfilled").length,
+        ).toBe(1);
+        for (const result of results)
+          if (result.status === "fulfilled" && Buffer.isBuffer(result.value))
+            result.value.fill(0);
+      }
+      expect(
+        take.mock.results.filter((result) => result.type === "return").length,
+      ).toBe(1);
+      expect(observer().peek(cIdentity, 0)?.text).toBe("");
+    });
+
+    it("accepts only the existing completed historical-read policy, without asserting a live witness", async () => {
+      const { consume } = await harness({ path: route });
+      const controller = new AbortController();
+      const captured = await consume(controller);
+      controller.abort();
+      const bytes = await directoryUACResponseBytes(captured);
+      expect(bytes.length).toBeGreaterThan(0);
+      bytes.fill(0);
+      expect(observer().peek(cIdentity, 0)?.signalAborted).toBe(true);
+    });
+
+    it("waits for the actual delayed native raw digest before the one take", async () => {
+      let releaseHash!: () => void;
+      vi.stubGlobal("crypto", {
+        randomUUID: () => webcrypto.randomUUID(),
+        subtle: {
+          digest: (algorithm: string, raw: Uint8Array<ArrayBuffer>) =>
+            new Promise<ArrayBuffer>((resolve, reject) => {
+              releaseHash = () => {
+                void webcrypto.subtle
+                  .digest(algorithm, raw)
+                  .then(resolve, reject);
+              };
+            }),
+        },
+      });
+      const { latest, page } = await harness({ path: route });
+      await readDirectoryV2JSON(await window.fetch(route), signal());
+      expect(observer().peek(cIdentity, 0)?.state).toBe("hashing");
+      let finishWait!: () => void;
+      page.waitForFunction.mockImplementationOnce(async (fn, argument) => {
+        expect(fn(argument)).toBe(false);
+        await new Promise<void>((resolve) => {
+          finishWait = resolve;
+        });
+        expect(fn(argument)).toBe(true);
+      });
+      const take = vi.spyOn(observer(), "take"),
+        pending = directoryUACResponseBytes(latest());
+      expect(page.waitForFunction).toHaveBeenLastCalledWith(
+        expect.any(Function),
+        expect.any(Object),
+        { timeout: 15_000, polling: 50 },
+      );
+      expect(take).not.toHaveBeenCalled();
+      releaseHash();
+      await settle(cIdentity, 0);
+      finishWait();
+      const bytes = await pending;
+      expect(bytes.length).toBeGreaterThan(0);
+      bytes.fill(0);
+      expect(take).toHaveBeenCalledOnce();
+    });
+
+    it("never exposes unknown errors or accepts forged mutable failure messages", async () => {
+      const { consume, page } = await harness({ path: route });
+      const captured = await consume();
+      const privateError = new Error("UNIT_PRIVATE_ERROR", {
+        cause: new Error("UNIT_PRIVATE_CAUSE"),
+      });
+      page.waitForFunction.mockRejectedValueOnce(privateError);
+      const first = await closed(
+        directoryUACResponseBytes(captured),
+        "observed_body_read",
+      );
+      expect(first).not.toBe(privateError);
+      expect(first.stack?.includes("UNIT_PRIVATE")).toBe(false);
+      expect(
+        directoryUACResponseFailureCheck(new Error(first.message)),
+      ).toBeUndefined();
+      expect(
+        directoryUACResponseFailureCheck({ message: first.message }),
+      ).toBeUndefined();
+      first.message = "UNIT_PRIVATE_MUTATION";
+      expect(directoryUACResponseFailureCheck(first)).toBe(
+        "observed_body_read",
+      );
+      page.waitForFunction.mockRejectedValueOnce(privateError);
+      const second = await closed(
+        directoryUACResponseBytes(captured),
+        "observed_body_read",
+      );
+      expect(second).not.toBe(first);
+      expect(second.message.includes("UNIT_PRIVATE")).toBe(false);
+    });
+    it("feeds actual captured bytes to C with one attempted take and independent cached clones", async () => {
+      const raw = '{"rows":[{"label":"unredacted"}],"count":1}';
+      const { consume } = await harness({
+        path: route,
+        body: stream(
+          [...Buffer.from(raw)].flatMap((byte) => [
+            new Uint8Array(0),
+            new Uint8Array([byte]),
+          ]),
+        ),
+      });
+      const captured = await consume();
+      const inspector = vi.fn(() => {
+        throw new Error("UNIT_PRIVATE_INSPECTOR_ERROR");
+      });
+      Object.assign(captured, {
+        body: inspector,
+        json: inspector,
+        text: inspector,
+      });
+      const take = vi.spyOn(observer(), "take");
+      const [first, second] = await Promise.all([
+        safeResponse(captured, 1, []),
+        safeResponse(captured, 1, []),
+      ]);
+      expect(first).toEqual({ rows: [{ label: "unredacted" }], count: 1 });
+      expect(second).toEqual(first);
+      expect(second).not.toBe(first);
+      (first.rows as { label: string }[])[0].label = "caller mutation";
+      expect((second.rows as { label: string }[])[0].label).toBe("unredacted");
+      expect(await safeResponse(captured, 1, [])).toEqual(second);
+      expect(take).toHaveBeenCalledOnce();
+      expect(inspector).not.toHaveBeenCalled();
+      expect(observer().buffers()).toMatchObject({
+        chunks: 0,
+        hashing: 0,
+        text: 0,
+      });
+    });
+
+    it.each([
+      ['{"x":1,"x":2}', [], "body_json"],
+      ['{"x":1,"\\u0078":2}', [], "body_json"],
+      ['\uFEFF{"x":1}', [], "observed_byte_binding"],
+      ['{"x":"UNIT_PRIVATE_VALUE"}', ["UNIT_PRIVATE_VALUE"], "body_privacy"],
+      ['{"secret":"value"}', [], "body_privacy"],
+      ["[1,2]", [], "body_object"],
+    ] as const)(
+      "keeps C strict checks on the native-stream path %#",
+      async (raw, secrets, check) => {
+        const { consume } = await harness({
+          path: route,
+          body: stream(
+            [...Buffer.from(raw)].map((byte) => new Uint8Array([byte])),
+          ),
+        });
+        const captured = await consume();
+        let error: unknown;
+        try {
+          await safeResponse(captured, 1, secrets);
+        } catch (caught) {
+          error = caught;
+        }
+        const message = uacFailureMessage(error, "list_read");
+        expect(message).toBe(
+          `uac_evidence_invalid:post_binding;stage=list_read;check=${check}`,
+        );
+        expect(message.includes("UNIT_PRIVATE")).toBe(false);
+        expect(observer().buffers()).toMatchObject({
+          chunks: 0,
+          hashing: 0,
+          text: 0,
+        });
+      },
+    );
+
+    it("rechecks each caller's secrets after actual stream capture and never revives poisoned cache", async () => {
+      const { consume } = await harness({
+        path: route,
+        body: '{"label":"UNIT_NEWLY_KNOWN"}',
+      });
+      const captured = await consume(),
+        take = vi.spyOn(observer(), "take");
+      await expect(safeResponse(captured, 1, [])).resolves.toEqual({
+        label: "UNIT_NEWLY_KNOWN",
+      });
+      const secrets = ["UNIT_NEWLY_KNOWN"];
+      for (const current of [secrets, []]) {
+        let error: unknown;
+        try {
+          await safeResponse(captured, 1, current);
+        } catch (caught) {
+          error = caught;
+        }
+        expect(uacFailureMessage(error, "list_read")).toBe(
+          "uac_evidence_invalid:post_binding;stage=list_read;check=body_privacy",
+        );
+      }
+      expect(take).toHaveBeenCalledOnce();
+    });
+    it("binds repeated C URLs and distinct query URLs to their actual request ordinals", async () => {
+      const { consume, latest } = await harness({ path: route });
+      const first = await consume(),
+        second = await consume();
+      const query = `${route}?page=2`;
+      await readDirectoryV2JSON(await window.fetch(query), signal());
+      await settle(`GET ${origin}${query}`, 0);
+      const third = latest();
+      for (const [response, sequence] of [
+        [second, 2],
+        [third, 3],
+        [first, 1],
+      ] as const) {
+        const bytes = await directoryUACResponseBytes(response);
+        expect(bytes.toString("utf8")).toBe(JSON.stringify({ sequence }));
+        bytes.fill(0);
+      }
+      await closed(directoryUACResponseBytes(first), "observed_body_read");
+    });
+
+    it("rejects an actual empty native stream before allocating host bytes", async () => {
+      const { consume, latest } = await harness({
+        path: route,
+        body: stream([new Uint8Array(0)]),
+      });
+      await expect(consume()).rejects.toThrow();
+      await settle(cIdentity, 0);
+      expect(observer().peek(cIdentity, 0)?.byteLength).toBe(0);
+      // The real application reader cancels after empty JSON fails to parse.
+      expect(observer().peek(cIdentity, 0)?.cancelCalls).toBe(1);
+      const from = vi.spyOn(Buffer, "from");
+      let error: unknown;
+      try {
+        await directoryUACResponseBytes(latest());
+      } catch (caught) {
+        error = caught;
+      }
+      const allocations = from.mock.calls.length;
+      from.mockRestore();
+      expect(allocations).toBe(0);
+      expect(directoryUACResponseFailureCheck(error)).toBe(
+        "observed_body_read",
+      );
+    });
+
+    it.each([
+      [0xc0, 0xaf],
+      [0xe0, 0x80, 0xaf],
+      [0xf0, 0x80, 0x80, 0xaf],
+      [0xf4, 0x90, 0x80, 0x80],
+      [0xe2, 0x82],
+      [0xf0, 0x9f, 0x98],
+    ])(
+      "rejects malformed UTF-8 split into zero-separated native chunks %#",
+      async (...bad) => {
+        const { consume, latest } = await harness({
+          path: route,
+          body: stream([
+            Buffer.from('{"x":"'),
+            ...bad.flatMap((byte) => [
+              new Uint8Array(0),
+              new Uint8Array([byte]),
+            ]),
+            Buffer.from('"}'),
+          ]),
+        });
+        await expect(consume()).rejects.toThrow();
+        await settle(cIdentity, 0);
+        await closed(directoryUACResponseBytes(latest()), "observed_body_read");
+        expect(observer().buffers()).toMatchObject({
+          chunks: 0,
+          hashing: 0,
+          text: 0,
+        });
+      },
+    );
+
+    it("handles hostile and revoked error-like objects without property access", () => {
+      const inspect = vi.fn(() => {
+        throw new Error("UNIT_PRIVATE_GETTER");
+      });
+      const error = new Proxy(
+        {},
+        { get: inspect, getOwnPropertyDescriptor: inspect },
+      );
+      const revocable = Proxy.revocable({}, {});
+      revocable.revoke();
+      for (const candidate of [
+        error,
+        revocable.proxy,
+        null,
+        undefined,
+        "observed_body_read",
+        1,
+      ])
+        expect(directoryUACResponseFailureCheck(candidate)).toBeUndefined();
+      expect(inspect).not.toHaveBeenCalled();
+    });
+    it("measures and encodes one text/count/hash snapshot even with hostile host getters", async () => {
+      const { consume, page } = await harness({
+        path: route,
+        body: '{"ok":true}',
+      });
+      const captured = await consume();
+      let textReads = 0,
+        countReads = 0,
+        hashReads = 0,
+        cleared = false;
+      page.evaluate.mockImplementationOnce(async (fn, argument) => {
+        const result = fn(argument),
+          record = result.record;
+        const text = record.text,
+          count = record.byteLength,
+          hash = record.sha256;
+        Object.defineProperties(record, {
+          text: {
+            get: () => (++textReads === 1 ? text : "a".repeat((1 << 20) + 1)),
+            set: (value) => {
+              cleared = value === "";
+            },
+          },
+          byteLength: {
+            get: () => (++countReads <= 4 ? count : (1 << 20) + 1),
+          },
+          sha256: {
+            get: () => {
+              hashReads++;
+              return hash;
+            },
+          },
+        });
+        return result;
+      });
+      const bytes = await directoryUACResponseBytes(captured);
+      expect(bytes.toString("utf8")).toBe('{"ok":true}');
+      expect(textReads).toBe(1);
+      expect(countReads).toBe(4);
+      expect(hashReads).toBe(3);
+      expect(cleared).toBe(true);
+      bytes.fill(0);
+    });
   });
 });

@@ -34,6 +34,9 @@ var directorySearchBody = bytes.Join([][]byte{
 }, nil)
 
 type directorySession struct {
+	userUACV3Profile         userUACV3Profile
+	uacRecorder              *userUACWireRecorder
+	uacConnectionID          uint64
 	v3                       bool
 	userExportFailureV3      bool
 	groupExportFailureV3     bool
@@ -53,6 +56,9 @@ type directorySession struct {
 }
 
 func (d *directorySession) pages() int {
+	if d.userUACV3Profile == userUACMixed33 {
+		return 4
+	}
 	if d.slow {
 		return directorySlowPages
 	}
@@ -63,6 +69,9 @@ func (d *directorySession) pages() int {
 }
 
 func (d *directorySession) objects() int {
+	if d.userUACV3Profile == userUACMixed33 {
+		return 51
+	}
 	if d.empty {
 		return 0
 	}
@@ -148,6 +157,10 @@ func (d *directorySession) writePage(ctx context.Context, conn io.Writer, id int
 	}
 	entries := d.objects() / d.pages()
 	first := d.page*entries + 1
+	if d.userUACV3Profile == userUACMixed33 {
+		first = d.page*directoryPageEntries + 1
+		entries = min(directoryPageEntries, d.objects()-first+1)
+	}
 	for row := first; row < first+entries; row++ {
 		entry := directoryEntryForDictionary(id, row, d.v2)
 		if d.v3 {
@@ -168,7 +181,18 @@ func (d *directorySession) writePage(ctx context.Context, conn io.Writer, id int
 		if d.userAssetsV2 {
 			entry = userAssetsV2Entry(id, row)
 		}
-		if err := writeAll(conn, entry); err != nil {
+		if d.userUACV3Profile == userUACMixed33 {
+			entry = userUACV3Entry(id, row)
+		}
+		ticket, recordErr := d.uacRecorder.BeginWrite(d.uacConnectionID, d.page+1, row-1, uacEntry, len(entry))
+		if recordErr != nil {
+			return recordErr
+		}
+		writeErr := writeAll(conn, entry)
+		if recordErr = d.uacRecorder.FinishWrite(ticket, entry, writeErr == nil); recordErr != nil {
+			return recordErr
+		}
+		if err := writeErr; err != nil {
 			return err
 		}
 	}
@@ -178,7 +202,15 @@ func (d *directorySession) writePage(ctx context.Context, conn io.Writer, id int
 	done := element(0x30, integer(0x02, id),
 		element(0x65, integer(0x0a, 0), octets(""), octets("")), element(0xa0, control))
 	defer clear(done)
-	if err := writeAll(conn, done); err != nil {
+	ticket, recordErr := d.uacRecorder.BeginWrite(d.uacConnectionID, d.page+1, -1, uacDone, len(done))
+	if recordErr != nil {
+		return recordErr
+	}
+	writeErr := writeAll(conn, done)
+	if recordErr = d.uacRecorder.FinishWrite(ticket, done, writeErr == nil); recordErr != nil {
+		return recordErr
+	}
+	if err := writeErr; err != nil {
 		return err
 	}
 	d.page++
