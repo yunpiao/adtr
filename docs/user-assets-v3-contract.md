@@ -273,3 +273,58 @@ independently generated SHA256. A Go/Unicode upgrade must explicitly regenerate
 and review this small table rather than inheriting browser-specific ICU rules.
 The shared helper accepts a field list so other readers can retain narrower
 contracts; computer assets use SAM/SID/DN without mail.
+
+## UI-0494 / FLD-0330 input-length follow-up (Issue247)
+
+This adds only dictionary3 user's keyword input enforcement after PR246's
+keyword-only clear slice. The historical PR246 scope above remains a record of
+that slice, not the scope of this follow-up. Issue30 says "最长50字符" and
+`maxlength=50` but does not define Unicode counting or IME behavior. This bounded
+engineering interpretation uses the already-established **50 UTF-16 code units**
+(50 BMP characters or25 supplementary emoji), not grapheme clusters. The API's
+existing <=200 UTF-8-byte and no-unpaired-surrogate validation remains unchanged.
+It is not a claim of original OS IME parity or product acceptance; product0/209.
+
+Ordinary overlength typing, paste replacement or final drop change rejects the
+**whole change** and restores the latest length-compliant draft plus selection
+start/end/direction. There is deliberately no native `maxlength`: it could
+silently truncate before React sees the intended input. No prefix truncation,
+trim, normalization, or implicit GET/POST occurs. Length-compliant does not mean
+API-valid: direct programmatic raw controls still use the original literal query
+and safely escaped applied display; lone surrogates still fail explicit submit.
+
+The original Cc-bearing paste/drop rejection runs first so single-line native
+sanitization cannot transform raw input into another query. Paste length accounts
+for selection replacement; drop position is not assumed to equal that selection.
+An oversized external drop payload is rejected upfront, and every resulting
+ordinary input is checked against the final value. The search error persists
+until a distinct valid edit or an explicit clear; unrelated SAM/time transfer
+errors and drafts remain intact. Other list errors remain in their own channel
+and become visible again when the keyword error is cleared.
+
+Composition may temporarily exceed50 units. During composition, search submit,
+refresh and both clear actions are disabled; dirty state also blocks pagination,
+page-size changes, detail and new export. `compositionend` and blur fallback use
+one idempotent finisher. A rejected composition restores the pre-composition
+draft and selection, and repeated trailing input containing either rejected or
+restored text cannot silently clear its error. A new distinct edit recovers.
+Both clear actions reset accepted/composition/rejection/selection references while
+retaining their original draft-only versus full-filter-query behavior. Source,
+actor/session remount, fatal read failure and unmount invalidate old composition.
+
+Editing, rejecting and composition start invalidate only the independent detail
+channel. They do not cancel the pending list, replace its accepted query or pin,
+or alter existing rows and page-local positions. Late detail success or 403
+cannot reopen detail or invalidate the newer workspace. Current API, shared CSS,
+v2/other workspaces, source fixtures, workflows, selectors and budgets stay fixed.
+
+DOM contracts cover50/51,25/26 emoji, whole replacement, backward selection,
+transfer precedence/drop uncertainty, end/blur/duplicate composition events,
+clear reset, independent errors, pending list/late detail and source/session/
+authorization/unmount isolation. The existing real browser suite adds native
+keyboard and trusted clipboard checks at1440/390 plus actual selection and emoji
+boundaries, with original response/observation-bound screenshots. Its dispatched
+composition events are explicitly **synthetic**, not OS-native IME acceptance.
+Local browser launch remains permission-blocked; discovery is not execution.
+Exact-head CI, independent review and fresh main verification remain separate
+required evidence before this engineering slice can be declared complete.

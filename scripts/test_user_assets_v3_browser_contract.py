@@ -167,11 +167,13 @@ class UserAssetsV3BrowserContract(unittest.TestCase):
     def assert_keyword_clear_action(self, code):
         block = code.split('aria-label="清除用户资产关键词"', 1)[1].split(
             '</button>', 1)[0]
-        for required in ['disabled={stale || (draft === "" && !filterTransferErrors.search)}',
+        flat = re.sub(r'\s+', ' ', block)
+        for required in ['keywordComposition || stale || (draft === "" && !filterTransferErrors.search)',
+                         'resetKeyword()',
                          'setDraft("")', 'const next = { ...current }',
                          'delete next.search', 'return next', 'setInputError("")',
                          'clearDetail()', 'searchInput.current?.focus()', '清空关键词']:
-            self.assertIn(required, block)
+            self.assertIn(required, flat)
         for forbidden in ['setFilterDraft(', 'setFilterTransferErrors({})',
                           'cancelList(', 'loadList(', 'setQuery(', 'queryRef.current',
                           'setList(', 'fetch(', 'pageIdx:', 'pageSize:']:
@@ -199,6 +201,109 @@ class UserAssetsV3BrowserContract(unittest.TestCase):
                 with self.assertRaises(AssertionError):
                     prefix, block = code.split('aria-label="清除用户资产关键词"', 1)
                     self.assert_keyword_clear_action(prefix + 'aria-label="清除用户资产关键词"' + block.replace(old, new, 1))
+
+    def assert_keyword_limit_action(self, code):
+        change = code.split('const changeKeyword =', 1)[1].split('const resetKeyword =', 1)[0]
+        flat = re.sub(r'\s+', ' ', change)
+        for required in ['!keywordActive.current', 'composingKeyword.current',
+                         'setDraft(value)', 'clearDetail()',
+                         'value === rejected.value || value === rejected.restored',
+                         'finishKeywordComposition', '!composingKeyword.current',
+                         'composingKeyword.current = false', 'setKeywordComposition(false)',
+                         'restored: acceptedKeyword.current', 'editKeyword(value)']:
+            self.assertIn(required, flat)
+        self.assertEqual(change.count('value.length > 50'), 2)
+        for forbidden in ['.slice(', '.substring(', '.trim(', '.normalize(',
+                          'loadList(', 'cancelList(', 'setQuery(', 'queryRef.current']:
+            self.assertNotIn(forbidden, change)
+        restore = code.split('const restoreKeyword =', 1)[1].split('const changeKeyword =', 1)[0]
+        for required in ['acceptedKeyword.current', 'input.value = previous',
+                         'input.setSelectionRange(start, end, direction)',
+                         '...current', 'search: "关键词最多 50 个 UTF-16 单元', 'clearDetail()']:
+            self.assertIn(required, re.sub(r'\s+', ' ', restore))
+        input_block = code.split('placeholder="按 SAM、SID、mail 或 DN 搜索"', 1)[1].split('/>', 1)[0]
+        self.assertNotIn('maxLength=', input_block)
+        self.assertIn('onBlur={(event) =>', input_block)
+        self.assertEqual(input_block.count('finishKeywordComposition(event.currentTarget.value)'), 2)
+        self.assertIn('input.value.length - (end - start) + inserted.length > 50', input_block)
+        self.assertIn('event.dataTransfer.getData("text/plain").length > 50', input_block)
+        for kind in ['Paste', 'Drop']:
+            block = input_block.split(f'on{kind}={{', 1)[1]
+            self.assertLess(block.index(f'keywordGuard.on{kind}(event)'), block.index('event.defaultPrevented'))
+            self.assertLess(block.index('event.defaultPrevented'), block.index('rejectKeywordLength()'))
+        dirty = code.split('const dirty =', 1)[1].split('const changeFilter =', 1)[0]
+        self.assertIn('keywordComposition ||', dirty)
+        self.assertIn('if (', code.split('const submit =', 1)[1])
+        self.assertIn('composingKeyword.current ||', code.split('const submit =', 1)[1].split('validUserAssetsV3Search', 1)[0])
+        self.assertEqual(code.count('resetKeyword();'), 2)
+        self.assertIn('key={keywordGeneration}', code)
+        self.assertIn('setKeywordGeneration((value) => value + 1)', code)
+        self.assertIn('keywordActive.current = true', code.split('const loadList =', 1)[1].split('const loadDetail =', 1)[0])
+        self.assertIn('keywordActive.current = false', code.split('return () => {', 1)[1])
+        self.assertEqual(code.split('const handleFailure =', 1)[1].split('const loadList =', 1)[0].count('keywordActive.current = false'), 2)
+
+    def test_keyword_limit_preserves_channels_and_handles_composition(self):
+        self.assert_keyword_limit_action(Path('web/src/UserAssetsV3Workspace.tsx').read_text())
+
+    def test_keyword_limit_action_negative_mutations(self):
+        code = Path('web/src/UserAssetsV3Workspace.tsx').read_text()
+        for old, new in [
+            ('value.length > 50', 'value.length > 51'),
+            ('value === rejected.value || value === rejected.restored', 'value === rejected.value'),
+            ('input.setSelectionRange(start, end, direction)', 'input.setSelectionRange(start, end)'),
+            ('input.value.length - (end - start) + inserted.length > 50', 'input.value.length + inserted.length > 50'),
+            ('event.dataTransfer.getData("text/plain").length > 50', 'event.dataTransfer.getData("text/plain").length > 51'),
+            ('keywordComposition ||\n    !!transferError', '!!transferError'),
+        ]:
+            with self.subTest(mutation=old):
+                self.assertIn(old, code)
+                with self.assertRaises(AssertionError):
+                    self.assert_keyword_limit_action(code.replace(old, new, 1))
+
+    def assert_keyword_limit_browser(self, code):
+        block = code.split('await test.step("whole-change keyword length:', 1)[1].split(
+            'await test.step("mobile real data', 1)[0]
+        flat = re.sub(r'\s+', ' ', block)
+        for required in ['width: 1440', 'width: 390',
+                         'page.keyboard.type("a".repeat(50))', 'page.keyboard.type("Z")',
+                         'navigator.clipboard.writeText(value)', 'page.keyboard.press("Control+V")',
+                         'trusted: true, prevented', 'event.isTrusted',
+                         'await select(10, 12, "backward")', 'await paste("XYZ", true)',
+                         'await paste("😀", false)', 'await paste("😀".repeat(26), true)',
+                         'await paste("😀".repeat(25), false)',
+                         'await paste("x".repeat(51) + "\\n", true)',
+                         'not.toContainText(limitMessage)',
+                         'new CompositionEvent("compositionstart"', 'new CompositionEvent("compositionend"',
+                         'isComposing: true', 'requestSubmit()',
+                         '"汉".repeat(51), "previous", "汉".repeat(51)',
+                         'await expect(field).toHaveValue("previous")',
+                         'await expect(clearKeyword).toBeDisabled()',
+                         'await expect(search).toBeDisabled()',
+                         'expect(implicitRequests).toBe(0)', 'await expectUserPositions(first.value.list)',
+                         'user-assets-v3-desktop-keyword-limit.png',
+                         'user-assets-v3-mobile-keyword-limit.png',
+                         'syntheticCompositionIsNotOSIMEAcceptance: true']:
+            self.assertIn(required, flat)
+        for forbidden in ['.fulfill(', 'context.request', 'fixtureGET(', 'fetch(',
+                          'waitForTimeout(', 'test.setTimeout(', 'test.skip(']:
+            self.assertNotIn(forbidden, block)
+
+    def test_keyword_limit_real_keyboard_clipboard_and_explicit_synthetic_ime(self):
+        self.assert_keyword_limit_browser(Path('web/e2e/user-assets-v3.spec.ts').read_text())
+
+    def test_keyword_limit_browser_negative_mutations(self):
+        code = Path('web/e2e/user-assets-v3.spec.ts').read_text()
+        for old, new in [
+            ('await paste("😀".repeat(26), true)', 'await paste("😀".repeat(25), true)'),
+            ('await paste("😀".repeat(25), false)', 'await paste("😀".repeat(24), false)'),
+            ('trusted: true, prevented', 'trusted: false, prevented'),
+            ('syntheticCompositionIsNotOSIMEAcceptance: true', 'syntheticCompositionIsNotOSIMEAcceptance: false'),
+        ]:
+            with self.subTest(mutation=old):
+                self.assertIn(old, code)
+                with self.assertRaises(AssertionError):
+                    prefix, block = code.split('await test.step("whole-change keyword length:', 1)
+                    self.assert_keyword_limit_browser(prefix + 'await test.step("whole-change keyword length:' + block.replace(old, new, 1))
 
     def assert_keyword_clear_browser(self, code):
         block = code.split('await test.step("keyword-only clear preserves', 1)[1].split(

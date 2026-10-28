@@ -1835,6 +1835,258 @@ test("UserAssetsV3 real workspace, pins, identity facts and native reader invali
     );
   });
 
+  await test.step("whole-change keyword length: native keyboard, clipboard and synthetic composition at desktop and mobile", async () => {
+    const field = page.getByLabel("用户资产关键词", { exact: true });
+    const clearKeyword = page.getByRole("button", {
+      name: "清除用户资产关键词",
+      exact: true,
+    });
+    const search = page.getByRole("button", { name: "搜索用户", exact: true });
+    const limitMessage =
+      "关键词最多 50 个 UTF-16 单元，已拒绝整次变更并保留此前内容；请重新编辑或清除关键词。";
+    let implicitRequests = 0;
+    const observe = (request: Request) => {
+      const path = new URL(request.url()).pathname;
+      if (path.startsWith("/api/user-assets/v3")) implicitRequests++;
+    };
+    page.on("request", observe);
+    await context.grantPermissions(["clipboard-read", "clipboard-write"], {
+      origin: new URL(page.url()).origin,
+    });
+    const selection = () =>
+      field.evaluate((element) => {
+        const input = element as HTMLInputElement;
+        return {
+          start: input.selectionStart,
+          end: input.selectionEnd,
+          direction: input.selectionDirection,
+        };
+      });
+    const select = async (
+      start: number,
+      end: number,
+      direction: "forward" | "backward" | "none" = "none",
+    ) => {
+      await field.focus();
+      await field.evaluate(
+        (element, args) => {
+          (element as HTMLInputElement).setSelectionRange(
+            args.start,
+            args.end,
+            args.direction,
+          );
+          element.dispatchEvent(new Event("select", { bubbles: true }));
+        },
+        { start, end, direction },
+      );
+    };
+    const paste = async (value: string, prevented: boolean) => {
+      await field.evaluate((element) => {
+        (window as any).__v3KeywordLimitPaste = null;
+        element.addEventListener(
+          "paste",
+          (event) => {
+            setTimeout(() => {
+              (window as any).__v3KeywordLimitPaste = {
+                trusted: event.isTrusted,
+                prevented: event.defaultPrevented,
+              };
+            });
+          },
+          { once: true },
+        );
+      });
+      await page.evaluate(
+        (value) => navigator.clipboard.writeText(value),
+        value,
+      );
+      await field.focus();
+      await page.keyboard.press("Control+V");
+      await expect
+        .poll(() => page.evaluate(() => (window as any).__v3KeywordLimitPaste))
+        .toEqual({ trusted: true, prevented });
+    };
+    const evidence: unknown[] = [];
+    try {
+      for (const viewport of [
+        { width: 1440, height: 1000 },
+        { width: 390, height: 844 },
+      ]) {
+        await page.setViewportSize(viewport);
+        await field.fill("");
+        await field.focus();
+        await expect(field).not.toHaveAttribute("maxlength");
+        await field.evaluate((element) => {
+          (window as any).__v3KeywordLimitKeyboard = null;
+          element.addEventListener(
+            "input",
+            (event) => {
+              (window as any).__v3KeywordLimitKeyboard = event.isTrusted;
+            },
+            { once: true },
+          );
+        });
+        await page.keyboard.type("a".repeat(50));
+        await expect(field).toHaveValue("a".repeat(50));
+        expect(
+          await page.evaluate(() => (window as any).__v3KeywordLimitKeyboard),
+        ).toBe(true);
+        const acceptedCaret = await selection();
+        expect(acceptedCaret.start).toBe(50);
+        expect(acceptedCaret.end).toBe(50);
+        await page.keyboard.type("Z");
+        await expect(field).toHaveValue("a".repeat(50));
+        expect(await selection()).toEqual(acceptedCaret);
+        await expect(
+          page.getByText(limitMessage, { exact: true }),
+        ).toBeVisible();
+        await expect(search).toBeDisabled();
+        await select(10, 12, "backward");
+        await paste("XYZ", true);
+        expect(await selection()).toEqual({
+          start: 10,
+          end: 12,
+          direction: "backward",
+        });
+        await expect(field).toHaveValue("a".repeat(50));
+        await paste("😀", false);
+        await expect(field).toHaveValue("a".repeat(10) + "😀" + "a".repeat(38));
+        await expect(field).toHaveAttribute("aria-invalid", "false");
+        await select(0, 50, "backward");
+        await paste("😀".repeat(26), true);
+        await expect(field).toHaveValue("a".repeat(10) + "😀" + "a".repeat(38));
+        expect(await selection()).toEqual({
+          start: 0,
+          end: 50,
+          direction: "backward",
+        });
+        await paste("😀".repeat(25), false);
+        await expect(field).toHaveValue("😀".repeat(25));
+        await select(0, 50);
+        await paste("x".repeat(51) + "\n", true);
+        await expect(page.getByRole("alert")).toContainText("含控制字符");
+        await expect(page.getByRole("alert")).not.toContainText(limitMessage);
+        await clearKeyword.click();
+        await expect(field).toHaveValue("");
+        await expect(field).toBeFocused();
+        await field.fill("previous");
+        await select(2, 5, "backward");
+        // Deliberately synthetic composition: proves event handling, not OS IME acceptance.
+        await field.evaluate((element) => {
+          element.dispatchEvent(
+            new CompositionEvent("compositionstart", { bubbles: true }),
+          );
+          Object.getOwnPropertyDescriptor(
+            HTMLInputElement.prototype,
+            "value",
+          )!.set!.call(element, "汉".repeat(51));
+          element.dispatchEvent(
+            new InputEvent("input", {
+              bubbles: true,
+              inputType: "insertCompositionText",
+              data: "汉".repeat(51),
+              isComposing: true,
+            }),
+          );
+        });
+        await expect(field).toHaveValue("汉".repeat(51));
+        await expect(search).toBeDisabled();
+        await expect(clearKeyword).toBeDisabled();
+        await expect(
+          page.getByRole("button", { name: "清除用户筛选", exact: true }),
+        ).toBeDisabled();
+        await expect(
+          page.getByRole("button", { name: "刷新用户资产观测", exact: true }),
+        ).toBeDisabled();
+        await expect(page.getByLabel("用户资产每页条数")).toBeDisabled();
+        await expect(
+          page.getByRole("button", { name: "导出匹配用户 XLSX", exact: true }),
+        ).toBeDisabled();
+        await page
+          .locator("form.asset-search-toolbar")
+          .evaluate((form) => (form as HTMLFormElement).requestSubmit());
+        await field.evaluate((element) =>
+          element.dispatchEvent(
+            new CompositionEvent("compositionend", {
+              bubbles: true,
+              data: "汉".repeat(51),
+            }),
+          ),
+        );
+        await expect(field).toHaveValue("previous");
+        expect(await selection()).toEqual({
+          start: 2,
+          end: 5,
+          direction: "backward",
+        });
+        // Repeated trailing events must not clear the rejection or restore composed data.
+        for (const value of ["汉".repeat(51), "previous", "汉".repeat(51)]) {
+          await field.evaluate((element, value) => {
+            Object.getOwnPropertyDescriptor(
+              HTMLInputElement.prototype,
+              "value",
+            )!.set!.call(element, value);
+            element.dispatchEvent(
+              new InputEvent("input", {
+                bubbles: true,
+                inputType: "insertText",
+                data: value,
+              }),
+            );
+          }, value);
+          await expect(field).toHaveValue("previous");
+          await expect(
+            page.getByText(limitMessage, { exact: true }),
+          ).toBeVisible();
+        }
+        await field.scrollIntoViewIfNeeded();
+        await expect(field).toBeInViewport({ ratio: 1 });
+        await expect(clearKeyword).toBeInViewport({ ratio: 1 });
+        expect(
+          await page.evaluate(
+            () => document.documentElement.scrollWidth <= innerWidth,
+          ),
+        ).toBe(true);
+        await capture(
+          viewport.width === 1440
+            ? "user-assets-v3-desktop-keyword-limit.png"
+            : "user-assets-v3-mobile-keyword-limit.png",
+          first.value,
+        );
+        evidence.push({
+          viewport,
+          nativeKeyboard: true,
+          nativeClipboard: true,
+          selectionDirection: "backward",
+          emojiBoundary: [25, 26],
+          syntheticCompositionOnly: true,
+          implicitRequests,
+        });
+        await clearKeyword.click();
+        await expect(field).toHaveValue("");
+        await expect(field).toHaveAttribute("aria-invalid", "false");
+        await expect(search).toBeEnabled();
+        await expectUserPositions(first.value.list);
+        expect(implicitRequests).toBe(0);
+      }
+      await writeFile(
+        testInfo.outputPath("user-assets-v3-keyword-limit.json"),
+        JSON.stringify(
+          { evidence, syntheticCompositionIsNotOSIMEAcceptance: true },
+          null,
+          2,
+        ),
+      );
+    } finally {
+      page.off("request", observe);
+      await context.clearPermissions();
+      await page.evaluate(() => {
+        delete (window as any).__v3KeywordLimitPaste;
+        delete (window as any).__v3KeywordLimitKeyboard;
+      });
+    }
+  });
+
   await test.step("mobile real data and drawer remain bounded at 390 by 844", async () => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.evaluate(() => scrollTo(0, 0));

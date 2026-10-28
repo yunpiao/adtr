@@ -529,14 +529,15 @@ describe("UI-0494 draft-only user keyword clear", () => {
     },
   );
 
-  it("preserves the existing 50 UTF-16-unit submit rejection without truncation", async () => {
+  it("rejects the whole overlong input before submit and clears its length error without a request", async () => {
     await start();
+    fill("用户资产关键词", "previous");
     const value = "x".repeat(51);
     fill("用户资产关键词", value);
     click("搜索用户");
-    expect(keyword()).toHaveValue(value);
+    expect(keyword()).toHaveValue("previous");
     expect(screen.getByRole("alert")).toHaveTextContent(
-      "搜索最多 50 个 UTF-16 单元",
+      "已拒绝整次变更并保留此前内容",
     );
     expect(calls()).toHaveLength(1);
     fireEvent.click(clearKeyword());

@@ -374,6 +374,22 @@ function Assets({
   const [query, setQuery] = useState(initial);
   const queryRef = useRef(initial);
   const [draft, setDraft] = useState("");
+  // Length-compliant is not API-valid: raw controls and lone surrogates retain
+  // their existing transfer/submit validation rather than being normalized here.
+  const acceptedKeyword = useRef("");
+  const composingKeyword = useRef(false);
+  const keywordActive = useRef(true);
+  const [keywordGeneration, setKeywordGeneration] = useState(0);
+  const [keywordComposition, setKeywordComposition] = useState(false);
+  const keywordSelection = useRef({
+    start: 0,
+    end: 0,
+    direction: "none" as "forward" | "backward" | "none",
+  });
+  const rejectedComposition = useRef<{
+    value: string;
+    restored: string;
+  } | null>(null);
   const [filterDraft, setFilterDraft] = useState(emptyFilters);
   const [filterTransferErrors, setFilterTransferErrors] = useState<
     Partial<Record<RawFilterKey, string>>
@@ -428,6 +444,11 @@ function Assets({
         [401, 403, 404].includes(reason.status) ||
         reason.code === "selection_changed")
     ) {
+      keywordActive.current = false;
+      composingKeyword.current = false;
+      rejectedComposition.current = null;
+      setKeywordComposition(false);
+      setDraft(acceptedKeyword.current);
       cancelList();
       clearDetail();
       setList(null);
@@ -438,6 +459,12 @@ function Assets({
       reason instanceof ApiError &&
       reason.code === "directory_observation_unavailable"
     ) {
+      keywordActive.current = false;
+      setKeywordGeneration((value) => value + 1);
+      composingKeyword.current = false;
+      rejectedComposition.current = null;
+      setKeywordComposition(false);
+      setDraft(acceptedKeyword.current);
       cancelList();
       clearDetail();
       setList(null);
@@ -449,6 +476,7 @@ function Assets({
     return false;
   };
   const loadList = (next: UserAssetsV3Query) => {
+    keywordActive.current = true;
     cancelList();
     clearDetail();
     const sequence = listSequence.current;
@@ -531,9 +559,13 @@ function Assets({
     void read();
   };
   useLayoutEffect(() => {
+    keywordActive.current = true;
     loadList(initial);
     searchInput.current?.focus();
     return () => {
+      keywordActive.current = false;
+      composingKeyword.current = false;
+      rejectedComposition.current = null;
       cancelList();
       cancelDetail();
     };
@@ -542,7 +574,8 @@ function Assets({
   }, []);
   const submit = (event: FormEvent) => {
     event.preventDefault();
-    if (stale || transferError || (busy && !dirty)) return;
+    if (composingKeyword.current || stale || transferError || (busy && !dirty))
+      return;
     if (!validUserAssetsV3Search(draft)) {
       setInputError(
         "搜索最多 50 个 UTF-16 单元，且不能包含无效字符；输入不会被截断。",
@@ -575,6 +608,7 @@ function Assets({
   };
   const transferError = Object.values(filterTransferErrors).join(" ");
   const dirty =
+    keywordComposition ||
     !!transferError ||
     draft !== query.search ||
     (Object.keys(emptyFilters) as (keyof typeof emptyFilters)[]).some(
@@ -621,6 +655,95 @@ function Assets({
         event,
       ),
   });
+  const editKeyword = (value: string) => {
+    acceptedKeyword.current = value;
+    rejectedComposition.current = null;
+    setDraft(value);
+    setFilterTransferErrors((current) => {
+      const next = { ...current };
+      delete next.search;
+      return next;
+    });
+    setInputError("");
+    clearDetail();
+  };
+  const rememberKeywordSelection = () => {
+    const input = searchInput.current;
+    if (
+      !input ||
+      composingKeyword.current ||
+      input.value !== acceptedKeyword.current
+    )
+      return;
+    keywordSelection.current = {
+      start: input.selectionStart ?? 0,
+      end: input.selectionEnd ?? 0,
+      direction: input.selectionDirection ?? "none",
+    };
+  };
+  const restoreKeyword = () => {
+    const previous = acceptedKeyword.current;
+    setDraft(previous);
+    const input = searchInput.current;
+    if (input) {
+      // Restore the entire previous draft, not a prefix of the rejected insertion.
+      input.value = previous;
+      const { start, end, direction } = keywordSelection.current;
+      input.setSelectionRange(start, end, direction);
+    }
+  };
+  const rejectKeywordLength = () => {
+    restoreKeyword();
+    setFilterTransferErrors((current) => ({
+      ...current,
+      search:
+        "关键词最多 50 个 UTF-16 单元，已拒绝整次变更并保留此前内容；请重新编辑或清除关键词。",
+    }));
+    setInputError("");
+    clearDetail();
+  };
+  const changeKeyword = (value: string) => {
+    if (!keywordActive.current) {
+      restoreKeyword();
+      return;
+    }
+    if (composingKeyword.current) {
+      setDraft(value);
+      clearDetail();
+      return;
+    }
+    // A rejected composition may emit repeated trailing input with either value.
+    const rejected = rejectedComposition.current;
+    if (rejected && (value === rejected.value || value === rejected.restored)) {
+      rejectKeywordLength();
+      return;
+    }
+    if (value.length > 50) {
+      rejectKeywordLength();
+      return;
+    }
+    editKeyword(value);
+  };
+  const finishKeywordComposition = (value: string) => {
+    if (!keywordActive.current || !composingKeyword.current) return;
+    composingKeyword.current = false;
+    setKeywordComposition(false);
+    if (value.length > 50) {
+      rejectedComposition.current = {
+        value,
+        restored: acceptedKeyword.current,
+      };
+      rejectKeywordLength();
+    } else editKeyword(value);
+  };
+  const resetKeyword = () => {
+    acceptedKeyword.current = "";
+    composingKeyword.current = false;
+    rejectedComposition.current = null;
+    keywordSelection.current = { start: 0, end: 0, direction: "none" };
+    setKeywordComposition(false);
+  };
+  const keywordGuard = rawInputGuards("search");
   return (
     <section className="asset-queue" aria-label="已选数据源用户资产">
       <div className="asset-queue-heading">
@@ -632,6 +755,7 @@ function Assets({
           type="button"
           className="secondary asset-refresh"
           aria-label="刷新用户资产观测"
+          disabled={keywordComposition}
           onClick={() => {
             const { observationId: _pin, ...latest } = queryRef.current;
             loadList({ ...latest, pageIdx: 1 });
@@ -643,20 +767,52 @@ function Assets({
       <form className="filters asset-search-toolbar" onSubmit={submit}>
         <Field label="用户资产关键词">
           <input
+            key={keywordGeneration}
             ref={searchInput}
-            {...rawInputGuards("search")}
+            {...keywordGuard}
             aria-describedby="asset-search-help"
             placeholder="按 SAM、SID、mail 或 DN 搜索"
             value={draft}
-            onChange={(event) => {
-              setDraft(event.target.value);
-              setFilterTransferErrors((current) => {
-                const next = { ...current };
-                delete next.search;
-                return next;
-              });
-              setInputError("");
+            onChange={(event) => changeKeyword(event.target.value)}
+            onSelect={rememberKeywordSelection}
+            onKeyDown={rememberKeywordSelection}
+            onBeforeInput={rememberKeywordSelection}
+            onCompositionStart={() => {
+              if (!keywordActive.current) return;
+              rememberKeywordSelection();
+              composingKeyword.current = true;
+              setKeywordComposition(true);
               clearDetail();
+            }}
+            onCompositionEnd={(event) =>
+              finishKeywordComposition(event.currentTarget.value)
+            }
+            onBlur={(event) =>
+              finishKeywordComposition(event.currentTarget.value)
+            }
+            onPaste={(event) => {
+              rememberKeywordSelection();
+              keywordGuard.onPaste(event);
+              if (event.defaultPrevented || composingKeyword.current) return;
+              const input = event.currentTarget;
+              const inserted = event.clipboardData.getData("text/plain");
+              const start = input.selectionStart ?? 0;
+              const end = input.selectionEnd ?? start;
+              if (input.value.length - (end - start) + inserted.length > 50) {
+                event.preventDefault();
+                rejectKeywordLength();
+              }
+            }}
+            onDrop={(event) => {
+              rememberKeywordSelection();
+              keywordGuard.onDrop(event);
+              if (event.defaultPrevented || composingKeyword.current) return;
+              // Drop position need not equal selection; validate the final change.
+              // A payload beyond the whole limit cannot fit at an external drop point.
+              if (event.dataTransfer.getData("text/plain").length > 50) {
+                event.preventDefault();
+                rejectKeywordLength();
+              }
             }}
           />
         </Field>
@@ -685,8 +841,13 @@ function Assets({
           type="button"
           className="secondary"
           aria-label="清除用户资产关键词"
-          disabled={stale || (draft === "" && !filterTransferErrors.search)}
+          disabled={
+            keywordComposition ||
+            stale ||
+            (draft === "" && !filterTransferErrors.search)
+          }
           onClick={() => {
+            resetKeyword();
             setDraft("");
             setFilterTransferErrors((current) => {
               const next = { ...current };
@@ -716,14 +877,19 @@ function Assets({
             ))}
           </select>
         </Field>
-        <button disabled={stale || !!transferError || (busy && !dirty)}>
+        <button
+          disabled={
+            keywordComposition || stale || !!transferError || (busy && !dirty)
+          }
+        >
           搜索用户
         </button>
         <button
           type="button"
           className="secondary"
-          disabled={busy || stale}
+          disabled={keywordComposition || busy || stale}
           onClick={() => {
+            resetKeyword();
             setDraft("");
             setFilterDraft(emptyFilters);
             setFilterTransferErrors({});
