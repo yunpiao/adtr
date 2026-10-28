@@ -363,6 +363,39 @@ function expectedUser(row: number) {
           : "2026-10-01T02:03:04Z",
   };
 }
+// Display-only positions are tied to each accepted genuine response's GUID order.
+async function expectUserPositions(
+  page: Page,
+  expected: { objectGUID: string }[],
+) {
+  const table = page.getByRole("table", {
+    name: "用户资产列表",
+    exact: true,
+    includeHidden: true,
+  });
+  if (expected.length === 0) {
+    await expect(table).toHaveCount(0);
+    return;
+  }
+  const header = table.getByRole("columnheader", {
+    name: "本页序号",
+    exact: true,
+    includeHidden: true,
+  });
+  await expect(header).toHaveAttribute("scope", "col");
+  await expect(header).not.toHaveAttribute("aria-sort");
+  await expect(header.getByRole("button")).toHaveCount(0);
+  const rows = table.locator("tbody tr");
+  await expect(rows).toHaveCount(expected.length);
+  for (let index = 0; index < expected.length; index++) {
+    const cells = rows.nth(index).getByRole("cell");
+    await expect(cells).toHaveCount(7);
+    await expect(cells.nth(0)).toHaveAttribute("data-label", "本页序号");
+    await expect(cells.nth(0)).toHaveText(String(index + 1));
+    await expect(cells.nth(2)).toHaveText(expected[index].objectGUID);
+  }
+}
+
 async function assetAction(
   page: Page,
   action: () => Promise<unknown>,
@@ -384,6 +417,7 @@ async function assetAction(
   ).toBe(status);
   expect(response.headers()["cache-control"]).toBe("no-store");
   const value = await directoryV2ResponseJSON(response);
+  if (!detail && status === 200) await expectUserPositions(page, value.list);
   return {
     value,
     query: new URL(response.url()).searchParams,
@@ -891,6 +925,28 @@ test("UserAssetsV2 real worker TLS LDAP PostgreSQL search and pinned detail", as
         fullPage: false,
       });
 
+      const firstDesktopRow = socTable.locator("tbody tr").first();
+      await expect(firstDesktopRow.getByRole("cell").nth(2)).toHaveText(
+        desktop.value.list[0].objectGUID,
+      );
+      await firstDesktopRow.scrollIntoViewIfNeeded();
+      await expect(firstDesktopRow).toBeInViewport({ ratio: 1 });
+      const firstDesktopPosition = firstDesktopRow.getByRole("cell").first();
+      await expect(firstDesktopPosition).toHaveAttribute(
+        "data-label",
+        "本页序号",
+      );
+      await expect(firstDesktopPosition).toHaveText("1");
+      await expect(firstDesktopPosition).toBeVisible();
+      await expect(firstDesktopPosition).toBeInViewport({ ratio: 1 });
+      await expect(firstDesktopRow.getByRole("cell").nth(2)).toBeInViewport({
+        ratio: 1,
+      });
+      await soc.screenshot({
+        path: testInfo.outputPath("user-assets-v2-desktop-row-numbers.png"),
+        fullPage: false,
+      });
+
       const desktopDetail = await assetAction(
         soc,
         () =>
@@ -1015,6 +1071,28 @@ test("UserAssetsV2 real worker TLS LDAP PostgreSQL search and pinned detail", as
         path: testInfo.outputPath(
           "user-assets-v2-soc-mobile-user-assets-first-screen.png",
         ),
+        fullPage: false,
+      });
+
+      const firstMobileRow = socTable.locator("tbody tr").first();
+      await expect(firstMobileRow.getByRole("cell").nth(2)).toHaveText(
+        mobile.value.list[0].objectGUID,
+      );
+      await firstMobileRow.scrollIntoViewIfNeeded();
+      await expect(firstMobileRow).toBeInViewport({ ratio: 1 });
+      const firstMobilePosition = firstMobileRow.getByRole("cell").first();
+      await expect(firstMobilePosition).toHaveAttribute(
+        "data-label",
+        "本页序号",
+      );
+      await expect(firstMobilePosition).toHaveText("1");
+      await expect(firstMobilePosition).toBeVisible();
+      await expect(firstMobilePosition).toBeInViewport({ ratio: 1 });
+      await expect(firstMobileRow.getByRole("cell").nth(2)).toBeInViewport({
+        ratio: 1,
+      });
+      await soc.screenshot({
+        path: testInfo.outputPath("user-assets-v2-mobile-row-numbers.png"),
         fullPage: false,
       });
 
@@ -1546,6 +1624,7 @@ test("UserAssetsV2 real worker TLS LDAP PostgreSQL search and pinned detail", as
       });
       await expect(table).toContainText("user-11");
       await expect(table).not.toContainText("user-02");
+      await expectUserPositions(page, current.value.list);
     } finally {
       await held.release();
     }
