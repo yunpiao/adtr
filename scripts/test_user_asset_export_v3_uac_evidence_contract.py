@@ -1146,5 +1146,292 @@ class PythonDiagnosticTests(unittest.TestCase):
                 self.assertEqual(stderr.getvalue(), 'uac_evidence_invalid:' + expected + ';stage=runner_main\n')
 
 
+
+class ObserverDiagnosticTests(unittest.TestCase):
+    """Actual C helper diagnostics; synthetic inputs, never current CI evidence."""
+
+    def _run_probe(self, source):
+        with tempfile.TemporaryDirectory() as directory:
+            script = Path(directory) / 'probe.mjs'
+            script.write_text(source)
+            result = subprocess.run(['node', str(script), str(ROOT)], cwd=ROOT,
+                                    text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                    timeout=60, check=False)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stderr, '')
+        return json.loads(result.stdout)
+
+    def test_actual_host_observer_thirteen_scenarios_keep_ledger_and_classify(self):
+        result = self._run_probe(r"""
+import fs from 'node:fs';
+import path from 'node:path';
+import crypto from 'node:crypto';
+import { registerHooks, isBuiltin, createRequire } from 'node:module';
+import { pathToFileURL } from 'node:url';
+import { EventEmitter } from 'node:events';
+const root=path.resolve(process.argv[2]);
+const local=n=>pathToFileURL(path.join(root,n)).href;
+const stub=s=>'data:text/javascript,'+encodeURIComponent(s);
+const helperURL=local('web/e2e/user-asset-export-v3-uac-helpers.ts'), observerURL=local('web/e2e/directory-v2-response-observer.ts'), parserURL=local('web/src/directory-v4-controls-json.ts');
+const deps=new Map([[helperURL,{'../src/directory-v4-controls-json':parserURL,'./directory-v2-response-observer':observerURL,'./user-asset-export-v3-helpers':stub('import {createHash} from "node:crypto";export const hash=v=>createHash("sha256").update(v).digest("hex");')}],[observerURL,{'../src/directory-v4-controls-json':parserURL}],[parserURL,{'./api':stub('export class ApiError extends Error {constructor(){super("invalid_response");}}')}]]);
+const hook=registerHooks({resolve(s,c,n){const d=deps.get(c.parentURL);if(d&&Object.hasOwn(d,s))return{url:d[s],shortCircuit:true};if(d&&!isBuiltin(s))throw Error('unexpected_offline_dependency');return n(s,c);}});
+const require=createRequire(import.meta.url);let h,o;try{h=require(path.join(root,'web/e2e/user-asset-export-v3-uac-helpers.ts'));o=require(path.join(root,'web/e2e/directory-v2-response-observer.ts'));}finally{hook.deregister();}
+const check=(x,label)=>{if(!x)throw Error('probe_assertion:'+label)};
+const hash=b=>crypto.createHash('sha256').update(b).digest('hex');
+const origin='http://127.0.0.1:12345';
+const source={taskUUID:'synthetic-observation',selection:{domainId:'synthetic-domain',revision:'2',credentialRevision:'1'}};
+const keys=['abcdefab-cdef-4abc-8def-abcdefabcdef','fedcbafe-dcba-4fed-8cba-fedcbafedcba','aabbccdd-eeff-4aab-8ccd-eeffaabbccdd'];
+const modes=['set','clear','not_returned'];
+const codes=['135790','246802','357913'];
+const closed=async(fn,stage)=>{try{return{ok:true,value:await fn()}}catch(e){return{ok:false,message:h.uacFailureMessage(e,stage)}}};
+async function runScenario(name,variation={}){
+ let storage,gate,register,readCount=0,takes=0,bodyCalls=0,finalCount=0,ledgerSHA256=null;
+ const records=new Map(), counts=new Map();
+ const secrets=[];
+ const frame={page:()=>page,url:()=>origin+'/'};
+ const locator=(key)=>JSON.stringify({version:1,kind:'user_assets.v3.export',actorID:1,domainId:source.selection.domainId,idempotencyKey:key});
+ const page={mainFrame:()=>frame,isClosed:()=>false,
+  waitForFunction:async()=>{},
+  evaluate:async(_fn,arg)=>{
+   if(typeof arg==='string'){readCount++;if(gate)await gate.wait;return storage;}
+   const rec=records.get(arg.id)?.[arg.identity.ordinal];check(rec,'record');check(!rec.taken,'atomic_take');if(arg.take){rec.taken=true;takes++;}
+   return{count:counts.get(arg.id),record:{...rec,identity:{...rec.identity}}};
+  },
+  getByRole:()=>({getByRole:()=>({click:async()=>{}})}),
+  waitForResponse:async()=>{throw Error('unarmed_receipt');}
+ };
+ class Context extends EventEmitter{constructor(){super();this.tabs=[page];}pages(){return this.tabs;}async exposeBinding(_n,f){register=f}async addInitScript(){}}
+ const context=new Context();await o.observeDirectoryV2Responses(context);register({page,frame},'unit-document');
+ const observer=h.observeUACExportWrites(context,origin,secrets);
+ function requestFor(method,pathname,value,body,options={}){
+  const url=origin+pathname,id=method+' '+url,ordinal=counts.get(id)||0;
+  const raw=Buffer.from(JSON.stringify(value));const identity={epoch:'unit-document',method,url,ordinal};
+  const record={identity,state:'complete',status:200,actor:'1',cache:'no-store',text:raw.toString('utf8'),byteLength:raw.length,sha256:hash(raw),eof:true,readers:1,released:1,cancelCalls:0,signalAborted:false,completedRead:true,taken:false};
+  records.set(id,[...(records.get(id)||[]),record]);counts.set(id,ordinal+1);
+  const req={frame:()=>frame,resourceType:()=>'fetch',url:()=>url,method:()=>method,postDataBuffer:()=>Buffer.from(JSON.stringify(body)),response:async()=>response};
+  const response={request:()=>req,url:()=>url,status:()=>200,headers:()=>({'x-adtr-user-id':'1','cache-control':'no-store'}),body:async()=>{bodyCalls++;throw Error('inspector_body_must_not_be_used');}};
+  context.emit('request',req);return{req,response};
+ }
+ const cases=[], seen=[];
+ for(let i=0;i<3;i++){
+  const mode=modes[i],exp=h.expectedUACRequest(source,mode);let key=keys[i];
+  if(i===2&&variation.keyOldProofCollision)key='135790ab-cdef-4abc-8def-abcdefabcdef';
+  storage=locator(key);
+  const responseValue={taskID:'export-'+mode,task:{state:'queued'},request:exp,replayed:false};
+  if(i===2&&variation.currentKeyReflection)responseValue.task.note=key;
+  if(i===2&&variation.lateProof)responseValue.task.note='late-proof-marker';
+  if(i===2&&variation.extraResponseKey)responseValue.extra=true;
+  if(i===2&&variation.badTaskID)responseValue.taskID='platform';
+  const postBody={...exp,idempotencyKey:key,actorPassword:'unit-private-password',totpCode:codes[i]};
+  observer.armCase(mode,exp,1,page);
+  if(i===2&&variation.deferLocator){let release;gate={wait:new Promise(r=>release=r),release:()=>{release();gate=undefined;}};}
+  const beforeTakes=takes;
+  const x=requestFor('POST',h.exportPrefix,responseValue,postBody); seen.push(x);
+  const main=await closed(()=>h.safeResponse(x.response,1,secrets),'export_submit');
+  check(main.ok,'main_pass:'+name);
+  check(typeof main.value.taskID==='string'&&main.value.replayed===false&&h.sameValue(main.value.request,exp),'actual_main_predicates');
+  if(i===2&&variation.mutateReturnedClone)main.value.task.secret='unit-private-password';
+  if(i===2&&variation.lateProof)secrets.push('late-proof-marker');
+  if(i===2&&variation.locatorPrevious)storage=locator(keys[1]);
+  if(i===2&&variation.locatorMissing)storage=null;
+  if(i===2&&variation.duplicate)requestFor('POST',h.exportPrefix,responseValue,postBody);
+  if(i===2&&variation.requestFailed)context.emit('requestfailed',x.req);
+  if(i===2&&variation.priorRequestFailed)context.emit('requestfailed',seen[0].req);
+  if(gate)gate.release();
+  const settled=await closed(()=>observer.settleCase(main.value.taskID),'export_settle');
+  cases.push({mode,mainSafeResponse:true,mainPredicates:true,settled:settled.ok,closedFailure:settled.message??null,bodyTakes:takes-beforeTakes});
+  if(!settled.ok){check(i===2&&variation.expectReject,'expected_third_rejection:'+name);const expectedBranch = variation.locatorPrevious ? 'request_inspection;case=not_returned;relation=current;inspect=key_equality'
+ : variation.locatorMissing ? 'request_inspection;case=not_returned;relation=current;inspect=locator_shape'
+ : variation.duplicate ? 'duplicate_create;case=not_returned;relation=current'
+ : variation.priorRequestFailed ? 'request_failed;case=not_returned;relation=prior'
+ : variation.requestFailed ? 'request_failed;case=not_returned;relation=current'
+ : variation.extraResponseKey ? 'created_envelope;case=not_returned;relation=current'
+ : variation.badTaskID ? 'created_task_id;case=not_returned;relation=current'
+ : variation.keyOldProofCollision ? 'request_inspection;case=not_returned;relation=current;inspect=locator_privacy'
+ : 'response_check;case=not_returned;relation=current';
+ const responseCheck = variation.currentKeyReflection || variation.lateProof ? ';check=body_privacy' : '';
+ check(settled.message==='uac_evidence_invalid:post_binding;stage=export_settle'+responseCheck+';observer='+expectedBranch,'exact_closed_failure');break;}
+  // Actual original-key receipt helper follows settlement before the next case.
+  const receiptValue={taskID:responseValue.taskID,task:{state:'succeeded'},request:exp};
+  page.waitForResponse=async()=>requestFor('GET',h.exportPrefix+'/receipt?domainId='+exp.domainId+'&idempotencyKey='+key,receiptValue,null).response;
+  const receipt=await closed(()=>h.readUACOriginalReceipt(page,origin,1,exp,hash(key),secrets),'original_receipt');
+  check(receipt.ok&&receipt.value.taskID===responseValue.taskID,'actual_receipt_pass:'+name);finalCount++;
+ }
+ if(!variation.expectReject){context.tabs=[];const final=await observer.closeAndSnapshot({owner:10,producer:9,observations:1,directoryUses:1,exportTasks:3});check(final.events.length===3&&final.createCount===3&&final.cancelCount===0&&final.unexpectedExportWriteCount===0,'same_ledger');ledgerSHA256=hash(JSON.stringify(final));}
+ else check(cases.length===3&&!cases[2].settled&&finalCount===2,'exact_prefix');
+ check(bodyCalls===0,'no_inspector_body');
+ return{name,cases,ledgerSHA256,successfulOriginalReceipts:finalCount,actualHostAtomicTakes:takes,inspectorBodyCalls:bodyCalls,locatorReads:readCount};
+}
+const variants=[
+ ['three_case_same_response_control',{}],
+ ['third_main_first_then_observer_same_cached_response',{deferLocator:true}],
+ ['returned_clone_mutation_isolated',{deferLocator:true,mutateReturnedClone:true}],
+ ['third_locator_previous_after_main',{deferLocator:true,locatorPrevious:true,expectReject:true}],
+ ['third_locator_missing_after_main',{deferLocator:true,locatorMissing:true,expectReject:true}],
+ ['third_duplicate_post_after_main',{deferLocator:true,duplicate:true,expectReject:true}],
+ ['third_requestfailed_after_main',{deferLocator:true,requestFailed:true,expectReject:true}],
+ ['earlier_set_requestfailed_during_third_case',{deferLocator:true,priorRequestFailed:true,expectReject:true}],
+ ['third_extra_response_field_main_pass_observer_reject',{deferLocator:true,extraResponseKey:true,expectReject:true}],
+ ['third_task_platform_main_pass_observer_reject',{deferLocator:true,badTaskID:true,expectReject:true}],
+ ['third_current_key_reflection_detected_after_hash_registration',{deferLocator:true,currentKeyReflection:true,expectReject:true}],
+ ['third_latest_secret_added_after_main',{deferLocator:true,lateProof:true,expectReject:true}],
+ ['third_valid_uuid_contains_older_observed_proof',{deferLocator:true,keyOldProofCollision:true,expectReject:true}],
+];
+
+(async () => {
+const results=[];for(const [n,v]of variants)results.push(await runScenario(n,v));
+const sourceSHA256={};for(const file of ['web/e2e/user-asset-export-v3-uac-helpers.ts','web/e2e/directory-v2-response-observer.ts','web/src/directory-v4-controls-json.ts'])sourceSHA256[file]=hash(fs.readFileSync(path.join(root,file)));
+process.stdout.write(JSON.stringify({scope:'Actual TS helper+unchanged host observer+unique parser; synthetic Playwright objects and completed observer records. No browser, HTTP, CI replay or observed current failure attribution. Actual receipt helper exercised after each successful case.',sourceSHA256,results},null,2)+'\n');
+
+})().catch(() => { process.stderr.write("closed_observer_probe_failed\n"); process.exitCode = 1; });
+""")
+        self.assertEqual(len(result['results']), 13)
+        for item in result['results'][:3]:
+            self.assertEqual(item['ledgerSHA256'], '9f437ee2ea84b2181904068553f74b76a26f20256387f046672c6a583c9926e1')
+            self.assertEqual(item['actualHostAtomicTakes'], 6)
+            self.assertEqual(item['successfulOriginalReceipts'], 3)
+            self.assertTrue(all(case['settled'] for case in item['cases']))
+        for item in result['results'][3:]:
+            self.assertEqual(item['actualHostAtomicTakes'], 5)
+            self.assertEqual(item['successfulOriginalReceipts'], 2)
+            self.assertTrue(all(case['mainSafeResponse'] and case['mainPredicates'] for case in item['cases']))
+            self.assertFalse(item['cases'][-1]['settled'])
+        self.assertTrue(all(item['inspectorBodyCalls'] == 0 for item in result['results']))
+
+    def test_observer_all_branches_first_poison_local_recovery_and_hostile_errors(self):
+        result = self._run_probe(r"""
+import fs from 'node:fs';
+import path from 'node:path';
+import crypto from 'node:crypto';
+import {registerHooks,isBuiltin,createRequire} from 'node:module';
+import {pathToFileURL} from 'node:url';
+import {EventEmitter} from 'node:events';
+const root=path.resolve(process.argv[2]);
+const local=n=>pathToFileURL(path.join(root,n)).href;
+const stub=s=>'data:text/javascript,'+encodeURIComponent(s);
+const helperURL=local('web/e2e/user-asset-export-v3-uac-helpers.ts');
+const parserURL=local('web/src/directory-v4-controls-json.ts');
+const observed=new WeakMap();globalThis.__uacObservedChecks=observed;
+const deps=new Map([[helperURL,{'../src/directory-v4-controls-json':parserURL,
+ './directory-v2-response-observer':stub('export const directoryUACResponseBytes=async r=>r.body();export const directoryUACResponseFailureCheck=e=>e!==null&&typeof e==="object"?globalThis.__uacObservedChecks.get(e):undefined;'),
+ './user-asset-export-v3-helpers':stub('import {createHash} from "node:crypto";export const hash=v=>{globalThis.__uacHashFault?.(v);return createHash("sha256").update(v).digest("hex");};')}],
+ [parserURL,{'./api':stub('export class ApiError extends Error{constructor(){super("invalid_response");}}')}]]);
+const hook=registerHooks({resolve(s,c,n){const d=deps.get(c.parentURL);if(d&&Object.hasOwn(d,s))return{url:d[s],shortCircuit:true};if(d&&!isBuiltin(s))throw Error('unexpected_offline_dependency');return n(s,c);}});
+const require=createRequire(import.meta.url);let h;try{h=require(path.join(root,'web/e2e/user-asset-export-v3-uac-helpers.ts'));}finally{hook.deregister();}
+const check=(v,label)=>{if(!v)throw Error('observer_probe_assertion:'+label)};
+const origin='http://127.0.0.1:12345',key='abcdefab-cdef-4abc-8def-abcdefabcdef',otherKey='fedcbafe-dcba-4fed-8cba-fedcbafedcba';
+const source={taskUUID:'synthetic-observation',selection:{domainId:'synthetic-domain',revision:'2',credentialRevision:'1'}};
+const locator=(k=key)=>JSON.stringify({version:1,kind:'user_assets.v3.export',actorID:1,domainId:source.selection.domainId,idempotencyKey:k});
+const rows=[];let hookCalls=0,rawBodies=0,zeroedBodies=0,rawZeroingAssertions=0;
+function hostile(){return new Proxy({}, {get(){hookCalls++;throw Error('private_hook');},getPrototypeOf(){hookCalls++;throw Error('private_hook');},getOwnPropertyDescriptor(){hookCalls++;throw Error('private_hook');},ownKeys(){hookCalls++;throw Error('private_hook');}})}
+function setup(options={}){
+ const known=[],frame={},raws=[],mustClear=new WeakSet();let storage=locator(),readLocator;
+ const page={mainFrame:()=>frame,isClosed:()=>false,evaluate:async()=>readLocator?readLocator():storage};
+ class Context extends EventEmitter{constructor(){super();this.tabs=[page];}pages(){return this.tabs;}}
+ const context=new Context(),o=h.observeUACExportWrites(context,origin,known);
+ const expected=h.expectedUACRequest(source,'set');
+ const state={known,frame,page,context,o,expected,raws,setStorage:v=>storage=v,setReader:f=>readLocator=f};
+ function request(opt={}){
+  const exp=opt.expected??expected;
+  const payload={...exp,idempotencyKey:key,actorPassword:'unit-private-proof',totpCode:'357913',...opt.body};
+  const value={taskID:'export-set',task:{},request:exp,replayed:false,...opt.created};
+  const bytes=opt.raw===null?null:Buffer.isBuffer(opt.raw)?Buffer.from(opt.raw):Buffer.from(opt.raw??JSON.stringify(payload));
+  if(bytes){rawBodies++;raws.push(bytes);if(opt.fillThrow)bytes.fill=()=>{throw opt.fillThrow;};}
+  const req={frame:()=>{if(opt.frameThrow)throw opt.frameThrow;return opt.frame??frame;},method:()=>opt.method??'POST',url:()=>{if(opt.urlThrow)throw opt.urlThrow;return opt.url??origin+h.exportPrefix;},postDataBuffer:()=>{if(bytes&&!opt.fillThrow)mustClear.add(bytes);return bytes;},
+   response:async()=>{if(opt.responseThrow)throw opt.responseThrow;return opt.noResponse?null:response;}};
+  const response={status:()=>opt.status??200,headers:()=>opt.headers??{'x-adtr-user-id':'1','cache-control':'no-store'},body:async()=>{if(opt.bodyThrow)throw opt.bodyThrow;return opt.responseBytes??Buffer.from(JSON.stringify(value));}};
+  return{req,response};
+ }
+ state.request=request;state.emit=opt=>{const x=request(opt);context.emit('request',x.req);return x;};
+ state.arm=()=>o.armCase('set',expected,1,page);
+ state.dispose=async()=>{context.tabs=[];try{await o.closeAndSnapshot({});}catch{}for(const b of raws){if(mustClear.has(b)){rawZeroingAssertions++;check(b.every(v=>v===0),"all_inspected_raw_buffers_zeroed");}if(b.every(v=>v===0))zeroedBodies++;}};
+ return state;
+}
+async function failure(fn,expected,label){let error;try{await fn();}catch(e){error=e;}check(error!==undefined,'must_reject_'+label);const message=h.uacFailureMessage(error,'export_settle');check(message===expected,'message_'+label);check(error.cause===undefined,'fresh_cause_'+label);const before=message;error.message='private-mutated-message';error.observer='forged';error.case='private-value';error.inspect='forged';check(h.uacFailureMessage(error,'export_settle')===before,'immutable_owned_'+label);rows.push({label,message});return error;}
+const msg=(branch,{code='post_binding',mode='set',relation='current',inspect,check:responseCheck}={})=>`uac_evidence_invalid:${code};stage=export_settle${responseCheck?';check='+responseCheck:''};observer=${branch};case=${mode};relation=${relation}${inspect?';inspect='+inspect:''}`;
+async function one(label,options,branch,extra={}){const s=setup();s.arm();if(options.secret)s.known.push(options.secret);if(Object.hasOwn(options,'storage'))s.setStorage(options.storage);if(options.reader)s.setReader(options.reader);if(options.before)options.before(s);const x=s.emit(options);if(options.after)options.after(s,x);await failure(()=>s.o.settleCase('export-set'),msg(branch,extra),label);if(options.restore)options.restore();await s.dispose();}
+
+(async () => {
+// Every synchronous original poison site; task count remains one for duplicate.
+for(const [label,branch,extra,opt] of [
+ ['url_parse','url_parse',{relation:'unknown'},{urlThrow:hostile()}],
+ ['cancel_write','cancel_write',{}, {url:origin+h.exportPrefix+'/cancel'}],
+ ['unexpected_write','unexpected_write',{}, {method:'PUT'}],
+ ['duplicate_create','duplicate_create',{}, {}],
+]){const s=setup();s.arm();s.emit();s.emit(opt);await failure(()=>s.o.settleCase('export-set'),msg(branch,extra),label);await s.dispose();}
+{const s=setup();s.emit();await failure(()=>s.arm(),msg('inactive_case',{code:'post_count',mode:'unarmed',relation:'unarmed'}),'inactive_case');await s.dispose();}
+{const s=setup();s.arm();s.emit();await s.o.settleCase('export-set');s.emit();await failure(()=>s.o.settleCase('export-set'),msg('settled_case',{code:'post_count'}),'settled_case');await s.dispose();}
+// Actual request-inspector entered checks, including strict byte/JSON/privacy gates.
+const inspections=[
+ ['request_owned',{frame:{}}], ['body_size',{raw:null}], ['body_bom',{raw:Buffer.concat([Buffer.from([239,187,191]),Buffer.from('{}')])}],
+ ['body_utf8',{raw:Buffer.from([255])}], ['body_json',{raw:'{"x":1,"x":2}'}],
+ ['body_scalar',{body:{actorPassword:'\ud800'}}],['body_shape',{body:{unexpected:true}}],
+ ['business_types',{body:{screenColumns:[null]}}],['proof_shape',{body:{totpCode:'invalid'}}],
+ ['business_binding',{body:{search:'different'}}],['business_privacy',{secret:'user-'}],
+ ['locator_read',{reader:()=>{throw hostile();}}],['locator_shape',{storage:null}],
+ ['locator_json',{storage:'{"x":1,"x":2}'}],['locator_identity',{storage:JSON.stringify({...JSON.parse(locator()),actorID:2})}],
+ ['locator_privacy',{secret:key}],['key_equality',{storage:locator(otherKey)}],
+ ['unexpected',{fillThrow:hostile()}],
+];
+for(const [sub,options]of inspections)await one('inspect_'+sub,options,'request_inspection',{inspect:sub});
+{const get=WeakMap.prototype.get;await one('inspect_proof_registration',{before:s=>{WeakMap.prototype.get=function(k){if(k===s.known)throw hostile();return get.call(this,k);};},after:()=>{WeakMap.prototype.get=get;},restore:()=>{WeakMap.prototype.get=get;}},'request_inspection',{inspect:'proof_registration'});}
+{await one('inspect_request_commitment',{before:()=>{globalThis.__uacHashFault=v=>{if(v===key)throw hostile();};},restore:()=>{delete globalThis.__uacHashFault;}},'request_inspection',{inspect:'request_commitment'});}
+await one('response_read',{responseThrow:hostile()},'response_read');
+await one('response_missing',{noResponse:true},'response_missing');
+for(const [branch,created]of [ ['created_envelope',{extra:true}],['created_task_id',{taskID:'platform'}],['created_replayed',{replayed:true}],['created_request',{request:{}}] ])await one(branch,{created},branch);
+// Existing eleven owned response checks remain distinguishable through the observer.
+const observedRead=new Error('private-observed-read'),observedBinding=new Error('private-observed-binding');observed.set(observedRead,'observed_body_read');observed.set(observedBinding,'observed_byte_binding');
+for(const [category,options]of [
+ ['status',{status:500}],['actor_header',{headers:{'x-adtr-user-id':'2','cache-control':'no-store'}}],['cache_header',{headers:{'x-adtr-user-id':'1','cache-control':'public'}}],
+ ['observed_body_read',{bodyThrow:observedRead}],['observed_byte_binding',{bodyThrow:observedBinding}],
+ ['body_size',{responseBytes:Buffer.alloc(0)}],['body_bom',{responseBytes:Buffer.from([239,187,191,123,125])}],
+ ['body_utf8',{responseBytes:Buffer.from([255])}],['body_json',{responseBytes:Buffer.from('{"x":1,"x":2}')}],
+ ['body_object',{responseBytes:Buffer.from('[]')}],['body_privacy',{created:{task:{password:'unit-private-proof'}}}],
+])await one('response_'+category,options,'response_check',{check:category});
+// Unknown values never gain response ownership from a forged string/property.
+for(const [label,error]of [['proxy',hostile()],['forged',{message:'uac_evidence_invalid:post_binding;check=actor_header',check:'actor_header'}],['getter',Object.defineProperties({}, {message:{get(){hookCalls++;throw Error('private');}},cause:{get(){hookCalls++;throw Error('private');}},toString:{get(){hookCalls++;throw Error('private');}}})]])await one('unknown_'+label,{responseThrow:error},'response_read');
+// First-poison ordering is sticky even when a later async failure completes.
+for(const order of ['duplicate_then_failed','failed_then_duplicate']){const s=setup();s.arm();let release;s.setReader(()=>new Promise(r=>release=r));const x=s.emit();if(order.startsWith('duplicate')){s.emit();s.context.emit('requestfailed',x.req);}else{s.context.emit('requestfailed',x.req);s.emit();}release(locator());await failure(()=>s.o.settleCase('export-set'),msg(order.startsWith('duplicate')?'duplicate_create':'request_failed'),order);await s.dispose();}
+for(const order of ['async_then_failed','failed_then_async']){const s=setup();s.arm();let release;s.setReader(()=>new Promise(r=>release=r));const x=s.emit({created:{extra:true}});if(order.startsWith('failed'))s.context.emit('requestfailed',x.req);release(locator());const branch=order.startsWith('failed')?'request_failed':'created_envelope';await failure(()=>s.o.settleCase('export-set'),msg(branch),order);s.context.emit('requestfailed',x.req);await failure(()=>s.o.settleCase('export-set'),msg(branch),order+'_sticky');await s.dispose();}
+// Local assertion diagnostics do not create new sticky poison.
+{const s=setup();s.context.tabs=[];await failure(()=>s.arm(),msg('arm_state',{code:'post_count',mode:'unarmed',relation:'unknown'}),'arm_state');s.context.tabs=[s.page];s.arm();s.emit();await s.o.settleCase('export-set');await s.dispose();}
+{const s=setup();s.arm();await failure(()=>s.o.settleCase('export-set'),msg('settle_state',{code:'post_count'}),'settle_state');s.emit();await failure(()=>s.o.settleCase('wrong-task'),msg('settle_task_mismatch'),'settle_task_mismatch');await s.o.settleCase('export-set');await s.dispose();}
+{const s=setup();s.arm();let writes=0;Object.defineProperty(Object.prototype,'event',{configurable:true,set(){writes++;},get(){return undefined;}});try{s.emit();await failure(()=>s.o.settleCase('export-set'),msg('settle_missing_event'),'settle_missing_event_injected_property');check(writes===1,'one_event_assignment');}finally{delete Object.prototype.event;}await s.dispose();}
+{const s=setup();await failure(()=>s.o.closeAndSnapshot({}),msg('close_state',{code:'post_count',mode:'unarmed',relation:'unknown'}),'close_state');s.context.tabs=[];await failure(()=>s.o.closeAndSnapshot({}),msg('close_counts',{code:'post_count',mode:'unarmed',relation:'unknown'}),'close_counts');check(s.context.listenerCount('request')===0&&s.context.listenerCount('requestfailed')===0,'close_detached_before_failure');await failure(()=>s.o.closeAndSnapshot({}),msg('close_state',{code:'post_count',mode:'unarmed',relation:'unknown'}),'close_failure_not_newly_retryable');}
+// GET/HEAD/OPTIONS/untracked failures remain ignored; listeners still drain.
+{const s=setup();s.arm();for(const method of ['GET','HEAD','OPTIONS']){const x=s.emit({method});s.context.emit('requestfailed',x.req);}s.context.emit('requestfailed',s.request().req);s.emit();await s.o.settleCase('export-set');await s.dispose();rows.push({label:'ignored_reads_untracked_failure_control',passed:true});}
+// Unrecognized external mode cannot contribute dynamic diagnostic text.
+for(const [label,mode]of [['unknown_mode_closed','private-mode'],['output_only_unarmed_mode','unarmed'],['output_only_unknown_mode','unknown'],['nonstr_mode',Object.defineProperty({},'toString',{get(){hookCalls++;throw Error('private');}})]]){const s=setup();const exp=Object.freeze({...s.expected,uacDisableBit:mode,screenColumns:s.expected.screenColumns});s.o.armCase(mode,exp,1,s.page);s.emit({expected:exp});s.emit({expected:exp});await failure(()=>s.o.settleCase('export-set'),msg('duplicate_create',{mode:'unknown'}),label);await s.dispose();}
+check(hookCalls===0,'unknown_error_hooks_never_called');
+check(rows.length>=60,'nonvacuous_cases');
+const branches=[...new Set(rows.map(r=>r.message?.match(/;observer=([^;]+)/)?.[1]).filter(Boolean))].sort();
+const inspectionsSeen=[...new Set(rows.map(r=>r.message?.match(/;inspect=([^;]+)/)?.[1]).filter(Boolean))].sort();
+const responseChecks=[...new Set(rows.map(r=>r.message?.match(/;check=([^;]+)/)?.[1]).filter(Boolean))].sort();
+check(branches.length===21,'all_observer_branches');check(inspectionsSeen.length===20,'all_inspection_checks');check(responseChecks.length===11,'all_response_checks');
+process.stdout.write(JSON.stringify({scope:'Actual helper/parser with synthetic response byte seam; missing event uses isolated property injection; no browser/CI/root-cause attribution.',rows,branches,inspections:inspectionsSeen,responseChecks,unknownErrorHookCalls:hookCalls,rawBodies,zeroedBodies,rawZeroingAssertions},null,2)+'\n');
+
+})().catch(() => { process.stderr.write("closed_observer_probe_failed\n"); process.exitCode = 1; });
+""")
+        self.assertEqual(len(result['rows']), 64)
+        self.assertEqual(result['unknownErrorHookCalls'], 0)
+        self.assertGreaterEqual(result['rawZeroingAssertions'], 40)
+        self.assertEqual(result['branches'], sorted([
+            'url_parse', 'cancel_write', 'unexpected_write', 'inactive_case',
+            'settled_case', 'duplicate_create', 'request_inspection', 'response_read',
+            'response_missing', 'response_check', 'created_envelope', 'created_task_id',
+            'created_replayed', 'created_request', 'request_failed', 'arm_state',
+            'settle_state', 'settle_missing_event', 'settle_task_mismatch',
+            'close_state', 'close_counts']))
+        self.assertEqual(result['inspections'], sorted([
+            'request_owned', 'body_size', 'body_bom', 'body_utf8', 'body_json',
+            'body_scalar', 'body_shape', 'business_types', 'proof_shape',
+            'proof_registration', 'business_binding', 'business_privacy', 'locator_read',
+            'locator_shape', 'locator_json', 'locator_identity', 'locator_privacy',
+            'key_equality', 'request_commitment', 'unexpected']))
+        self.assertEqual(result['responseChecks'], sorted([
+            'status', 'actor_header', 'cache_header', 'observed_body_read',
+            'observed_byte_binding', 'body_size', 'body_bom', 'body_utf8',
+            'body_json', 'body_object', 'body_privacy']))
+
 if __name__ == '__main__':
     unittest.main()

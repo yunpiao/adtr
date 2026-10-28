@@ -98,6 +98,72 @@ class UserAssetsV3BrowserContract(unittest.TestCase):
         self.assertIn('<tr key={row.objectGUID}>', production)
         self.assertIn('<td data-label="本页序号">{index + 1}</td>', production)
 
+    def assert_mobile_row_capture(self, code):
+        block = code.split(
+            'await test.step("mobile real data and drawer remain bounded at 390 by 844",',
+            1,
+        )[1].split('const actual = await assetAction', 1)[0]
+        ordered = [
+            'await page.setViewportSize({ width: 390, height: 844 })',
+            'await page.evaluate(() => scrollTo(0, 0))',
+            'document.documentElement.scrollWidth <= innerWidth',
+            'const firstMobileRow = table.locator("tbody tr").first()',
+            'await expect(firstMobileRow.getByRole("cell").nth(2)).toHaveText(',
+            'first.value.list[0].objectGUID',
+            'await firstMobileRow.scrollIntoViewIfNeeded()',
+            'const firstMobilePosition = firstMobileRow.getByRole("cell").first()',
+            'await expect(firstMobilePosition).toHaveAttribute("data-label", "本页序号")',
+            'await expect(firstMobilePosition).toHaveText("1")',
+            'await expect(firstMobilePosition).toBeVisible()',
+            'await expect(firstMobilePosition).toBeInViewport({ ratio: 1 })',
+            'await capture("user-assets-v3-mobile-list.png", first.value)',
+        ]
+        for text in ordered:
+            self.assertEqual(block.count(text), 1, text)
+        self.assertEqual([block.index(text) for text in ordered],
+                         sorted(block.index(text) for text in ordered))
+        for forbidden in ['.fulfill(', 'context.request', 'fetch(', 'setTimeout(',
+                          'waitForTimeout(', 'test.setTimeout(', 'fullPage: true']:
+            self.assertNotIn(forbidden, block)
+        capture = code.split('const capture = async', 1)[1].split(
+            'const captureSPNGeometry', 1)[0]
+        self.assertNotIn('scrollTo(', capture)
+        self.assertNotIn('scrollIntoView', capture)
+        self.assertIn('await page.screenshot({ path, fullPage: false })', capture)
+
+    def test_mobile_row_number_is_response_bound_and_fully_in_capture_viewport(self):
+        self.assert_mobile_row_capture(Path('web/e2e/user-assets-v3.spec.ts').read_text())
+
+    def test_mobile_row_capture_rejects_missing_identity_scroll_or_visibility(self):
+        code = Path('web/e2e/user-assets-v3.spec.ts').read_text()
+        mutations = [
+            ('const firstMobileRow = table.locator("tbody tr").first()',
+             'const firstMobileRow = table.locator("tbody tr").last()'),
+            ('first.value.list[0].objectGUID', 'first.value.list[1].objectGUID'),
+            ('await firstMobileRow.scrollIntoViewIfNeeded();', ''),
+            ('firstMobileRow.getByRole("cell").first()',
+             'firstMobileRow.getByRole("cell").nth(1)'),
+            ('firstMobilePosition).toHaveAttribute("data-label", "本页序号")',
+             'firstMobilePosition).toHaveAttribute("data-label", "SAM")'),
+            ('firstMobilePosition).toHaveText("1")', 'firstMobilePosition).toHaveText("2")'),
+            ('await expect(firstMobilePosition).toBeVisible();', ''),
+            ('firstMobilePosition).toBeInViewport({ ratio: 1 })',
+             'firstMobilePosition).toBeInViewport({ ratio: 0 })'),
+            ('await page.screenshot({ path, fullPage: false })',
+             'await page.screenshot({ path, fullPage: true })'),
+        ]
+        for old, new in mutations:
+            with self.subTest(mutation=old):
+                self.assertIn(old, code)
+                with self.assertRaises(AssertionError):
+                    self.assert_mobile_row_capture(code.replace(old, new, 1))
+        capture = 'await capture("user-assets-v3-mobile-list.png", first.value);'
+        moved = code.replace(capture, '', 1).replace(
+            'await firstMobileRow.scrollIntoViewIfNeeded();',
+            capture + '\n    await firstMobileRow.scrollIntoViewIfNeeded();', 1)
+        with self.assertRaises(AssertionError):
+            self.assert_mobile_row_capture(moved)
+
     def test_producer_provenance_and_browser_evidence_are_explicit(self):
         code = Path('web/e2e/user-assets-v3.spec.ts').read_text()
         for required in ['storedEvidence(taskUUID)', 'storedEvidence(newerId)',

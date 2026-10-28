@@ -171,3 +171,35 @@ PG loader/list再原样返回，C candidate原样保留。旧单元specimen手�
 全部源字节、task binding、wire、XLSX、cleanup和发布校验仍执行，不修改production/fixture。
 该静态矛盾已由最小及完整合成candidate反事实验证；本轮真实run的统一publication日志仍不能证明
 它已经到达这个拒绝点，原失败及主机名不完整推断的撤回记录均保留。
+
+### C export-write observer failure diagnostics
+
+The all-context observer retains its original sticky poison flag, request counts,
+strict request/response checks, listener lifetime and settlement/close predicates.
+It additionally records the **first committed poison** as an immutable private
+literal snapshot. Later failures cannot replace that snapshot. Non-poisoning
+arm/settlement assertions receive only a transient diagnostic; they do not create
+new sticky state or make an already closed observer retryable.
+
+The existing failure formatter may append closed `observer`, `case`, `relation`
+and request `inspect` fields, or propagate one of the existing eleven owned
+response `check` values. An entered check identifies the block that rejected; it
+is not proof that the block completed. `case` is the active case when poison was
+first committed, not the failed request's own case. `relation=current|prior`
+compares a private empty request-case token to the then-active token; `unarmed`
+and `unknown` are fixed fallbacks. No request ID, URL, task ID, key, proof, header,
+body, DOM, caught error or exception chain is included in diagnostic metadata.
+Unknown caught objects are used only for private WeakMap classification, never
+for message/property/prototype inspection. Fresh owned failures keep the same
+outward `post_binding`/`post_count` code; direct request inspection retains
+`post_parse`. Receipt parsing and raw-buffer clearing retain their old behavior.
+
+These diagnostics resolve otherwise indistinguishable observer failure branches;
+removing them restores the same fail-closed behavior with less precise errors.
+Their side effects are bounded in-memory literals/weak token associations and a
+closed log suffix, with no additional request, screenshot, artifact, schema,
+retention path, dependency or timeout budget. Synthetic tests exercise the actual
+helper and host reader, including earlier-case late native failures, but do not
+establish the cause of any real CI failure. PR244 run40621595241 remains the
+preserved failed observation; a newly approved exact-head run is needed for
+actual branch attribution or complete C9 acceptance.

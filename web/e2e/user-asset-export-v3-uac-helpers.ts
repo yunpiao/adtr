@@ -214,10 +214,130 @@ function ownedResponseCheck(error: unknown): UACResponseCheck | undefined {
     : undefined;
 }
 
+const uacInspectionChecks = [
+  "request_owned",
+  "body_size",
+  "body_bom",
+  "body_utf8",
+  "body_json",
+  "body_scalar",
+  "body_shape",
+  "business_types",
+  "proof_shape",
+  "proof_registration",
+  "business_binding",
+  "business_privacy",
+  "locator_read",
+  "locator_shape",
+  "locator_json",
+  "locator_identity",
+  "locator_privacy",
+  "key_equality",
+  "request_commitment",
+  "unexpected",
+] as const;
+type UACInspectionCheck = (typeof uacInspectionChecks)[number];
+const inspectionFailureChecks = new WeakMap<object, UACInspectionCheck>();
+function inspectionFailure(check: UACInspectionCheck): Error {
+  const error = new Error("uac_evidence_invalid:post_parse");
+  inspectionFailureChecks.set(error, check);
+  return error;
+}
+function ownedInspectionCheck(error: unknown): UACInspectionCheck | undefined {
+  return error !== null && typeof error === "object"
+    ? inspectionFailureChecks.get(error)
+    : undefined;
+}
+const uacObserverBranches = [
+  "url_parse",
+  "cancel_write",
+  "unexpected_write",
+  "inactive_case",
+  "settled_case",
+  "duplicate_create",
+  "request_inspection",
+  "response_read",
+  "response_missing",
+  "response_check",
+  "created_envelope",
+  "created_task_id",
+  "created_replayed",
+  "created_request",
+  "request_failed",
+  "arm_state",
+  "settle_state",
+  "settle_missing_event",
+  "settle_task_mismatch",
+  "close_state",
+  "close_counts",
+] as const;
+type UACObserverBranch = (typeof uacObserverBranches)[number];
+const uacObserverCases = [
+  "set",
+  "clear",
+  "not_returned",
+  "unarmed",
+  "unknown",
+] as const;
+const uacObserverRelations = [
+  "current",
+  "prior",
+  "unarmed",
+  "unknown",
+] as const;
+type UACObserverDiagnostic = Readonly<{
+  observer: UACObserverBranch;
+  case: (typeof uacObserverCases)[number];
+  relation: (typeof uacObserverRelations)[number];
+  inspect?: UACInspectionCheck;
+  check?: UACResponseCheck;
+}>;
+type UACObserverFailure = Readonly<
+  UACObserverDiagnostic & {
+    code: "post_binding" | "post_count";
+  }
+>;
+const observerFailureDetails = new WeakMap<object, UACObserverFailure>();
+function observerFailure(
+  code: "post_binding" | "post_count",
+  diagnostic: UACObserverDiagnostic,
+): Error {
+  const error = new Error(`uac_evidence_invalid:${code}`);
+  // Only immutable literal snapshots survive; no caller object or caught error.
+  observerFailureDetails.set(error, Object.freeze({ ...diagnostic, code }));
+  return error;
+}
+function ownedObserverFailure(error: unknown): UACObserverFailure | undefined {
+  return error !== null && typeof error === "object"
+    ? observerFailureDetails.get(error)
+    : undefined;
+}
+
 export function uacFailureMessage(
   error: unknown,
   stage: UACFailureStage,
 ): string {
+  const observer = ownedObserverFailure(error);
+  if (observer) {
+    // New observer errors take this private path before any legacy Error
+    // inspection. Never inspect the original object caught by an observer.
+    const safeStage =
+      uacFailureStages.find((value) => value === stage) ?? "unexpected";
+    const code = observer.code === "post_count" ? "post_count" : "post_binding";
+    const branch = uacObserverBranches.find(
+      (value) => value === observer.observer,
+    );
+    const mode =
+      uacObserverCases.find((value) => value === observer.case) ?? "unknown";
+    const relation =
+      uacObserverRelations.find((value) => value === observer.relation) ??
+      "unknown";
+    const inspect = uacInspectionChecks.find(
+      (value) => value === observer.inspect,
+    );
+    const check = uacResponseChecks.find((value) => value === observer.check);
+    return `uac_evidence_invalid:${code};stage=${safeStage}${check ? `;check=${check}` : ""}${branch ? `;observer=${branch};case=${mode};relation=${relation}` : ""}${inspect ? `;inspect=${inspect}` : ""}`;
+  }
   let code: string = "unexpected";
   try {
     // Read only an own data property; do not invoke an unknown message getter.
@@ -417,10 +537,14 @@ function locatorKey(
   actor: number,
   expected: Readonly<ExportRequest>,
   secrets: readonly string[],
+  reportCheck?: (check: UACInspectionCheck) => void,
 ): string {
+  reportCheck?.("locator_shape");
   uacRequire(typeof raw === "string" && Buffer.byteLength(raw, "utf8") <= 2048);
+  reportCheck?.("locator_json");
   const locator = parseDirectoryV4UniqueJSON(raw);
   scalarTree(locator);
+  reportCheck?.("locator_shape");
   uacRequire(
     exact(locator, [
       "version",
@@ -430,6 +554,7 @@ function locatorKey(
       "idempotencyKey",
     ]),
   );
+  reportCheck?.("locator_identity");
   uacRequire(
     locator.version === 1 &&
       locator.kind === "user_assets.v3.export" &&
@@ -441,6 +566,7 @@ function locatorKey(
         locator.idempotencyKey,
       ),
   );
+  reportCheck?.("locator_privacy");
   uacRequire(
     !runSecrets(secrets).some(
       (secret) =>
@@ -469,6 +595,7 @@ export async function inspectUACCreateRequest(
   let text = "",
     key = "";
   let parsed: unknown;
+  let check: UACInspectionCheck = "request_owned";
   try {
     uacRequire(
       ownedRequest(request, expectedPage, ownedAppOrigin) &&
@@ -476,17 +603,24 @@ export async function inspectUACCreateRequest(
         new URL(request.url()).pathname === exportPrefix,
       "post_parse",
     );
+    check = "body_size";
     raw = request.postDataBuffer();
     uacRequire(raw && raw.length > 0 && raw.length <= 32768, "post_parse");
+    check = "body_bom";
     uacRequire(
       !(raw[0] === 0xef && raw[1] === 0xbb && raw[2] === 0xbf),
       "post_parse",
     );
+    check = "body_utf8";
     text = new TextDecoder("utf-8", { fatal: true }).decode(raw);
+    check = "body_json";
     parsed = parseDirectoryV4UniqueJSON(text);
+    check = "body_scalar";
     scalarTree(parsed);
+    check = "body_shape";
     uacRequire(exact(parsed, bodyKeys), "post_parse");
     const body = parsed;
+    check = "business_types";
     uacRequire(
       businessKeys
         .filter((k) => k !== "screenColumns")
@@ -495,6 +629,7 @@ export async function inspectUACCreateRequest(
         body.screenColumns.every((v) => typeof v === "string"),
       "post_parse",
     );
+    check = "proof_shape";
     uacRequire(
       typeof body.actorPassword === "string" &&
         body.actorPassword.length >= 1 &&
@@ -503,15 +638,29 @@ export async function inspectUACCreateRequest(
         /^[0-9]{6}$/u.test(body.totpCode),
       "post_parse",
     );
+    check = "proof_registration";
     rememberObservedProof(knownSecrets, body.actorPassword, body.totpCode);
     const secrets = runSecrets(knownSecrets);
+    check = "business_binding";
     uacRequire(sameValue(project(body), expected), "post_binding");
+    check = "business_privacy";
     safeValue(expected, knownSecrets);
-    key = locatorKey(await readLocator(), actorId, expected, secrets);
+    check = "locator_read";
+    key = locatorKey(
+      await readLocator(),
+      actorId,
+      expected,
+      secrets,
+      (entered) => {
+        check = entered;
+      },
+    );
+    check = "key_equality";
     uacRequire(
       typeof body.idempotencyKey === "string" && body.idempotencyKey === key,
       "post_binding",
     );
+    check = "request_commitment";
     const idempotencyKeySHA256 = hash(key);
     rememberIdempotencyHash(knownSecrets, idempotencyKeySHA256);
     const safeBusinessRequest = Object.freeze({
@@ -527,7 +676,7 @@ export async function inspectUACCreateRequest(
       ),
     };
   } catch {
-    throw new Error("uac_evidence_invalid:post_parse");
+    throw inspectionFailure(check);
   } finally {
     raw?.fill(0);
     raw = null;
@@ -675,6 +824,7 @@ export function observeUACExportWrites(
 ): UACPostObserver {
   type Active = {
     mode: UACMode;
+    token: object;
     expected: Readonly<ExportRequest>;
     actor: number;
     page: Page;
@@ -691,12 +841,57 @@ export function observeUACExportWrites(
   const tasks: Promise<void>[] = [],
     events: PostEvent[] = [];
   const writes = new WeakSet<Request>();
+  const unarmedToken = Object.freeze({});
+  const writeTokens = new WeakMap<Request, object>();
+  let firstPoison: UACObserverDiagnostic | undefined;
+  const diagnostic = (
+    observer: UACObserverBranch,
+    token?: object,
+    inspect?: UACInspectionCheck,
+    check?: UACResponseCheck,
+  ): UACObserverDiagnostic => {
+    const current = active;
+    const mode = current
+      ? ((["set", "clear", "not_returned"] as const).find(
+          (value) => value === current.mode,
+        ) ?? "unknown")
+      : "unarmed";
+    const relation =
+      token === undefined
+        ? "unknown"
+        : !current || token === unarmedToken
+          ? "unarmed"
+          : token === current.token
+            ? "current"
+            : "prior";
+    return Object.freeze({ observer, case: mode, relation, inspect, check });
+  };
+  const poison = (
+    observer: UACObserverBranch,
+    token?: object,
+    inspect?: UACInspectionCheck,
+    check?: UACResponseCheck,
+  ): void => {
+    // Only the original poison sites call this; later failures cannot rewrite
+    // the first committed literal snapshot or clear the authoritative flag.
+    poisoned = true;
+    firstPoison ??= diagnostic(observer, token, inspect, check);
+  };
+  function requireObserver(
+    condition: unknown,
+    code: "post_binding" | "post_count",
+    fallback: UACObserverBranch,
+    token?: object,
+  ): asserts condition {
+    if (!condition)
+      throw observerFailure(code, firstPoison ?? diagnostic(fallback, token));
+  }
   const onRequest = (request: Request): void => {
     let pathname: string;
     try {
       pathname = new URL(request.url()).pathname;
     } catch {
-      poisoned = true;
+      poison("url_parse");
       return;
     }
     if (
@@ -707,25 +902,29 @@ export function observeUACExportWrites(
     writes.add(request);
     // Counting and case capture happen synchronously, before any async work.
     const captured = active;
+    const token = captured?.token ?? unarmedToken;
+    writeTokens.set(request, token);
     if (pathname === exportPrefix && request.method() === "POST") createCount++;
     else if (pathname === `${exportPrefix}/cancel`) {
       cancelCount++;
-      poisoned = true;
+      poison("cancel_write", token);
     } else {
       unexpectedExportWriteCount++;
-      poisoned = true;
+      poison("unexpected_write", token);
     }
+    let rejection: UACObserverBranch = "inactive_case";
     if (
       !captured ||
-      captured.settled ||
-      captured.tasks.length !== 0 ||
-      pathname !== exportPrefix ||
+      ((rejection = "settled_case"), captured.settled) ||
+      ((rejection = "duplicate_create"), captured.tasks.length !== 0) ||
+      ((rejection = "unexpected_write"), pathname !== exportPrefix) ||
       request.method() !== "POST"
     ) {
-      poisoned = true;
+      poison(rejection, token);
       return;
     }
     const ordinal = createCount;
+    let entered: UACObserverBranch = "request_inspection";
     const task = (async () => {
       const inspected = await inspectUACCreateRequest(
         request,
@@ -740,21 +939,28 @@ export function observeUACExportWrites(
           ),
         knownSecrets,
       );
+      entered = "response_read";
       const response = await request.response();
+      entered = "response_missing";
       uacRequire(response !== null);
+      entered = "response_check";
       const created = await safeResponse(
         response,
         captured.actor,
         knownSecrets,
       );
+      entered = "created_envelope";
+      uacRequire(exact(created, ["taskID", "task", "request", "replayed"]));
+      entered = "created_task_id";
       uacRequire(
-        exact(created, ["taskID", "task", "request", "replayed"]) &&
-          typeof created.taskID === "string" &&
+        typeof created.taskID === "string" &&
           /^[A-Za-z0-9_.-]{1,128}$/u.test(created.taskID) &&
-          created.taskID !== "platform" &&
-          created.replayed === false &&
-          sameValue(created.request, captured.expected),
+          created.taskID !== "platform",
       );
+      entered = "created_replayed";
+      uacRequire(created.replayed === false);
+      entered = "created_request";
+      uacRequire(sameValue(created.request, captured.expected));
       const event: PostEvent = {
         ...inspected,
         ordinal,
@@ -767,20 +973,28 @@ export function observeUACExportWrites(
       };
       captured.event = event;
       events.push(event);
-    })().catch(() => {
-      poisoned = true;
+    })().catch((error: unknown) => {
+      // Unknown caught values are only WeakMap keys, never introspected.
+      poison(
+        entered,
+        token,
+        entered === "request_inspection"
+          ? (ownedInspectionCheck(error) ?? "unexpected")
+          : undefined,
+        entered === "response_check" ? ownedResponseCheck(error) : undefined,
+      );
     });
     captured.tasks.push(task);
     tasks.push(task);
   };
   const onFailed = (request: Request): void => {
-    if (writes.has(request)) poisoned = true;
+    if (writes.has(request)) poison("request_failed", writeTokens.get(request));
   };
   context.on("request", onRequest);
   context.on("requestfailed", onFailed);
   return {
     armCase(mode, expected, actor, page) {
-      uacRequire(
+      requireObserver(
         !closed &&
           !poisoned &&
           (!active || active.settled) &&
@@ -788,6 +1002,7 @@ export function observeUACExportWrites(
           Number.isSafeInteger(actor) &&
           actor > 0,
         "post_count",
+        "arm_state",
       );
       uacRequire(
         expected.uacDisableBit === mode &&
@@ -795,23 +1010,43 @@ export function observeUACExportWrites(
           Object.isFrozen(expected.screenColumns),
       );
       safeValue(expected, knownSecrets);
-      active = { mode, expected, actor, page, tasks: [], settled: false };
+      active = {
+        mode,
+        token: Object.freeze({}),
+        expected,
+        actor,
+        page,
+        tasks: [],
+        settled: false,
+      };
     },
     async settleCase(taskID) {
       const captured = active;
-      uacRequire(
+      requireObserver(
         captured && !closed && !captured.settled && captured.tasks.length === 1,
         "post_count",
+        "settle_state",
+        captured?.token,
       );
       await Promise.all(captured.tasks);
-      uacRequire(
-        !poisoned && captured.event && captured.event.taskID === taskID,
+      let rejection: UACObserverBranch = "settle_missing_event";
+      requireObserver(
+        !poisoned &&
+          captured.event &&
+          ((rejection = "settle_task_mismatch"),
+          captured.event.taskID === taskID),
         "post_binding",
+        rejection,
+        captured.token,
       );
       captured.settled = true;
     },
     async closeAndSnapshot(finalBudget) {
-      uacRequire(!closed && context.pages().length === 0, "post_count");
+      requireObserver(
+        !closed && context.pages().length === 0,
+        "post_count",
+        "close_state",
+      );
       let settledCount = -1;
       while (settledCount !== tasks.length) {
         settledCount = tasks.length;
@@ -820,7 +1055,7 @@ export function observeUACExportWrites(
       context.off("request", onRequest);
       context.off("requestfailed", onFailed);
       closed = true;
-      uacRequire(
+      requireObserver(
         !poisoned &&
           active?.settled &&
           createCount === 3 &&
@@ -828,6 +1063,7 @@ export function observeUACExportWrites(
           unexpectedExportWriteCount === 0 &&
           events.length === 3,
         "post_count",
+        "close_counts",
       );
       return {
         events: [...events].sort((a, b) => a.ordinal - b.ordinal),

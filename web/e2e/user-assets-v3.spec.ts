@@ -1636,6 +1636,16 @@ test("UserAssetsV3 real workspace, pins, identity facts and native reader invali
         () => document.documentElement.scrollWidth <= innerWidth,
       ),
     ).toBe(true);
+    const firstMobileRow = table.locator("tbody tr").first();
+    await expect(firstMobileRow.getByRole("cell").nth(2)).toHaveText(
+      first.value.list[0].objectGUID,
+    );
+    await firstMobileRow.scrollIntoViewIfNeeded();
+    const firstMobilePosition = firstMobileRow.getByRole("cell").first();
+    await expect(firstMobilePosition).toHaveAttribute("data-label", "本页序号");
+    await expect(firstMobilePosition).toHaveText("1");
+    await expect(firstMobilePosition).toBeVisible();
+    await expect(firstMobilePosition).toBeInViewport({ ratio: 1 });
     await capture("user-assets-v3-mobile-list.png", first.value);
     const actual = await assetAction(
       page,
