@@ -1,6 +1,7 @@
 from ci_workflow_contract import reviewed_workflow
 """Guard dictionary3's additive real browser gate; never substitute for CI."""
 import ast
+import re
 from pathlib import Path
 import unittest
 
@@ -60,6 +61,42 @@ class UserAssetsV3BrowserContract(unittest.TestCase):
             self.assertNotIn(forbidden, block)
         self.assertIn('return recordAssetResponse(response, detail, status)', code)
         self.assertIn('expect(response.request().method()).toBe("GET")', code)
+
+    def test_page_local_row_numbers_bind_actual_response_order_without_query_changes(self):
+        code = Path('web/e2e/user-assets-v3.spec.ts').read_text()
+        block = code.split('const expectUserPositions = async', 1)[1].split(
+            'const panel =', 1)[0]
+        for required in ['expected.length === 0', 'expect(table).toHaveCount(0)',
+                         'name: "本页序号"', '"scope", "col"', '"aria-sort"',
+                         'header.getByRole("button")', '"tbody tr"',
+                         'cells).toHaveCount(7)', '"data-label", "本页序号"',
+                         'cells.nth(0)).toHaveText(String(index + 1))',
+                         'cells.nth(2)).toHaveText(expected[index].objectGUID)']:
+            self.assertIn(required, block)
+        for forbidden in ['pageIdx', 'pageSize', '.click(', '.evaluate(',
+                          'context.request', 'fetch(', '.fulfill(']:
+            self.assertNotIn(forbidden, block)
+        for response in ['first', 'secondPage', 'back', 'found', 'descending',
+                         'descendingLast', 'resized', 'clearLast', 'restored',
+                         'refreshed']:
+            self.assertIn(f'await expectUserPositions({response}.value.list)', code)
+        capture = code.split('const capture = async', 1)[1].split(
+            'const captureSPNGeometry', 1)[0]
+        self.assertIn('if (!object) await expectUserPositions(list.list)', capture)
+        self.assertIn('user-assets-v3-desktop-list.png', code)
+        self.assertIn('user-assets-v3-mobile-list.png', code)
+        production = Path('web/src/UserAssetsV3Workspace.tsx').read_text()
+        columns = re.findall(
+            r'<th scope="col" style=\{\{ width: "(\d+)%" \}\}>\s*([^<]+?)\s*</th>',
+            production,
+        )
+        self.assertEqual(columns, [('9', '本页序号'), ('14', 'SAM'),
+                                   ('17', 'GUID'), ('19', 'DN'), ('16', 'SID'),
+                                   ('15', 'mail'), ('10', '详情')])
+        self.assertEqual(sum(int(width) for width, _ in columns), 100)
+        self.assertIn('{list.list.map((row, index) => (', production)
+        self.assertIn('<tr key={row.objectGUID}>', production)
+        self.assertIn('<td data-label="本页序号">{index + 1}</td>', production)
 
     def test_producer_provenance_and_browser_evidence_are_explicit(self):
         code = Path('web/e2e/user-assets-v3.spec.ts').read_text()

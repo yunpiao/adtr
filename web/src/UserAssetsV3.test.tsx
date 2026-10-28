@@ -1989,10 +1989,10 @@ describe("v3 observed UAC disabled-bit filter", () => {
       screen.getByText("禁用位已设置 / 原始 UAC：4294967295"),
     ).toBeVisible();
     expect(
-      within(screen.getByRole("table", { name: "用户资产列表" })).getAllByRole(
-        "columnheader",
-      ),
-    ).toHaveLength(6);
+      within(screen.getByRole("table", { name: "用户资产列表" }))
+        .getAllByRole("columnheader")
+        .map((header) => header.textContent),
+    ).toEqual(["本页序号", "SAM", "GUID", "DN", "SID", "mail", "详情"]);
     expect(screen.getByLabelText("用户资产每页条数").closest("label")).toBe(
       screen.getByLabelText("用户资产关键词").closest("form")!.children[1],
     );
