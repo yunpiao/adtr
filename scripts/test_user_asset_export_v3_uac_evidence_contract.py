@@ -790,7 +790,7 @@ process.env.ADTR_E2E_BASE_URL = origin;
 process.env.ADTR_LDAP_FIXTURE_UAC_RUN_NONCE = unit.nonce;
 process.env.ADTR_E2E_LDAP_UAC_EVIDENCE_DIR = '/unit-owned';
 let callback, target, injected, stages, tabs, mode, index, budgetCalls, writes, closed, waits;
-let mainPage;
+let mainPage, submittedResponse, settlementBindings;
 const fixture = { taskUUID: unit.data.source.taskUUID, actorId: 2, secrets: [], consoles: [], bootstrap: {} };
 function file(name) {
  const key = path.basename(name).replace(/^task-result-/, '');
@@ -835,7 +835,7 @@ function locator(page, name) {
   } else if(name==='下载用户 XLSX' || name==='下载原用户 XLSX') emitDownload(page);
   else if(name==='查看原导出结果') emit(page,response(exportPrefix+'/detail',currentCase().detail));
  };
- return { click, dblclick: async () => emit(page,response(exportPrefix,currentCase().create)),
+ return { click, dblclick: async () => { submittedResponse=response(exportPrefix,currentCase().create);emit(page,submittedResponse); },
  fill: async () => {}, selectOption: async (value) => { if(name==='本次观测的禁用位') mode=value; },
  uncheck: async () => {},check: async () => {}, innerText: async () => currentCase().request.screenColumns.join(' → '),
  getByRole: (_,c) => locator(page,c.name),getByLabel: (n) => locator(page,n),isVisible: async () => true };
@@ -859,7 +859,7 @@ globalThis.__uacMocks = {test:testMock,expect:expectMock,navigateTo:async()=>{},
  sensitiveBudget:async()=>{const at=budgetCalls++;return at===0?unit.data.sensitiveBudget.before:at<=3?unit.data.sensitiveBudget.afterEach[at-1]:unit.data.sensitiveBudget.after;},
  captureUACReadOnlyScreenshot:async()=>{},storedUACSource:async()=>unit.data.source,storedUACExport:async()=>currentCase().database,
  readUACOriginalReceipt:async()=>currentCase().receipt,
- observeUACExportWrites:()=>({armCase:()=>{},settleCase:async()=>{},closeAndSnapshot:async()=>unit.data.postLedger}),...fsMock};
+ observeUACExportWrites:()=>({armCase:()=>{},settleCase:async(id,boundResponse)=>{check(boundResponse===submittedResponse&&id===currentCase().create.taskID);settlementBindings++;},closeAndSnapshot:async()=>unit.data.postLedger}),...fsMock};
 const stubExports = (names) => stub(names.map(n=>`export const ${n}=globalThis.__uacMocks.${n};`).join('\n'));
 const helperStub = stub('export const '+['captureUACReadOnlyScreenshot','storedUACSource','storedUACExport','readUACOriginalReceipt','observeUACExportWrites'].map(n=>`${n}=globalThis.__uacMocks.${n}`).join(',')+';\n'+['expectedUACRequest','safeResponse','safeValue','sameValue','uacRequire','uacFailureMessage','exportPrefix'].map(n=>`export const ${n}=globalThis.__actualUAC.${n};`).join('\n'));
 const imports = new Map([
@@ -884,12 +884,12 @@ const hooks=registerHooks({resolve(specifier,context,next){
 }});
 let h;try{h=require(path.join(root,'web/e2e/user-asset-export-v3-uac-helpers.ts'));globalThis.__actualUAC=h;require(path.join(root,'web/e2e/user-asset-export-v3-uac-mixed33.spec.ts'));}finally{hooks.deregister();}
 const secret='UNIT_SECRET_DO_NOT_REPORT_843921_01234567-89ab-4cde-8123-456789abcdef';
-async function run(at,error){target=at;injected=error;stages=[];mode='omitted';index=0;budgetCalls=0;writes=0;closed=0;waits=[];mainPage=pageObject();tabs=[mainPage];
+async function run(at,error){target=at;injected=error;stages=[];mode='omitted';index=0;budgetCalls=0;writes=0;closed=0;waits=[];settlementBindings=0;submittedResponse=undefined;mainPage=pageObject();tabs=[mainPage];
  let failure;try{await callback({page:mainPage,context},{outputPath:(n)=>'/unit-output/'+n});}catch(e){failure=e;}
- return {failure,stages:[...stages],writes,closed};
+ return {failure,stages:[...stages],writes,closed,settlementBindings};
 }
 (async()=>{
- const success=await run(null,null);check(!success.failure&&success.writes===1&&success.closed===4);
+ const success=await run(null,null);check(!success.failure&&success.writes===1&&success.closed===4&&success.settlementBindings===3);
  const stageSet=[...new Set(success.stages)];check(stageSet.length===h.uacFailureStages.length-1);
  for(const stage of stageSet)for(const error of [new Error(secret,{cause:new Error(secret)}),new Error('uac_evidence_invalid:post_count')]){
   error.stack=secret;const result=await run(stage,error);
@@ -949,7 +949,7 @@ async function run(at,error){target=at;injected=error;stages=[];mode='omitted';i
         self.assertIn('return setupGroupFixtureMode(page, context, options);', fixture)
         self.assertIn('setupUACGroupFixture(page, context, "mixed-33-v1")', flat_spec)
         self.assertRegex(flat_spec, r'await proof\(\s*page, fixture\.bootstrap\.password, fixture\.bootstrap\.auth, fixture\.secrets,?\s*\)')
-        self.assertIn('await observer.settleCase(created.taskID)', flat_spec)
+        self.assertIn('await observer.settleCase(created.taskID, createdResponse)', flat_spec)
         self.assertIn('await readUACOriginalReceipt(', spec)
         self.assertIn('await captureUACReadOnlyScreenshot(', spec)
         self.assertIn('(await originalTab.opener()) === null', flat_helper)
@@ -1250,7 +1250,8 @@ async function runScenario(name,variation={}){
  : variation.keyOldProofCollision ? 'request_inspection;case=not_returned;relation=current;inspect=locator_privacy'
  : 'response_check;case=not_returned;relation=current';
  const responseCheck = variation.currentKeyReflection || variation.lateProof ? ';check=body_privacy' : '';
- check(settled.message==='uac_evidence_invalid:post_binding;stage=export_settle'+responseCheck+';observer='+expectedBranch,'exact_closed_failure');break;}
+ const nativeSuffix = variation.requestFailed || variation.priorRequestFailed ? ';native=other;host_phase='+(variation.priorRequestFailed?'event_recorded':'request_inspection')+';settle_request=unknown' : '';
+ check(settled.message==='uac_evidence_invalid:post_binding;stage=export_settle'+responseCheck+';observer='+expectedBranch+nativeSuffix,'exact_closed_failure');break;}
   // Actual original-key receipt helper follows settlement before the next case.
   const receiptValue={taskID:responseValue.taskID,task:{state:'succeeded'},request:exp};
   page.waitForResponse=async()=>requestFor('GET',h.exportPrefix+'/receipt?domainId='+exp.domainId+'&idempotencyKey='+key,receiptValue,null).response;
@@ -1348,7 +1349,7 @@ function setup(options={}){
  return state;
 }
 async function failure(fn,expected,label){let error;try{await fn();}catch(e){error=e;}check(error!==undefined,'must_reject_'+label);const message=h.uacFailureMessage(error,'export_settle');check(message===expected,'message_'+label);check(error.cause===undefined,'fresh_cause_'+label);const before=message;error.message='private-mutated-message';error.observer='forged';error.case='private-value';error.inspect='forged';check(h.uacFailureMessage(error,'export_settle')===before,'immutable_owned_'+label);rows.push({label,message});return error;}
-const msg=(branch,{code='post_binding',mode='set',relation='current',inspect,check:responseCheck}={})=>`uac_evidence_invalid:${code};stage=export_settle${responseCheck?';check='+responseCheck:''};observer=${branch};case=${mode};relation=${relation}${inspect?';inspect='+inspect:''}`;
+const msg=(branch,{code='post_binding',mode='set',relation='current',inspect,check:responseCheck}={})=>`uac_evidence_invalid:${code};stage=export_settle${responseCheck?';check='+responseCheck:''};observer=${branch};case=${mode};relation=${relation}${inspect?';inspect='+inspect:''}${branch==='request_failed'?';native=other;host_phase=request_inspection;settle_request=unknown':''}`;
 async function one(label,options,branch,extra={}){const s=setup();s.arm();if(options.secret)s.known.push(options.secret);if(Object.hasOwn(options,'storage'))s.setStorage(options.storage);if(options.reader)s.setReader(options.reader);if(options.before)options.before(s);const x=s.emit(options);if(options.after)options.after(s,x);await failure(()=>s.o.settleCase('export-set'),msg(branch,extra),label);if(options.restore)options.restore();await s.dispose();}
 
 (async () => {
@@ -1432,6 +1433,229 @@ process.stdout.write(JSON.stringify({scope:'Actual helper/parser with synthetic 
             'status', 'actor_header', 'cache_header', 'observed_body_read',
             'observed_byte_binding', 'body_size', 'body_bom', 'body_utf8',
             'body_json', 'body_object', 'body_privacy']))
+
+
+class NativeFailureDiagnosticTests(unittest.TestCase):
+    """Closed host metadata only; injected events are not real browser causes."""
+
+    def _run_probe(self, source):
+        with tempfile.TemporaryDirectory() as directory:
+            script = Path(directory) / 'probe.mjs'
+            script.write_text(source)
+            # Actual production API classes use TS parameter properties. Native
+            # Node transform support is required; no dependency is installed.
+            result = subprocess.run(['node', '--experimental-transform-types',
+                                     '--disable-warning=ExperimentalWarning', str(script), str(ROOT)],
+                                    cwd=ROOT, text=True, stdout=subprocess.PIPE,
+                                    stderr=subprocess.PIPE, timeout=60, check=False)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stderr, '')
+        return json.loads(result.stdout)
+
+    def test_native_failure_closed_fields_hostile_methods_identity_phase_and_reentry(self):
+        result = self._run_probe(r"""
+import fs from 'node:fs';
+import path from 'node:path';
+import crypto from 'node:crypto';
+import {registerHooks,isBuiltin,createRequire} from 'node:module';
+import {pathToFileURL} from 'node:url';
+import {EventEmitter} from 'node:events';
+const root=path.resolve(process.argv[2]);
+const local=n=>pathToFileURL(path.join(root,n)).href;
+const stub=s=>'data:text/javascript,'+encodeURIComponent(s);
+const helperURL=local('web/e2e/user-asset-export-v3-uac-helpers.ts');
+const parserURL=local('web/src/directory-v4-controls-json.ts');
+const observed=new WeakMap();globalThis.__uacObservedChecks=observed;
+const deps=new Map([[helperURL,{'../src/directory-v4-controls-json':parserURL,
+ './directory-v2-response-observer':stub('export const directoryUACResponseBytes=async r=>r.body();export const directoryUACResponseFailureCheck=e=>e!==null&&typeof e==="object"?globalThis.__uacObservedChecks.get(e):undefined;'),
+ './user-asset-export-v3-helpers':stub('import {createHash} from "node:crypto";export const hash=v=>{globalThis.__uacHashFault?.(v);return createHash("sha256").update(v).digest("hex");};')}],
+ [parserURL,{'./api':stub('export class ApiError extends Error{constructor(){super("invalid_response");}}')}]]);
+const hook=registerHooks({resolve(s,c,n){const d=deps.get(c.parentURL);if(d&&Object.hasOwn(d,s))return{url:d[s],shortCircuit:true};if(d&&!isBuiltin(s))throw Error('unexpected_offline_dependency');return n(s,c);}});
+const require=createRequire(import.meta.url);let h;try{h=require(path.join(root,'web/e2e/user-asset-export-v3-uac-helpers.ts'));}finally{hook.deregister();}
+const check=(v,label)=>{if(!v)throw Error('observer_probe_assertion:'+label)};
+const origin='http://127.0.0.1:12345',key='abcdefab-cdef-4abc-8def-abcdefabcdef',otherKey='fedcbafe-dcba-4fed-8cba-fedcbafedcba';
+const source={taskUUID:'synthetic-observation',selection:{domainId:'synthetic-domain',revision:'2',credentialRevision:'1'}};
+const locator=(k=key)=>JSON.stringify({version:1,kind:'user_assets.v3.export',actorID:1,domainId:source.selection.domainId,idempotencyKey:k});
+const rows=[];let hookCalls=0,rawBodies=0,zeroedBodies=0,rawZeroingAssertions=0;
+function hostile(){return new Proxy({}, {get(){hookCalls++;throw Error('private_hook');},getPrototypeOf(){hookCalls++;throw Error('private_hook');},getOwnPropertyDescriptor(){hookCalls++;throw Error('private_hook');},ownKeys(){hookCalls++;throw Error('private_hook');}})}
+function setup(options={}){
+ const known=[],frame={},raws=[],mustClear=new WeakSet(),apiCalls={failure:0,request:0};let storage=locator(),readLocator;
+ const page={mainFrame:()=>frame,isClosed:()=>false,evaluate:async()=>readLocator?readLocator():storage};
+ class Context extends EventEmitter{constructor(){super();this.tabs=[page];}pages(){return this.tabs;}}
+ const context=new Context(),o=h.observeUACExportWrites(context,origin,known);
+ const expected=h.expectedUACRequest(source,'set');
+ const state={known,frame,page,context,o,expected,raws,apiCalls,setStorage:v=>storage=v,setReader:f=>readLocator=f};
+ function request(opt={}){
+  const exp=opt.expected??expected;
+  const payload={...exp,idempotencyKey:key,actorPassword:'unit-private-proof',totpCode:'357913',...opt.body};
+  const value={taskID:'export-set',task:{},request:exp,replayed:false,...opt.created};
+  const bytes=opt.raw===null?null:Buffer.isBuffer(opt.raw)?Buffer.from(opt.raw):Buffer.from(opt.raw??JSON.stringify(payload));
+  if(bytes){rawBodies++;raws.push(bytes);if(opt.fillThrow)bytes.fill=()=>{throw opt.fillThrow;};}
+  const req={failure:()=>{apiCalls.failure++;return {errorText:"net::ERR_ABORTED"};},frame:()=>{if(opt.frameThrow)throw opt.frameThrow;return opt.frame??frame;},method:()=>opt.method??'POST',url:()=>{if(opt.urlThrow)throw opt.urlThrow;return opt.url??origin+h.exportPrefix;},postDataBuffer:()=>{if(bytes&&!opt.fillThrow)mustClear.add(bytes);return bytes;},
+   response:async()=>{if(opt.responseThrow)throw opt.responseThrow;return opt.noResponse?null:response;}};
+  const response={request:()=>{apiCalls.request++;return req;},status:()=>opt.status??200,headers:()=>opt.headers??{'x-adtr-user-id':'1','cache-control':'no-store'},body:async()=>{if(opt.bodyThrow)throw opt.bodyThrow;return opt.responseBytes??Buffer.from(JSON.stringify(value));}};
+  return{req,response};
+ }
+ state.request=request;state.emit=opt=>{const x=request(opt);context.emit('request',x.req);return x;};
+ state.arm=()=>o.armCase('set',expected,1,page);
+ state.dispose=async()=>{context.tabs=[];try{await o.closeAndSnapshot({});}catch{}for(const b of raws){if(mustClear.has(b)){rawZeroingAssertions++;check(b.every(v=>v===0),"all_inspected_raw_buffers_zeroed");}if(b.every(v=>v===0))zeroedBodies++;}};
+ return state;
+}
+async function failure(fn,expected,label){let error;try{await fn();}catch(e){error=e;}check(error!==undefined,'must_reject_'+label);const message=h.uacFailureMessage(error,'export_settle');check(message===expected,'message_'+label);check(error.cause===undefined,'fresh_cause_'+label);const before=message;error.message='private-mutated-message';error.observer='forged';error.case='private-value';error.inspect='forged';check(h.uacFailureMessage(error,'export_settle')===before,'immutable_owned_'+label);rows.push({label,message});return error;}
+const msg=(branch,{code='post_binding',mode='set',relation='current',inspect,check:responseCheck,native='aborted',phase='request_inspection',match='same'}={})=>`uac_evidence_invalid:${code};stage=export_settle${responseCheck?';check='+responseCheck:''};observer=${branch};case=${mode};relation=${relation}${inspect?';inspect='+inspect:''}${branch==='request_failed'?';native='+native+';host_phase='+phase+';settle_request='+match:''}`;
+async function one(label,options,branch,extra={}){const s=setup();s.arm();if(options.secret)s.known.push(options.secret);if(Object.hasOwn(options,'storage'))s.setStorage(options.storage);if(options.reader)s.setReader(options.reader);if(options.before)options.before(s);const x=s.emit(options);if(options.after)options.after(s,x);await failure(()=>s.o.settleCase('export-set'),msg(branch,extra),label);if(options.restore)options.restore();await s.dispose();}
+(async()=>{
+const nativeLabels=new Map([['net::ERR_ABORTED','aborted'],['net::ERR_CONNECTION_RESET','connection_reset'],['net::ERR_CONNECTION_CLOSED','connection_closed'],['net::ERR_CONNECTION_REFUSED','connection_refused'],['net::ERR_TIMED_OUT','timed_out'],['net::ERR_FAILED','failed']]);
+async function nativeCase(label,options={}){
+ const s=setup();s.arm();let release;s.setReader(()=>new Promise(r=>release=r));
+ const x=s.request();if(options.configure)options.configure(s,x);
+ s.context.emit('request',x.req);s.context.emit('requestfailed',x.req);
+ if(options.afterFailed)options.afterFailed(s,x);
+ release(locator());
+ let selected=x.response;if(Object.hasOwn(options,'selected'))selected=options.selected;
+ if(options.selection)selected=options.selection(s,x);
+ await failure(()=>s.o.settleCase('export-set',selected),msg('request_failed',{native:options.native??'other',match:options.match??'same'}),label);
+ if(options.expectedFailureCalls!==undefined)check(s.apiCalls.failure===options.expectedFailureCalls,'failure_api_calls_'+label);
+ if(options.expectedRequestCalls!==undefined)check(s.apiCalls.request===options.expectedRequestCalls,'request_api_calls_'+label);
+ await s.dispose();
+}
+for(const [text,native]of nativeLabels)await nativeCase('exact_'+native,{native,configure:(s,x)=>{x.req.failure=()=>{s.apiCalls.failure++;return{errorText:text};};},expectedFailureCalls:1,expectedRequestCalls:1});
+for(const [index,value]of ['',null,undefined,17,true,new String('net::ERR_ABORTED'),' net::ERR_ABORTED','net::ERR_ABORTED ','NET::ERR_ABORTED','net::err_aborted','net::ERR_ABORTED;private-proof','private-prefix:net::ERR_ABORTED','net::ERR_CONNECTION_TIMED_OUT','net::ERR_FAILED\nprivate-key',{},[]].entries())await nativeCase('unknown_value_'+index,{configure:(s,x)=>{x.req.failure=()=>({errorText:value});}});
+for(const [label,value]of [
+ ['result_proxy',hostile()],['inherited',Object.create({get errorText(){hookCalls++;throw Error('private');}})],
+ ['accessor',Object.defineProperty({},'errorText',{get(){hookCalls++;throw Error('private');}})],
+ ['result_null',null],['result_promise',Promise.resolve({errorText:'net::ERR_ABORTED'})],
+ ['result_thenable',Object.defineProperty({},'then',{get(){hookCalls++;throw Error('private');}})],
+])await nativeCase(label,{configure:(s,x)=>{x.req.failure=()=>value;}});
+{const revoked=Proxy.revocable({},{});revoked.revoke();await nativeCase('revoked_result',{configure:(s,x)=>{x.req.failure=()=>revoked.proxy;}});}
+await nativeCase('throwing_failure',{configure:(s,x)=>{x.req.failure=()=>{throw hostile();};}});
+await nativeCase('missing_failure',{configure:(s,x)=>{delete x.req.failure;},expectedFailureCalls:0});
+await nativeCase('failure_getter',{configure:(s,x)=>{Object.defineProperty(x.req,'failure',{get(){hookCalls++;throw Error('private');}});},expectedFailureCalls:0});
+await nativeCase('prototype_failure_getter',{configure:(s,x)=>{delete x.req.failure;Object.setPrototypeOf(x.req,Object.defineProperty({},'failure',{get(){hookCalls++;throw Error('private');}}));},expectedFailureCalls:0});
+await nativeCase('proxy_failure_function',{configure:(s,x)=>{x.req.failure=new Proxy(()=>({errorText:'net::ERR_ABORTED'}),{apply(){hookCalls++;throw Error('private');},get(){hookCalls++;throw Error('private');}});},expectedFailureCalls:0});
+await nativeCase('proxy_prototype',{configure:(s,x)=>{delete x.req.failure;Object.setPrototypeOf(x.req,hostile());},expectedFailureCalls:0});
+await nativeCase('prototype_data_method',{native:'connection_reset',configure:(s,x)=>{delete x.req.failure;Object.setPrototypeOf(x.req,{failure(){s.apiCalls.failure++;return{errorText:'net::ERR_CONNECTION_RESET'};}});},expectedFailureCalls:1});
+await nativeCase('bounded_prototype_chain',{configure:(s,x)=>{delete x.req.failure;let p={failure(){hookCalls++;return{errorText:'net::ERR_ABORTED'};}};for(let i=0;i<9;i++)p=Object.create(p);Object.setPrototypeOf(x.req,p);},expectedFailureCalls:0});
+// Reentry is deliberately injected inside the trusted API seam. The old poison
+// must already be visible, and only the first event may own native metadata.
+await nativeCase('failure_api_reentry',{native:'aborted',configure:(s,x)=>{x.req.failure=()=>{s.apiCalls.failure++;const second=s.request();second.req.failure=()=>{hookCalls++;return{errorText:'net::ERR_FAILED'};};s.context.emit('request',second.req);s.context.emit('requestfailed',second.req);return{errorText:'net::ERR_ABORTED'};};},expectedFailureCalls:1});
+await nativeCase('same_request_repeat_after_first_failure',{native:'aborted',afterFailed:(s,x)=>{s.context.emit('request',x.req);s.context.emit('requestfailed',x.req);},expectedFailureCalls:1});
+await nativeCase('same_request_repeat_during_failure_api',{native:'aborted',configure:(s,x)=>{x.req.failure=()=>{s.apiCalls.failure++;s.context.emit('request',x.req);s.context.emit('requestfailed',x.req);return{errorText:'net::ERR_ABORTED'};};},expectedFailureCalls:1});
+await nativeCase('first_native_snapshot_sticky',{native:'connection_closed',configure:(s,x)=>{x.req.failure=()=>{s.apiCalls.failure++;return{errorText:'net::ERR_CONNECTION_CLOSED'};};},afterFailed:(s,x)=>{x.req.failure=()=>{hookCalls++;return{errorText:'net::ERR_ABORTED'};};s.context.emit('requestfailed',x.req);},expectedFailureCalls:1});
+// Identity requires an existing per-request token, not taskID, URL or shape.
+await nativeCase('optional_response_omitted',{native:'aborted',selected:undefined,match:'unknown',expectedRequestCalls:0});
+await nativeCase('registered_different_request_same_fields',{native:'aborted',match:'different',selection:(s,x)=>{const other=s.emit();return other.response;}});
+for(const [label,returned]of [ ['plain_object',{}],['untracked_request',{url:()=>origin+h.exportPrefix,method:()=> 'POST'}],['promise',Promise.resolve({})],['thenable',Object.defineProperty({},'then',{get(){hookCalls++;throw Error('private');}})],['return_proxy',hostile()],['null',null],['primitive','private-value'] ])await nativeCase('identity_'+label,{native:'aborted',match:'unknown',selection:(s,x)=>({request:()=>returned})});
+await nativeCase('response_proxy',{native:'aborted',match:'unknown',selected:hostile()});
+await nativeCase('response_request_getter',{native:'aborted',match:'unknown',selected:Object.defineProperty({},'request',{get(){hookCalls++;throw Error('private');}})});
+await nativeCase('response_request_proxy_function',{native:'aborted',match:'unknown',selected:{request:new Proxy(()=>({}),{apply(){hookCalls++;throw Error('private');}})}});
+await nativeCase('response_request_throw',{native:'aborted',match:'unknown',selected:{request(){throw hostile();}}});
+await nativeCase('response_proxy_prototype',{native:'aborted',match:'unknown',selected:Object.create(hostile())});
+await nativeCase('response_prototype_data_method',{native:'aborted',selection:(s,x)=>Object.create({request(){s.apiCalls.request++;return x.req;}}),expectedRequestCalls:1});
+// No new API reads when the old condition is successful, a post_count guard
+// fails, or another first cause already wins.
+{const s=setup();s.arm();const x=s.emit();await s.o.settleCase('export-set',hostile());check(s.apiCalls.request===0&&s.apiCalls.failure===0,'success_zero_new_api');s.context.emit('requestfailed',x.req);await failure(()=>s.o.settleCase('export-set',x.response),msg('request_failed',{code:'post_count',phase:'event_recorded',match:'unknown'}),'post_count_no_identity_read');check(s.apiCalls.request===0&&s.apiCalls.failure===1,'post_count_zero_request_api');await s.dispose();}
+{const s=setup();s.arm();const x=s.emit();s.emit();s.context.emit('requestfailed',x.req);await failure(()=>s.o.settleCase('export-set',x.response),msg('duplicate_create'),'other_first_cause_no_api');check(s.apiCalls.request===0&&s.apiCalls.failure===0,'other_first_zero_api');await s.dispose();}
+// Event-time host checkpoints, not a later observation or browser stream state.
+for(const phase of ['response_wait','response_check']){
+ const s=setup();s.arm();const x=s.request();let signal,release;const seen=new Promise(r=>signal=r),gate=new Promise(r=>release=r);
+ if(phase==='response_wait')x.req.response=async()=>{signal();await gate;return x.response;};
+ else{const body=x.response.body;x.response.body=async()=>{signal();await gate;return body();};}
+ s.context.emit('request',x.req);await seen;s.context.emit('requestfailed',x.req);release();
+ await failure(()=>s.o.settleCase('export-set',x.response),msg('request_failed',{phase}),'phase_'+phase);await s.dispose();
+}
+{const s=setup();s.arm();const x=s.request();let signal,taskIDReads=0;const seen=new Promise(r=>signal=r);
+ Object.defineProperty(Object.prototype,'event',{configurable:true,set(value){Object.defineProperty(this,'event',{value,configurable:true});Object.defineProperty(value,'taskID',{configurable:true,get(){taskIDReads++;throw Error('short_circuited_private_task');}});signal();}});
+ try{s.context.emit('request',x.req);await seen;s.context.emit('requestfailed',x.req);await failure(()=>s.o.settleCase('export-set',x.response),msg('request_failed',{phase:'event_recorded'}),'phase_event_recorded_and_shortcircuit');check(taskIDReads===0,'poison_does_not_read_shortcircuited_taskID');}finally{delete Object.prototype.event;}await s.dispose();}
+{const s=setup();s.arm();const x=s.request();let methodCalls=0;x.req.method=()=>{methodCalls++;if(methodCalls===2)s.context.emit('requestfailed',x.req);return'POST';};s.context.emit('request',x.req);await failure(()=>s.o.settleCase('export-set',x.response),msg('request_failed',{phase:'unknown'}),'phase_unknown_early_reentry');await s.dispose();}
+// A revoked tracked receiver remains a valid weak identity key, but its API
+// is not read. Subsequent original async work may fail; first poison still wins.
+{const s=setup();s.arm();let release;s.setReader(()=>new Promise(r=>release=r));const x=s.request();const rev=Proxy.revocable(x.req,{});s.context.emit('request',rev.proxy);rev.revoke();s.context.emit('requestfailed',rev.proxy);release(locator());await failure(()=>s.o.settleCase('export-set',{request:()=>rev.proxy}),msg('request_failed',{native:'other',match:'unknown'}),'revoked_tracked_receiver');await s.dispose();}
+// External compatibility control can select actual locked Playwright class
+// prototypes. No constructor, browser, connection or network is invoked.
+let actualPrototypeControl=false;
+if(process.argv[3]){const network=require(path.resolve(process.argv[3]));await nativeCase('actual_playwright_prototype_control',{native:'aborted',configure:(s,x)=>{delete x.req.failure;Object.setPrototypeOf(x.req,network.Request.prototype);x.req._failureText='net::ERR_ABORTED';delete x.response.request;Object.setPrototypeOf(x.response,network.Response.prototype);x.response._request=x.req;}});actualPrototypeControl=true;}
+check(hookCalls===0,'all_unknown_getter_proxy_hooks_zero');
+const native=[...new Set(rows.map(x=>x.message?.match(/;native=([^;]+)/)?.[1]).filter(Boolean))].sort();
+const phases=[...new Set(rows.map(x=>x.message?.match(/;host_phase=([^;]+)/)?.[1]).filter(Boolean))].sort();
+const matches=[...new Set(rows.map(x=>x.message?.match(/;settle_request=([^;]+)/)?.[1]).filter(Boolean))].sort();
+check(native.length===7&&phases.length===5&&matches.length===3,'all_new_closed_enums');
+process.stdout.write(JSON.stringify({scope:'Actual C helper with synthetic synchronous API/response-byte seams; explicit reentry/property injections; no browser/network/native-cause claim.',rows,native,phases,matches,unknownHooks:hookCalls,rawZeroingAssertions,actualPrototypeControl},null,2)+'\n');
+})().catch(()=>{process.stderr.write('native_failure_probe_failed\n');process.exitCode=1;});
+""")
+        self.assertEqual(len(result['rows']), 63)
+        self.assertEqual(result['unknownHooks'], 0)
+        self.assertFalse(result['actualPrototypeControl'])
+        self.assertEqual(result['native'], sorted(['aborted', 'connection_reset', 'connection_closed',
+                                                'connection_refused', 'timed_out', 'failed', 'other']))
+        self.assertEqual(result['phases'], sorted(['request_inspection', 'response_wait',
+                                                'response_check', 'event_recorded', 'unknown']))
+        self.assertEqual(result['matches'], ['different', 'same', 'unknown'])
+
+    def test_actual_production_native_stream_acceptance_unchanged_with_injected_failure(self):
+        result = self._run_probe(r"""
+import fs from 'node:fs';
+import path from 'node:path';
+import crypto from 'node:crypto';
+import {createRequire,registerHooks,isBuiltin} from 'node:module';
+import {pathToFileURL,fileURLToPath} from 'node:url';
+import {EventEmitter} from 'node:events';
+const root=path.resolve(process.argv[2]), require=createRequire(import.meta.url), loaded=new Set();
+const helperPath=path.join(root,'web/e2e/user-asset-export-v3-uac-helpers.ts');
+const hashStub='data:text/javascript,'+encodeURIComponent('import{createHash}from"node:crypto";export const hash=v=>createHash("sha256").update(v).digest("hex");');
+const hook=registerHooks({resolve(s,c,n){if(c.parentURL?.startsWith(pathToFileURL(root+'/').href)&&s.startsWith('.')){if(c.parentURL===pathToFileURL(helperPath).href&&s==='./user-asset-export-v3-helpers')return{url:hashStub,shortCircuit:true};const p=path.resolve(path.dirname(fileURLToPath(c.parentURL)),s)+'.ts';if(!p.startsWith(root+'/web/')||!fs.existsSync(p))throw Error('unexpected_source_dependency');loaded.add(p);return{url:pathToFileURL(p).href,shortCircuit:true};}if(c.parentURL?.startsWith(pathToFileURL(root+'/').href)&&!isBuiltin(s))throw Error('unexpected_package_dependency');return n(s,c);}});
+let h,o,api;try{h=require(helperPath);o=require(path.join(root,'web/e2e/directory-v2-response-observer.ts'));api=require(path.join(root,'web/src/user-asset-export-v3-api.ts'));loaded.add(helperPath);loaded.add(path.join(root,'web/e2e/directory-v2-response-observer.ts'));loaded.add(path.join(root,'web/src/user-asset-export-v3-api.ts'));}finally{hook.deregister();}
+const check=(v,label)=>{if(!v)throw Error('native_probe_assertion:'+label);};
+const origin='http://127.0.0.1:12345';const source={taskUUID:'synthetic-observation',selection:{domainId:'synthetic-domain',revision:'2',credentialRevision:'1'}};
+const key='aabbccdd-eeff-4aab-8ccd-eeffaabbccdd',known=['unit-native-password','357913'];
+async function run(name,{abort=false,failed=false}={}){
+ let request,response,fetchCalls=0,inspectorBodyCalls=0,failureAPICalls=0,responseRequestCalls=0;
+ const control=new AbortController(),expected=h.expectedUACRequest(source,'not_returned');
+ const task={taskUUID:'export-current',taskName:'user_assets.v3.export',domainId:expected.domainId,payloadVersion:1,state:'queued',sourceState:'',error:'',createdAt:'',updatedAt:'',attempt:0,maxAttempts:3,progress:0,resultVersion:0,result:{},cursor:{},parentTaskUUID:'',terminalAt:null,archived:false,visibilityVersion:0};
+ const value={taskID:task.taskUUID,task,request:expected,replayed:false};
+ const bytes=Buffer.from(JSON.stringify(value));const stream=new ReadableStream({start(c){for(let i=0;i<bytes.length;i+=17)c.enqueue(new Uint8Array(bytes.subarray(i,i+17)));c.close();}});
+ const nativeResponse=new Response(stream,{status:200,headers:{'Content-Type':'application/json','Content-Length':String(bytes.length),'Cache-Control':'no-store','X-ADTR-User-ID':'1','X-Content-Type-Options':'nosniff'}});
+ const frame={page:()=>page,url:()=>origin+'/'};
+ const page={mainFrame:()=>frame,isClosed:()=>false,evaluate:async(fn,arg)=>fn(arg),waitForFunction:async(fn,arg)=>{const end=Date.now()+3000;while(!fn(arg)){check(Date.now()<end,'bounded_complete');await new Promise(r=>setTimeout(r,1));}}};
+ class Context extends EventEmitter{pages(){return[page]}async exposeBinding(name,fn){window[name]=(...args)=>Promise.resolve(fn({page,frame},...args));}async addInitScript(fn,arg){fn(arg);}}
+ const context=new Context();
+ globalThis.location=new URL(origin);globalThis.sessionStorage={getItem:()=>JSON.stringify({version:1,kind:'user_assets.v3.export',actorID:1,domainId:expected.domainId,idempotencyKey:key})};
+ globalThis.window={fetch:(input,init)=>{fetchCalls++;const url=new URL(input,origin).href;request={failure:()=>{failureAPICalls++;return{errorText:"net::ERR_ABORTED"};},frame:()=>frame,resourceType:()=>'fetch',url:()=>url,method:()=>init.method,postDataBuffer:()=>Buffer.from(init.body),response:async()=>response};response={request:()=>{responseRequestCalls++;return request;},url:()=>url,status:()=>nativeResponse.status,headers:()=>Object.fromEntries(nativeResponse.headers),body:async()=>{inspectorBodyCalls++;throw Error('unexpected_inspector_body');}};queueMicrotask(()=>context.emit('request',request));return Promise.resolve(nativeResponse);}};window.top=window;
+ await o.observeDirectoryV2Responses(context);globalThis.fetch=(...a)=>window.fetch(...a);
+ const observer=h.observeUACExportWrites(context,origin,known);observer.armCase('not_returned',expected,1,page);
+ const app=await api.userAssetExportAPI.create(expected,key,{actorPassword:known[0],totpCode:known[1]},1,'unit-csrf',control.signal);
+ check(app.taskID===task.taskUUID&&app.replayed===false,'actual_production_application_parse');
+ const id='POST '+origin+h.exportPrefix, browser=window.__adtrDirectoryV2ResponseObserver;
+ const atAppReturn=browser.peek(id,0);check(atAppReturn.eof&&atAppReturn.completedRead&&atAppReturn.readers===1&&atAppReturn.released===1&&atAppReturn.cancelCalls===0&&!atAppReturn.signalAborted,'completed_before_abort');
+ if(abort)control.abort();
+ if(failed)context.emit('requestfailed',request);
+ const main=await h.safeResponse(response,1,known);check(main.taskID===task.taskUUID&&main.replayed===false&&h.sameValue(main.request,expected),'actual_main_predicates');
+ let settled=true,closedDiagnostic=null;try{await observer.settleCase(main.taskID,response)}catch(error){settled=false;closedDiagnostic=h.uacFailureMessage(error,'export_settle');}
+ const final=browser.peek(id,0);
+ check(settled===!failed,'settle_matches_native_failure_rule');if(failed)check(/^uac_evidence_invalid:post_binding;stage=export_settle;observer=request_failed;case=not_returned;relation=current;native=aborted;host_phase=(request_inspection|response_wait|response_check|event_recorded|unknown);settle_request=same$/.test(closedDiagnostic),'closed_injected_native_signature');check(failureAPICalls===(failed?1:0),'only_first_failure_api');
+ check(fetchCalls===1&&inspectorBodyCalls===0,'no_extra_transport');
+ return{name,actualProductionCreateAccepted:true,applicationBodyCompletedBeforeOptionalAbort:true,applicationByteCount:bytes.length,finalObserverState:final.state,signalAborted:final.signalAborted,completedRead:final.completedRead,eof:final.eof,readers:final.readers,released:final.released,cancelCalls:final.cancelCalls,mainSafeResponseAccepted:true,observerSettled:settled,closedDiagnostic,requestFailedWasInjected:failed,nativeBrowserReasonObserved:false,nativeFailureTextWasInjected:failed,failureAPICalls,responseRequestCalls,fetchCalls,inspectorBodyCalls};
+}
+(async()=>{
+const results=[];for(const [n,c]of [['native_response_control',{}],['post_application_abort_without_native_event',{abort:true}],['post_application_abort_with_injected_requestfailed',{abort:true,failed:true}],['application_complete_no_abort_with_injected_requestfailed',{failed:true}]])results.push(await run(n,c));
+const sourceSHA256=Object.fromEntries([...loaded].sort().map(p=>[path.relative(root,p),crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex')]));
+process.stdout.write(JSON.stringify({scope:'Actual production userAssetExportAPI.create, actual browser response-capture install and host API, C helper; native Node Response/ReadableStream/AbortController. Fetch is local synthetic, Playwright requestfailed explicitly injected, no browser/CDP/HTTP/network or CI-root-cause proof.',sourceSHA256,results},null,2)+'\n');
+
+})().catch(()=>{process.stderr.write("closed_production_probe_failed\n");process.exitCode=1;});
+""")
+        self.assertEqual(len(result['sourceSHA256']), 16)
+        self.assertEqual(len(result['results']), 4)
+        for index, case in enumerate(result['results']):
+            self.assertTrue(case['actualProductionCreateAccepted'])
+            self.assertTrue(case['applicationBodyCompletedBeforeOptionalAbort'])
+            self.assertTrue(case['mainSafeResponseAccepted'])
+            self.assertEqual(case['observerSettled'], index < 2)
+            self.assertEqual(case['failureAPICalls'], 0 if index < 2 else 1)
+            self.assertEqual(case['responseRequestCalls'], 2 if index < 2 else 3)
+            self.assertEqual(case['fetchCalls'], 1)
+            self.assertEqual(case['inspectorBodyCalls'], 0)
+            self.assertFalse(case['nativeBrowserReasonObserved'])
+            self.assertEqual(case['signalAborted'], index in (1, 2))
 
 if __name__ == '__main__':
     unittest.main()

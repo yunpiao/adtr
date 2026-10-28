@@ -6,7 +6,7 @@ import type {
   TestInfo,
 } from "@playwright/test";
 import { execFile } from "node:child_process";
-import { promisify } from "node:util";
+import { promisify, types } from "node:util";
 import { parseDirectoryV4UniqueJSON } from "../src/directory-v4-controls-json";
 import { hash } from "./user-asset-export-v3-helpers";
 import {
@@ -115,7 +115,7 @@ export type UACPostObserver = {
     actor: number,
     page: Page,
   ): void;
-  settleCase(taskID: string): Promise<void>;
+  settleCase(taskID: string, response?: Response): Promise<void>;
   closeAndSnapshot(finalBudget: Budget): Promise<PostLedger>;
 };
 const businessKeys = [
@@ -292,19 +292,130 @@ type UACObserverDiagnostic = Readonly<{
   inspect?: UACInspectionCheck;
   check?: UACResponseCheck;
 }>;
+const uacNativeFailures = [
+  "aborted",
+  "connection_reset",
+  "connection_closed",
+  "connection_refused",
+  "timed_out",
+  "failed",
+  "other",
+] as const;
+type UACNativeFailure = (typeof uacNativeFailures)[number];
+const uacHostPhases = [
+  "request_inspection",
+  "response_wait",
+  "response_check",
+  "event_recorded",
+  "unknown",
+] as const;
+type UACHostPhase = (typeof uacHostPhases)[number];
+const uacSettleRequests = ["same", "different", "unknown"] as const;
+type UACSettleRequest = (typeof uacSettleRequests)[number];
+type UACNativeSnapshot = Readonly<{
+  native: UACNativeFailure;
+  hostPhase: UACHostPhase;
+}>;
+type UACNativeReport = Readonly<
+  UACNativeSnapshot & { settleRequest: UACSettleRequest }
+>;
+
+// Diagnostic-only calls to trusted synchronous Playwright APIs. Reject getters
+// and proxies while finding a data method; never inspect any caught value.
+function diagnosticMethod(
+  receiver: unknown,
+  name: "failure" | "request",
+): ((...args: unknown[]) => unknown) | undefined {
+  try {
+    if (
+      receiver === null ||
+      typeof receiver !== "object" ||
+      types.isProxy(receiver)
+    )
+      return undefined;
+    let cursor: object | null = receiver;
+    for (let depth = 0; cursor !== null && depth < 8; depth++) {
+      if (types.isProxy(cursor)) return undefined;
+      const descriptor = Object.getOwnPropertyDescriptor(cursor, name);
+      if (descriptor) {
+        return Object.hasOwn(descriptor, "value") &&
+          typeof descriptor.value === "function" &&
+          !types.isProxy(descriptor.value)
+          ? descriptor.value
+          : undefined;
+      }
+      cursor = Object.getPrototypeOf(cursor);
+    }
+  } catch {
+    /* A diagnostic lookup cannot replace the original rejection. */
+  }
+  return undefined;
+}
+function nativeRequestFailure(request: Request): UACNativeFailure {
+  try {
+    const method = diagnosticMethod(request, "failure");
+    if (!method) return "other";
+    const result: unknown = Reflect.apply(method, request, []);
+    if (result === null || typeof result !== "object" || types.isProxy(result))
+      return "other";
+    const descriptor = Object.getOwnPropertyDescriptor(result, "errorText");
+    if (!descriptor || !Object.hasOwn(descriptor, "value")) return "other";
+    switch (descriptor.value) {
+      case "net::ERR_ABORTED":
+        return "aborted";
+      case "net::ERR_CONNECTION_RESET":
+        return "connection_reset";
+      case "net::ERR_CONNECTION_CLOSED":
+        return "connection_closed";
+      case "net::ERR_CONNECTION_REFUSED":
+        return "connection_refused";
+      case "net::ERR_TIMED_OUT":
+        return "timed_out";
+      case "net::ERR_FAILED":
+        return "failed";
+      default:
+        return "other";
+    }
+  } catch {
+    return "other";
+  }
+}
+function diagnosticResponseRequest(response: Response): object | undefined {
+  try {
+    const method = diagnosticMethod(response, "request");
+    if (!method) return undefined;
+    const request: unknown = Reflect.apply(method, response, []);
+    return request !== null &&
+      typeof request === "object" &&
+      !types.isProxy(request) &&
+      !types.isPromise(request)
+      ? request
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 type UACObserverFailure = Readonly<
   UACObserverDiagnostic & {
     code: "post_binding" | "post_count";
+    native?: UACNativeFailure;
+    hostPhase?: UACHostPhase;
+    settleRequest?: UACSettleRequest;
   }
 >;
 const observerFailureDetails = new WeakMap<object, UACObserverFailure>();
 function observerFailure(
   code: "post_binding" | "post_count",
   diagnostic: UACObserverDiagnostic,
+  native?: UACNativeReport,
 ): Error {
   const error = new Error(`uac_evidence_invalid:${code}`);
   // Only immutable literal snapshots survive; no caller object or caught error.
-  observerFailureDetails.set(error, Object.freeze({ ...diagnostic, code }));
+  observerFailureDetails.set(
+    error,
+    Object.freeze({ ...diagnostic, ...native, code }),
+  );
   return error;
 }
 function ownedObserverFailure(error: unknown): UACObserverFailure | undefined {
@@ -336,7 +447,18 @@ export function uacFailureMessage(
       (value) => value === observer.inspect,
     );
     const check = uacResponseChecks.find((value) => value === observer.check);
-    return `uac_evidence_invalid:${code};stage=${safeStage}${check ? `;check=${check}` : ""}${branch ? `;observer=${branch};case=${mode};relation=${relation}` : ""}${inspect ? `;inspect=${inspect}` : ""}`;
+    const native =
+      uacNativeFailures.find((value) => value === observer.native) ?? "other";
+    const hostPhase =
+      uacHostPhases.find((value) => value === observer.hostPhase) ?? "unknown";
+    const settleRequest =
+      uacSettleRequests.find((value) => value === observer.settleRequest) ??
+      "unknown";
+    const nativeSuffix =
+      branch === "request_failed"
+        ? `;native=${native};host_phase=${hostPhase};settle_request=${settleRequest}`
+        : "";
+    return `uac_evidence_invalid:${code};stage=${safeStage}${check ? `;check=${check}` : ""}${branch ? `;observer=${branch};case=${mode};relation=${relation}` : ""}${inspect ? `;inspect=${inspect}` : ""}${nativeSuffix}`;
   }
   let code: string = "unexpected";
   try {
@@ -843,6 +965,11 @@ export function observeUACExportWrites(
   const writes = new WeakSet<Request>();
   const unarmedToken = Object.freeze({});
   const writeTokens = new WeakMap<Request, object>();
+  const requestTokens = new WeakMap<Request, object>();
+  const hostPhases = new WeakMap<Request, { phase: UACHostPhase }>();
+  let nativeClaimed = false;
+  let firstFailedToken: object | undefined;
+  let firstNative: UACNativeSnapshot | undefined;
   let firstPoison: UACObserverDiagnostic | undefined;
   const diagnostic = (
     observer: UACObserverBranch,
@@ -882,9 +1009,42 @@ export function observeUACExportWrites(
     code: "post_binding" | "post_count",
     fallback: UACObserverBranch,
     token?: object,
+    response?: Response,
   ): asserts condition {
-    if (!condition)
-      throw observerFailure(code, firstPoison ?? diagnostic(fallback, token));
+    if (!condition) {
+      let native: UACNativeReport | undefined;
+      if (firstPoison?.observer === "request_failed") {
+        let settleRequest: UACSettleRequest = "unknown";
+        // The original predicate has already failed. No new API read on success,
+        // post_count, or a different first cause; never re-read skipped taskID.
+        if (
+          code === "post_binding" &&
+          response !== undefined &&
+          firstFailedToken !== undefined
+        ) {
+          try {
+            const request = diagnosticResponseRequest(response);
+            const token = request
+              ? requestTokens.get(request as Request)
+              : undefined;
+            if (token)
+              settleRequest = token === firstFailedToken ? "same" : "different";
+          } catch {
+            /* Diagnostics remain unknown, not a replacement error. */
+          }
+        }
+        native = Object.freeze({
+          native: firstNative?.native ?? "other",
+          hostPhase: firstNative?.hostPhase ?? "unknown",
+          settleRequest,
+        });
+      }
+      throw observerFailure(
+        code,
+        firstPoison ?? diagnostic(fallback, token),
+        native,
+      );
+    }
   }
   const onRequest = (request: Request): void => {
     let pathname: string;
@@ -904,6 +1064,8 @@ export function observeUACExportWrites(
     const captured = active;
     const token = captured?.token ?? unarmedToken;
     writeTokens.set(request, token);
+    if (!requestTokens.has(request))
+      requestTokens.set(request, Object.freeze({}));
     if (pathname === exportPrefix && request.method() === "POST") createCount++;
     else if (pathname === `${exportPrefix}/cancel`) {
       cancelCount++;
@@ -925,6 +1087,8 @@ export function observeUACExportWrites(
     }
     const ordinal = createCount;
     let entered: UACObserverBranch = "request_inspection";
+    const hostPhase: { phase: UACHostPhase } = { phase: "request_inspection" };
+    hostPhases.set(request, hostPhase);
     const task = (async () => {
       const inspected = await inspectUACCreateRequest(
         request,
@@ -940,10 +1104,12 @@ export function observeUACExportWrites(
         knownSecrets,
       );
       entered = "response_read";
+      hostPhase.phase = "response_wait";
       const response = await request.response();
       entered = "response_missing";
       uacRequire(response !== null);
       entered = "response_check";
+      hostPhase.phase = "response_check";
       const created = await safeResponse(
         response,
         captured.actor,
@@ -973,6 +1139,7 @@ export function observeUACExportWrites(
       };
       captured.event = event;
       events.push(event);
+      hostPhase.phase = "event_recorded";
     })().catch((error: unknown) => {
       // Unknown caught values are only WeakMap keys, never introspected.
       poison(
@@ -988,7 +1155,27 @@ export function observeUACExportWrites(
     tasks.push(task);
   };
   const onFailed = (request: Request): void => {
-    if (writes.has(request)) poison("request_failed", writeTokens.get(request));
+    if (writes.has(request)) {
+      const first = !poisoned;
+      // Commit the original rejection and its immutable first cause before any
+      // new API call. Claim metadata ownership before a method can reenter.
+      poison("request_failed", writeTokens.get(request));
+      if (first && !nativeClaimed) {
+        nativeClaimed = true;
+        let native: UACNativeFailure = "other";
+        let hostPhase: UACHostPhase = "unknown";
+        try {
+          firstFailedToken = requestTokens.get(request);
+          const phase = hostPhases.get(request)?.phase;
+          hostPhase =
+            uacHostPhases.find((value) => value === phase) ?? "unknown";
+          native = nativeRequestFailure(request);
+        } catch {
+          /* Keep the original poison and fixed fallback metadata. */
+        }
+        firstNative = Object.freeze({ native, hostPhase });
+      }
+    }
   };
   context.on("request", onRequest);
   context.on("requestfailed", onFailed);
@@ -1020,7 +1207,7 @@ export function observeUACExportWrites(
         settled: false,
       };
     },
-    async settleCase(taskID) {
+    async settleCase(taskID, response) {
       const captured = active;
       requireObserver(
         captured && !closed && !captured.settled && captured.tasks.length === 1,
@@ -1038,6 +1225,7 @@ export function observeUACExportWrites(
         "post_binding",
         rejection,
         captured.token,
+        response,
       );
       captured.settled = true;
     },

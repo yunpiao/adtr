@@ -203,3 +203,40 @@ helper and host reader, including earlier-case late native failures, but do not
 establish the cause of any real CI failure. PR244 run40621595241 remains the
 preserved failed observation; a newly approved exact-head run is needed for
 actual branch attribution or complete C9 acceptance.
+
+### Native request-failure metadata (C only)
+
+If the first observer poison is `request_failed`, the same failure may include
+three additional closed fields. `native` maps only six complete `net::ERR_*`
+constants to `aborted`, `connection_reset`, `connection_closed`,
+`connection_refused`, `timed_out` or `failed`; every other or unreadable result is
+`other`. Neither the original errorText nor any error object is retained or
+formatted. Getter/proxy-based method/field access is refused; only the trusted
+synchronous Playwright data method is invoked once after the original poison
+has committed and first-event metadata ownership has been claimed.
+
+`host_phase` snapshots the C host observer's last entered checkpoint at that
+failure: `request_inspection`, `response_wait`, `response_check`,
+`event_recorded` or `unknown`. It does not report browser EOF, live AbortSignal
+state, or the cause of a native failure. The immutable first phase/native
+snapshot cannot be replaced by later progress or a reentrant event.
+
+`settle_request=same|different|unknown` compares per-Request empty tokens against
+`createdResponse.request()` from the already selected main response explicitly
+passed to settlement. Each tracked Request keeps one permanent token, even if a
+request event is repeated. Only two existing registered tokens can establish
+same/different; missing/untracked/Promise/unsafe returns are unknown. No URL,
+taskID or response-body equality is used. This optional response argument is
+necessary for actual identity binding; omitting it preserves the old failure
+behavior with unknown identity. It is read only after the original post_binding
+condition fails with first cause request_failed. Successful settlement,
+post_count state failures and other first causes make no additional API call.
+
+The added local method scan is capped at eight non-proxy prototype levels; an
+unreadable/deeper method yields a fixed fallback without changing acceptance.
+No await, page evaluation, transport, screenshot, artifact or timeout is added.
+Removing this metadata restores the same unconditional native-failure rejection
+with less information. Even an exact native `aborted` label does not prove that
+an application AbortController caused it. Synthetic native-stream tests inject
+both the event and its error category; real attribution requires a newly
+approved exact-head CI observation. Original failed runs remain preserved.

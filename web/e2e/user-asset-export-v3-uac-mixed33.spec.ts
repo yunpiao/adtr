@@ -336,7 +336,7 @@ test("mixed33 real UAC lists and full exports bind wire, source, original receip
         "post_binding",
       );
       stage = "export_settle";
-      await observer.settleCase(created.taskID);
+      await observer.settleCase(created.taskID, createdResponse);
       stage = "export_ready";
       await expect(
         panel.getByRole("button", { name: "下载用户 XLSX", exact: true }),
