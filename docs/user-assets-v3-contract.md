@@ -134,6 +134,53 @@ partition coverage are separate layers, not those missing browser/LDAP chains.
 Format2 artifacts, exact-head CI, independent pixel/content review and runner cleanup
 are still required; offline preparation does not change product acceptance0/209.
 
+## UI-0494 keyword-only draft clear (2026-10-28)
+
+Engineering [#245](https://github.com/yunpiao/adtr/issues/245) implements only the
+`clearable` part of Issue30's keyword control. The explicit `清空关键词` button
+(accessible name `清除用户资产关键词`) empties the keyword draft, removes only its
+search paste/drop rejection, clears the shared submit-validation notice as ordinary
+editing does, and returns focus to the keyword input. Other invalid drafts are
+retained and must pass the unchanged validation on the next explicit Search.
+The button is disabled for a stale observation, or when both the keyword and its
+transfer error are empty; an empty keyword with a rejected transfer remains clearable.
+
+This is a local edit, not a query: no GET/POST or list cancellation occurs.
+SAM, paired creation times, ordering and UAC drafts, other transfer errors, selected
+source, accepted query, observation pin, page/page size, visible rows and page-local
+row numbers remain unchanged. Explicit `搜索用户` applies the remaining drafts on
+page1 with the same pin and page size. The original `清除用户筛选` still clears all
+filters and performs its explicit read; it is not replaced by the new control.
+A dirty draft keeps paging, details and creation of a new export blocked; recovery
+of an existing export retains its original locator and existing rules.
+
+Like ordinary field editing, keyword clear closes/invalidates selected details,
+cancels their retry timer and rejects late success or error callbacks, without
+cancelling the independent list channel. A pending list may still finish for the
+old accepted query; the empty keyword then remains unapplied. If the user explicitly
+applies it first, the superseded list cannot replace the newer result. An open
+modal drawer makes the background controls inert; actual users close it before
+editing, while synthetic DOM tests also exercise the invalidation transition directly.
+
+The action is optional convenience for editing one field, not a required API
+parameter. Removing it would remove only this explicit single-field affordance;
+manual editing and full-filter clear would remain. Its side effects are the local
+keyword/error change, detail invalidation and focus transfer described above. The
+page-size field retains its original second-child position and CSS; the new button
+follows it without changing shared CSS or other workspaces. The original50 UTF-16-unit submit validation is unchanged. Input-length/IME enforcement,
+v2 and full UI-0494/product equivalence are not included.
+
+DOM and Python source contracts are synthetic verification. The existing real
+`user-assets-v3` CI suite adds exact-query, native transfer and superseded-response
+checks plus source-bound1440/390 keyword-clear screenshots. Separate control and
+list captures avoid claiming the keyword and preserved rows share a viewport when
+expanded filters push the rows below it. Each list capture is taken while still
+dirty, before Apply, after its response-bound GUID and page-local position1 are
+verified and the position is fully in view. Actual execution and pixel review
+are required before claiming browser verification. No fixture, workflow,
+selector, runner, API/schema or timing budget changes. Existing user exports and the
+mixed33 consumer closure remain required. Product acceptance stays0/209.
+
 ## Versioned UI and safe facts
 
 The existing default `#user-assets-v2` remains v2. New `#user-assets-v3` is explicit.

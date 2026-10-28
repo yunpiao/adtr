@@ -1361,6 +1361,176 @@ test("UserAssetsV3 real workspace, pins, identity facts and native reader invali
     }
   });
 
+  await test.step("keyword-only clear preserves applied page and filters until explicit Search", async () => {
+    const keyword = page.getByLabel("用户资产关键词", { exact: true });
+    const clearKeyword = page.getByRole("button", {
+      name: "清除用户资产关键词",
+      exact: true,
+    });
+    const apply = () =>
+      page.getByRole("button", { name: "搜索用户", exact: true }).click();
+    await expect(clearKeyword).toBeDisabled();
+    await page.getByText("精确账户与创建时间筛选", { exact: true }).click();
+    await keyword.fill("user-");
+    await page
+      .getByLabel("创建时间开始（含）", { exact: true })
+      .fill("2026-10-01T00:00:00Z");
+    await page
+      .getByLabel("创建时间结束（不含）", { exact: true })
+      .fill("2026-10-02T00:00:00Z");
+    await page.getByLabel("创建时间排序", { exact: true }).selectOption("desc");
+    await page
+      .getByLabel("本次观测的禁用位", { exact: true })
+      .selectOption("clear");
+    const applied = await assetAction(page, apply);
+    expect(applied.value.list).toEqual(users.slice(1, 11));
+    const appliedLast = await assetAction(page, () =>
+      page.getByRole("button", { name: "用户资产下一页", exact: true }).click(),
+    );
+    expect(appliedLast.value.list).toEqual([users[11]]);
+    const appliedQuery = {
+      domainId,
+      expectedRevision: selection.revision,
+      expectedCredentialRevision: selection.credentialRevision,
+      observationId: taskUUID,
+      search: "user-",
+      pageIdx: "2",
+      pageSize: "10",
+      startTm: "2026-10-01T00:00:00Z",
+      endTm: "2026-10-02T00:00:00Z",
+      creatTm: "desc",
+      uacDisableBit: "clear",
+    };
+    expect([...appliedLast.query].sort()).toEqual(
+      Object.entries(appliedQuery).sort(),
+    );
+    let implicitRequests = 0;
+    const recordRequest = (request: Request) => {
+      const path = new URL(request.url()).pathname;
+      if (path.startsWith("/api/user-assets/v3")) implicitRequests++;
+    };
+    page.on("request", recordRequest);
+    try {
+      await clearKeyword.click();
+      await expect(keyword).toHaveValue("");
+      await expect(keyword).toBeFocused();
+      await expect(clearKeyword).toBeDisabled();
+      await expect(
+        page.getByText("已应用搜索：“user-”", { exact: true }),
+      ).toBeVisible();
+      await expect(page.locator(".asset-page-count")).toHaveText(
+        "第 2 页 · 共 2 页 · 匹配用户 11 个",
+      );
+      await expectUserPositions(appliedLast.value.list);
+      await expect(
+        page.getByRole("button", { name: "用户资产上一页", exact: true }),
+      ).toBeDisabled();
+      await expect(
+        page.getByRole("button", { name: "查看用户 user-12", exact: true }),
+      ).toBeDisabled();
+      await expect(
+        page.getByLabel("用户资产每页条数", { exact: true }),
+      ).toHaveValue("10");
+      await expect(
+        page.getByLabel("精确账户名（SAM）", { exact: true }),
+      ).toHaveValue("");
+      await expect(
+        page.getByLabel("创建时间开始（含）", { exact: true }),
+      ).toHaveValue(appliedQuery.startTm);
+      await expect(
+        page.getByLabel("创建时间结束（不含）", { exact: true }),
+      ).toHaveValue(appliedQuery.endTm);
+      await expect(
+        page.getByLabel("创建时间排序", { exact: true }),
+      ).toHaveValue("desc");
+      await expect(
+        page.getByLabel("本次观测的禁用位", { exact: true }),
+      ).toHaveValue("clear");
+      await keyword.scrollIntoViewIfNeeded();
+      await expect(keyword).toBeInViewport({ ratio: 1 });
+      await expect(clearKeyword).toBeInViewport({ ratio: 1 });
+      await capture(
+        "user-assets-v3-desktop-keyword-clear.png",
+        appliedLast.value,
+      );
+      const clearedRow = table.locator("tbody tr").first();
+      await expect(clearedRow.getByRole("cell").nth(2)).toHaveText(
+        appliedLast.value.list[0].objectGUID,
+      );
+      const clearedPosition = clearedRow.getByRole("cell").first();
+      await expect(clearedPosition).toHaveText("1");
+      await expect(clearedPosition).toHaveAttribute("data-label", "本页序号");
+      await clearedRow.scrollIntoViewIfNeeded();
+      await expect(clearedPosition).toBeInViewport({ ratio: 1 });
+      await capture(
+        "user-assets-v3-desktop-keyword-clear-list.png",
+        appliedLast.value,
+      );
+      await page.setViewportSize({ width: 390, height: 844 });
+      await clearKeyword.scrollIntoViewIfNeeded();
+      await expect(keyword).toBeInViewport({ ratio: 1 });
+      await expect(clearKeyword).toBeInViewport({ ratio: 1 });
+      expect(
+        await page.evaluate(
+          () => document.documentElement.scrollWidth <= innerWidth,
+        ),
+      ).toBe(true);
+      await capture(
+        "user-assets-v3-mobile-keyword-clear.png",
+        appliedLast.value,
+      );
+      await clearedRow.scrollIntoViewIfNeeded();
+      await expect(clearedPosition).toBeVisible();
+      await expect(clearedPosition).toBeInViewport({ ratio: 1 });
+      await capture(
+        "user-assets-v3-mobile-keyword-clear-list.png",
+        appliedLast.value,
+      );
+      expect(implicitRequests).toBe(0);
+    } finally {
+      page.off("request", recordRequest);
+      await page.setViewportSize({ width: 1440, height: 900 });
+    }
+    const cleared = await assetAction(page, apply);
+    expect([...cleared.query].sort()).toEqual(
+      Object.entries({ ...appliedQuery, search: "", pageIdx: "1" }).sort(),
+    );
+    expect(cleared.value.list).toEqual(applied.value.list);
+    await expectUserPositions(cleared.value.list);
+    const restored = await assetAction(page, () =>
+      page.getByRole("button", { name: "清除用户筛选", exact: true }).click(),
+    );
+    expect(restored.value).toEqual(first.value);
+    await page.getByText("精确账户与创建时间筛选", { exact: true }).click();
+
+    const old = await holdAssetResponse(
+      page,
+      "/api/user-assets/v3",
+      actorId,
+      users[0],
+    );
+    await keyword.fill("user-02");
+    await apply();
+    try {
+      await old.fetched();
+      await clearKeyword.click();
+      const current = await assetAction(page, apply);
+      expect(current.query.get("search")).toBe("");
+      expect(current.query.get("observationId")).toBe(taskUUID);
+      expect(current.value).toEqual(first.value);
+      const outcome = await old.release();
+      expect(outcome.application).toBe("complete-consumed");
+      transport.push({
+        scenario: "keyword-clear-apply-supersedes-list",
+        ...outcome,
+      });
+      await expect(keyword).toHaveValue("");
+      await expectUserPositions(current.value.list);
+    } finally {
+      await old.release();
+    }
+  });
+
   await test.step("UAC disabled-bit draft, real filtered reads, reset and late original response keep the pin", async () => {
     const control = page.getByLabel("本次观测的禁用位", { exact: true });
     const apply = () =>
@@ -1615,6 +1785,43 @@ test("UserAssetsV3 real workspace, pins, identity facts and native reader invali
           await expect(field).toHaveAttribute("aria-invalid", "false");
         }
       }
+      // Keep all original manual-edit recovery cases above. Also prove that an
+      // empty draft with a trusted rejected paste can be cleared without a read.
+      await expect(field).toHaveValue("");
+      await field.evaluate((element) => {
+        (window as any).__v3TransferWitness = null;
+        element.addEventListener(
+          "paste",
+          (event) => {
+            setTimeout(() => {
+              (window as any).__v3TransferWitness = {
+                trusted: event.isTrusted,
+                prevented: event.defaultPrevented,
+              };
+            });
+          },
+          { once: true },
+        );
+      });
+      await page.evaluate(() => navigator.clipboard.writeText("bad\ninput"));
+      await field.focus();
+      await page.keyboard.press("Control+V");
+      await expect
+        .poll(() => page.evaluate(() => (window as any).__v3TransferWitness))
+        .toEqual({ trusted: true, prevented: true });
+      await expect(field).toHaveValue("");
+      await expect(field).toHaveAttribute("aria-invalid", "true");
+      const clearKeyword = page.getByRole("button", {
+        name: "清除用户资产关键词",
+        exact: true,
+      });
+      await expect(clearKeyword).toBeEnabled();
+      await clearKeyword.click();
+      await expect(field).toHaveValue("");
+      await expect(field).toBeFocused();
+      await expect(field).toHaveAttribute("aria-invalid", "false");
+      await expect(clearKeyword).toBeDisabled();
+      expect(reads).toBe(0);
     } finally {
       page.off("request", recordRead);
       await cdp.detach();
