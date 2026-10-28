@@ -164,6 +164,108 @@ class UserAssetsV3BrowserContract(unittest.TestCase):
         with self.assertRaises(AssertionError):
             self.assert_mobile_row_capture(moved)
 
+    def assert_keyword_clear_action(self, code):
+        block = code.split('aria-label="清除用户资产关键词"', 1)[1].split(
+            '</button>', 1)[0]
+        for required in ['disabled={stale || (draft === "" && !filterTransferErrors.search)}',
+                         'setDraft("")', 'const next = { ...current }',
+                         'delete next.search', 'return next', 'setInputError("")',
+                         'clearDetail()', 'searchInput.current?.focus()', '清空关键词']:
+            self.assertIn(required, block)
+        for forbidden in ['setFilterDraft(', 'setFilterTransferErrors({})',
+                          'cancelList(', 'loadList(', 'setQuery(', 'queryRef.current',
+                          'setList(', 'fetch(', 'pageIdx:', 'pageSize:']:
+            self.assertNotIn(forbidden, block)
+        before = code.split('aria-label="清除用户资产关键词"', 1)[0]
+        self.assertIn('type="button"', before.rsplit('<button', 1)[1])
+        self.assertIn('className="field asset-page-size"', code)
+        self.assertLess(code.index('className="field asset-page-size"'),
+                        code.index('aria-label="清除用户资产关键词"'))
+
+    def test_keyword_clear_is_draft_only_and_preserves_other_state_channels(self):
+        self.assert_keyword_clear_action(Path('web/src/UserAssetsV3Workspace.tsx').read_text())
+
+    def test_keyword_clear_action_rejects_query_abort_or_other_filter_changes(self):
+        code = Path('web/src/UserAssetsV3Workspace.tsx').read_text()
+        for old, new in [
+            ('delete next.search;', 'delete next.startTm;'),
+            ('clearDetail();\n            searchInput.current?.focus();',
+             'cancelList();\n            searchInput.current?.focus();'),
+            ('searchInput.current?.focus();\n          }}', 'setFilterDraft(emptyFilters);\n          }}'),
+            ('(draft === "" && !filterTransferErrors.search)', 'draft === ""'),
+        ]:
+            with self.subTest(mutation=old):
+                self.assertIn(old, code)
+                with self.assertRaises(AssertionError):
+                    prefix, block = code.split('aria-label="清除用户资产关键词"', 1)
+                    self.assert_keyword_clear_action(prefix + 'aria-label="清除用户资产关键词"' + block.replace(old, new, 1))
+
+    def assert_keyword_clear_browser(self, code):
+        block = code.split('await test.step("keyword-only clear preserves', 1)[1].split(
+            'await test.step("UAC disabled-bit draft,', 1)[0]
+        flat = re.sub(r'\s+', ' ', block)
+        for required in ['name: "清除用户资产关键词"', 'await clearKeyword.click()',
+                         'await expect(keyword).toHaveValue("")', 'toBeFocused()',
+                         'expect(implicitRequests).toBe(0)',
+                         'path.startsWith("/api/user-assets/v3")',
+                         'expect([...appliedLast.query].sort())',
+                         'Object.entries(appliedQuery).sort()',
+                         'Object.entries({ ...appliedQuery, search: "", pageIdx: "1" }).sort()',
+                         'await expectUserPositions(appliedLast.value.list)',
+                         'await expectUserPositions(current.value.list)',
+                         'getByLabel("精确账户名（SAM）"', 'getByLabel("本次观测的禁用位"',
+                         'getByLabel("用户资产每页条数"', 'getByLabel("创建时间开始（含）"',
+                         'getByLabel("创建时间结束（不含）"', 'getByLabel("创建时间排序"',
+                         'await keyword.scrollIntoViewIfNeeded()',
+                         'await clearKeyword.scrollIntoViewIfNeeded()',
+                         'keyword).toBeInViewport({ ratio: 1 })',
+                         'clearKeyword).toBeInViewport({ ratio: 1 })',
+                         'width: 390, height: 844', 'width: 1440, height: 900',
+                         'document.documentElement.scrollWidth <= innerWidth',
+                         '"user-assets-v3-desktop-keyword-clear.png", appliedLast.value',
+                         '"user-assets-v3-mobile-keyword-clear.png", appliedLast.value',
+                         '"user-assets-v3-desktop-keyword-clear-list.png", appliedLast.value',
+                         '"user-assets-v3-mobile-keyword-clear-list.png", appliedLast.value',
+                         'const clearedRow = table.locator("tbody tr").first()',
+                         'appliedLast.value.list[0].objectGUID',
+                         'clearedPosition).toHaveText("1")',
+                         'clearedPosition).toHaveAttribute("data-label", "本页序号")',
+                         'await clearedRow.scrollIntoViewIfNeeded()',
+                         'clearedPosition).toBeInViewport({ ratio: 1 })',
+                         'expect(current.value).toEqual(first.value)',
+                         'expect(outcome.application).toBe("complete-consumed")',
+                         'scenario: "keyword-clear-apply-supersedes-list"']:
+            self.assertIn(required, flat)
+        for forbidden in ['.fulfill(', 'context.request', 'fixtureGET(', 'setTimeout(',
+                          'waitForTimeout(', 'test.setTimeout(', '"POST"']:
+            self.assertNotIn(forbidden, block)
+        native = code.split('await test.step("native clipboard', 1)[1].split(
+            'await test.step("mobile real data', 1)[0]
+        self.assertIn('name: "清除用户资产关键词"', native)
+        self.assertIn('await expect(field).toBeFocused()', native)
+        self.assertIn('expect(reads).toBe(0)', native)
+
+    def test_keyword_clear_real_browser_evidence_is_response_bound(self):
+        self.assert_keyword_clear_browser(Path('web/e2e/user-assets-v3.spec.ts').read_text())
+
+    def test_keyword_clear_browser_rejects_missing_request_focus_pin_or_capture_checks(self):
+        code = Path('web/e2e/user-assets-v3.spec.ts').read_text()
+        for old, new in [
+            ('expect(implicitRequests).toBe(0)', 'expect(implicitRequests).toBe(1)'),
+            ('await expect(keyword).toBeFocused();', ''),
+            ('Object.entries(appliedQuery).sort()', '[]'),
+            ('...appliedQuery, search: "", pageIdx: "1"', '...appliedQuery, search: "", pageIdx: "2"'),
+            ('"user-assets-v3-mobile-keyword-clear.png"', '"unbound.png"'),
+            ('"user-assets-v3-mobile-keyword-clear-list.png"', '"unbound-list.png"'),
+            ('clearedPosition).toHaveText("1")', 'clearedPosition).toHaveText("2")'),
+            ('appliedLast.value.list[0].objectGUID', 'appliedLast.value.list[1].objectGUID'),
+            ('keyword-clear-apply-supersedes-list', 'unrelated'),
+        ]:
+            with self.subTest(mutation=old):
+                self.assertIn(old, code)
+                with self.assertRaises(AssertionError):
+                    self.assert_keyword_clear_browser(code.replace(old, new, 1))
+
     def test_producer_provenance_and_browser_evidence_are_explicit(self):
         code = Path('web/e2e/user-assets-v3.spec.ts').read_text()
         for required in ['storedEvidence(taskUUID)', 'storedEvidence(newerId)',

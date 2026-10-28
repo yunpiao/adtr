@@ -681,6 +681,25 @@ function Assets({
             ))}
           </select>
         </label>
+        <button
+          type="button"
+          className="secondary"
+          aria-label="清除用户资产关键词"
+          disabled={stale || (draft === "" && !filterTransferErrors.search)}
+          onClick={() => {
+            setDraft("");
+            setFilterTransferErrors((current) => {
+              const next = { ...current };
+              delete next.search;
+              return next;
+            });
+            setInputError("");
+            clearDetail();
+            searchInput.current?.focus();
+          }}
+        >
+          清空关键词
+        </button>
         <Field label="本次观测的禁用位">
           <select
             aria-describedby="asset-uac-disable-help"
