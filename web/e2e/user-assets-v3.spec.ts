@@ -2039,9 +2039,29 @@ test("UserAssetsV3 real workspace, pins, identity facts and native reader invali
             page.getByText(limitMessage, { exact: true }),
           ).toBeVisible();
         }
-        await field.scrollIntoViewIfNeeded();
+        if (viewport.width === 390) {
+          // The input is already visible near mid-screen; deliberately frame the
+          // restored draft AND the rejection below it, leaving the fixed header clear.
+          await field.evaluate((element) => {
+            window.scrollTo(
+              0,
+              window.scrollY + element.getBoundingClientRect().top - 96,
+            );
+          });
+        } else await field.scrollIntoViewIfNeeded();
         await expect(field).toBeInViewport({ ratio: 1 });
         await expect(clearKeyword).toBeInViewport({ ratio: 1 });
+        await expect(
+          page.getByText(limitMessage, { exact: true }),
+        ).toBeInViewport({ ratio: 1 });
+        await expect(field).toHaveValue("previous");
+        expect(await selection()).toEqual({
+          start: 2,
+          end: 5,
+          direction: "backward",
+        });
+        await expect(clearKeyword).toBeEnabled();
+        await expect(search).toBeDisabled();
         expect(
           await page.evaluate(
             () => document.documentElement.scrollWidth <= innerWidth,

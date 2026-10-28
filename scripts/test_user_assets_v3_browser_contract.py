@@ -305,6 +305,51 @@ class UserAssetsV3BrowserContract(unittest.TestCase):
                     prefix, block = code.split('await test.step("whole-change keyword length:', 1)
                     self.assert_keyword_limit_browser(prefix + 'await test.step("whole-change keyword length:' + block.replace(old, new, 1))
 
+    def assert_keyword_limit_capture(self, code):
+        block = code.split('await test.step("whole-change keyword length:', 1)[1].split(
+            'await test.step("mobile real data', 1)[0]
+        self.assertIn('if (viewport.width === 390)', block)
+        proof = block.split('if (viewport.width === 390)', 1)[1].split('evidence.push', 1)[0]
+        flat = re.sub(r'\s+', ' ', proof)
+        capture = flat.index('await capture(')
+        for required in ['await field.evaluate((element) =>',
+                         'window.scrollTo( 0, window.scrollY + element.getBoundingClientRect().top - 96, )',
+                         'await expect(field).toBeInViewport({ ratio: 1 })',
+                         'await expect(clearKeyword).toBeInViewport({ ratio: 1 })',
+                         'await expect(clearKeyword).toBeEnabled()',
+                         'await expect(search).toBeDisabled()',
+                         'await expect(field).toHaveValue("previous")',
+                         'direction: "backward"']:
+            self.assertIn(required, flat)
+            self.assertLess(flat.index(required), capture)
+        error = re.search(r'await expect\(\s*page.getByText\(limitMessage, \{ exact: true \}\),?\s*\)\.toBeInViewport\(\{ ratio: 1 \}\)', flat)
+        self.assertIsNotNone(error)
+        self.assertLess(error.start(), capture)
+        self.assertNotIn('fullPage: true', proof)
+        self.assertNotIn('setViewportSize', proof)
+
+    def test_keyword_limit_mobile_capture_contains_draft_clear_and_complete_error(self):
+        self.assert_keyword_limit_capture(Path('web/e2e/user-assets-v3.spec.ts').read_text())
+
+    def test_keyword_limit_capture_rejects_missing_scroll_partial_or_late_proof(self):
+        code = Path('web/e2e/user-assets-v3.spec.ts').read_text()
+        prefix, block = code.split('await test.step("whole-change keyword length:', 1)
+        for old, new in [
+            ('if (viewport.width === 390)', 'if (viewport.width === 391)'),
+            ('window.scrollY + element.getBoundingClientRect().top - 96', 'window.scrollY'),
+            ('await expect(field).toBeInViewport({ ratio: 1 })', 'await expect(field).toBeInViewport({ ratio: 0 })'),
+            ('await expect(clearKeyword).toBeInViewport({ ratio: 1 })', 'await expect(clearKeyword).toBeInViewport({ ratio: 0 })'),
+            (').toBeInViewport({ ratio: 1 });\n        await expect(field).toHaveValue("previous")', ').toBeInViewport({ ratio: 0 });\n        await expect(field).toHaveValue("previous")'),
+        ]:
+            with self.subTest(mutation=old):
+                self.assertIn(old, block)
+                with self.assertRaises(AssertionError):
+                    self.assert_keyword_limit_capture(prefix + 'await test.step("whole-change keyword length:' + block.replace(old, new, 1))
+        early = 'await expect(clearKeyword).toBeInViewport({ ratio: 1 });'
+        late = block.replace(early, '', 1).replace('evidence.push({', early + '\n        evidence.push({', 1)
+        with self.assertRaises(AssertionError):
+            self.assert_keyword_limit_capture(prefix + 'await test.step("whole-change keyword length:' + late)
+
     def assert_keyword_clear_browser(self, code):
         block = code.split('await test.step("keyword-only clear preserves', 1)[1].split(
             'await test.step("UAC disabled-bit draft,', 1)[0]
