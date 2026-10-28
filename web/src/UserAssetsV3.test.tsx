@@ -938,14 +938,15 @@ describe("UserAssetsV3 private workspace", () => {
     expect(
       screen.getByLabelText("用户资产关键词", { exact: true }),
     ).not.toHaveAttribute("maxlength");
+    fill("用户资产关键词", "previous");
     fill("用户资产关键词", "😀".repeat(26));
     expect(
       screen.getByLabelText("用户资产关键词", { exact: true }),
-    ).toHaveValue("😀".repeat(26));
+    ).toHaveValue("previous");
     const count = calls().length;
     click("搜索用户");
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      "输入不会被截断",
+      "已拒绝整次变更并保留此前内容",
     );
     expect(calls()).toHaveLength(count);
     fill("用户资产关键词", " \u0000\u202e ");
