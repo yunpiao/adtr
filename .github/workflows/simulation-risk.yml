@@ -1,0 +1,50 @@
+name: simulation-risk
+on:
+  pull_request:
+  workflow_dispatch:
+  push:
+    branches: [main]
+permissions: {}
+concurrency:
+  group: simulation-risk-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  synthetic-vertical:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
+        with:
+          go-version: '1.27.1'
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24.19.0'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Verify dedicated acceptance wiring
+        run: python3 -m unittest discover -s scripts -p test_simulation_risk_workflow_contract.py
+      - name: Build exact revision (synthetic only)
+        run: |
+          mkdir -p bin
+          go build -o bin/adtr ./cmd/adtr
+          npm ci --prefix web
+          npm run build --prefix web
+          cd web && npx --no-install tsc --noEmit --strict --target ES2022 --module ESNext --moduleResolution Bundler --skipLibCheck simulation-risk.playwright.config.ts simulation-risk-e2e/risk.spec.ts
+      - name: Install CI-only Chromium
+        run: cd web && npx --no-install playwright install --with-deps chromium
+      - name: Real PostgreSQL, authenticated TCP and browser acceptance
+        run: python3 scripts/test_simulation_risk_integration.py
+      - name: Publish synthetic evidence only
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: SIMULATED-risk-${{ github.event.pull_request.head.sha || github.sha }}
+          path: artifacts/simulation-risk/
+          if-no-files-found: error
+          retention-days: 7

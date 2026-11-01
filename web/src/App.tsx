@@ -23,6 +23,7 @@ import { forgetMaintenanceSession } from "./maintenance-intent";
 import AuditWorkspace from "./AuditWorkspace";
 import MessagesWorkspace from "./MessagesWorkspace";
 import SimulationEventsWorkspace from "./SimulationEventsWorkspace";
+import SimulationRiskWorkspace from "./SimulationRiskWorkspace";
 import { forgetAuditSession } from "./audit-intent";
 import SystemWorkspace from "./SystemWorkspace";
 import OperationalLogsWorkspace from "./OperationalLogsWorkspace";
@@ -72,6 +73,7 @@ function pageFromHash(): Page {
       "profile",
       "messages",
       "simulation-events",
+      "simulation-risk",
       "credential-use",
       "directory",
       "directory-credential-use",
@@ -450,6 +452,7 @@ export default function App() {
       page === "audit" ||
       page === "messages" ||
       page === "simulation-events" ||
+      page === "simulation-risk" ||
       page === "system" ||
       page === "operational-logs" ||
       page === "domains" ||
@@ -640,6 +643,15 @@ export default function App() {
                     )}
                     {active === "tasks" && (
                       <TaskWorkspace
+                        profile={profile}
+                        sessionChanged={() => {
+                          setPage("account");
+                          refresh();
+                        }}
+                      />
+                    )}
+                    {active === "simulation-risk" && (
+                      <SimulationRiskWorkspace
                         profile={profile}
                         sessionChanged={() => {
                           setPage("account");

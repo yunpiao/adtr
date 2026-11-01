@@ -7,6 +7,7 @@ import base64
 from concurrent.futures import ThreadPoolExecutor
 import http.cookiejar
 import json
+import re
 import os
 from pathlib import Path
 import secrets
@@ -248,7 +249,8 @@ def main():
                    ADTR_SIMULATION_EVENTS_ENABLED="true", ADTR_DIRECTORY_READ_ENABLED="false", ADTR_DOMAIN_PROBE_ENABLED="false")
         for phase in ("migrate-first", "migrate-repeat", "bootstrap"):
             prepare_database(phase, env)
-        assert sql("SELECT version FROM adtr.schema_version") == "24"
+        expected_schema = re.search(r"const Current = (\d+)", (ROOT / "internal/schemaversion/version.go").read_text()).group(1)
+        assert sql("SELECT version FROM adtr.schema_version") == expected_schema
         report["checks"].append("real PostgreSQL migration and repeated migration")
         sql(f"""
 BEGIN;
