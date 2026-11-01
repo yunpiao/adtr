@@ -3,6 +3,12 @@ import ast
 from pathlib import Path
 import re
 import unittest
+import io
+from email.message import Message
+import json
+from unittest.mock import patch
+
+from test_simulation_events_integration import Client, safe_response_code
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -58,6 +64,41 @@ class SimulationEventsWorkflowContract(unittest.TestCase):
             self.assertIn(setting, config)
         for path in ('scripts/ci_inventory.json', '.github/workflows/ci.yml', 'web/playwright.config.ts'):
             self.assertNotIn('simulation-events.spec.ts', self.text(path))
+
+
+class SimulationClientDiagnosticsContract(unittest.TestCase):
+    def response(self, status, payload):
+        result = io.BytesIO(payload)
+        result.status = status
+        result.headers = Message()
+        result.headers["Content-Type"] = "application/json"
+        return result
+
+    def test_login_wire_shape_and_closed_failure_code(self):
+        client = Client("http://127.0.0.1:18080", "admin")
+        password = "Synthetic secret must never be logged"
+        with patch.object(client.opener, "open", return_value=self.response(400, b'{"error":"invalid_input"}')) as opened:
+            with self.assertRaises(AssertionError) as caught:
+                client.call("/api/auth/login", {"username": "simulation-admin", "password": password})
+        request = opened.call_args.args[0]
+        self.assertEqual(request.get_method(), "POST")
+        self.assertEqual(request.get_header("Content-type"), "application/json")
+        self.assertEqual(request.get_header("Origin"), "http://127.0.0.1:18080")
+        self.assertEqual(json.loads(request.data), {"username": "simulation-admin", "password": password})
+        self.assertIn("stage=admin; code=invalid_input", str(caught.exception))
+        self.assertIn("responseType=json; method=POST; requestType=json; proxyConfigured=", str(caught.exception))
+        self.assertNotIn(password, str(caught.exception))
+        self.assertNotIn("simulation-admin", str(caught.exception))
+
+    def test_untrusted_diagnostics_are_never_echoed(self):
+        for raw, expected in ((b'<html>secret</html>', "non-json-response"),
+                              (b'{"error":"secret"}', "unrecognized-response"),
+                              (b'{"error": ["secret"]}', "unrecognized-response"),
+                              (b'{"error":"invalid_input","password":"secret"}', "invalid_input"),
+                              (b'x' * 65537, "oversized-response")):
+            self.assertEqual(safe_response_code(raw), expected)
+        with self.assertRaises(ValueError):
+            Client("http://127.0.0.1:18080", "secret")
 
 
 if __name__ == '__main__':

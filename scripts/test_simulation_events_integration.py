@@ -56,9 +56,29 @@ def run(args, **kwargs):
     return subprocess.run(args, check=True, timeout=kwargs.pop("timeout", 120), **kwargs)
 
 
+# Error bodies can originate in an intermediary. Log only this closed vocabulary.
+SAFE_ERROR_CODES = frozenset({"invalid_input", "forbidden", "unauthenticated", "invalid_credentials",
+                              "mfa_required", "rate_limited", "internal", "not_found", "simulation_disabled",
+                              "simulation_unavailable", "schema_incompatible", "revision_conflict"})
+CLIENT_STAGES = frozenset({"anonymous", "admin", "operator", "other-tenant", "race-0", "race-1"})
+
+
+def safe_response_code(raw):
+    if len(raw) > 65536:
+        return "oversized-response"
+    try:
+        value = json.loads(raw)
+    except (ValueError, UnicodeError):
+        return "non-json-response"
+    code = value.get("error") if isinstance(value, dict) else None
+    return code if isinstance(code, str) and code in SAFE_ERROR_CODES else "unrecognized-response"
+
+
 class Client:
-    def __init__(self, base):
-        self.base, self.csrf = base, ""
+    def __init__(self, base, stage="anonymous"):
+        if stage not in CLIENT_STAGES:
+            raise ValueError("invalid synthetic client stage")
+        self.base, self.csrf, self.stage = base, "", stage
         self.opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
 
     def call(self, path, body=None, want=200, csrf=True):
@@ -72,8 +92,16 @@ class Client:
         except urllib.error.HTTPError as error:
             response = error
         with response:
-            status, raw = response.status, response.read()
-        assert status == want, f"{path.split('?')[0]}: HTTP {status}, expected {want}"
+            status = response.status
+            raw = response.read(65537) if status != want else response.read()
+            response_type = "json" if response.headers.get_content_type() == "application/json" else "non-json"
+        proxy_configured = any(isinstance(handler, urllib.request.ProxyHandler) and bool(handler.proxies)
+                               for handler in self.opener.handlers)
+        request_type = "json" if request.get_header("Content-type") == "application/json" else "other"
+        method = request.get_method() if request.get_method() in ("GET", "POST") else "other"
+        assert status == want, (f"{path.split('?')[0]}: HTTP {status}, expected {want}; stage={self.stage}; "
+                                f"code={safe_response_code(raw)}; responseType={response_type}; "
+                                f"method={method}; requestType={request_type}; proxyConfigured={proxy_configured}")
         value = json.loads(raw)
         if isinstance(value, dict) and "csrfToken" in value:
             self.csrf = value["csrfToken"]
@@ -178,7 +206,7 @@ COMMIT;
             run(["go", "run", str(source)], env=env, capture_output=True)
         log = tempfile.TemporaryFile()  # Raw server logs are deliberately not published.
         start()
-        anonymous, admin, client, other = [Client(base) for _ in range(4)]
+        anonymous, admin, client, other = [Client(base, stage) for stage in ("anonymous", "admin", "operator", "other-tenant")]
         for c, username in ((admin, "simulation-admin"), (client, "simulation-operator"), (other, "simulation-other")):
             c.call("/api/auth/login", {"username": username, "password": account_password})
         listing = API + "/datasets?domainId=simulation-domain-a&offset=0&limit=100"
@@ -203,7 +231,7 @@ COMMIT;
         assert client.call(detail_path)["case"]["Revision"] == 2
         sql(f"UPDATE adtr.access_permissions SET writeable=true WHERE tenant_id='default' AND role_id='{ROLE}' AND mark='simulation_events'")
         # Separate authenticated clients race on one revision; exactly one wins.
-        racers = [Client(base), Client(base)]
+        racers = [Client(base, "race-0"), Client(base, "race-1")]
         for racer in racers:
             racer.call("/api/auth/login", {"username": "simulation-operator", "password": account_password})
         def race(index):
