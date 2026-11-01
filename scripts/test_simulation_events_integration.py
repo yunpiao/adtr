@@ -74,6 +74,45 @@ def safe_response_code(raw):
     return code if isinstance(code, str) and code in SAFE_ERROR_CODES else "unrecognized-response"
 
 
+PREPARATION_PHASES = {"migrate-first": "migrate", "migrate-repeat": "migrate", "bootstrap": "bootstrap"}
+PREPARATION_ERRORS = {
+    b"migration connection failed": "database-connect",
+    b"migration transaction failed": "database-transaction",
+    b"migration statement failed": "migration-infrastructure",
+    b"unsupported migration target": "unsupported-target",
+    b"unsupported schema version; refusing migration": "unsupported-schema",
+    b"simulation events schema migration failed": "simulation-schema",
+    b"schema version update failed": "schema-version-update",
+    b"migration commit failed": "migration-commit",
+    b"invalid bootstrap input": "bootstrap-input",
+    b"bootstrap database unavailable": "database-connect",
+    b"bootstrap refused: accounts already exist": "bootstrap-existing-accounts",
+    b"bootstrap failed": "bootstrap-write",
+    b"invalid database configuration": "database-configuration",
+}
+
+
+def safe_preparation_code(stderr):
+    # Only a complete, exact known CLI error is classified. Extra lines, SQL,
+    # addresses, credentials or unexpected output are never copied to artifacts.
+    if not isinstance(stderr, bytes) or len(stderr) > 1024:
+        return "unclassified"
+    return PREPARATION_ERRORS.get(stderr.strip(), "unclassified")
+
+
+def prepare_database(phase, env):
+    if phase not in PREPARATION_PHASES:
+        raise ValueError("invalid database preparation phase")
+    try:
+        run(["./bin/adtr", "-mode", PREPARATION_PHASES[phase]], env=env, capture_output=True)
+    except subprocess.CalledProcessError as error:
+        raise RuntimeError(f"database preparation failed: phase={phase}; exit={error.returncode}; code={safe_preparation_code(error.stderr)}") from None
+    except subprocess.TimeoutExpired:
+        raise RuntimeError(f"database preparation failed: phase={phase}; exit=none; code=timeout") from None
+    except OSError:
+        raise RuntimeError(f"database preparation failed: phase={phase}; exit=none; code=launch-failed") from None
+
+
 class Client:
     def __init__(self, base, stage="anonymous"):
         if stage not in CLIENT_STAGES:
@@ -164,8 +203,10 @@ def main():
         run(["docker", "run", "--detach", "--rm", "--name", name, "--label", "adtr.simulation.owner=" + owner,
              "-e", "POSTGRES_PASSWORD", "-e", "POSTGRES_DB=adtr_e2e", "-p", "127.0.0.1::5432", *postgres_image_args(IMAGE)], env=env, capture_output=True)
         created = True
+        # postgres entrypoint temporarily accepts Unix-socket connections while
+        # initializing. Require its final TCP listener, used by the mapped port.
         for _ in range(100):
-            if subprocess.run(["docker", "exec", name, "pg_isready", "-U", "postgres", "-d", "adtr_e2e"], capture_output=True, timeout=5).returncode == 0:
+            if subprocess.run(["docker", "exec", name, "pg_isready", "-h", "127.0.0.1", "-p", "5432", "-U", "postgres", "-d", "adtr_e2e"], capture_output=True, timeout=5).returncode == 0:
                 break
             time.sleep(.2)
         else:
@@ -181,8 +222,8 @@ def main():
                    ADTR_ORIGIN=base, ADTR_LISTEN_ADDR=f"127.0.0.1:{port}", ADTR_WEB_DIR=str(ROOT / "web/dist"),
                    ADTR_BOOTSTRAP_USERNAME="simulation-admin", ADTR_BOOTSTRAP_PASSWORD=account_password,
                    ADTR_SIMULATION_EVENTS_ENABLED="true", ADTR_DIRECTORY_READ_ENABLED="false", ADTR_DOMAIN_PROBE_ENABLED="false")
-        for mode in ("migrate", "migrate", "bootstrap"):
-            run(["./bin/adtr", "-mode", mode], env=env, capture_output=True)
+        for phase in ("migrate-first", "migrate-repeat", "bootstrap"):
+            prepare_database(phase, env)
         assert sql("SELECT version FROM adtr.schema_version") == "24"
         report["checks"].append("real PostgreSQL migration and repeated migration")
         sql(f"""

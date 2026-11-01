@@ -2,13 +2,14 @@
 import ast
 from pathlib import Path
 import re
+import subprocess
 import unittest
 import io
 from email.message import Message
 import json
 from unittest.mock import patch
 
-from test_simulation_events_integration import Client, safe_response_code
+from test_simulation_events_integration import Client, safe_response_code, safe_preparation_code, prepare_database
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -48,7 +49,7 @@ class SimulationEventsWorkflowContract(unittest.TestCase):
                          '^TestPostgresAtomicSyntheticState$', '^TestSimulationEventHTTP'):
             self.assertIn(expected, commands)
         source = self.text('scripts/test_simulation_events_integration.py')
-        self.assertIn('for mode in ("migrate", "migrate", "bootstrap"):', source)
+        self.assertIn('for phase in ("migrate-first", "migrate-repeat", "bootstrap"):', source)
         self.assertIn('report["status"] = "not-run"', source)
         self.assertIn('report["status"] = "passed"', source)
         self.assertLess(source.index('"simulation-e2e/simulation-events.spec.ts"'), source.index('report["status"] = "passed"'))
@@ -99,6 +100,44 @@ class SimulationClientDiagnosticsContract(unittest.TestCase):
             self.assertEqual(safe_response_code(raw), expected)
         with self.assertRaises(ValueError):
             Client("http://127.0.0.1:18080", "secret")
+
+
+class SimulationDatabasePreparationContract(unittest.TestCase):
+    def test_readiness_requires_final_tcp_listener(self):
+        source = (ROOT / "scripts/test_simulation_events_integration.py").read_text()
+        tree = ast.parse(source)
+        commands = [node for node in ast.walk(tree) if isinstance(node, ast.List)
+                    and any(isinstance(x, ast.Constant) and x.value == "pg_isready" for x in node.elts)]
+        self.assertEqual(len(commands), 1)
+        literals = [x.value for x in commands[0].elts if isinstance(x, ast.Constant)]
+        self.assertEqual(literals, ["docker", "exec", "pg_isready", "-h", "127.0.0.1", "-p", "5432", "-U", "postgres", "-d", "adtr_e2e"])
+        self.assertIn("for _ in range(100):", source)
+        self.assertIn("time.sleep(.2)", source)
+
+    def test_preparation_preserves_commands_and_never_retries(self):
+        with patch("test_simulation_events_integration.run") as command:
+            for phase in ("migrate-first", "migrate-repeat", "bootstrap"):
+                prepare_database(phase, {})
+        self.assertEqual([call.args[0] for call in command.call_args_list],
+                         [["./bin/adtr", "-mode", mode] for mode in ("migrate", "migrate", "bootstrap")])
+        error = subprocess.CalledProcessError(1, ["secret"], output=b"secret", stderr=b"migration connection failed\n")
+        with patch("test_simulation_events_integration.run", side_effect=error) as command:
+            with self.assertRaises(RuntimeError) as caught:
+                prepare_database("migrate-first", {"SECRET": "secret"})
+            command.assert_called_once()
+        self.assertEqual(str(caught.exception), "database preparation failed: phase=migrate-first; exit=1; code=database-connect")
+        self.assertTrue(caught.exception.__suppress_context__)
+
+    def test_preparation_output_is_closed_and_redacted(self):
+        self.assertEqual(safe_preparation_code(b"simulation events schema migration failed\n"), "simulation-schema")
+        for value in (b"secret", b"migration connection failed\nsecret", b"secret" * 500,
+                      "migration connection failed", None):
+            self.assertEqual(safe_preparation_code(value), "unclassified")
+        with patch("test_simulation_events_integration.run", side_effect=subprocess.TimeoutExpired("secret", 120, stderr=b"secret")):
+            with self.assertRaisesRegex(RuntimeError, "phase=bootstrap; exit=none; code=timeout"):
+                prepare_database("bootstrap", {})
+        with self.assertRaises(ValueError):
+            prepare_database("secret", {})
 
 
 if __name__ == '__main__':
