@@ -19,7 +19,9 @@ import (
 	"github.com/yunpiao/adtr/internal/dnsipxlsx"
 	"github.com/yunpiao/adtr/internal/groupgraph"
 	"github.com/yunpiao/adtr/internal/riskscore"
+	"github.com/yunpiao/adtr/internal/rulecatalog"
 	"github.com/yunpiao/adtr/internal/securityevents"
+	"github.com/yunpiao/adtr/internal/sensitivelabels"
 )
 
 const maxInput = 4 << 20
@@ -107,6 +109,13 @@ func uniqueJSON(d *json.Decoder, depth int) error {
 	return nil
 }
 
+type caseRequest struct {
+	Scope      securityevents.Scope      `json:"scope"`
+	Provenance securityevents.Provenance `json:"provenance"`
+	ID         string                    `json:"id"`
+	Changes    []securityevents.Change   `json:"changes"`
+}
+
 type graphRequest struct {
 	Snapshot groupgraph.Snapshot `json:"snapshot"`
 	Query    groupgraph.Query    `json:"query"`
@@ -131,6 +140,60 @@ type eventsRequest struct {
 
 func evaluate(ctx context.Context, command string, data []byte) (any, error) {
 	switch command {
+	case "rule-exceptions":
+		return exceptions(ctx, data)
+	case "rule-catalog":
+		var in rulecatalog.Request
+		if err := decode(data, &in); err != nil {
+			return nil, err
+		}
+		return rulecatalog.Execute(ctx, in)
+	case "labels":
+		var in sensitivelabels.Input
+		if err := decode(data, &in); err != nil {
+			return nil, err
+		}
+		return sensitivelabels.Evaluate(in)
+	case "label-changes":
+		var in struct {
+			Before sensitivelabels.Input `json:"before"`
+			After  sensitivelabels.Input `json:"after"`
+		}
+		if err := decode(data, &in); err != nil {
+			return nil, err
+		}
+		return sensitivelabels.Compare(in.Before, in.After)
+
+	case "case-replay":
+		var in caseRequest
+		if err := decode(data, &in); err != nil {
+			return nil, err
+		}
+		if len(in.Changes) > 1000 {
+			return nil, errInput
+		}
+		current, err := securityevents.NewCase(in.Scope, in.Provenance, in.ID)
+		if err != nil {
+			return nil, err
+		}
+		audits := make([]securityevents.Audit, 0, len(in.Changes))
+		for _, change := range in.Changes {
+			next, audit, err := current.Apply(in.Scope, change)
+			if err != nil {
+				return nil, err
+			}
+			current = next
+			audits = append(audits, audit)
+		}
+		view, err := current.View(in.Scope)
+		if err != nil {
+			return nil, err
+		}
+		return struct {
+			Case  securityevents.CaseView `json:"case"`
+			Audit []securityevents.Audit  `json:"audit"`
+		}{view, audits}, nil
+
 	case "assets":
 		var in assetassessment.Input
 		if err := decode(data, &in); err != nil {
@@ -216,7 +279,7 @@ func evaluate(ctx context.Context, command string, data []byte) (any, error) {
 }
 func run(args []string, input io.Reader, output, stderr io.Writer) int {
 	if len(args) != 1 {
-		fmt.Fprintln(stderr, "usage: adtr-simulate assets|groups|dns|dns-xlsx|risk|rules|events < synthetic.json")
+		fmt.Fprintln(stderr, "usage: adtr-simulate assets|groups|dns|dns-xlsx|risk|rules|events|case-replay|rule-catalog|labels|label-changes|rule-exceptions < synthetic.json")
 		return 2
 	}
 	data, err := io.ReadAll(io.LimitReader(input, maxInput+1))
