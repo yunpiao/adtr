@@ -52,6 +52,29 @@ func main() {
 '''
 
 
+FIXTURE_PREFLIGHT_SQL = f"""
+SELECT
+ (SELECT count(*)=2 AND bool_and(c.max_ad_count=2 AND c.expire_time>extract(epoch FROM clock_timestamp())+86400
+   AND (SELECT count(*) FROM adtr.resource_domains d WHERE d.tenant_id=c.tenant_id AND d.active)<=c.max_ad_count)
+  FROM adtr.resource_tenant_config c WHERE c.tenant_id IN ('default','other'))
+ AND (SELECT count(*)=2 FROM adtr.users u
+  JOIN adtr.access_roles r ON r.tenant_id=u.tenant_id AND r.id=u.role_id
+  JOIN adtr.access_permissions p ON p.tenant_id=r.tenant_id AND p.role_id=r.id AND p.mark='simulation_events' AND p.readable AND p.writeable
+  JOIN adtr.access_permissions dp ON dp.tenant_id=r.tenant_id AND dp.role_id=r.id AND dp.mark='domains' AND dp.readable
+  WHERE u.username IN ('simulation-operator','simulation-other') AND u.role='viewer' AND r.id='{ROLE}'
+   AND NOT u.must_change AND NOT u.disabled AND u.password_updated_at>clock_timestamp()-interval '1 day')
+ AND (SELECT count(*)=2 AND bool_and(d.id='simulation-domain-a')
+  FROM adtr.resource_domains d
+  JOIN adtr.resource_group_members m ON m.tenant_id=d.tenant_id AND m.domain_id=d.id
+  JOIN adtr.resource_role_groups r ON r.tenant_id=m.tenant_id AND r.group_id=m.group_id
+  WHERE d.active AND d.tenant_id IN ('default','other') AND r.role_id='{ROLE}')
+ AND EXISTS(SELECT FROM adtr.domain_connections WHERE tenant_id='default' AND domain_id='simulation-domain-a'
+  AND canonical_domain='simulation.example.test' AND credential_mode='unconfigured' AND deleted_at IS NULL
+  AND connection_revision=1 AND credential_revision=1)
+ AND (SELECT count(*)=3 FROM adtr.simulation_event_datasets WHERE simulation AND dataset_id='simulation-dataset');
+"""
+
+
 def run(args, **kwargs):
     return subprocess.run(args, check=True, timeout=kwargs.pop("timeout", 120), **kwargs)
 
@@ -59,7 +82,8 @@ def run(args, **kwargs):
 # Error bodies can originate in an intermediary. Log only this closed vocabulary.
 SAFE_ERROR_CODES = frozenset({"invalid_input", "forbidden", "unauthenticated", "invalid_credentials",
                               "mfa_required", "rate_limited", "internal", "not_found", "simulation_disabled",
-                              "simulation_unavailable", "schema_incompatible", "revision_conflict"})
+                              "simulation_unavailable", "schema_incompatible", "revision_conflict", "tenant_not_configured",
+                              "tenant_expired", "tenant_domain_limit_exceeded"})
 CLIENT_STAGES = frozenset({"anonymous", "admin", "operator", "other-tenant", "race-0", "race-1"})
 
 
@@ -229,6 +253,9 @@ def main():
         sql(f"""
 BEGIN;
 UPDATE adtr.users SET must_change=false WHERE username='simulation-admin';
+INSERT INTO adtr.resource_tenant_config(tenant_id,max_ad_count,expire_time,uid,name)
+ SELECT tenant_id,2,extract(epoch FROM clock_timestamp()+interval '30 days')::bigint,uid,name
+ FROM (VALUES('default','synthetic-default','Synthetic default tenant'),('other','synthetic-other','Synthetic other tenant')) t(tenant_id,uid,name);
 INSERT INTO adtr.access_roles(tenant_id,id,name) VALUES ('default','{ROLE}','Synthetic simulation operator'),('other','{ROLE}','Other synthetic operator');
 INSERT INTO adtr.access_permissions(tenant_id,role_id,mark,readable,writeable)
  SELECT tenant_id,id,mark,true,mark='simulation_events' FROM adtr.access_roles CROSS JOIN (VALUES('simulation_events'),('domains')) p(mark);
@@ -245,6 +272,10 @@ COMMIT;
             source = Path(tmp) / "main.go"
             source.write_text(SEED)
             run(["go", "run", str(source)], env=env, capture_output=True)
+        # Fail at fixture setup, not a later browser click, if an authorization
+        # prerequisite is absent. These assertions do not substitute for HTTP.
+        assert sql(FIXTURE_PREFLIGHT_SQL) == "t", "synthetic fixture prerequisites incomplete"
+        report["checks"].append("synthetic tenant, role, scope and account prerequisites")
         log = tempfile.TemporaryFile()  # Raw server logs are deliberately not published.
         start()
         anonymous, admin, client, other = [Client(base, stage) for stage in ("anonymous", "admin", "operator", "other-tenant")]

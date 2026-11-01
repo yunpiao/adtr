@@ -9,7 +9,7 @@ from email.message import Message
 import json
 from unittest.mock import patch
 
-from test_simulation_events_integration import Client, safe_response_code, safe_preparation_code, prepare_database, ROLE
+from test_simulation_events_integration import Client, safe_response_code, safe_preparation_code, prepare_database, ROLE, FIXTURE_PREFLIGHT_SQL, SAFE_ERROR_CODES
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -172,6 +172,32 @@ class SimulationFixtureIdentifierContract(unittest.TestCase):
         event_validator = (ROOT / "internal/auth/message_http.go").read_text()
         self.assertIn("if len(s) < 1 || len(s) > 128 {", resource_validator)
         self.assertIn("if len(s) == 0 || len(s) > 128 {", event_validator)
+
+
+class SimulationFixturePrerequisitesContract(unittest.TestCase):
+    def test_both_tenants_have_current_configuration_before_seed(self):
+        source = (ROOT / "scripts/test_simulation_events_integration.py").read_text()
+        self.assertIn("INSERT INTO adtr.resource_tenant_config(tenant_id,max_ad_count,expire_time,uid,name)", source)
+        self.assertIn("SELECT tenant_id,2,extract(epoch FROM clock_timestamp()+interval '30 days')::bigint,uid,name", source)
+        self.assertIn("('default','synthetic-default','Synthetic default tenant'),('other','synthetic-other','Synthetic other tenant')", source)
+        self.assertIn('assert sql(FIXTURE_PREFLIGHT_SQL) == "t"', source)
+        self.assertLess(source.index('assert sql(FIXTURE_PREFLIGHT_SQL)'), source.index('anonymous, admin, client, other ='))
+        self.assertIn("tenant_not_configured", SAFE_ERROR_CODES)
+
+    def test_preflight_matches_actual_authorization_prerequisites(self):
+        actual = (ROOT / "internal/auth/resource_store.go").read_text()
+        for guard in ('fail(409, "tenant_not_configured")', 'config.ExpireTime <= s.now().Unix()',
+                      'count > config.MaxADCount', 'JOIN adtr.resource_group_members',
+                      'JOIN adtr.resource_role_groups'):
+            self.assertIn(guard, actual)
+        for guard in ('c.expire_time>extract(epoch FROM clock_timestamp())+86400',
+                      '<=c.max_ad_count', "bool_and(d.id='simulation-domain-a')",
+                      'JOIN adtr.resource_group_members', 'JOIN adtr.resource_role_groups',
+                      'NOT u.must_change AND NOT u.disabled', "interval '1 day'",
+                      "p.mark='simulation_events' AND p.readable AND p.writeable",
+                      "dp.mark='domains' AND dp.readable", "credential_mode='unconfigured'",
+                      'connection_revision=1 AND credential_revision=1'):
+            self.assertIn(guard, FIXTURE_PREFLIGHT_SQL)
 
 
 if __name__ == '__main__':
