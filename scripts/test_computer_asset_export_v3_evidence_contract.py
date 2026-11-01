@@ -68,7 +68,7 @@ def specimen():
                 'whenCreatedBytes': None if n == 23 else b64(b'00010101000000.0Z' if n == 1 else b'20260101000000.0Z')}})
     raw = json.dumps({'dictionaryVersion': 3, 'objects': objects}).encode()
     source = {'bodyBase64': b64(raw), 'sha256': v.sha(raw), 'dictionaryVersion': 3, 'count': 30, 'taskState': 'succeeded', 'purpose': 'domain.directory_read.v3', 'useState': 'quiesced', 'reason': 'executor_returned', 'dependencies': 0, 'payloadVersion': 1, 'maxAttempts': 1, 'attempt': 1, 'taskName': 'domain.directory_read.v3', 'taskUUID': 'observation1', 'actorId': '2', 'selection': {'domainId': 'domain1', 'revision': '2', 'credentialRevision': '1'}}
-    data = {'format': 1, 'provenance': {'fixtureOnly': True}, 'source': source, 'actorId': 1, 'sensitiveBudget': {'before': {'schemaVersion': 23, 'owner': 7, 'producer': 9, 'observations': 1, 'directoryUses': 1, 'exportTasks': 0}, 'after': {'schemaVersion': 23, 'owner': 10, 'producer': 9, 'observations': 1, 'directoryUses': 1, 'exportTasks': 3}}, 'cases': []}
+    data = {'format': 1, 'provenance': {'fixtureOnly': True}, 'source': source, 'actorId': 1, 'sensitiveBudget': {'before': {'schemaVersion': v.CURRENT_SCHEMA, 'owner': 7, 'producer': 9, 'observations': 1, 'directoryUses': 1, 'exportTasks': 0}, 'after': {'schemaVersion': v.CURRENT_SCHEMA, 'owner': 10, 'producer': 9, 'observations': 1, 'directoryUses': 1, 'exportTasks': 3}}, 'cases': []}
     files = {}
     for index, name in enumerate(('default', 'allMatched', 'empty')):
         task = f'export{index}'

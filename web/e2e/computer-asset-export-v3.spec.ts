@@ -1,3 +1,4 @@
+import { currentApplicationSchema } from "./application-schema";
 import { navigateTo } from "./navigation";
 import { test, expect } from "@playwright/test";
 import { expectSpecializedTaskReadOnly } from "./specialized-task-controls";
@@ -26,7 +27,7 @@ test("computer asset export real source, owner MFA, Worker persistence and XLSX 
   const actorId = (await readJSON(context, "/api/auth/me")).ID as number;
   expect(actorId).not.toBe(fixture.actorId);
   const before = await sensitiveBudget(actorId, fixture.actorId);
-  expect(before).toMatchObject({ schemaVersion: 23, owner: 7, producer: 9, observations: 1, directoryUses: 1, exportTasks: 0 });
+  expect(before).toMatchObject({ schemaVersion: currentApplicationSchema, owner: 7, producer: 9, observations: 1, directoryUses: 1, exportTasks: 0 });
   const initial = await openAssets(page, actorId);
   expect(initial).toMatchObject({ dictionaryVersion: 3, available: true, observationId: fixture.taskUUID, page: { pageSize: 10, total: 23 } });
   await page.locator("summary").filter({ hasText: /^创建时间筛选与排序$/u }).click();

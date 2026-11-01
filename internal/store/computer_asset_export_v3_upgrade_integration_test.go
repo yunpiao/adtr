@@ -63,8 +63,10 @@ func TestSchema23PreservesHistoryAndRegistersNoAutomaticGrant(t *testing.T) {
 	if !reflect.DeepEqual(snapshot, f.snapshot()) || catalog != f.catalogSnapshot() {
 		t.Fatal("repeat migration changed history/catalog")
 	}
+	// Schema23 identifies the historical upgrade entry; Migrate targets the
+	// latest schema, so the resulting version must follow SchemaVersion.
 	var valid bool
-	if err := f.conn.QueryRow(f.ctx, `SELECT version=23 AND NOT EXISTS(SELECT FROM adtr.access_permissions WHERE mark='computer_asset_exports') AND NOT EXISTS(SELECT FROM adtr.tasks WHERE kind='computer_assets.v3.export') AND to_regclass('adtr.computer_asset_export_snapshots') IS NOT NULL AND to_regclass('adtr.computer_asset_export_chunks') IS NOT NULL AND to_regclass('adtr.computer_asset_export_manifests') IS NOT NULL FROM adtr.schema_version`).Scan(&valid); err != nil || !valid {
+	if err := f.conn.QueryRow(f.ctx, `SELECT version=$1 AND NOT EXISTS(SELECT FROM adtr.access_permissions WHERE mark='computer_asset_exports') AND NOT EXISTS(SELECT FROM adtr.tasks WHERE kind='computer_assets.v3.export') AND to_regclass('adtr.computer_asset_export_snapshots') IS NOT NULL AND to_regclass('adtr.computer_asset_export_chunks') IS NOT NULL AND to_regclass('adtr.computer_asset_export_manifests') IS NOT NULL FROM adtr.schema_version`, SchemaVersion).Scan(&valid); err != nil || !valid {
 		t.Fatal("migration invented grant/data or missed artifacts", err)
 	}
 	if err := Ready(f.ctx, f.config); err != nil {
