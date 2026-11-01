@@ -270,8 +270,14 @@ func TestDomainAdmissionIdempotencyEpochAndCancellation(t *testing.T) {
 	if e := f.conn.QueryRow(f.ctx, "SELECT payload::text,result::text,max_attempts FROM adtr.tasks WHERE task_id=$1", task).Scan(&payload, &result, &attempts); e != nil {
 		t.Fatal(e)
 	}
-	if attempts != 1 || strings.Contains(payload, "password") || strings.Contains(payload, "10.20") || strings.Contains(payload, "dc1") {
-		t.Fatal("unsafe task admission")
+	if attempts != 1 {
+		t.Fatal("unsafe task admission: max_attempts must be one")
+	}
+	if e := validateDomainAdmissionPayload(payload, domainAdmissionPins{
+		ConnectionRevision: "1", CredentialRevision: "1",
+		PolicyRevision: f.runtime.Policy().Revision(), DiagnosticGeneration: "2",
+	}); e != nil {
+		t.Fatal("unsafe task admission:", e)
 	}
 	detail := f.callDomain(admin, "/detail?domainId="+id, nil, 200)["connection"].(map[string]any)
 	if detail["latestTaskUUID"] != task || detail["connectionState"] != "testing" || detail["lastDiagnostic"] != nil {
