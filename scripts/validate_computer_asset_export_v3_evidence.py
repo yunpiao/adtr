@@ -4,6 +4,7 @@ The caller supplies trusted checkout/run provenance. Source rows are derived fro
 captured PostgreSQL observation bytes, never from exporter-provided expected rows.
 """
 import argparse
+from application_schema import CURRENT_SCHEMA
 import base64
 from datetime import datetime
 import hashlib
@@ -241,7 +242,7 @@ def validate(data, read_artifact, provenance):
     no_secrets(data)
     budget = data['sensitiveBudget']
     exact(budget, ['before', 'after'], 'sensitive budget fields')
-    require(budget['before'] == {'schemaVersion': 23, 'owner': 7, 'producer': 9, 'observations': 1, 'directoryUses': 1, 'exportTasks': 0}, 'setup schema23 sensitive budget and source ledger')
+    require(budget['before'] == {'schemaVersion': CURRENT_SCHEMA, 'owner': 7, 'producer': 9, 'observations': 1, 'directoryUses': 1, 'exportTasks': 0}, 'setup current application schema sensitive budget and source ledger')
     require(budget['after'] == {**budget['before'], 'owner': 10, 'exportTasks': 3}, 'bounded owner budget; no new collection use')
     require(all(type(n) is int for point in budget.values() for n in point.values()), 'integer ledger counts')
     source = data['source']

@@ -4,6 +4,7 @@ Unit specimens are not acceptance evidence. Shared user helpers are pure and
 are imported without replacing or mutating any of their module globals.
 """
 import argparse
+from application_schema import CURRENT_SCHEMA
 from datetime import datetime
 from pathlib import Path
 import json
@@ -60,7 +61,7 @@ def validate(data, read_artifact, provenance):
     require(type(data['format']) is int and data['format'] == 1 and data['suite'] == 'runningCancel','isolated versioned running suite')
     require(data['provenance'] == provenance,'trusted current commit/tree/run/source provenance')
     no_secrets(data)
-    before = {'schemaVersion':23,'owner':7,'producer':9,'observations':1,'directoryUses':1,'exportTasks':0}
+    before = {'schemaVersion':CURRENT_SCHEMA,'owner':7,'producer':9,'observations':1,'directoryUses':1,'exportTasks':0}
     require(data['sensitiveBudget'] == {'before':before,'after':{**before,'owner':9,'exportTasks':1}} and all(type(n) is int for point in data['sensitiveBudget'].values() for n in point.values()),'fixed sensitive budget without recollection')
     rows = source_rows(data['source'])
     require(len(rows) == 23 and integer(data['actorId'],1) and str(data['actorId']) != data['source']['actorId'],'real source and independent owner')

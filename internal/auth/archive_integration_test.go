@@ -27,7 +27,7 @@ type archiveFixture struct {
 func newArchiveFixture(t *testing.T) *archiveFixture {
 	t.Helper()
 	f := newTaskFixture(t) // Isolated real PostgreSQL; absence is a failure, never a skip.
-	f.exec(ArchivePermissionSchema + taskarchive.Schema + DomainPermissionMarks + OperationAccountPermissionMarks)
+	f.exec(ArchivePermissionSchema + taskarchive.Schema + DomainPermissionMarks + OperationAccountPermissionMarks + SimulationEventPermissionMarks)
 	f.exec("UPDATE adtr.schema_version SET version=$1 WHERE singleton=true", taskarchive.SchemaVersion)
 	f.exec("INSERT INTO adtr.access_permissions(tenant_id,role_id,mark,readable,writeable) VALUES('one',$1,'task_archive',true,true)", narrowResourceRole)
 	engine, err := tasks.New(f.s.database, tasks.ProductionRegistry(), taskAuthorizer(f.s.now), taskarchive.SchemaVersion)
