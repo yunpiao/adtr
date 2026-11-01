@@ -538,6 +538,7 @@ function Workspace({
           <label>
             模拟数据集
             <select
+              aria-label="模拟数据集"
               value={datasetId}
               disabled={busy || !!pending}
               onChange={(e) => {
