@@ -25,7 +25,7 @@ from test_integration import IMAGE
 
 ROOT = Path(__file__).resolve().parents[1]
 API = "/api/simulation/events"
-ROLE = "simulation_e2e_role_00001"
+ROLE = "simulation_e2e_role_0001"  # Custom role IDs are exactly 24 ASCII characters.
 SEED = r'''
 package main
 import (

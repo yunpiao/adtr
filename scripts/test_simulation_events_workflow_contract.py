@@ -9,7 +9,7 @@ from email.message import Message
 import json
 from unittest.mock import patch
 
-from test_simulation_events_integration import Client, safe_response_code, safe_preparation_code, prepare_database
+from test_simulation_events_integration import Client, safe_response_code, safe_preparation_code, prepare_database, ROLE
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -138,6 +138,40 @@ class SimulationDatabasePreparationContract(unittest.TestCase):
                 prepare_database("bootstrap", {})
         with self.assertRaises(ValueError):
             prepare_database("secret", {})
+
+
+class SimulationFixtureIdentifierContract(unittest.TestCase):
+    def test_custom_role_matches_production_validator(self):
+        source = (ROOT / "internal/auth/access_types.go").read_text()
+        validator = source.split("func validRoleID(id string) bool {", 1)[1].split("func validateGrants", 1)[0]
+        # Keep this test-side ASCII parity rule tied to the actual production
+        # validator. Builtin IDs are irrelevant: this fixture is a custom role.
+        self.assertIn("if len(id) != 24 {", validator)
+        self.assertIn("c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '-' || c == '_'", validator)
+        valid_custom_role = lambda value: re.fullmatch(r"[a-zA-Z0-9_-]{24}", value) is not None
+        self.assertTrue(valid_custom_role(ROLE))
+        self.assertEqual(len(ROLE.encode("ascii")), 24)
+        # Actual run41295807399 operator login failed because this old SQL
+        # fixture bypassed create validation, then loadAccessGrants rejected it.
+        old_role = "simulation_e2e_role_00001"
+        self.assertEqual(len(old_role), 25)
+        self.assertFalse(valid_custom_role(old_role))
+        self.assertFalse(valid_custom_role("!" * 24))
+        self.assertFalse(valid_custom_role("é" * 24))
+
+    def test_other_fixture_ids_fit_resource_and_event_boundaries(self):
+        # resource IDs allow 1..128 ASCII alphanumeric/-/_, plus dot; event
+        # HTTP IDs use the stricter set below. Neither requires role's length24.
+        ids = ("default", "other", "simulation-domain-a", "simulation-domain-b",
+               "simulation-group", "simulation-dataset", "synthetic-event",
+               "http-case", "browser-case", "http-operation", "read-only", "race-0", "race-1")
+        for value in ids:
+            with self.subTest(identifier=value):
+                self.assertRegex(value, r"^[a-zA-Z0-9_-]{1,128}$")
+        resource_validator = (ROOT / "internal/auth/resource_types.go").read_text()
+        event_validator = (ROOT / "internal/auth/message_http.go").read_text()
+        self.assertIn("if len(s) < 1 || len(s) > 128 {", resource_validator)
+        self.assertIn("if len(s) == 0 || len(s) > 128 {", event_validator)
 
 
 if __name__ == '__main__':
