@@ -173,7 +173,10 @@ class DirectoryV4ControlsCI(unittest.TestCase):
                        'w.Header().Set("X-Content-Type-Options", "nosniff")']:
             self.assertIn(header, writer)
         self.assertNotIn('x-adtr-user-id', source.lower())
-        self.assertIn('if path == "/me" {\n\t\treturn u, "", false, tx.Commit(ctx)', source)
+        me = source.split('if path == "/me" {', 1)[1].split('if path == "/logout" {', 1)[0]
+        self.assertIn('simulationEventProfileReadable(ctx, tx, u)', me)
+        self.assertIn('u.SimulationEventsReadable = &readable', me)
+        self.assertIn('return u, "", false, tx.Commit(ctx)', me)
         self.assertIn('mux.Handle("/api/auth/", authentication)', Path('cmd/adtr/main.go').read_text())
         fixture = Path('web/e2e/directory-v4-fixture.ts').read_text()
         self.assertIn('actorId !== undefined && response.headers()["x-adtr-user-id"] !== String(actorId)', fixture)

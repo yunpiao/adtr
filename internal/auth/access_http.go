@@ -294,7 +294,7 @@ func (s *Service) handleAccess(ctx context.Context, r *http.Request, path string
 			rt, known := accessRoutes[suffix]
 			results[i] = ok && prefix && known && method == rt.method && grantAllows(grants, rt)
 			if ok && !prefix {
-				results[i] = resourcePathAllowed(method, url, roleID, grants) || taskPathAllowed(method, url, grants) || auditPathAllowed(method, url, grants) || systemPathAllowed(method, url, u.tenant, grants) || schedulePathAllowed(method, url, grants) || archivePathAllowed(method, url, grants) || credentialUsePathAllowed(method, url, roleID, grants) || operationAccountPathAllowed(method, url, grants) || domainSelectionPathAllowed(method, url, grants) || domainAccessPathAllowed(method, url, roleID, grants) || operationalLogPathAllowed(method, url, u.tenant, grants) || directoryPathAllowed(method, url, grants) || directoryCredentialUsePathAllowed(method, url, roleID, grants) || directoryV2PathAllowed(method, url, grants) || directoryV2CredentialUsePathAllowed(method, url, roleID, grants) || directoryV3PathAllowed(method, url, grants) || directoryV3CredentialUsePathAllowed(method, url, roleID, grants) || computerAssetExportV3PathAllowed(method, url, grants) || groupAssetExportV3PathAllowed(method, url, grants) || userAssetExportV3PathAllowed(method, url, grants) || userAssetV3PathAllowed(method, url, grants) || computerAssetsV3PathAllowed(method, url, grants) || groupAssetsV3PathAllowed(method, url, grants) || groupMembersV4PathAllowed(method, url, grants) || directoryV4PathAllowed(method, url, grants) || directoryV4CredentialUsePathAllowed(method, url, roleID, grants) || userAssetsV2PathAllowed(method, url, grants) || messagePathAllowed(method, url, grants)
+				results[i] = resourcePathAllowed(method, url, roleID, grants) || taskPathAllowed(method, url, grants) || auditPathAllowed(method, url, grants) || systemPathAllowed(method, url, u.tenant, grants) || schedulePathAllowed(method, url, grants) || archivePathAllowed(method, url, grants) || credentialUsePathAllowed(method, url, roleID, grants) || operationAccountPathAllowed(method, url, grants) || domainSelectionPathAllowed(method, url, grants) || domainAccessPathAllowed(method, url, roleID, grants) || operationalLogPathAllowed(method, url, u.tenant, grants) || directoryPathAllowed(method, url, grants) || directoryCredentialUsePathAllowed(method, url, roleID, grants) || directoryV2PathAllowed(method, url, grants) || directoryV2CredentialUsePathAllowed(method, url, roleID, grants) || directoryV3PathAllowed(method, url, grants) || directoryV3CredentialUsePathAllowed(method, url, roleID, grants) || computerAssetExportV3PathAllowed(method, url, grants) || groupAssetExportV3PathAllowed(method, url, grants) || userAssetExportV3PathAllowed(method, url, grants) || userAssetV3PathAllowed(method, url, grants) || computerAssetsV3PathAllowed(method, url, grants) || groupAssetsV3PathAllowed(method, url, grants) || groupMembersV4PathAllowed(method, url, grants) || directoryV4PathAllowed(method, url, grants) || directoryV4CredentialUsePathAllowed(method, url, roleID, grants) || userAssetsV2PathAllowed(method, url, grants) || messagePathAllowed(method, url, grants) || simulationEventPathAllowed(method, url, grants)
 			}
 		}
 		value = map[string]any{"results": results}
@@ -319,6 +319,10 @@ func loadAccessGrants(ctx context.Context, tx pgx.Tx, tenant, id string) (map[st
 	out := map[string]AccessAuth{}
 	if id == "platform_admin" {
 		for _, m := range accessMarks {
+			// Synthetic capability is explicitly granted, never inherited by builtins.
+			if m == "simulation_events" {
+				continue
+			}
 			out[m] = AccessAuth{true, true}
 		}
 		return out, nil
@@ -353,7 +357,7 @@ func loadAccessGrants(ctx context.Context, tx pgx.Tx, tenant, id string) (map[st
 }
 func permissionNodes(grants map[string]AccessAuth, onlyReadable bool) []AccessPermission {
 	nodes := make([]AccessPermission, 0, len(accessMarks))
-	names := map[string]string{"users": "Users", "roles": "Roles", "permissions": "Permissions", "tasks": "Tasks", "audit": "Audit", "audit_exports": "Audit exports", "system": "System", "schedules": "Schedules", "task_archive": "Task archive", "domains": "Domain connections", "operation_accounts": "Operation accounts", "system_logs": "Operational logs", "directory_assets": "Directory assets", "user_asset_exports": "User asset exports", "group_asset_exports": "Group asset exports", "computer_asset_exports": "Computer asset exports"}
+	names := map[string]string{"users": "Users", "roles": "Roles", "permissions": "Permissions", "tasks": "Tasks", "audit": "Audit", "audit_exports": "Audit exports", "system": "System", "schedules": "Schedules", "task_archive": "Task archive", "domains": "Domain connections", "operation_accounts": "Operation accounts", "system_logs": "Operational logs", "directory_assets": "Directory assets", "user_asset_exports": "User asset exports", "group_asset_exports": "Group asset exports", "computer_asset_exports": "Computer asset exports", "simulation_events": "Simulated security events"}
 	keys := make([]string, 0, len(accessRoutes))
 	for p := range accessRoutes {
 		keys = append(keys, p)
@@ -361,10 +365,23 @@ func permissionNodes(grants map[string]AccessAuth, onlyReadable bool) []AccessPe
 	sort.Strings(keys)
 	for _, mark := range accessMarks {
 		a := grants[mark]
+		if mark == "simulation_events" && !a.Readable {
+			continue
+		}
 		if onlyReadable && !a.Readable {
 			continue
 		}
 		paths := []AccessPath{}
+		if mark == "simulation_events" {
+			for _, suffix := range []string{"/datasets", "/query", "/detail", "/transition", "/operation"} {
+				mode := "readable"
+				if suffix == "/transition" {
+					mode = "writeable"
+				}
+				method := simulationEventRoutes[suffix]
+				paths = append(paths, AccessPath{method + " " + suffix, method + " " + simulationEventPath + suffix, mode})
+			}
+		}
 		for _, p := range keys {
 			r := accessRoutes[p]
 			if r.mark != mark {

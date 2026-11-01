@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"github.com/yunpiao/adtr/internal/schemaversion"
+	"github.com/yunpiao/adtr/internal/simulationevents"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/yunpiao/adtr/internal/audit"
@@ -245,6 +246,12 @@ func migrateTo(ctx context.Context, config *pgx.ConnConfig, target int) error {
 			return errors.New("computer asset export v3 migration failed")
 		}
 		version = 23
+	}
+	if version < 24 && target >= 24 {
+		if _, err := tx.Exec(ctx, auth.SimulationEventPermissionSchema+simulationevents.SchemaSQL+simulationevents.ImmutableSchemaSQL); err != nil {
+			return errors.New("simulation events schema migration failed")
+		}
+		version = 24
 	}
 	if _, err := tx.Exec(ctx, "UPDATE adtr.schema_version SET version=$1 WHERE singleton=true", version); err != nil {
 		return errors.New("schema version update failed")
