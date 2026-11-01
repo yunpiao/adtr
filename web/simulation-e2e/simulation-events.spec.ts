@@ -36,6 +36,9 @@ async function openWorkspace(page: Page) {
     exact: true,
   });
   await expect(workspace).toContainText("SIMULATED");
+  // Capture only the authenticated synthetic workspace, before a selector
+  // failure can prevent useful visual evidence. No auth inputs or traces.
+  await workspace.screenshot({ path: resolve(evidence, "pre-dataset.png") });
   await page
     .getByLabel("模拟数据集", { exact: true })
     .selectOption("simulation-dataset");

@@ -152,6 +152,18 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 describe("simulation events HTTP workspace", () => {
+  it("keeps the dataset selector accessible name exact after options load and selection changes", async () => {
+    render(<SimulationEventsWorkspace {...props()} />);
+    await screen.findByRole("option", { name: "fixture-a (dataset-a)" });
+    const selector = screen.getByLabelText("模拟数据集", { exact: true });
+    expect(selector).toHaveAttribute("aria-label", "模拟数据集");
+    expect(selector).toHaveAccessibleName("模拟数据集");
+    expect(screen.getByRole("combobox", { name: /^模拟数据集$/ })).toBe(
+      selector,
+    );
+    fireEvent.change(selector, { target: { value: "dataset-a" } });
+    expect(selector).toHaveAccessibleName("模拟数据集");
+  });
   it("defaults deny, never fetches or grants admin bypass", () => {
     render(
       <SimulationEventsWorkspace
