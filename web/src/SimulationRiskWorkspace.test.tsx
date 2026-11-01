@@ -152,6 +152,14 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 describe("simulation risk workspace", () => {
+  it("keeps the dataset select exact accessible name after options load", async () => {
+    render(<Workspace {...props()} />);
+    await screen.findByRole("option", { name: "fixture-a (dataset-a)" });
+    const select = screen.getByRole("combobox", { name: "风险数据集" });
+    expect(select).toHaveAccessibleName("风险数据集");
+    expect(select).toHaveAttribute("aria-label", "风险数据集");
+    expect(screen.getByLabelText("风险数据集", { exact: true })).toBe(select);
+  });
   it("defaults deny even administrator and missing grants", () => {
     render(
       <Workspace

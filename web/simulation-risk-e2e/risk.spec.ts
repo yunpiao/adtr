@@ -19,7 +19,7 @@ test.use({
 });
 const api = "/api/simulation/risk";
 const evidence = resolve("../artifacts/simulation-risk");
-async function openWorkspace(page: Page) {
+async function openWorkspace(page: Page, capturePrerequisite = false) {
   await page.goto("/#simulation-risk");
   await page
     .getByRole("radio", {
@@ -36,6 +36,13 @@ async function openWorkspace(page: Page) {
   });
   await expect(workspace).toContainText("SIMULATED");
   await expect(workspace).toContainText("illustrative-event-risk-v1");
+  if (capturePrerequisite) {
+    // Auth has completed; capture only the explicitly synthetic workspace.
+    // Keep this before dataset selection so selector failures retain safe evidence.
+    await workspace.screenshot({
+      path: resolve(evidence, "SIMULATED-risk-pre-dataset.png"),
+    });
+  }
   await page
     .getByLabel("风险数据集", { exact: true })
     .selectOption("simulation-dataset");
@@ -62,7 +69,7 @@ test("SIMULATED risk: real mapping, reset, duplicate/lost response, same receipt
   await expect(
     page.getByRole("heading", { name: "登录账户", exact: true }),
   ).toBeHidden();
-  const result = await openWorkspace(page);
+  const result = await openWorkspace(page, true);
   await expect(result).toContainText("模拟分数：15");
   await expect(result).toContainText("版本：1");
   for (const text of [
