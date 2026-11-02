@@ -26,7 +26,7 @@ type scheduleFixture struct {
 func newScheduleFixture(t *testing.T) *scheduleFixture {
 	t.Helper()
 	f := newTaskFixture(t) // Real isolated PostgreSQL; unavailable means failure.
-	f.exec(SchedulePermissionSchema + schedules.Schema + DomainPermissionMarks + OperationAccountPermissionMarks + SimulationEventPermissionMarks)
+	f.exec(SchedulePermissionSchema + schedules.Schema + DomainPermissionMarks + OperationAccountPermissionMarks + SimulationEventPermissionMarks + SimulationRiskPermissionMarks)
 	f.exec("UPDATE adtr.schema_version SET version=$1 WHERE singleton=true", schedules.SchemaVersion)
 	f.exec("INSERT INTO adtr.access_permissions(tenant_id,role_id,mark,readable,writeable) VALUES('one',$1,'schedules',true,true)", narrowResourceRole)
 	e, err := tasks.New(f.s.database, tasks.ProductionRegistry(), taskAuthorizer(f.s.now), schedules.SchemaVersion)

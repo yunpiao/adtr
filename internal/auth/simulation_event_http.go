@@ -17,6 +17,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/yunpiao/adtr/internal/dbadmission"
+	"github.com/yunpiao/adtr/internal/schemaversion"
 	"github.com/yunpiao/adtr/internal/securityevents"
 	"github.com/yunpiao/adtr/internal/simulationevents"
 	"github.com/yunpiao/adtr/internal/tasks"
@@ -230,8 +231,8 @@ func (s *Service) handleSimulationEvent(ctx context.Context, r *http.Request, pa
 		return nil, err
 	}
 	defer tx.Rollback(ctx)
-	// This simulation slice requires migration 24, never legacy tables alone.
-	if err = tasks.CheckSchemaTx(ctx, tx, 24); err != nil {
+	// Hold the application-wide schema gate before acquiring identity locks.
+	if err = tasks.CheckSchemaTx(ctx, tx, schemaversion.Current); err != nil {
 		if errors.Is(err, tasks.ErrSchemaIncompatible) {
 			return nil, fail(503, "schema_incompatible")
 		}
@@ -295,7 +296,7 @@ func simulationEventProfileReadable(ctx context.Context, tx pgx.Tx, actor User) 
 	if err := tx.QueryRow(ctx, "SELECT version FROM adtr.schema_version WHERE singleton").Scan(&version); err != nil {
 		return false, err
 	}
-	if version != 24 {
+	if !simulationEventProfileSchemaAvailable(version) {
 		return false, nil
 	}
 	var role string
@@ -308,3 +309,7 @@ func simulationEventProfileReadable(ctx context.Context, tx pgx.Tx, actor User) 
 	}
 	return grants["simulation_events"].Readable, nil
 }
+
+// The navigation hint is safe on the original event schema and the additive
+// risk schema only. Unknown future versions must not advertise capabilities.
+func simulationEventProfileSchemaAvailable(version int) bool { return version == 24 || version == 25 }

@@ -40,6 +40,7 @@ type Service struct {
 }
 type User struct {
 	// Navigation hint only, populated only by authenticated login and /me.
+	SimulationRiskReadable                      *bool     `json:"simulationRiskReadable,omitempty"`
 	SimulationEventsReadable                    *bool     `json:"simulationEventsReadable,omitempty"`
 	ID                                          int64     `json:"ID"`
 	Username                                    string    `json:"username"`
@@ -321,6 +322,11 @@ func (s *Service) handle(ctx context.Context, r *http.Request, path string, in r
 			return nil, "", false, err
 		}
 		u.SimulationEventsReadable = &readable
+		riskReadable, err := simulationRiskProfileReadable(ctx, tx, u)
+		if err != nil {
+			return nil, "", false, err
+		}
+		u.SimulationRiskReadable = &riskReadable
 		if err = tx.Commit(ctx); err != nil {
 			return nil, "", false, err
 		}
@@ -372,6 +378,11 @@ func (s *Service) handle(ctx context.Context, r *http.Request, path string, in r
 			return nil, "", false, err
 		}
 		u.SimulationEventsReadable = &readable
+		riskReadable, err := simulationRiskProfileReadable(ctx, tx, u)
+		if err != nil {
+			return nil, "", false, err
+		}
+		u.SimulationRiskReadable = &riskReadable
 		return u, "", false, tx.Commit(ctx)
 	}
 	if path == "/logout" {

@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/yunpiao/adtr/internal/schemaversion"
 	"github.com/yunpiao/adtr/internal/securityevents"
 	"github.com/yunpiao/adtr/internal/simulationevents"
 )
@@ -27,7 +28,7 @@ func (w *simulationLostResponse) Write([]byte) (int, error) { return 0, io.ErrCl
 func TestSimulationEventHTTPAuthorizationRecoveryAndAuditAtomicity(t *testing.T) {
 	f := newTaskFixture(t)
 	f.exec(SimulationEventPermissionSchema + simulationevents.SchemaSQL + simulationevents.ImmutableSchemaSQL)
-	f.exec("UPDATE adtr.schema_version SET version=24")
+	f.exec("UPDATE adtr.schema_version SET version=$1", schemaversion.Current)
 	f.exec("INSERT INTO adtr.access_permissions(tenant_id,role_id,mark,readable,writeable) VALUES('one',$1,'simulation_events',true,true)", narrowResourceRole)
 	f.seedGroup("one", "simulation-group", narrowResourceRole, "domain-a")
 	scope := securityevents.Scope{Tenant: "one", Domain: "domain-a", Read: true, Manage: true}
