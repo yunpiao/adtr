@@ -3,6 +3,7 @@ export interface Profile {
   simulationEventsReadable?: boolean;
   simulationRiskReadable?: boolean;
   simulationDetectionReadable?: boolean;
+  simulationDetectionSchedulesReadable?: boolean;
   ID: number;
   username: string;
   role: string;

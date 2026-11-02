@@ -6,7 +6,9 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"github.com/yunpiao/adtr/internal/schemaversion"
 	"github.com/yunpiao/adtr/internal/simulationdetection"
+	"github.com/yunpiao/adtr/internal/simulationdetectionschedules"
 	"github.com/yunpiao/adtr/internal/simulationevents"
 	"github.com/yunpiao/adtr/internal/simulationrisk"
 	"github.com/yunpiao/adtr/internal/tasks"
@@ -22,11 +24,12 @@ func TestSimulationDetectionHTTPAuthorizationRecoveryAndAuditAtomicity(t *testin
 	f.exec(SimulationEventPermissionSchema + simulationevents.SchemaSQL + simulationevents.ImmutableSchemaSQL)
 	f.exec(SimulationRiskPermissionSchema + simulationrisk.SchemaSQL + simulationrisk.ImmutableSchemaSQL)
 	f.exec(SimulationDetectionPermissionSchema + simulationdetection.SchemaSQL + simulationdetection.ImmutableSchemaSQL)
-	f.exec("UPDATE adtr.schema_version SET version=26")
+	f.exec(SimulationDetectionSchedulesPermissionSchema + simulationdetectionschedules.SchemaSQL + simulationdetectionschedules.ImmutableSchemaSQL)
+	f.exec("UPDATE adtr.schema_version SET version=$1", schemaversion.Current)
 	f.exec("INSERT INTO adtr.access_permissions(tenant_id,role_id,mark,readable,writeable) VALUES('one',$1,'simulation_detection',true,true)", narrowResourceRole)
 	f.seedGroup("one", "detection-group", narrowResourceRole, "domain-a")
 	authorizer := simulationDetectionTaskAuthorizer(f.s.now)
-	engine, err := tasks.New(f.s.database, tasks.ProductionRegistry(simulationdetection.NewKind(authorizer)), authorizer, 26)
+	engine, err := tasks.New(f.s.database, tasks.ProductionRegistry(simulationdetection.NewKind(authorizer)), authorizer, schemaversion.Current)
 	if err != nil {
 		t.Fatal(err)
 	}

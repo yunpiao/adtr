@@ -25,6 +25,7 @@ import MessagesWorkspace from "./MessagesWorkspace";
 import SimulationEventsWorkspace from "./SimulationEventsWorkspace";
 import SimulationRiskWorkspace from "./SimulationRiskWorkspace";
 import SimulationDetectionWorkspace from "./SimulationDetectionWorkspace";
+import SimulationDetectionSchedulesWorkspace from "./SimulationDetectionSchedulesWorkspace";
 import SimulationDashboardWorkspace from "./SimulationDashboardWorkspace";
 import { forgetAuditSession } from "./audit-intent";
 import SystemWorkspace from "./SystemWorkspace";
@@ -77,6 +78,7 @@ function pageFromHash(): Page {
       "simulation-events",
       "simulation-risk",
       "simulation-detection",
+      "simulation-detection-schedules",
       "simulation-dashboard",
       "credential-use",
       "directory",
@@ -458,6 +460,7 @@ export default function App() {
       page === "simulation-events" ||
       page === "simulation-risk" ||
       page === "simulation-detection" ||
+      page === "simulation-detection-schedules" ||
       page === "simulation-dashboard" ||
       page === "system" ||
       page === "operational-logs" ||
@@ -667,6 +670,15 @@ export default function App() {
                     )}
                     {active === "simulation-detection" && (
                       <SimulationDetectionWorkspace
+                        profile={profile}
+                        sessionChanged={() => {
+                          setPage("account");
+                          refresh();
+                        }}
+                      />
+                    )}
+                    {active === "simulation-detection-schedules" && (
+                      <SimulationDetectionSchedulesWorkspace
                         profile={profile}
                         sessionChanged={() => {
                           setPage("account");
