@@ -15,6 +15,7 @@ export type SocPage =
   | "simulation-events"
   | "simulation-risk"
   | "simulation-detection"
+  | "simulation-dashboard"
   | "system"
   | "operational-logs"
   | "domains"
@@ -81,6 +82,7 @@ export const SOC_WORKSPACE_LABELS: Record<SocPage, string> = {
   "simulation-events": "合成安全事件",
   "simulation-risk": "合成风险分析",
   "simulation-detection": "合成检测任务",
+  "simulation-dashboard": "合成态势总览",
   system: "系统健康",
   "operational-logs": "运行日志与诊断包",
   domains: "域连接",
@@ -349,6 +351,13 @@ export default function SocNavigation({
             {button("tasks", "tasks")}
             {button("audit", "audit")}
             {button("messages", "audit")}
+            {profile.simulationEventsReadable === true &&
+              profile.simulationRiskReadable === true &&
+              profile.simulationDetectionReadable === true &&
+              !gated &&
+              !blocked &&
+              !forced &&
+              button("simulation-dashboard", "audit")}
             {profile.simulationDetectionReadable === true &&
               !gated &&
               !blocked &&

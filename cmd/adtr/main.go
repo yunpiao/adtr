@@ -276,6 +276,12 @@ func run() (runErr error) {
 			operationalHandler := authentication.OperationalLogsHandler(taskEngine)
 			mux.Handle("/api/system/logs", operationalHandler)
 			mux.Handle("/api/system/logs/", operationalHandler)
+			simulationDashboardHandler := authentication.SimulationDashboardHandler(
+				os.Getenv("ADTR_SIMULATION_DASHBOARD_ENABLED") == "true",
+				os.Getenv("ADTR_SIMULATION_EVENTS_ENABLED") == "true",
+				os.Getenv("ADTR_SIMULATION_RISK_ENABLED") == "true", simulationDetectionEnabled)
+			mux.Handle("/api/simulation/dashboard", simulationDashboardHandler)
+			mux.Handle("/api/simulation/dashboard/", simulationDashboardHandler)
 			simulationDetectionHandler := authentication.SimulationDetectionHandler(simulationDetectionEnabled, taskEngine)
 			mux.Handle("/api/simulation/detection", simulationDetectionHandler)
 			mux.Handle("/api/simulation/detection/", simulationDetectionHandler)
