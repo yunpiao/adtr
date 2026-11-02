@@ -5,6 +5,7 @@ package auth
 import (
 	"bytes"
 	"encoding/json"
+	"github.com/yunpiao/adtr/internal/simulationdetectionexceptions"
 	"github.com/yunpiao/adtr/internal/simulationlabels"
 	"github.com/yunpiao/adtr/internal/simulationrulecatalog"
 	"io"
@@ -39,6 +40,7 @@ func TestSimulationEventHTTPAuthorizationRecoveryAndAuditAtomicity(t *testing.T)
 	f.exec(SimulationDetectionSchedulesPermissionSchema + simulationdetectionschedules.SchemaSQL + simulationdetectionschedules.ImmutableSchemaSQL)
 	f.exec(SimulationLabelsPermissionSchema + simulationlabels.SchemaSQL + simulationlabels.ImmutableSchemaSQL)
 	f.exec(SimulationRuleCatalogPermissionSchema + simulationrulecatalog.SchemaSQL + simulationrulecatalog.ImmutableSchemaSQL)
+	f.exec(SimulationDetectionExceptionsPermissionSchema + simulationdetectionexceptions.SchemaSQL + simulationdetectionexceptions.ImmutableSchemaSQL)
 	f.exec("UPDATE adtr.schema_version SET version=$1", schemaversion.Current)
 	f.exec("INSERT INTO adtr.access_permissions(tenant_id,role_id,mark,readable,writeable) VALUES('one',$1,'simulation_events',true,true)", narrowResourceRole)
 	f.seedGroup("one", "simulation-group", narrowResourceRole, "domain-a")

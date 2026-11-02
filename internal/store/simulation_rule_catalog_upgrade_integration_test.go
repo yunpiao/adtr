@@ -24,7 +24,7 @@ func TestSchema29UpgradePreservesHistoryAndGrants(t *testing.T) {
 	if Ready(f.ctx, f.config) == nil {
 		t.Fatal("schema28 accepted by current binary")
 	}
-	if err := Migrate(f.ctx, f.config); err != nil {
+	if err := migrateTo(f.ctx, f.config, 29); err != nil {
 		t.Fatal(err)
 	}
 	after := f.snapshot()
@@ -37,12 +37,12 @@ func TestSchema29UpgradePreservesHistoryAndGrants(t *testing.T) {
 	if err := f.conn.QueryRow(f.ctx, `SELECT version=29 AND NOT EXISTS(SELECT FROM adtr.access_permissions WHERE mark IN ('simulation_rule_catalog','simulation_rule_catalog_publish')) AND to_regclass('adtr.simulation_rule_catalog_heads') IS NOT NULL AND to_regclass('adtr.simulation_rule_catalog_receipts') IS NOT NULL FROM adtr.schema_version`).Scan(&valid); err != nil || !valid {
 		t.Fatal("migration missing independent schema or invented grant", err)
 	}
-	if err := Ready(f.ctx, f.config); err != nil {
-		t.Fatal("current schema29 rejected")
+	if err := Ready(f.ctx, f.config); err == nil {
+		t.Fatal("historical schema29 accepted by current binary")
 	}
 	catalog := f.catalogSnapshot()
 	snapshot := f.snapshot()
-	if err := Migrate(f.ctx, f.config); err != nil {
+	if err := migrateTo(f.ctx, f.config, 29); err != nil {
 		t.Fatal(err)
 	}
 	if catalog != f.catalogSnapshot() || !reflect.DeepEqual(snapshot, f.snapshot()) {
@@ -57,7 +57,7 @@ func TestSchema29FailureRollsBackPermissionAndTables(t *testing.T) {
 	f.exec(`CREATE TABLE adtr.simulation_rule_catalog_receipts (sentinel text)`)
 	before := f.snapshot()
 	catalog := f.catalogSnapshot()
-	if err := Migrate(f.ctx, f.config); err == nil {
+	if err := migrateTo(f.ctx, f.config, 29); err == nil {
 		t.Fatal("collision migration unexpectedly succeeded")
 	}
 	if !reflect.DeepEqual(before, f.snapshot()) || catalog != f.catalogSnapshot() {
@@ -75,15 +75,15 @@ func TestSchema29ConcurrentUpgrade(t *testing.T) {
 	f := newSimulationRuleCatalogUpgradeFixture(t)
 	results := make(chan error, 2)
 	for i := 0; i < 2; i++ {
-		go func() { results <- Migrate(f.ctx, f.config) }()
+		go func() { results <- migrateTo(f.ctx, f.config, 29) }()
 	}
 	for i := 0; i < 2; i++ {
 		if err := <-results; err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := Ready(f.ctx, f.config); err != nil {
-		t.Fatal(err)
+	if err := Ready(f.ctx, f.config); err == nil {
+		t.Fatal("historical schema29 accepted by current binary")
 	}
 	var grants int
 	if err := f.conn.QueryRow(f.ctx, "SELECT count(*) FROM adtr.access_permissions WHERE mark IN ('simulation_rule_catalog','simulation_rule_catalog_publish')").Scan(&grants); err != nil || grants != 0 {

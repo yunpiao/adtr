@@ -127,12 +127,12 @@ func TestSimulationDetectionSchedulesErrorCodes(t *testing.T) {
 func TestSimulationDetectionSchedulesPermissionMigrationDefaultDeny(t *testing.T) {
 	sql := SimulationDetectionSchedulesPermissionSchema
 	for _, mark := range accessMarks {
-		if mark == "simulation_labels" || mark == "simulation_rule_catalog" || mark == "simulation_rule_catalog_publish" {
+		if mark == "simulation_labels" || mark == "simulation_rule_catalog" || mark == "simulation_rule_catalog_publish" || mark == "simulation_detection_exceptions" {
 			if strings.Contains(sql, "'"+mark+"'") {
 				t.Fatal("historical migration27 gained future mark")
 			}
-			if !strings.Contains(SimulationRuleCatalogPermissionSchema, "'"+mark+"'") {
-				t.Fatal("migration29 missing current mark")
+			if !strings.Contains(SimulationDetectionExceptionsPermissionSchema, "'"+mark+"'") {
+				t.Fatal("migration30 missing current mark")
 			}
 			continue
 		}
