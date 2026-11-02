@@ -566,3 +566,67 @@ describe("synthetic event navigation hint", () => {
     ).not.toBeInTheDocument();
   });
 });
+
+describe("synthetic detection scheduling navigation", () => {
+  it("requires both explicit hints and hides revoked or missing hints", () => {
+    const fetcher = vi.fn();
+    vi.stubGlobal("fetch", fetcher);
+    const view = render(
+      <Navigation actor={{ ...profile, simulationDetectionReadable: true }} />,
+    );
+    expect(
+      screen.queryByRole("button", { name: "模拟检测计划" }),
+    ).not.toBeInTheDocument();
+    view.rerender(
+      <Navigation
+        actor={{ ...profile, simulationDetectionSchedulesReadable: true }}
+      />,
+    );
+    expect(
+      screen.queryByRole("button", { name: "模拟检测计划" }),
+    ).not.toBeInTheDocument();
+    view.rerender(
+      <Navigation
+        actor={{
+          ...profile,
+          simulationDetectionReadable: true,
+          simulationDetectionSchedulesReadable: true,
+        }}
+      />,
+    );
+    expect(
+      screen.getByRole("button", { name: "模拟检测计划" }),
+    ).toBeInTheDocument();
+    view.rerender(
+      <Navigation
+        actor={{
+          ...profile,
+          simulationDetectionReadable: true,
+          simulationDetectionSchedulesReadable: false,
+        }}
+      />,
+    );
+    expect(
+      screen.queryByRole("button", { name: "模拟检测计划" }),
+    ).not.toBeInTheDocument();
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+  it.each(["gated", "blocked", "forced"] as const)(
+    "hides a granted scheduling hint when %s",
+    (state) => {
+      render(
+        <Navigation
+          actor={{
+            ...profile,
+            simulationDetectionReadable: true,
+            simulationDetectionSchedulesReadable: true,
+          }}
+          {...{ [state]: true }}
+        />,
+      );
+      expect(
+        screen.queryByRole("button", { name: "模拟检测计划" }),
+      ).not.toBeInTheDocument();
+    },
+  );
+});

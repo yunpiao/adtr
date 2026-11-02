@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/yunpiao/adtr/internal/dbadmission"
 	"github.com/yunpiao/adtr/internal/detectionrules"
+	"github.com/yunpiao/adtr/internal/schemaversion"
 	"github.com/yunpiao/adtr/internal/securityevents"
 	"github.com/yunpiao/adtr/internal/simulationdetection"
 	"github.com/yunpiao/adtr/internal/simulationevents"
@@ -264,7 +265,7 @@ func (s *Service) handleSimulationDetection(ctx context.Context, r *http.Request
 		return nil, err
 	}
 	defer tx.Rollback(ctx)
-	if err = tasks.CheckSchemaTx(ctx, tx, 26); err != nil {
+	if err = tasks.CheckSchemaTx(ctx, tx, schemaversion.Current); err != nil {
 		if errors.Is(err, tasks.ErrSchemaIncompatible) {
 			return nil, fail(503, "schema_incompatible")
 		}

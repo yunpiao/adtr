@@ -280,7 +280,7 @@ func simulationRiskProfileReadable(ctx context.Context, tx pgx.Tx, actor User) (
 	if err := tx.QueryRow(ctx, "SELECT version FROM adtr.schema_version WHERE singleton").Scan(&version); err != nil {
 		return false, err
 	}
-	if version != 25 && version != 26 {
+	if version != 25 && version != 26 && version != 27 {
 		return false, nil
 	}
 	var role string

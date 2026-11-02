@@ -131,7 +131,17 @@ func TestSimulationDetectionFailClosed(t *testing.T) {
 }
 func TestSimulationDetectionPermissionMigrationPreservesBoundaries(t *testing.T) {
 	sql := SimulationDetectionPermissionSchema
+	// Migration 26 is immutable history: migration 27 introduces scheduling.
 	for _, mark := range accessMarks {
+		if mark == "simulation_detection_schedules" {
+			if strings.Contains(sql, "'"+mark+"'") {
+				t.Fatal("historical migration gained future capability")
+			}
+			if !strings.Contains(SimulationDetectionSchedulesPermissionSchema, "'"+mark+"'") {
+				t.Fatal("current migration missing schedule mark")
+			}
+			continue
+		}
 		if !strings.Contains(sql, "'"+mark+"'") {
 			t.Fatal("missing mark", mark)
 		}

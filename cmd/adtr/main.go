@@ -27,6 +27,7 @@ import (
 	app "github.com/yunpiao/adtr/internal/runtime"
 	"github.com/yunpiao/adtr/internal/schedules"
 	"github.com/yunpiao/adtr/internal/simulationdetection"
+	"github.com/yunpiao/adtr/internal/simulationdetectionschedules"
 	"github.com/yunpiao/adtr/internal/store"
 	"github.com/yunpiao/adtr/internal/systemhealth"
 	"github.com/yunpiao/adtr/internal/taskarchive"
@@ -99,6 +100,8 @@ func run() (runErr error) {
 		return store.Migrate(migrationCtx, cfg.Database)
 	}
 	simulationDetectionEnabled := os.Getenv("ADTR_SIMULATION_DETECTION_ENABLED") == "true"
+	simulationDetectionSchedulesEnabled := os.Getenv("ADTR_SIMULATION_DETECTION_SCHEDULES_ENABLED") == "true"
+	var detectionScheduleEngine *simulationdetectionschedules.Engine
 	var operationAccountStore *operationaccounts.Store
 	var domainStore *domains.Store
 	var taskEngine *tasks.Engine
@@ -123,13 +126,22 @@ func run() (runErr error) {
 			return fmt.Errorf("system health configuration failed")
 		}
 		kinds := []tasks.Kind{domainStore.ComputerAssetExportV3Kind(), domainStore.GroupAssetExportV3Kind(), domainStore.UserAssetExportV3Kind(), audit.Kind(), domainStore.Kind(), domainStore.AccountKind(), domainStore.DirectoryKind(), domainStore.DirectoryV2Kind(), domainStore.DirectoryV3Kind(), domainStore.DirectoryV4Kind(), operationallogs.Kind()}
-		taskAuthorizer := auth.NewSimulationDetectionTaskAuthorizer(simulationDetectionEnabled)
+		taskAuthorizer := auth.NewSimulationDetectionSchedulesTaskAuthorizer(simulationDetectionEnabled, simulationDetectionSchedulesEnabled)
 		if simulationDetectionEnabled {
 			kinds = append(kinds, simulationdetection.NewKind(taskAuthorizer))
+		}
+		if simulationDetectionEnabled && simulationDetectionSchedulesEnabled {
+			kinds = append(kinds, simulationdetectionschedules.NewKind(taskAuthorizer))
 		}
 		taskEngine, err = tasks.New(cfg.Database, tasks.ProductionRegistry(kinds...), taskAuthorizer, store.SchemaVersion)
 		if err != nil {
 			return fmt.Errorf("task engine configuration failed")
+		}
+		if simulationDetectionEnabled && simulationDetectionSchedulesEnabled {
+			detectionScheduleEngine, err = simulationdetectionschedules.New(cfg.Database, taskEngine, taskAuthorizer)
+			if err != nil {
+				return fmt.Errorf("simulation detection scheduler configuration failed")
+			}
 		}
 	}
 	if *mode == "api" || *mode == "worker" {
@@ -285,6 +297,9 @@ func run() (runErr error) {
 			simulationDetectionHandler := authentication.SimulationDetectionHandler(simulationDetectionEnabled, taskEngine)
 			mux.Handle("/api/simulation/detection", simulationDetectionHandler)
 			mux.Handle("/api/simulation/detection/", simulationDetectionHandler)
+			detectionSchedulesHandler := authentication.SimulationDetectionSchedulesHandler(simulationDetectionEnabled, simulationDetectionSchedulesEnabled, taskEngine)
+			mux.Handle("/api/simulation/detection-schedules", detectionSchedulesHandler)
+			mux.Handle("/api/simulation/detection-schedules/", detectionSchedulesHandler)
 			simulationRiskHandler := authentication.SimulationRiskHandler(os.Getenv("ADTR_SIMULATION_RISK_ENABLED") == "true")
 			mux.Handle("/api/simulation/risk", simulationRiskHandler)
 			mux.Handle("/api/simulation/risk/", simulationRiskHandler)
@@ -346,6 +361,15 @@ func run() (runErr error) {
 		}
 		schedulerDone := make(chan struct{})
 		go func() { runScheduleLoop(ctx, scheduleEngine, workerOwner, activityRecorder); close(schedulerDone) }()
+		detectionSchedulerDone := make(chan struct{})
+		if detectionScheduleEngine != nil {
+			go func() {
+				defer close(detectionSchedulerDone)
+				runSimulationDetectionScheduleLoop(ctx, detectionScheduleEngine.Tick, func(error) { fmt.Fprintln(os.Stderr, "simulation detection schedule admission cycle failed") })
+			}()
+		} else {
+			close(detectionSchedulerDone)
+		}
 		maintenanceDone := make(chan struct{})
 		reconcileUses := func(c context.Context) error {
 			return reconcileCredentialReservationsV4(c, func(pass context.Context) error {
@@ -379,6 +403,7 @@ func run() (runErr error) {
 		cancelRoot()
 		workerErr = <-result
 		<-schedulerDone
+		<-detectionSchedulerDone
 		<-maintenanceDone
 		messageErr := <-messageDone
 		workerErr = errors.Join(workerErr, messageErr, <-bulkDone)
