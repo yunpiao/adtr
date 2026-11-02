@@ -119,7 +119,16 @@ func TestSimulationDNSIPHTTPWorkerDownloadAuthorityAndRevocation(t *testing.T) {
 	if listed["total"] != float64(2) || len(listed["rows"].([]any)) != 1 {
 		t.Fatal("page", listed)
 	}
-	call(author, "/records?domainId=example.test&observationId=fixed&keyword=&family=&offset=0&limit=1", nil, 404)
+	// DNS names are not resource IDs: reject their syntax before authorization.
+	invalidScope := object(call(author, "/records?domainId=example.test&observationId=fixed&keyword=&family=&offset=0&limit=1", nil, 400))
+	if invalidScope["error"] != "invalid_input" {
+		t.Fatal("DNS name accepted as resource scope", invalidScope)
+	}
+	// A syntactically valid but unauthorized resource must remain hidden.
+	unauthorizedScope := object(call(author, "/records?domainId=domain-b&observationId=fixed&keyword=&family=&offset=0&limit=1", nil, 404))
+	if unauthorizedScope["error"] != "not_found" {
+		t.Fatal("unauthorized resource scope exposed", unauthorizedScope)
+	}
 	input := map[string]any{"domainId": "domain-a", "observationId": "fixed", "observationHash": obs.Hash, "keyword": "", "family": "", "operationId": "export-all"}
 	bad := *author
 	bad.csrf = "forged"

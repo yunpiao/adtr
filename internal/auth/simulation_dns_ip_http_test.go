@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"github.com/yunpiao/adtr/internal/simulationdnsip"
 	"github.com/yunpiao/adtr/internal/tasks"
@@ -118,5 +119,17 @@ func TestSimulationDNSIPAuthorizerBoundaries(t *testing.T) {
 		if status != tc.status {
 			t.Fatal(status, tc.status)
 		}
+	}
+}
+
+// This request must fail validation even without a database or task engine.
+func TestSimulationDNSIPDNSDomainIsNotResourceScope(t *testing.T) {
+	s := Service{}
+	r := httptest.NewRequest("GET", simulationDNSIPPath+"/records?domainId=example.test&observationId=fixed&keyword=&family=&offset=0&limit=1", nil)
+	w := httptest.NewRecorder()
+	s.SimulationDNSIPHandler(true, nil).ServeHTTP(w, r)
+	var result map[string]string
+	if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil || w.Code != 400 || result["error"] != "invalid_input" {
+		t.Fatalf("DNS domain scope: status=%d body=%s decode=%v", w.Code, w.Body, err)
 	}
 }
