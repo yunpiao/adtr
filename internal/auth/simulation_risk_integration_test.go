@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"github.com/yunpiao/adtr/internal/schemaversion"
+	"github.com/yunpiao/adtr/internal/simulationlabels"
 	"github.com/yunpiao/adtr/internal/simulationrisk"
 	"net/http"
 	"net/http/httptest"
@@ -26,6 +27,7 @@ func TestSimulationRiskHTTPAuthorizationRecoveryAndAuditAtomicity(t *testing.T) 
 	f.exec(SimulationRiskPermissionSchema + simulationrisk.SchemaSQL + simulationrisk.ImmutableSchemaSQL)
 	f.exec(SimulationDetectionPermissionSchema + simulationdetection.SchemaSQL + simulationdetection.ImmutableSchemaSQL)
 	f.exec(SimulationDetectionSchedulesPermissionSchema + simulationdetectionschedules.SchemaSQL + simulationdetectionschedules.ImmutableSchemaSQL)
+	f.exec(SimulationLabelsPermissionSchema + simulationlabels.SchemaSQL + simulationlabels.ImmutableSchemaSQL)
 	f.exec("UPDATE adtr.schema_version SET version=$1", schemaversion.Current)
 	var guards int
 	if err := f.conn.QueryRow(f.ctx, `SELECT count(*) FROM pg_trigger WHERE tgrelid='adtr.access_permissions'::regclass AND tgname IN ('task_auth_permissions','simulation_event_grant_epoch','simulation_risk_grant_epoch','simulation_detection_grant_epoch') AND tgenabled='O'`).Scan(&guards); err != nil || guards != 4 {

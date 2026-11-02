@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/yunpiao/adtr/internal/simulationlabels"
 	"net/http/httptest"
 	"testing"
 
@@ -28,6 +29,7 @@ func TestSimulationDetectionSchedulesHTTPAuthorityReceiptsAndCAS(t *testing.T) {
 	f.exec(SimulationRiskPermissionSchema + simulationrisk.SchemaSQL + simulationrisk.ImmutableSchemaSQL)
 	f.exec(SimulationDetectionPermissionSchema + simulationdetection.SchemaSQL + simulationdetection.ImmutableSchemaSQL)
 	f.exec(SimulationDetectionSchedulesPermissionSchema + schedules.SchemaSQL + schedules.ImmutableSchemaSQL)
+	f.exec(SimulationLabelsPermissionSchema + simulationlabels.SchemaSQL + simulationlabels.ImmutableSchemaSQL)
 	f.exec("UPDATE adtr.schema_version SET version=$1", schemaversion.Current)
 	f.seedGroup("one", "schedule-group", narrowResourceRole, "domain-a")
 	auth := simulationDetectionSchedulesTaskAuthorizer(f.s.now)

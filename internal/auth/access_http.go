@@ -294,7 +294,7 @@ func (s *Service) handleAccess(ctx context.Context, r *http.Request, path string
 			rt, known := accessRoutes[suffix]
 			results[i] = ok && prefix && known && method == rt.method && grantAllows(grants, rt)
 			if ok && !prefix {
-				results[i] = resourcePathAllowed(method, url, roleID, grants) || taskPathAllowed(method, url, grants) || auditPathAllowed(method, url, grants) || systemPathAllowed(method, url, u.tenant, grants) || schedulePathAllowed(method, url, grants) || archivePathAllowed(method, url, grants) || credentialUsePathAllowed(method, url, roleID, grants) || operationAccountPathAllowed(method, url, grants) || domainSelectionPathAllowed(method, url, grants) || domainAccessPathAllowed(method, url, roleID, grants) || operationalLogPathAllowed(method, url, u.tenant, grants) || directoryPathAllowed(method, url, grants) || directoryCredentialUsePathAllowed(method, url, roleID, grants) || directoryV2PathAllowed(method, url, grants) || directoryV2CredentialUsePathAllowed(method, url, roleID, grants) || directoryV3PathAllowed(method, url, grants) || directoryV3CredentialUsePathAllowed(method, url, roleID, grants) || computerAssetExportV3PathAllowed(method, url, grants) || groupAssetExportV3PathAllowed(method, url, grants) || userAssetExportV3PathAllowed(method, url, grants) || userAssetV3PathAllowed(method, url, grants) || computerAssetsV3PathAllowed(method, url, grants) || groupAssetsV3PathAllowed(method, url, grants) || groupMembersV4PathAllowed(method, url, grants) || directoryV4PathAllowed(method, url, grants) || directoryV4CredentialUsePathAllowed(method, url, roleID, grants) || userAssetsV2PathAllowed(method, url, grants) || messagePathAllowed(method, url, grants) || simulationEventPathAllowed(method, url, grants) || simulationRiskPathAllowed(method, url, grants) || simulationDetectionPathAllowed(method, url, grants) || simulationDetectionSchedulesPathAllowed(method, url, grants)
+				results[i] = resourcePathAllowed(method, url, roleID, grants) || taskPathAllowed(method, url, grants) || auditPathAllowed(method, url, grants) || systemPathAllowed(method, url, u.tenant, grants) || schedulePathAllowed(method, url, grants) || archivePathAllowed(method, url, grants) || credentialUsePathAllowed(method, url, roleID, grants) || operationAccountPathAllowed(method, url, grants) || domainSelectionPathAllowed(method, url, grants) || domainAccessPathAllowed(method, url, roleID, grants) || operationalLogPathAllowed(method, url, u.tenant, grants) || directoryPathAllowed(method, url, grants) || directoryCredentialUsePathAllowed(method, url, roleID, grants) || directoryV2PathAllowed(method, url, grants) || directoryV2CredentialUsePathAllowed(method, url, roleID, grants) || directoryV3PathAllowed(method, url, grants) || directoryV3CredentialUsePathAllowed(method, url, roleID, grants) || computerAssetExportV3PathAllowed(method, url, grants) || groupAssetExportV3PathAllowed(method, url, grants) || userAssetExportV3PathAllowed(method, url, grants) || userAssetV3PathAllowed(method, url, grants) || computerAssetsV3PathAllowed(method, url, grants) || groupAssetsV3PathAllowed(method, url, grants) || groupMembersV4PathAllowed(method, url, grants) || directoryV4PathAllowed(method, url, grants) || directoryV4CredentialUsePathAllowed(method, url, roleID, grants) || userAssetsV2PathAllowed(method, url, grants) || messagePathAllowed(method, url, grants) || simulationEventPathAllowed(method, url, grants) || simulationRiskPathAllowed(method, url, grants) || simulationDetectionPathAllowed(method, url, grants) || simulationDetectionSchedulesPathAllowed(method, url, grants) || simulationLabelsPathAllowed(method, url, grants)
 			}
 		}
 		value = map[string]any{"results": results}
@@ -320,7 +320,7 @@ func loadAccessGrants(ctx context.Context, tx pgx.Tx, tenant, id string) (map[st
 	if id == "platform_admin" {
 		for _, m := range accessMarks {
 			// Synthetic capability is explicitly granted, never inherited by builtins.
-			if m == "simulation_events" || m == "simulation_risk" || m == "simulation_detection" || m == "simulation_detection_schedules" {
+			if m == "simulation_events" || m == "simulation_risk" || m == "simulation_detection" || m == "simulation_detection_schedules" || m == "simulation_labels" {
 				continue
 			}
 			out[m] = AccessAuth{true, true}
@@ -357,7 +357,7 @@ func loadAccessGrants(ctx context.Context, tx pgx.Tx, tenant, id string) (map[st
 }
 func permissionNodes(grants map[string]AccessAuth, onlyReadable bool) []AccessPermission {
 	nodes := make([]AccessPermission, 0, len(accessMarks))
-	names := map[string]string{"users": "Users", "roles": "Roles", "permissions": "Permissions", "tasks": "Tasks", "audit": "Audit", "audit_exports": "Audit exports", "system": "System", "schedules": "Schedules", "task_archive": "Task archive", "domains": "Domain connections", "operation_accounts": "Operation accounts", "system_logs": "Operational logs", "directory_assets": "Directory assets", "user_asset_exports": "User asset exports", "group_asset_exports": "Group asset exports", "computer_asset_exports": "Computer asset exports", "simulation_events": "Simulated security events", "simulation_risk": "Simulated risk", "simulation_detection": "Simulated detection", "simulation_detection_schedules": "Simulated detection schedules"}
+	names := map[string]string{"users": "Users", "roles": "Roles", "permissions": "Permissions", "tasks": "Tasks", "audit": "Audit", "audit_exports": "Audit exports", "system": "System", "schedules": "Schedules", "task_archive": "Task archive", "domains": "Domain connections", "operation_accounts": "Operation accounts", "system_logs": "Operational logs", "directory_assets": "Directory assets", "user_asset_exports": "User asset exports", "group_asset_exports": "Group asset exports", "computer_asset_exports": "Computer asset exports", "simulation_events": "Simulated security events", "simulation_risk": "Simulated risk", "simulation_detection": "Simulated detection", "simulation_detection_schedules": "Simulated detection schedules", "simulation_labels": "Simulated sensitive labels"}
 	keys := make([]string, 0, len(accessRoutes))
 	for p := range accessRoutes {
 		keys = append(keys, p)
@@ -365,7 +365,7 @@ func permissionNodes(grants map[string]AccessAuth, onlyReadable bool) []AccessPe
 	sort.Strings(keys)
 	for _, mark := range accessMarks {
 		a := grants[mark]
-		if (mark == "simulation_events" || mark == "simulation_risk" || mark == "simulation_detection" || mark == "simulation_detection_schedules") && !a.Readable {
+		if (mark == "simulation_events" || mark == "simulation_risk" || mark == "simulation_detection" || mark == "simulation_detection_schedules" || mark == "simulation_labels") && !a.Readable {
 			continue
 		}
 		if onlyReadable && !a.Readable {
@@ -410,6 +410,16 @@ func permissionNodes(grants map[string]AccessAuth, onlyReadable bool) []AccessPe
 					mode = "writeable"
 				}
 				paths = append(paths, AccessPath{rt.method + " " + suffix, rt.method + " " + simulationDetectionSchedulesPath + suffix, mode})
+			}
+		}
+		if mark == "simulation_labels" {
+			for _, suffix := range simulationLabelsRouteOrder {
+				rt := simulationLabelsRoutes[suffix]
+				mode := "readable"
+				if rt.write {
+					mode = "writeable"
+				}
+				paths = append(paths, AccessPath{rt.method + " " + suffix, rt.method + " " + simulationLabelsPath + suffix, mode})
 			}
 		}
 		for _, p := range keys {

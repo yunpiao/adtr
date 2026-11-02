@@ -630,3 +630,46 @@ describe("synthetic detection scheduling navigation", () => {
     },
   );
 });
+
+describe("independent simulated sensitive-label navigation", () => {
+  it("requires the labels hint, never inherits administrator or detection hints", () => {
+    const view = render(
+      <Navigation
+        actor={{
+          ...profile,
+          simulationDetectionReadable: true,
+          simulationDetectionSchedulesReadable: true,
+        }}
+      />,
+    );
+    expect(
+      screen.queryByRole("button", { name: "模拟敏感资产标记" }),
+    ).not.toBeInTheDocument();
+    view.rerender(
+      <Navigation actor={{ ...profile, simulationLabelsReadable: true }} />,
+    );
+    expect(
+      screen.getByRole("button", { name: "模拟敏感资产标记" }),
+    ).toBeInTheDocument();
+    view.rerender(
+      <Navigation actor={{ ...profile, simulationLabelsReadable: false }} />,
+    );
+    expect(
+      screen.queryByRole("button", { name: "模拟敏感资产标记" }),
+    ).not.toBeInTheDocument();
+  });
+  it.each(["gated", "blocked", "forced"] as const)(
+    "hides granted labels when %s",
+    (state) => {
+      render(
+        <Navigation
+          actor={{ ...profile, simulationLabelsReadable: true }}
+          {...{ [state]: true }}
+        />,
+      );
+      expect(
+        screen.queryByRole("button", { name: "模拟敏感资产标记" }),
+      ).not.toBeInTheDocument();
+    },
+  );
+});
