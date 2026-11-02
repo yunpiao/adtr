@@ -59,6 +59,7 @@ func TestPostgresDashboardSnapshot(t *testing.T) {
 	cfg = cfg.Copy()
 	cfg.Database = name
 	connect := func() *pgx.Conn {
+		t.Helper()
 		c, err := pgx.ConnectConfig(ctx, cfg)
 		if err != nil {
 			t.Fatal("test connection unavailable")
@@ -72,6 +73,7 @@ func TestPostgresDashboardSnapshot(t *testing.T) {
 		t.Fatal(e)
 	}
 	transact := func(c *pgx.Conn, fn func(pgx.Tx) error) {
+		t.Helper()
 		tx, err := c.Begin(ctx)
 		if err != nil {
 			t.Fatal(err)
@@ -91,6 +93,7 @@ func TestPostgresDashboardSnapshot(t *testing.T) {
 	fixture := simulationevents.Fixture{ID: in.DatasetID, Provenance: p, Events: []securityevents.RawEvent{{ID: "event", Tenant: s.Tenant, Domain: s.Domain, Kind: "login_failure", Actor: "actor", Device: "device", Session: "session", SourceIP: "192.0.2.1", OccurredAt: time.Now().UTC().Add(-time.Minute).Format(time.RFC3339Nano), Provenance: p}}, Cases: []simulationevents.FixtureCase{{ID: "case", EvidenceIDs: []string{"event"}}}}
 	transact(db, func(tx pgx.Tx) error { _, err := simulationevents.SeedFixtureTx(ctx, tx, es, fixture); return err })
 	read := func(sc Scope) Summary {
+		t.Helper()
 		var out Summary
 		transact(db, func(tx pgx.Tx) error { var err error; out, err = SummaryTx(ctx, tx, sc, in); return err })
 		return out
