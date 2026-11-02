@@ -1,6 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { dependencyGraph } from './ci_dependencies.mjs';
+import { spawnSync } from 'node:child_process';
+
+test('checkout schema reader preserves real selection proof and fail-closed edges', () => {
+  const result = spawnSync('python3', ['scripts/test_application_schema_selection.py'], {
+    encoding: 'utf8', timeout: 60000,
+  });
+  assert.ifError(result.error);
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+});
 
 test('imports, re-exports, literal dynamic and require share real dependencies', () => {
   const result = dependencyGraph({'a.ts': `import type {T} from './b'; export {T} from './b';

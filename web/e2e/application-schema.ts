@@ -1,5 +1,6 @@
 // The checkout is the independent oracle; never infer this expectation from API/DB data.
 import { closeSync, openSync, readSync } from "node:fs";
+import { resolve } from "node:path";
 
 const maxSourceBytes = 4096;
 export function parseCurrentSchema(source: Buffer): number {
@@ -13,7 +14,9 @@ export function parseCurrentSchema(source: Buffer): number {
 }
 
 function currentSchema(): number {
-  const descriptor = openSync(new URL("../../internal/schemaversion/version.go", import.meta.url), "r");
+  // This is checkout data, not a web module. Changes under internal/ already
+  // require full CI coverage; keep the module graph free of unresolved URLs.
+  const descriptor = openSync(resolve(import.meta.dirname, "../../internal/schemaversion/version.go"), "r");
   try {
     const source = Buffer.alloc(maxSourceBytes + 1);
     const length = readSync(descriptor, source, 0, source.length, 0);
