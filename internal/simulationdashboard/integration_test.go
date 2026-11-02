@@ -14,6 +14,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/yunpiao/adtr/internal/detectionrules"
+	"github.com/yunpiao/adtr/internal/schemaversion"
 	"github.com/yunpiao/adtr/internal/securityevents"
 	"github.com/yunpiao/adtr/internal/simulationdetection"
 	"github.com/yunpiao/adtr/internal/simulationevents"
@@ -68,8 +69,11 @@ func TestPostgresDashboardSnapshot(t *testing.T) {
 	}
 	db := connect()
 	defer db.Close(context.Background())
-	schema := `CREATE SCHEMA adtr; CREATE TABLE adtr.schema_version(singleton boolean PRIMARY KEY DEFAULT true CHECK(singleton),version integer NOT NULL); INSERT INTO adtr.schema_version VALUES(true,26);`
+	schema := `CREATE SCHEMA adtr; CREATE TABLE adtr.schema_version(singleton boolean PRIMARY KEY DEFAULT true CHECK(singleton),version integer NOT NULL); `
 	if _, e = db.Exec(ctx, schema+simulationevents.SchemaSQL+simulationevents.ImmutableSchemaSQL+simulationrisk.SchemaSQL+simulationrisk.ImmutableSchemaSQL+simulationdetection.SchemaSQL+simulationdetection.ImmutableSchemaSQL+tasks.Schema+`CREATE TABLE adtr.dashboard_test_audit(kind text,operation text);`); e != nil {
+		t.Fatal(e)
+	}
+	if _, e = db.Exec(ctx, "INSERT INTO adtr.schema_version VALUES(true,$1)", schemaversion.Current); e != nil {
 		t.Fatal(e)
 	}
 	transact := func(c *pgx.Conn, fn func(pgx.Tx) error) {
@@ -79,6 +83,9 @@ func TestPostgresDashboardSnapshot(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer tx.Rollback(ctx)
+		if err = tasks.CheckSchemaTx(ctx, tx, schemaversion.Current); err != nil {
+			t.Fatal(err)
+		}
 		if err = fn(tx); err != nil {
 			t.Fatal(err)
 		}
@@ -114,7 +121,7 @@ func TestPostgresDashboardSnapshot(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	engine, e := tasks.New(cfg, registry, auth, 26)
+	engine, e := tasks.New(cfg, registry, auth, schemaversion.Current)
 	if e != nil {
 		t.Fatal(e)
 	}

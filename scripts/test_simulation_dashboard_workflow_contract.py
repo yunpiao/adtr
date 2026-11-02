@@ -18,6 +18,13 @@ class SimulationDashboardWorkflowContract(unittest.TestCase):
     def text(self, path):
         return (ROOT / path).read_text()
 
+    def test_named_pg_fixture_gates_transactions_before_business_locks(self):
+        source = self.text('internal/simulationdashboard/integration_test.go')
+        block = source.split('transact := func', 1)[1].split('s := Scope', 1)[0]
+        self.assertLess(block.index('tasks.CheckSchemaTx(ctx, tx, schemaversion.Current)'), block.index('fn(tx)'))
+        self.assertIn('tasks.New(cfg, registry, auth, schemaversion.Current)', source)
+        self.assertIn('"INSERT INTO adtr.schema_version VALUES(true,$1)", schemaversion.Current', source)
+
     def test_failed_go_test_diagnostic_is_closed(self):
         output = 'null\n[]\n"private"\n' + json.dumps({"Output": "integration_test.go:77: secret DSN password SQLSTATE 42P01"})
         failure = subprocess.CalledProcessError(1, ["go"], output=output, stderr="private credential")
