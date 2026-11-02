@@ -7,7 +7,12 @@ import (
 	"encoding/json"
 	"github.com/yunpiao/adtr/internal/groupgraph"
 	"github.com/yunpiao/adtr/internal/schemaversion"
+	"github.com/yunpiao/adtr/internal/simulationdetection"
+	"github.com/yunpiao/adtr/internal/simulationdetectionschedules"
+	"github.com/yunpiao/adtr/internal/simulationevents"
 	labels "github.com/yunpiao/adtr/internal/simulationlabels"
+	"github.com/yunpiao/adtr/internal/simulationrisk"
+	"github.com/yunpiao/adtr/internal/simulationrulecatalog"
 	"net/http/httptest"
 	"strconv"
 	"testing"
@@ -17,7 +22,12 @@ import (
 // skips, when ADTR_TEST_DATABASE_URL is absent.
 func TestSimulationLabelsHTTPAuthorityCASAndReceipts(t *testing.T) {
 	f := newTaskFixture(t)
+	f.exec(SimulationEventPermissionSchema + simulationevents.SchemaSQL + simulationevents.ImmutableSchemaSQL)
+	f.exec(SimulationRiskPermissionSchema + simulationrisk.SchemaSQL + simulationrisk.ImmutableSchemaSQL)
+	f.exec(SimulationDetectionPermissionSchema + simulationdetection.SchemaSQL + simulationdetection.ImmutableSchemaSQL)
+	f.exec(SimulationDetectionSchedulesPermissionSchema + simulationdetectionschedules.SchemaSQL + simulationdetectionschedules.ImmutableSchemaSQL)
 	f.exec(SimulationLabelsPermissionSchema + labels.SchemaSQL + labels.ImmutableSchemaSQL)
+	f.exec(SimulationRuleCatalogPermissionSchema + simulationrulecatalog.SchemaSQL + simulationrulecatalog.ImmutableSchemaSQL)
 	f.exec("UPDATE adtr.schema_version SET version=$1", schemaversion.Current)
 	f.seedGroup("one", "labels-group", narrowResourceRole, "domain-a")
 	call := func(c *resourceTestClient, path string, body any, want int) map[string]any {

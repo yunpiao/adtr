@@ -9,6 +9,7 @@ import (
 	"github.com/yunpiao/adtr/internal/simulationevents"
 	"github.com/yunpiao/adtr/internal/simulationlabels"
 	"github.com/yunpiao/adtr/internal/simulationrisk"
+	"github.com/yunpiao/adtr/internal/simulationrulecatalog"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/yunpiao/adtr/internal/audit"
@@ -280,6 +281,12 @@ func migrateTo(ctx context.Context, config *pgx.ConnConfig, target int) error {
 			return errors.New("simulation labels schema migration failed")
 		}
 		version = 28
+	}
+	if version < 29 && target >= 29 {
+		if _, err := tx.Exec(ctx, auth.SimulationRuleCatalogPermissionSchema+simulationrulecatalog.SchemaSQL+simulationrulecatalog.ImmutableSchemaSQL); err != nil {
+			return errors.New("simulation rule catalog schema migration failed")
+		}
+		version = 29
 	}
 	if _, err := tx.Exec(ctx, "UPDATE adtr.schema_version SET version=$1 WHERE singleton=true", version); err != nil {
 		return errors.New("schema version update failed")

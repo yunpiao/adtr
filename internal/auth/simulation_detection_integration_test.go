@@ -12,6 +12,7 @@ import (
 	"github.com/yunpiao/adtr/internal/simulationevents"
 	"github.com/yunpiao/adtr/internal/simulationlabels"
 	"github.com/yunpiao/adtr/internal/simulationrisk"
+	"github.com/yunpiao/adtr/internal/simulationrulecatalog"
 	"github.com/yunpiao/adtr/internal/tasks"
 	"net/http/httptest"
 	"strings"
@@ -27,6 +28,7 @@ func TestSimulationDetectionHTTPAuthorizationRecoveryAndAuditAtomicity(t *testin
 	f.exec(SimulationDetectionPermissionSchema + simulationdetection.SchemaSQL + simulationdetection.ImmutableSchemaSQL)
 	f.exec(SimulationDetectionSchedulesPermissionSchema + simulationdetectionschedules.SchemaSQL + simulationdetectionschedules.ImmutableSchemaSQL)
 	f.exec(SimulationLabelsPermissionSchema + simulationlabels.SchemaSQL + simulationlabels.ImmutableSchemaSQL)
+	f.exec(SimulationRuleCatalogPermissionSchema + simulationrulecatalog.SchemaSQL + simulationrulecatalog.ImmutableSchemaSQL)
 	f.exec("UPDATE adtr.schema_version SET version=$1", schemaversion.Current)
 	f.exec("INSERT INTO adtr.access_permissions(tenant_id,role_id,mark,readable,writeable) VALUES('one',$1,'simulation_detection',true,true)", narrowResourceRole)
 	f.seedGroup("one", "detection-group", narrowResourceRole, "domain-a")

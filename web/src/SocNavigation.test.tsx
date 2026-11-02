@@ -673,3 +673,50 @@ describe("independent simulated sensitive-label navigation", () => {
     },
   );
 });
+
+describe("independent simulated rule-catalog navigation", () => {
+  it("requires the catalog hint, never inherits administrator or detection hints", () => {
+    const view = render(
+      <Navigation
+        actor={{
+          ...profile,
+          simulationDetectionReadable: true,
+          simulationDetectionSchedulesReadable: true,
+        }}
+      />,
+    );
+    expect(
+      screen.queryByRole("button", { name: "模拟规则目录与编辑器" }),
+    ).not.toBeInTheDocument();
+    view.rerender(
+      <Navigation
+        actor={{ ...profile, simulationRuleCatalogReadable: true }}
+      />,
+    );
+    expect(
+      screen.getByRole("button", { name: "模拟规则目录与编辑器" }),
+    ).toBeInTheDocument();
+    view.rerender(
+      <Navigation
+        actor={{ ...profile, simulationRuleCatalogReadable: false }}
+      />,
+    );
+    expect(
+      screen.queryByRole("button", { name: "模拟规则目录与编辑器" }),
+    ).not.toBeInTheDocument();
+  });
+  it.each(["gated", "blocked", "forced"] as const)(
+    "hides granted catalog when %s",
+    (state) => {
+      render(
+        <Navigation
+          actor={{ ...profile, simulationRuleCatalogReadable: true }}
+          {...{ [state]: true }}
+        />,
+      );
+      expect(
+        screen.queryByRole("button", { name: "模拟规则目录与编辑器" }),
+      ).not.toBeInTheDocument();
+    },
+  );
+});

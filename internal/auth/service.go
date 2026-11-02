@@ -40,6 +40,8 @@ type Service struct {
 }
 type User struct {
 	// Navigation hint only, populated only by authenticated login and /me.
+	SimulationRuleCatalogReadable               *bool     `json:"simulationRuleCatalogReadable,omitempty"`
+	SimulationRuleCatalogPublishable            *bool     `json:"simulationRuleCatalogPublishable,omitempty"`
 	SimulationLabelsReadable                    *bool     `json:"simulationLabelsReadable,omitempty"`
 	SimulationDetectionSchedulesReadable        *bool     `json:"simulationDetectionSchedulesReadable,omitempty"`
 	SimulationDetectionReadable                 *bool     `json:"simulationDetectionReadable,omitempty"`
@@ -345,6 +347,16 @@ func (s *Service) handle(ctx context.Context, r *http.Request, path string, in r
 			return nil, "", false, err
 		}
 		u.SimulationLabelsReadable = &labelsReadable
+		catalogReadable, err := simulationRuleCatalogProfileReadable(ctx, tx, u)
+		if err != nil {
+			return nil, "", false, err
+		}
+		u.SimulationRuleCatalogReadable = &catalogReadable
+		catalogPublishable, err := simulationRuleCatalogProfilePublishable(ctx, tx, u)
+		if err != nil {
+			return nil, "", false, err
+		}
+		u.SimulationRuleCatalogPublishable = &catalogPublishable
 		if err = tx.Commit(ctx); err != nil {
 			return nil, "", false, err
 		}
@@ -416,6 +428,16 @@ func (s *Service) handle(ctx context.Context, r *http.Request, path string, in r
 			return nil, "", false, err
 		}
 		u.SimulationLabelsReadable = &labelsReadable
+		catalogReadable, err := simulationRuleCatalogProfileReadable(ctx, tx, u)
+		if err != nil {
+			return nil, "", false, err
+		}
+		u.SimulationRuleCatalogReadable = &catalogReadable
+		catalogPublishable, err := simulationRuleCatalogProfilePublishable(ctx, tx, u)
+		if err != nil {
+			return nil, "", false, err
+		}
+		u.SimulationRuleCatalogPublishable = &catalogPublishable
 		return u, "", false, tx.Commit(ctx)
 	}
 	if path == "/logout" {

@@ -5,6 +5,8 @@ export interface Profile {
   simulationDetectionReadable?: boolean;
   simulationDetectionSchedulesReadable?: boolean;
   simulationLabelsReadable?: boolean;
+  simulationRuleCatalogReadable?: boolean;
+  simulationRuleCatalogPublishable?: boolean;
   ID: number;
   username: string;
   role: string;
