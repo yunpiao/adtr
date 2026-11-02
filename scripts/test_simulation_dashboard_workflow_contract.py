@@ -3,6 +3,8 @@ import ast
 import json
 from pathlib import Path
 import re
+import subprocess
+import io
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
@@ -15,6 +17,16 @@ ROOT = Path(__file__).resolve().parents[1]
 class SimulationDashboardWorkflowContract(unittest.TestCase):
     def text(self, path):
         return (ROOT / path).read_text()
+
+    def test_failed_go_test_diagnostic_is_closed(self):
+        output = 'null\n[]\n"private"\n' + json.dumps({"Output": "integration_test.go:77: secret DSN password SQLSTATE 42P01"})
+        failure = subprocess.CalledProcessError(1, ["go"], output=output, stderr="private credential")
+        with patch('test_simulation_dashboard_integration.run', side_effect=failure), \
+             patch('sys.stdout', new_callable=io.StringIO) as printed:
+            with self.assertRaisesRegex(RuntimeError, 'required PostgreSQL integration failed'):
+                run_go_integration('./internal/simulationdashboard', '^TestPostgresDashboardSnapshot$', 'TestPostgresDashboardSnapshot', {})
+        self.assertEqual(json.loads(printed.getvalue()), {"phase": "named-postgres-test", "exitCode": 1,
+                         "locations": ["integration_test.go:77"], "sqlStates": ["42P01"]})
 
     def test_fixture_roles_live_grants_and_owned_resources(self):
         self.assertRegex(ROLE, r'^[A-Za-z0-9_-]{24}$')

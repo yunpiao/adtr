@@ -64,8 +64,29 @@ def run(args, **kwargs):
 
 def run_go_integration(package, selector, expected, env):
     # A successful go process with no matching tests (or only skips) is not evidence.
-    completed = run(["go", "test", "-json", "-tags=integration", package, "-run", selector, "-count=1"],
-                    env=env, timeout=240, capture_output=True, text=True)
+    try:
+        completed = run(["go", "test", "-json", "-tags=integration", package, "-run", selector, "-count=1"],
+                        env=env, timeout=240, capture_output=True, text=True)
+    except subprocess.CalledProcessError as failure:
+        # Retain only source locations and SQLSTATE codes, never raw test output,
+        # connection details, fixture rows, credentials or arbitrary identifiers.
+        locations, states = set(), set()
+        for line in (failure.stdout or "").splitlines():
+            try:
+                event = json.loads(line)
+            except (ValueError, TypeError):
+                continue
+            if not isinstance(event, dict):
+                continue
+            output = event.get("Output", "")
+            if not isinstance(output, str):
+                continue
+            locations.update(re.findall(r"\b(integration_test\.go):([0-9]{1,6}):", output))
+            states.update(re.findall(r"\bSQLSTATE ([0-9A-Z]{5})\b", output))
+        print(json.dumps({"phase": "named-postgres-test", "exitCode": failure.returncode,
+                          "locations": [f"{name}:{line}" for name, line in sorted(locations)[:16]],
+                          "sqlStates": sorted(states)[:16]}), flush=True)
+        raise RuntimeError("required PostgreSQL integration failed; see closed diagnostic") from None
     events = [json.loads(line) for line in completed.stdout.splitlines() if line.strip()]
     passed = {event.get("Test") for event in events if event.get("Action") == "pass"}
     skipped = {event.get("Test") for event in events if event.get("Action") == "skip"}
