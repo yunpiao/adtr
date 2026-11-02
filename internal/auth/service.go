@@ -39,6 +39,7 @@ type Service struct {
 	now       func() time.Time
 }
 type User struct {
+	SimulationDetectionExceptionsReadable *bool `json:"simulationDetectionExceptionsReadable,omitempty"`
 	// Navigation hint only, populated only by authenticated login and /me.
 	SimulationRuleCatalogReadable               *bool     `json:"simulationRuleCatalogReadable,omitempty"`
 	SimulationRuleCatalogPublishable            *bool     `json:"simulationRuleCatalogPublishable,omitempty"`
@@ -357,6 +358,11 @@ func (s *Service) handle(ctx context.Context, r *http.Request, path string, in r
 			return nil, "", false, err
 		}
 		u.SimulationRuleCatalogPublishable = &catalogPublishable
+		exceptionsReadable, err := simulationDetectionExceptionsProfileReadable(ctx, tx, u)
+		if err != nil {
+			return nil, "", false, err
+		}
+		u.SimulationDetectionExceptionsReadable = &exceptionsReadable
 		if err = tx.Commit(ctx); err != nil {
 			return nil, "", false, err
 		}
@@ -438,6 +444,11 @@ func (s *Service) handle(ctx context.Context, r *http.Request, path string, in r
 			return nil, "", false, err
 		}
 		u.SimulationRuleCatalogPublishable = &catalogPublishable
+		exceptionsReadable, err := simulationDetectionExceptionsProfileReadable(ctx, tx, u)
+		if err != nil {
+			return nil, "", false, err
+		}
+		u.SimulationDetectionExceptionsReadable = &exceptionsReadable
 		return u, "", false, tx.Commit(ctx)
 	}
 	if path == "/logout" {

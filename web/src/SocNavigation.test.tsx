@@ -720,3 +720,50 @@ describe("independent simulated rule-catalog navigation", () => {
     },
   );
 });
+
+describe("independent simulated detection-exceptions navigation", () => {
+  it("requires the exceptions hint, never inherits administrator or detection hints", () => {
+    const view = render(
+      <Navigation
+        actor={{
+          ...profile,
+          simulationDetectionReadable: true,
+          simulationDetectionSchedulesReadable: true,
+        }}
+      />,
+    );
+    expect(
+      screen.queryByRole("button", { name: "模拟检测例外" }),
+    ).not.toBeInTheDocument();
+    view.rerender(
+      <Navigation
+        actor={{ ...profile, simulationDetectionExceptionsReadable: true }}
+      />,
+    );
+    expect(
+      screen.getByRole("button", { name: "模拟检测例外" }),
+    ).toBeInTheDocument();
+    view.rerender(
+      <Navigation
+        actor={{ ...profile, simulationDetectionExceptionsReadable: false }}
+      />,
+    );
+    expect(
+      screen.queryByRole("button", { name: "模拟检测例外" }),
+    ).not.toBeInTheDocument();
+  });
+  it.each(["gated", "blocked", "forced"] as const)(
+    "hides granted exceptions when %s",
+    (state) => {
+      render(
+        <Navigation
+          actor={{ ...profile, simulationDetectionExceptionsReadable: true }}
+          {...{ [state]: true }}
+        />,
+      );
+      expect(
+        screen.queryByRole("button", { name: "模拟检测例外" }),
+      ).not.toBeInTheDocument();
+    },
+  );
+});

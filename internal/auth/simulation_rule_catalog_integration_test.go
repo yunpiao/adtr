@@ -7,7 +7,11 @@ import (
 	"encoding/json"
 	"github.com/yunpiao/adtr/internal/schemaversion"
 	"github.com/yunpiao/adtr/internal/simulationdetection"
+	"github.com/yunpiao/adtr/internal/simulationdetectionexceptions"
+	"github.com/yunpiao/adtr/internal/simulationdetectionschedules"
 	"github.com/yunpiao/adtr/internal/simulationevents"
+	"github.com/yunpiao/adtr/internal/simulationlabels"
+	"github.com/yunpiao/adtr/internal/simulationrisk"
 	catalog "github.com/yunpiao/adtr/internal/simulationrulecatalog"
 	"net/http/httptest"
 	"strconv"
@@ -19,8 +23,12 @@ import (
 func TestSimulationRuleCatalogHTTPIdentityReviewBridgeAndRevocation(t *testing.T) {
 	f := newTaskFixture(t)
 	f.exec(SimulationEventPermissionSchema + simulationevents.SchemaSQL + simulationevents.ImmutableSchemaSQL)
+	f.exec(SimulationRiskPermissionSchema + simulationrisk.SchemaSQL + simulationrisk.ImmutableSchemaSQL)
 	f.exec(SimulationDetectionPermissionSchema + simulationdetection.SchemaSQL + simulationdetection.ImmutableSchemaSQL)
+	f.exec(SimulationDetectionSchedulesPermissionSchema + simulationdetectionschedules.SchemaSQL + simulationdetectionschedules.ImmutableSchemaSQL)
+	f.exec(SimulationLabelsPermissionSchema + simulationlabels.SchemaSQL + simulationlabels.ImmutableSchemaSQL)
 	f.exec(SimulationRuleCatalogPermissionSchema + catalog.SchemaSQL + catalog.ImmutableSchemaSQL)
+	f.exec(SimulationDetectionExceptionsPermissionSchema + simulationdetectionexceptions.SchemaSQL + simulationdetectionexceptions.ImmutableSchemaSQL)
 	f.exec("UPDATE adtr.schema_version SET version=$1", schemaversion.Current)
 	f.seedGroup("one", "catalog-writers", narrowResourceRole, "domain-a")
 	f.seedGroup("one", "catalog-reviewers", widerResourceRole, "domain-a")
