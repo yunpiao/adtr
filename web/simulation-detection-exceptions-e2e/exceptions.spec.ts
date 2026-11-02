@@ -57,8 +57,10 @@ test("SIMULATED exceptions preserve actual Worker matches, recover receipts and 
   if(!username||!password) throw new Error("Dedicated disposable harness required");
   await mkdir(evidence,{recursive:true});
   const actor=await login(page,username,password),domainId="simulation-domain-a";
+  // APIRequestContext does not add the browser Origin header automatically.
+  const origin = new URL(page.url()).origin;
   async function post(path:string,body:unknown){
-    const response=await page.request.post(path,{data:body,headers:{"X-CSRF-Token":actor.csrfToken}});
+    const response=await page.request.post(path,{data:body,headers:{Origin:origin,"X-CSRF-Token":actor.csrfToken}});
     expect(response.status()).toBe(200); return response.json();
   }
   const template=(await post(detection+"/create",{domainId,templateId:"browser-template",name:"SIMULATED browser source",operationId:"browser-template-create",rules:[{id:"browser-rule",enabled:true,combine:"all",conditions:[{field:"event.outcome",operator:"eq",values:["failure"]}]}]})).template;

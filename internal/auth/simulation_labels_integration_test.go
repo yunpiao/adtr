@@ -10,6 +10,7 @@ import (
 	"github.com/yunpiao/adtr/internal/simulationdetection"
 	"github.com/yunpiao/adtr/internal/simulationdetectionexceptions"
 	"github.com/yunpiao/adtr/internal/simulationdetectionschedules"
+	"github.com/yunpiao/adtr/internal/simulationdnsip"
 	"github.com/yunpiao/adtr/internal/simulationevents"
 	labels "github.com/yunpiao/adtr/internal/simulationlabels"
 	"github.com/yunpiao/adtr/internal/simulationrisk"
@@ -30,6 +31,7 @@ func TestSimulationLabelsHTTPAuthorityCASAndReceipts(t *testing.T) {
 	f.exec(SimulationLabelsPermissionSchema + labels.SchemaSQL + labels.ImmutableSchemaSQL)
 	f.exec(SimulationRuleCatalogPermissionSchema + simulationrulecatalog.SchemaSQL + simulationrulecatalog.ImmutableSchemaSQL)
 	f.exec(SimulationDetectionExceptionsPermissionSchema + simulationdetectionexceptions.SchemaSQL + simulationdetectionexceptions.ImmutableSchemaSQL)
+	f.exec(SimulationDNSIPPermissionSchema + simulationdnsip.SchemaSQL + simulationdnsip.ImmutableSchemaSQL)
 	f.exec("UPDATE adtr.schema_version SET version=$1", schemaversion.Current)
 	f.seedGroup("one", "labels-group", narrowResourceRole, "domain-a")
 	call := func(c *resourceTestClient, path string, body any, want int) map[string]any {

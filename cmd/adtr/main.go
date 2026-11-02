@@ -28,6 +28,7 @@ import (
 	"github.com/yunpiao/adtr/internal/schedules"
 	"github.com/yunpiao/adtr/internal/simulationdetection"
 	"github.com/yunpiao/adtr/internal/simulationdetectionschedules"
+	"github.com/yunpiao/adtr/internal/simulationdnsip"
 	"github.com/yunpiao/adtr/internal/store"
 	"github.com/yunpiao/adtr/internal/systemhealth"
 	"github.com/yunpiao/adtr/internal/taskarchive"
@@ -100,6 +101,7 @@ func run() (runErr error) {
 		return store.Migrate(migrationCtx, cfg.Database)
 	}
 	simulationDetectionEnabled := os.Getenv("ADTR_SIMULATION_DETECTION_ENABLED") == "true"
+	simulationDNSIPEnabled := os.Getenv("ADTR_SIMULATION_DNS_IP_ENABLED") == "true"
 	simulationDetectionSchedulesEnabled := os.Getenv("ADTR_SIMULATION_DETECTION_SCHEDULES_ENABLED") == "true"
 	var detectionScheduleEngine *simulationdetectionschedules.Engine
 	var operationAccountStore *operationaccounts.Store
@@ -126,12 +128,15 @@ func run() (runErr error) {
 			return fmt.Errorf("system health configuration failed")
 		}
 		kinds := []tasks.Kind{domainStore.ComputerAssetExportV3Kind(), domainStore.GroupAssetExportV3Kind(), domainStore.UserAssetExportV3Kind(), audit.Kind(), domainStore.Kind(), domainStore.AccountKind(), domainStore.DirectoryKind(), domainStore.DirectoryV2Kind(), domainStore.DirectoryV3Kind(), domainStore.DirectoryV4Kind(), operationallogs.Kind()}
-		taskAuthorizer := auth.NewSimulationDetectionSchedulesTaskAuthorizer(simulationDetectionEnabled, simulationDetectionSchedulesEnabled)
+		taskAuthorizer := auth.NewSimulationDNSIPTaskAuthorizer(simulationDetectionEnabled, simulationDetectionSchedulesEnabled, simulationDNSIPEnabled)
 		if simulationDetectionEnabled {
 			kinds = append(kinds, simulationdetection.NewKind(taskAuthorizer))
 		}
 		if simulationDetectionEnabled && simulationDetectionSchedulesEnabled {
 			kinds = append(kinds, simulationdetectionschedules.NewKind(taskAuthorizer))
+		}
+		if simulationDNSIPEnabled {
+			kinds = append(kinds, simulationdnsip.NewKind(taskAuthorizer))
 		}
 		taskEngine, err = tasks.New(cfg.Database, tasks.ProductionRegistry(kinds...), taskAuthorizer, store.SchemaVersion)
 		if err != nil {
@@ -303,6 +308,9 @@ func run() (runErr error) {
 			simulationLabelsHandler := authentication.SimulationLabelsHandler(os.Getenv("ADTR_SIMULATION_LABELS_ENABLED") == "true")
 			mux.Handle("/api/simulation/labels", simulationLabelsHandler)
 			mux.Handle("/api/simulation/labels/", simulationLabelsHandler)
+			simulationDNSIPHandler := authentication.SimulationDNSIPHandler(simulationDNSIPEnabled, taskEngine)
+			mux.Handle("/api/simulation/dns-ip", simulationDNSIPHandler)
+			mux.Handle("/api/simulation/dns-ip/", simulationDNSIPHandler)
 			simulationDetectionExceptionsHandler := authentication.SimulationDetectionExceptionsHandler(os.Getenv("ADTR_SIMULATION_DETECTION_EXCEPTIONS_ENABLED") == "true", simulationDetectionEnabled, os.Getenv("ADTR_SIMULATION_EVENTS_ENABLED") == "true", taskEngine)
 			mux.Handle("/api/simulation/detection-exceptions", simulationDetectionExceptionsHandler)
 			mux.Handle("/api/simulation/detection-exceptions/", simulationDetectionExceptionsHandler)

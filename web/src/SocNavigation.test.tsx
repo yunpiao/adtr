@@ -767,3 +767,50 @@ describe("independent simulated detection-exceptions navigation", () => {
     },
   );
 });
+
+describe("independent simulated DNS/IP navigation", () => {
+  it("requires the DNS/IP hint, never inherits administrator or detection hints", () => {
+    const view = render(
+      <Navigation
+        actor={{
+          ...profile,
+          simulationDetectionReadable: true,
+          simulationDetectionSchedulesReadable: true,
+        }}
+      />,
+    );
+    expect(
+      screen.queryByRole("button", { name: "模拟 DNS/IP" }),
+    ).not.toBeInTheDocument();
+    view.rerender(
+      <Navigation
+        actor={{ ...profile, simulationDNSIPReadable: true }}
+      />,
+    );
+    expect(
+      screen.getByRole("button", { name: "模拟 DNS/IP" }),
+    ).toBeInTheDocument();
+    view.rerender(
+      <Navigation
+        actor={{ ...profile, simulationDNSIPReadable: false }}
+      />,
+    );
+    expect(
+      screen.queryByRole("button", { name: "模拟 DNS/IP" }),
+    ).not.toBeInTheDocument();
+  });
+  it.each(["gated", "blocked", "forced"] as const)(
+    "hides granted DNS/IP when %s",
+    (state) => {
+      render(
+        <Navigation
+          actor={{ ...profile, simulationDNSIPReadable: true }}
+          {...{ [state]: true }}
+        />,
+      );
+      expect(
+        screen.queryByRole("button", { name: "模拟 DNS/IP" }),
+      ).not.toBeInTheDocument();
+    },
+  );
+});

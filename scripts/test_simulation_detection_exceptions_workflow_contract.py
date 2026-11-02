@@ -70,6 +70,14 @@ class ExceptionAcceptanceContract(unittest.TestCase):
         with patch('test_simulation_detection_exceptions_integration.run',side_effect=failure),patch('sys.stdout',new_callable=io.StringIO) as printed:
             with self.assertRaises(RuntimeError): run_go_integration('./internal/auth','^Required$','Required',{})
         self.assertEqual(json.loads(printed.getvalue()),{'phase':'named-postgres-test','exitCode':1,'locations':['simulation_detection_exceptions_integration_test.go:77'],'sqlStates':['42P01']})
+    def test_browser_source_posts_preserve_origin_and_csrf(self):
+        source=self.text('web/simulation-detection-exceptions-e2e/exceptions.spec.ts')
+        self.assertIn('const origin = new URL(page.url()).origin;',source)
+        self.assertIn('page.request.post(path,{data:body,headers:{Origin:origin,"X-CSRF-Token":actor.csrfToken}})',source)
+        # No production authorization fallback: both source mutations use this helper.
+        self.assertEqual(source.count('page.request.post('),1)
+        self.assertIn('post(detection+"/create",',source)
+        self.assertIn('post(detection+"/run",',source)
     def test_browser_real_download_replay_history_and_geometry(self):
         source=self.text('web/simulation-detection-exceptions-e2e/exceptions.spec.ts')
         for token in ('route.fetch()','route.abort("failed")','createPosts).toBe(1)','readFile(file!,"utf8")','[["browser-rule","exception-positive"]]','toHaveLength(0)','page.reload()','toEqual(source)','"X-CSRF-Token":actor.csrfToken','receipt.intent).toEqual','header.y+header.height','page.viewportSize()!.height','从真实命中预览禁用声明','选择声明 JSON 文件'):
