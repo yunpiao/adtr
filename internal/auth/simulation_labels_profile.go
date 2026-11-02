@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"github.com/jackc/pgx/v5"
+	"github.com/yunpiao/adtr/internal/schemaversion"
 )
 
 // Navigation hint only; handlers always reauthorize. Unknown schemas fail closed.
@@ -21,7 +22,7 @@ func simulationLabelsProfileReadable(ctx context.Context, tx pgx.Tx, actor User)
 	if err := tx.QueryRow(ctx, "SELECT version FROM adtr.schema_version WHERE singleton").Scan(&version); err != nil {
 		return false, err
 	}
-	if version != 28 {
+	if version != schemaversion.Current {
 		return false, nil
 	}
 	var role string
