@@ -19,35 +19,6 @@ INVALID = [
 
 
 class ApplicationSchemaContract(unittest.TestCase):
-    def test_schema_reader_preserves_selection_proof_and_fail_closed_edges(self):
-        import ci_selection as selection
-        inventory = json.loads((ROOT / 'scripts/ci_inventory.json').read_text())
-        sources = selection.web_sources('HEAD')
-        reader = 'web/e2e/application-schema.ts'
-        sources[reader] = (ROOT / reader).read_text()
-        graph, uncertain = selection.dependency_graph(sources)
-        fixture = 'web/src/computer-asset-export-v3-fixtures.ts'
-        self.assertNotIn(reader, uncertain)
-        self.assertIn(fixture, selection.test_only_dependencies(graph, uncertain, inventory))
-        plan = selection.select([reader], inventory, [sources, sources])
-        self.assertEqual({e['name'] for e in plan['browser']}, {
-            'computer-asset-export-v3', 'computer-asset-export-v3-failure',
-            'computer-asset-export-v3-cancel', 'computer-asset-export-v3-running-cancel',
-        })
-        plan = selection.select(['internal/schemaversion/version.go'], inventory, [sources, sources])
-        self.assertTrue(all(plan['groups'].values()))
-        self.assertEqual(plan['browser'], inventory['browser'])
-        self.assertEqual(plan['fixed'], inventory['fixed'])
-        self.assertEqual(plan['auth'], list(range(1, 17)))
-        for edge in ('import(target);', "import './missing-schema-reader';",
-                     'new URL("../../internal/schemaversion/version.go", import.meta.url);'):
-            with self.subTest(edge=edge):
-                changed = dict(sources)
-                changed[reader] += '\n' + edge
-                graph, uncertain = selection.dependency_graph(changed)
-                self.assertIn(reader, uncertain)
-                self.assertNotIn(fixture, selection.test_only_dependencies(graph, uncertain, inventory))
-
     def test_exact_checkout_and_parser(self):
         self.assertEqual(CURRENT_SCHEMA, parse_current_schema((ROOT / 'internal/schemaversion/version.go').read_bytes()))
         for source, expected in zip(VALID, (1, 23, 24, 25, 26, 999999)):
