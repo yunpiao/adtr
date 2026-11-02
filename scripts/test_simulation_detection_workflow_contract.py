@@ -3,11 +3,12 @@ import ast
 import json
 from pathlib import Path
 import re
+import socket
 from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
-from test_simulation_detection_integration import ROLE, run_go_integration
+from test_simulation_detection_integration import ROLE, run_go_integration, worker_environment, wait_for_worker
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -71,7 +72,7 @@ class SimulationDetectionWorkflowContract(unittest.TestCase):
     def test_real_worker_is_required_and_not_run_is_not_pass(self):
         source = self.text('scripts/test_simulation_detection_integration.py')
         for expected in ('["./bin/adtr", "-mode", "worker"]', 'ADTR_SIMULATION_DETECTION_ENABLED="true"',
-                         'worker.poll() is None', 'completed["task"]["state"] == "succeeded"',
+                         'completed = wait_for_worker(worker, worker_base, report, lambda: client.call(active_path))', 'completed["task"]["state"] == "succeeded"',
                          'result["templateVersion"] == 2', 'latest["version"] == 3',
                          'stop_worker()', 'ADTR_DIRECTORY_READ_ENABLED="false"',
                          'ADTR_DOMAIN_PROBE_ENABLED="false"', 'report["status"] = "not-run"'):
@@ -98,6 +99,70 @@ class SimulationDetectionWorkflowContract(unittest.TestCase):
         self.assertIn('OwnerScoped: true', self.text('internal/simulationdetection/executor.go'))
         self.assertIn('k.OwnerScoped && (t.ActorID != p.ActorID || t.AuthorizationVersion != version)',
                       self.text('internal/tasks/engine.go'))
+
+    def test_worker_listener_is_distinct_on_each_start_and_secret_inputs_filtered(self):
+        with socket.socket() as api:
+            api.bind(("127.0.0.1", 0))
+            api.listen()
+            address = "127.0.0.1:" + str(api.getsockname()[1])
+            env = {"ADTR_LISTEN_ADDR": address, "ADTR_DATABASE_URL": "synthetic-private",
+                   "ADTR_BOOTSTRAP_PASSWORD": "never-forward", "ADTR_E2E_PASSWORD": "never-forward",
+                   "POSTGRES_PASSWORD": "never-forward", "PATH": "/synthetic"}
+            for _ in range(2):  # Initial launch and restart both allocate independently.
+                runtime, base = worker_environment(env)
+                self.assertNotEqual(runtime["ADTR_LISTEN_ADDR"], address)
+                self.assertRegex(runtime["ADTR_LISTEN_ADDR"], r"^127\.0\.0\.1:[1-9][0-9]*$")
+                self.assertEqual(base, "http://" + runtime["ADTR_LISTEN_ADDR"])
+                self.assertEqual(runtime["ADTR_DATABASE_URL"], "synthetic-private")
+                self.assertFalse(any(k.startswith(("ADTR_BOOTSTRAP_", "ADTR_E2E_")) for k in runtime))
+                self.assertNotIn("POSTGRES_PASSWORD", runtime)
+                self.assertEqual(env["ADTR_LISTEN_ADDR"], address)
+        source = self.text('scripts/test_simulation_detection_integration.py')
+        self.assertIn('runtime, worker_base = worker_environment(env)', source)
+        self.assertIn('start_worker()\n        wait_for_worker(worker, worker_base, report)', source)
+
+    @staticmethod
+    def response(status):
+        response = MagicMock()
+        response.__enter__.return_value.status = status
+        return response
+
+    def test_worker_readiness_gates_result_and_restart(self):
+        process = SimpleNamespace(poll=lambda: None)
+        report = {}
+        reader = MagicMock(return_value={"task": {"state": "succeeded"}})
+        with patch('test_simulation_detection_integration.urllib.request.urlopen',
+                   side_effect=[OSError("private-network-detail"), self.response(200)]) as probe, \
+             patch('test_simulation_detection_integration.time.sleep') as sleep:
+            self.assertEqual(wait_for_worker(process, "http://127.0.0.1:1234", report, reader), reader.return_value)
+            self.assertEqual(probe.call_count, 2)
+            reader.assert_called_once_with()
+            sleep.assert_called_once_with(.1)
+            probe.assert_called_with("http://127.0.0.1:1234/readyz", timeout=1)
+        with patch('test_simulation_detection_integration.urllib.request.urlopen', return_value=self.response(200)):
+            self.assertIsNone(wait_for_worker(process, "http://127.0.0.1:1235", report))
+        self.assertEqual(report, {})
+
+    def test_worker_exit_retains_only_closed_diagnostic(self):
+        report = {}
+        with patch('test_simulation_detection_integration.urllib.request.urlopen') as probe:
+            with self.assertRaisesRegex(RuntimeError, '^isolated worker exited$'):
+                wait_for_worker(SimpleNamespace(poll=lambda: 1), "http://127.0.0.1:1234", report)
+            probe.assert_not_called()
+        self.assertEqual(report, {"workerDiagnostic": {"phase": "worker", "reason": "process-exited", "exitCode": 1}})
+
+    def test_readiness_uses_existing_result_poll_budget(self):
+        process = SimpleNamespace(poll=lambda: None)
+        report = {}
+        reader = MagicMock()
+        with patch('test_simulation_detection_integration.urllib.request.urlopen', return_value=self.response(503)) as probe, \
+             patch('test_simulation_detection_integration.time.sleep') as sleep:
+            with self.assertRaisesRegex(RuntimeError, '^isolated worker readiness timed out$'):
+                wait_for_worker(process, "http://127.0.0.1:1234", report, reader)
+            self.assertEqual(probe.call_count, 300)
+            self.assertEqual(sleep.call_count, 300)
+            reader.assert_not_called()
+        self.assertEqual(report, {"workerDiagnostic": {"phase": "worker", "reason": "readiness-timeout"}})
 
     def test_go_guard_rejects_skips_missing_or_unrelated_pass(self):
         cases = [([], False), ([{"Action": "skip", "Test": "Required"}], False),

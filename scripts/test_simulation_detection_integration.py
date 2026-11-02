@@ -69,6 +69,51 @@ def run_go_integration(package, selector, expected, env):
     assert expected in passed and not skipped, "required PostgreSQL integration did not execute fully"
 
 
+
+def worker_environment(env):
+    """Reserve a distinct loopback candidate while the API is already listening."""
+    runtime = {k: v for k, v in env.items()
+               if not k.startswith(("ADTR_BOOTSTRAP_", "ADTR_E2E_")) and k != "POSTGRES_PASSWORD"}
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        address = "127.0.0.1:" + str(sock.getsockname()[1])
+    # Explicit port zero is rejected by production configuration. Never inherit
+    # the API listener, including when this worker is restarted.
+    if address == env["ADTR_LISTEN_ADDR"]:
+        raise RuntimeError("isolated worker listener collided with API")
+    runtime["ADTR_LISTEN_ADDR"] = address
+    return runtime, "http://" + address
+
+
+def wait_for_worker(worker, base, report, read_result=None):
+    """Readiness consumes the existing 300 result-poll iterations, not a retry budget."""
+    ready = False
+
+    def exited():
+        code = worker.poll()
+        if code is not None:
+            # A fixed vocabulary and integer exit status are safe to retain.
+            # Raw process logs may contain authentication/database material.
+            report["workerDiagnostic"] = {"phase": "worker", "reason": "process-exited", "exitCode": code}
+            raise RuntimeError("isolated worker exited")
+
+    for _ in range(300):
+        exited()
+        try:
+            with urllib.request.urlopen(base + "/readyz", timeout=1) as response:
+                ready = response.status == 200
+        except (OSError, urllib.error.URLError):
+            ready = False
+        if ready:
+            result = read_result() if read_result is not None else None
+            exited()
+            if read_result is None or result["task"]["state"] in ("succeeded", "failed", "cancelled", "dead_letter"):
+                return result
+        time.sleep(.1)
+    report["workerDiagnostic"] = {"phase": "worker", "reason": "task-timeout" if ready else "readiness-timeout"}
+    raise RuntimeError("real simulation worker result timed out" if ready else "isolated worker readiness timed out")
+
+
 def main():
     os.chdir(ROOT)
     # CI cancellation still tears down only this harness-owned process/container.
@@ -81,6 +126,7 @@ def main():
     name = "adtr-simulation-detection-e2e-" + uuid.uuid4().hex[:12]
     owner = uuid.uuid4().hex
     created, server, worker = False, None, None
+    worker_base = None
     log = None
     # Do not inherit deployment/database/LDAP/worker inputs into isolated tests.
     env = {k: v for k, v in os.environ.items() if not k.upper().startswith(("ADTR_", "POSTGRES_", "PG"))}
@@ -113,8 +159,8 @@ def main():
             worker = None
 
     def start_worker():
-        nonlocal worker
-        runtime = {k: v for k, v in env.items() if not k.startswith(("ADTR_BOOTSTRAP_", "ADTR_E2E_")) and k != "POSTGRES_PASSWORD"}
+        nonlocal worker, worker_base
+        runtime, worker_base = worker_environment(env)
         worker = subprocess.Popen(["./bin/adtr", "-mode", "worker"], env=runtime, stdout=log, stderr=log)
 
     def start():
@@ -264,14 +310,7 @@ COMMIT;
         latest = latest["template"]
         assert latest["version"] == 3
         start_worker()
-        for _ in range(300):
-            assert worker.poll() is None, "isolated worker exited"
-            completed = client.call(active_path)
-            if completed["task"]["state"] in ("succeeded", "failed", "cancelled", "dead_letter"):
-                break
-            time.sleep(.1)
-        else:
-            raise RuntimeError("real simulation worker result timed out")
+        completed = wait_for_worker(worker, worker_base, report, lambda: client.call(active_path))
         assert completed["task"]["state"] == "succeeded"
         result = completed["task"]["result"]
         assert result["simulation"] and result["templateVersion"] == 2
@@ -286,6 +325,7 @@ COMMIT;
         stop()
         start()
         start_worker()
+        wait_for_worker(worker, worker_base, report)
         assert client.call(active_path) == completed
         assert client.call(receipt_path) == receipt
         assert client.call(API + "/run", dict(run_body, templateVersion=2, operationId="http-active"))["submission"]["task"]["taskUUID"] == active_id
