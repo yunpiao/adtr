@@ -277,7 +277,9 @@ COMMIT;
             run(["go", "run", str(source)], env=env, capture_output=True)
         log = tempfile.TemporaryFile()  # Raw server logs are deliberately not published.
         start()
-        anonymous, admin, client, other, peer = [Client(base, stage) for stage in ("anonymous", "admin", "operator", "other-tenant", "other-owner")]
+        # Diagnostic stage is a closed shared vocabulary, not account identity.
+        # The peer remains a separate same-domain operator with its own session.
+        anonymous, admin, client, other, peer = [Client(base, stage) for stage in ("anonymous", "admin", "operator", "other-tenant", "operator")]
         for c, username in ((admin, "simulation-admin"), (client, "simulation-operator"), (other, "simulation-other"), (peer, "simulation-peer")):
             c.call("/api/auth/login", {"username": username, "password": account_password})
         # Exercise the actual browser prerequisite APIs before entering Playwright.

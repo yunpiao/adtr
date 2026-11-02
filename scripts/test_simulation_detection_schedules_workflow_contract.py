@@ -8,10 +8,36 @@ import subprocess
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
+from test_simulation_events_integration import Client
 from test_simulation_detection_schedules_integration import REQUIRED_POSTGRES_TESTS, ROLE, run_go_integration
 ROOT = Path(__file__).resolve().parents[1]
 MODULE = 'test_simulation_detection_schedules_integration'
 class ScheduledDetectionWorkflowContract(unittest.TestCase):
+    def test_real_shared_clients_preserve_separate_peer_identity(self):
+        source=(ROOT/'scripts/test_simulation_detection_schedules_integration.py').read_text()
+        tree=ast.parse(source)
+        main=next(n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name=='main')
+        assignment=next(n for n in ast.walk(main) if isinstance(n,ast.Assign)
+            and isinstance(n.value,ast.ListComp) and isinstance(n.targets[0],ast.Tuple)
+            and [v.id for v in n.targets[0].elts]==['anonymous','admin','client','other','peer'])
+        stages=ast.literal_eval(assignment.value.generators[0].iter)
+        # Real constructor validates the closed vocabulary, without HTTP calls.
+        clients=dict(zip([v.id for v in assignment.targets[0].elts],
+                         [Client('http://127.0.0.1:19000',stage) for stage in stages]))
+        self.assertEqual([c.stage for c in clients.values()],
+                         ['anonymous','admin','operator','other-tenant','operator'])
+        self.assertIsNot(clients['peer'],clients['client'])
+        self.assertIsNot(clients['peer'].opener,clients['client'].opener)
+        login_loop=next(n for n in ast.walk(main) if isinstance(n,ast.For)
+            and isinstance(n.target,ast.Tuple)
+            and [v.id for v in n.target.elts]==['c','username'])
+        identities={entry.elts[0].id:ast.literal_eval(entry.elts[1]) for entry in login_loop.iter.elts}
+        self.assertEqual(identities,{'admin':'simulation-admin','client':'simulation-operator',
+                                    'other':'simulation-other','peer':'simulation-peer'})
+        self.assertIn("('default','simulation-peer')",source)
+        for path in ('detail_path','receipt_path','task_path'):
+            self.assertIn('peer.call('+path+', want=404)',source)
+
     def test_named_tests_exist_and_do_not_skip(self):
         self.assertEqual(len(REQUIRED_POSTGRES_TESTS),10)
         for package,name in REQUIRED_POSTGRES_TESTS:
