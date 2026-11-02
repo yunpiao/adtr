@@ -83,3 +83,19 @@ func TestDuplicateAndDepth(t *testing.T) {
 		}
 	}
 }
+
+func TestCaseReplay(t *testing.T) {
+	input := `{"scope":{"Tenant":"t","Domain":"d","Read":true,"Manage":true},"provenance":{"Contract":"adtr.securityevents.simulated.v1","Fixture":"f","Synthetic":true},"id":"case1","changes":[{"Action":"mark_suspicious","Actor":"synthetic-analyst","Reason":"fixture","At":"2026-01-01T00:00:00Z","ExpectedRevision":1},{"Action":"close","Actor":"synthetic-analyst","Reason":"fixture","At":"2026-01-01T00:00:01Z","ExpectedRevision":2}]}`
+	var out, e bytes.Buffer
+	if run([]string{"case-replay"}, strings.NewReader(input), &out, &e) != 0 {
+		t.Fatal(e.String())
+	}
+	if !strings.Contains(out.String(), `"State":"closed"`) {
+		t.Fatal(out.String())
+	}
+	input = strings.Replace(input, `"ExpectedRevision":2`, `"ExpectedRevision":1`, 1)
+	out.Reset()
+	if run([]string{"case-replay"}, strings.NewReader(input), &out, &e) != 2 || out.Len() != 0 {
+		t.Fatal("partial result on conflict")
+	}
+}

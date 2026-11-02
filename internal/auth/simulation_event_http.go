@@ -311,5 +311,7 @@ func simulationEventProfileReadable(ctx context.Context, tx pgx.Tx, actor User) 
 }
 
 // The navigation hint is safe on the original event schema and the additive
-// risk schema only. Unknown future versions must not advertise capabilities.
-func simulationEventProfileSchemaAvailable(version int) bool { return version == 24 || version == 25 }
+// risk/detection schemas only. Unknown future versions must not advertise capabilities.
+func simulationEventProfileSchemaAvailable(version int) bool {
+	return version == 24 || version == 25 || version == 26
+}

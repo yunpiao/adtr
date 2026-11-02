@@ -2,6 +2,7 @@ export interface Profile {
   // Navigation hint only; API independently rechecks current permissions.
   simulationEventsReadable?: boolean;
   simulationRiskReadable?: boolean;
+  simulationDetectionReadable?: boolean;
   ID: number;
   username: string;
   role: string;

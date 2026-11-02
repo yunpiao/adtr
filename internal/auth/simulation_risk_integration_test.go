@@ -12,17 +12,20 @@ import (
 	"testing"
 
 	"github.com/yunpiao/adtr/internal/securityevents"
+	"github.com/yunpiao/adtr/internal/simulationdetection"
 	"github.com/yunpiao/adtr/internal/simulationevents"
 )
 
-// Uses newResourceFixture's freshly created database, never existing grant data.
+// Installs the complete synthetic schema 24–26 chain in an isolated database,
+// never existing grant data. Legacy endpoints must continue working after upgrade.
 func TestSimulationRiskHTTPAuthorizationRecoveryAndAuditAtomicity(t *testing.T) {
 	f := newTaskFixture(t)
 	f.exec(SimulationEventPermissionSchema + simulationevents.SchemaSQL + simulationevents.ImmutableSchemaSQL)
 	f.exec(SimulationRiskPermissionSchema + simulationrisk.SchemaSQL + simulationrisk.ImmutableSchemaSQL)
-	f.exec("UPDATE adtr.schema_version SET version=25")
+	f.exec(SimulationDetectionPermissionSchema + simulationdetection.SchemaSQL + simulationdetection.ImmutableSchemaSQL)
+	f.exec("UPDATE adtr.schema_version SET version=26")
 	var guards int
-	if err := f.conn.QueryRow(f.ctx, `SELECT count(*) FROM pg_trigger WHERE tgrelid='adtr.access_permissions'::regclass AND tgname IN ('task_auth_permissions','simulation_event_grant_epoch','simulation_risk_grant_epoch') AND tgenabled='O'`).Scan(&guards); err != nil || guards != 3 {
+	if err := f.conn.QueryRow(f.ctx, `SELECT count(*) FROM pg_trigger WHERE tgrelid='adtr.access_permissions'::regclass AND tgname IN ('task_auth_permissions','simulation_event_grant_epoch','simulation_risk_grant_epoch','simulation_detection_grant_epoch') AND tgenabled='O'`).Scan(&guards); err != nil || guards != 4 {
 		t.Fatal("permission guards replaced", guards, err)
 	}
 	f.exec("INSERT INTO adtr.access_permissions(tenant_id,role_id,mark,readable,writeable) VALUES('one',$1,'simulation_risk',true,true)", narrowResourceRole)

@@ -17,6 +17,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/yunpiao/adtr/internal/dbadmission"
+	"github.com/yunpiao/adtr/internal/schemaversion"
 	"github.com/yunpiao/adtr/internal/securityevents"
 	"github.com/yunpiao/adtr/internal/simulationevents"
 	"github.com/yunpiao/adtr/internal/simulationrisk"
@@ -216,8 +217,8 @@ func (s *Service) handleSimulationRisk(ctx context.Context, r *http.Request, pat
 		return nil, err
 	}
 	defer tx.Rollback(ctx)
-	// This simulation slice requires migration 25, never legacy tables alone.
-	if err = tasks.CheckSchemaTx(ctx, tx, 25); err != nil {
+	// Runtime uses the exact application-wide schema gate.
+	if err = tasks.CheckSchemaTx(ctx, tx, schemaversion.Current); err != nil {
 		if errors.Is(err, tasks.ErrSchemaIncompatible) {
 			return nil, fail(503, "schema_incompatible")
 		}
@@ -279,7 +280,7 @@ func simulationRiskProfileReadable(ctx context.Context, tx pgx.Tx, actor User) (
 	if err := tx.QueryRow(ctx, "SELECT version FROM adtr.schema_version WHERE singleton").Scan(&version); err != nil {
 		return false, err
 	}
-	if version != 25 {
+	if version != 25 && version != 26 {
 		return false, nil
 	}
 	var role string
