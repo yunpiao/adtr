@@ -40,6 +40,7 @@ type Service struct {
 }
 type User struct {
 	// Navigation hint only, populated only by authenticated login and /me.
+	SimulationLabelsReadable                    *bool     `json:"simulationLabelsReadable,omitempty"`
 	SimulationDetectionSchedulesReadable        *bool     `json:"simulationDetectionSchedulesReadable,omitempty"`
 	SimulationDetectionReadable                 *bool     `json:"simulationDetectionReadable,omitempty"`
 	SimulationRiskReadable                      *bool     `json:"simulationRiskReadable,omitempty"`
@@ -339,6 +340,11 @@ func (s *Service) handle(ctx context.Context, r *http.Request, path string, in r
 			return nil, "", false, err
 		}
 		u.SimulationDetectionSchedulesReadable = &schedulesReadable
+		labelsReadable, err := simulationLabelsProfileReadable(ctx, tx, u)
+		if err != nil {
+			return nil, "", false, err
+		}
+		u.SimulationLabelsReadable = &labelsReadable
 		if err = tx.Commit(ctx); err != nil {
 			return nil, "", false, err
 		}
@@ -405,6 +411,11 @@ func (s *Service) handle(ctx context.Context, r *http.Request, path string, in r
 			return nil, "", false, err
 		}
 		u.SimulationDetectionSchedulesReadable = &schedulesReadable
+		labelsReadable, err := simulationLabelsProfileReadable(ctx, tx, u)
+		if err != nil {
+			return nil, "", false, err
+		}
+		u.SimulationLabelsReadable = &labelsReadable
 		return u, "", false, tx.Commit(ctx)
 	}
 	if path == "/logout" {

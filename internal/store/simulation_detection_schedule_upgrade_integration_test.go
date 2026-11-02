@@ -24,7 +24,7 @@ func TestSchema27UpgradePreservesHistoryAndGrants(t *testing.T) {
 	if Ready(f.ctx, f.config) == nil {
 		t.Fatal("schema26 accepted by current binary")
 	}
-	if err := Migrate(f.ctx, f.config); err != nil {
+	if err := migrateTo(f.ctx, f.config, 27); err != nil {
 		t.Fatal(err)
 	}
 	after := f.snapshot()
@@ -37,12 +37,12 @@ func TestSchema27UpgradePreservesHistoryAndGrants(t *testing.T) {
 	if err := f.conn.QueryRow(f.ctx, `SELECT version=27 AND NOT EXISTS(SELECT FROM adtr.access_permissions WHERE mark='simulation_detection_schedules') AND to_regclass('adtr.simulation_detection_schedules') IS NOT NULL AND to_regclass('adtr.simulation_detection_schedule_intents') IS NOT NULL FROM adtr.schema_version`).Scan(&valid); err != nil || !valid {
 		t.Fatal("migration missing independent schema or invented grant", err)
 	}
-	if err := Ready(f.ctx, f.config); err != nil {
-		t.Fatal(err)
+	if err := Ready(f.ctx, f.config); err == nil {
+		t.Fatal("historical schema27 accepted by current binary")
 	}
 	catalog := f.catalogSnapshot()
 	snapshot := f.snapshot()
-	if err := Migrate(f.ctx, f.config); err != nil {
+	if err := migrateTo(f.ctx, f.config, 27); err != nil {
 		t.Fatal(err)
 	}
 	if catalog != f.catalogSnapshot() || !reflect.DeepEqual(snapshot, f.snapshot()) {
@@ -57,7 +57,7 @@ func TestSchema27FailureRollsBackPermissionAndTables(t *testing.T) {
 	f.exec(`CREATE TABLE adtr.simulation_detection_schedule_intents (sentinel text)`)
 	before := f.snapshot()
 	catalog := f.catalogSnapshot()
-	if err := Migrate(f.ctx, f.config); err == nil {
+	if err := migrateTo(f.ctx, f.config, 27); err == nil {
 		t.Fatal("collision migration unexpectedly succeeded")
 	}
 	if !reflect.DeepEqual(before, f.snapshot()) || catalog != f.catalogSnapshot() {

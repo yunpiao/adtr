@@ -15,6 +15,7 @@ import (
 	"github.com/yunpiao/adtr/internal/securityevents"
 	"github.com/yunpiao/adtr/internal/simulationdetection"
 	"github.com/yunpiao/adtr/internal/simulationevents"
+	"github.com/yunpiao/adtr/internal/simulationlabels"
 	"github.com/yunpiao/adtr/internal/tasks"
 	"os"
 	"sync"
@@ -73,7 +74,7 @@ func newScheduleFixture(t *testing.T) *scheduleFixture {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = db.Close(context.Background()) })
-	ddl := fmt.Sprintf(`CREATE SCHEMA adtr;CREATE TABLE adtr.schema_version(singleton boolean PRIMARY KEY DEFAULT true,version integer NOT NULL);INSERT INTO adtr.schema_version VALUES(true,%d);`, schemaversion.Current) + tasks.Schema + simulationevents.SchemaSQL + simulationevents.ImmutableSchemaSQL + simulationdetection.SchemaSQL + simulationdetection.ImmutableSchemaSQL + SchemaSQL + ImmutableSchemaSQL + `CREATE TABLE adtr.synthetic_schedule_authority(epoch text NOT NULL,allowed boolean NOT NULL);INSERT INTO adtr.synthetic_schedule_authority VALUES('1',true);CREATE TABLE adtr.synthetic_schedule_audit(operation_id text PRIMARY KEY);`
+	ddl := fmt.Sprintf(`CREATE SCHEMA adtr;CREATE TABLE adtr.schema_version(singleton boolean PRIMARY KEY DEFAULT true,version integer NOT NULL);INSERT INTO adtr.schema_version VALUES(true,%d);`, schemaversion.Current) + tasks.Schema + simulationevents.SchemaSQL + simulationevents.ImmutableSchemaSQL + simulationdetection.SchemaSQL + simulationdetection.ImmutableSchemaSQL + SchemaSQL + ImmutableSchemaSQL + simulationlabels.SchemaSQL + simulationlabels.ImmutableSchemaSQL + `CREATE TABLE adtr.synthetic_schedule_authority(epoch text NOT NULL,allowed boolean NOT NULL);INSERT INTO adtr.synthetic_schedule_authority VALUES('1',true);CREATE TABLE adtr.synthetic_schedule_audit(operation_id text PRIMARY KEY);`
 	if _, err = db.Exec(ctx, ddl); err != nil {
 		t.Fatal(err)
 	}
