@@ -26,6 +26,7 @@ import (
 	"github.com/yunpiao/adtr/internal/operationallogs"
 	app "github.com/yunpiao/adtr/internal/runtime"
 	"github.com/yunpiao/adtr/internal/schedules"
+	"github.com/yunpiao/adtr/internal/simulationdetection"
 	"github.com/yunpiao/adtr/internal/store"
 	"github.com/yunpiao/adtr/internal/systemhealth"
 	"github.com/yunpiao/adtr/internal/taskarchive"
@@ -97,6 +98,7 @@ func run() (runErr error) {
 		defer cancel()
 		return store.Migrate(migrationCtx, cfg.Database)
 	}
+	simulationDetectionEnabled := os.Getenv("ADTR_SIMULATION_DETECTION_ENABLED") == "true"
 	var operationAccountStore *operationaccounts.Store
 	var domainStore *domains.Store
 	var taskEngine *tasks.Engine
@@ -120,7 +122,12 @@ func run() (runErr error) {
 		if err != nil {
 			return fmt.Errorf("system health configuration failed")
 		}
-		taskEngine, err = tasks.New(cfg.Database, tasks.ProductionRegistry(domainStore.ComputerAssetExportV3Kind(), domainStore.GroupAssetExportV3Kind(), domainStore.UserAssetExportV3Kind(), audit.Kind(), domainStore.Kind(), domainStore.AccountKind(), domainStore.DirectoryKind(), domainStore.DirectoryV2Kind(), domainStore.DirectoryV3Kind(), domainStore.DirectoryV4Kind(), operationallogs.Kind()), auth.NewTaskAuthorizer(), store.SchemaVersion)
+		kinds := []tasks.Kind{domainStore.ComputerAssetExportV3Kind(), domainStore.GroupAssetExportV3Kind(), domainStore.UserAssetExportV3Kind(), audit.Kind(), domainStore.Kind(), domainStore.AccountKind(), domainStore.DirectoryKind(), domainStore.DirectoryV2Kind(), domainStore.DirectoryV3Kind(), domainStore.DirectoryV4Kind(), operationallogs.Kind()}
+		taskAuthorizer := auth.NewSimulationDetectionTaskAuthorizer(simulationDetectionEnabled)
+		if simulationDetectionEnabled {
+			kinds = append(kinds, simulationdetection.NewKind(taskAuthorizer))
+		}
+		taskEngine, err = tasks.New(cfg.Database, tasks.ProductionRegistry(kinds...), taskAuthorizer, store.SchemaVersion)
 		if err != nil {
 			return fmt.Errorf("task engine configuration failed")
 		}
@@ -269,6 +276,9 @@ func run() (runErr error) {
 			operationalHandler := authentication.OperationalLogsHandler(taskEngine)
 			mux.Handle("/api/system/logs", operationalHandler)
 			mux.Handle("/api/system/logs/", operationalHandler)
+			simulationDetectionHandler := authentication.SimulationDetectionHandler(simulationDetectionEnabled, taskEngine)
+			mux.Handle("/api/simulation/detection", simulationDetectionHandler)
+			mux.Handle("/api/simulation/detection/", simulationDetectionHandler)
 			simulationRiskHandler := authentication.SimulationRiskHandler(os.Getenv("ADTR_SIMULATION_RISK_ENABLED") == "true")
 			mux.Handle("/api/simulation/risk", simulationRiskHandler)
 			mux.Handle("/api/simulation/risk/", simulationRiskHandler)

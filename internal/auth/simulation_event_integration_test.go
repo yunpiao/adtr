@@ -12,7 +12,9 @@ import (
 
 	"github.com/yunpiao/adtr/internal/schemaversion"
 	"github.com/yunpiao/adtr/internal/securityevents"
+	"github.com/yunpiao/adtr/internal/simulationdetection"
 	"github.com/yunpiao/adtr/internal/simulationevents"
+	"github.com/yunpiao/adtr/internal/simulationrisk"
 )
 
 type simulationLostResponse struct {
@@ -24,10 +26,13 @@ func (w *simulationLostResponse) Header() http.Header       { return w.header }
 func (w *simulationLostResponse) WriteHeader(n int)         { w.status = n }
 func (w *simulationLostResponse) Write([]byte) (int, error) { return 0, io.ErrClosedPipe }
 
-// Uses newResourceFixture's freshly created database, never existing grant data.
+// Installs the complete synthetic schema 24–26 chain in an isolated database,
+// never existing grant data. Legacy endpoints must continue working after upgrade.
 func TestSimulationEventHTTPAuthorizationRecoveryAndAuditAtomicity(t *testing.T) {
 	f := newTaskFixture(t)
 	f.exec(SimulationEventPermissionSchema + simulationevents.SchemaSQL + simulationevents.ImmutableSchemaSQL)
+	f.exec(SimulationRiskPermissionSchema + simulationrisk.SchemaSQL + simulationrisk.ImmutableSchemaSQL)
+	f.exec(SimulationDetectionPermissionSchema + simulationdetection.SchemaSQL + simulationdetection.ImmutableSchemaSQL)
 	f.exec("UPDATE adtr.schema_version SET version=$1", schemaversion.Current)
 	f.exec("INSERT INTO adtr.access_permissions(tenant_id,role_id,mark,readable,writeable) VALUES('one',$1,'simulation_events',true,true)", narrowResourceRole)
 	f.seedGroup("one", "simulation-group", narrowResourceRole, "domain-a")

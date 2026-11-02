@@ -44,3 +44,23 @@ stdin 上限 4 MiB，嵌套深度上限 64，拒绝非 ASCII 对象键、未知�
 独立模块的单元测试及 CLI 跨模块测试不能替代真实 AD、Windows、浏览器、容量和产品验收。
 事件 case 状态机可由 Go 调用者使用，当前 CLI events 子命令只做查询和关联，不修改持久状态。
 后续将按依赖继续敏感标签、白名单、规则管理、报告和模拟适配器，逐切片验证。
+
+## 第二批交互式快照操作（#253）
+
+新增命令：
+- `rule-catalog`：init/create/edit/list/detail/test/publish-simulation/enable/disable/archive/export。
+  输入 Request 见 rulecatalog-simulated-contract.md，输出 snapshot 可保存再作为下次输入。
+  每次变更必须提供 expected_revision，避免同一快照的过期编辑；修改后必须重新测试，
+  模拟 reviewer 记录不等于身份认证或生产发布审批。
+- `labels`：敏感组和手工标签的合成推导；输入见 sensitive-labels-simulated-contract.md。
+- `label-changes`：before/after 两个完整同策略输入，重算后输出变化；不完整或不兼容直接失败。
+- `rule-exceptions`：action、access、snapshot 和对应动作字段；见 detection-exceptions-simulated-contract.md。
+  init 只接受 access；add/edit 接 entry、expectedRevision；archive 接 id、expectedRevision；
+  import 接 entries、expectedRevision；evaluate 接 events、matches、asOf。
+  preview-from-event 接 event 及 entry 的 id/reason/rule_id/rule_digest/not_before/expires_at，
+  只生成禁用草稿；export/list 不变更快照。各动作拒绝无关顶层字段。
+- `case-replay`：scope、provenance、id、changes；最多1000条显式合成变更，从初始revision=1重放。
+  任一冲突则整次无结果；输出最终case和审计值，不写数据库、不构成防篡改日志。
+
+CLI 原有输入/键/字节预算仍生效；JSON snapshots 是不可信数据，模块重新验证。
+同版本自洽的合成快照可以由用户重建；这些离线工具不提供跨进程 CAS 或身份可信性。

@@ -196,7 +196,7 @@ func TestSimulationRiskQueryStrictSubjectAndNoClientScope(t *testing.T) {
 
 func TestSimulationEventHintSchemaAdditiveCompatibility(t *testing.T) {
 	for _, v := range []int{0, 23, 24, 25, 26, 1000} {
-		if simulationEventProfileSchemaAvailable(v) != (v == 24 || v == 25) {
+		if simulationEventProfileSchemaAvailable(v) != (v == 24 || v == 25 || v == 26) {
 			t.Fatal("event hint schema", v)
 		}
 	}
