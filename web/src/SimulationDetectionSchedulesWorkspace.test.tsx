@@ -150,14 +150,25 @@ function fill() {
   fireEvent.change(screen.getByLabelText("计划名称"), {
     target: { value: "新计划" },
   });
-  fireEvent.change(screen.getByLabelText("检测模板"), {
+  fireEvent.change(screen.getByRole("combobox", { name: "检测模板" }), {
     target: { value: template.id },
   });
-  fireEvent.change(screen.getByLabelText("合成数据集"), {
+  fireEvent.change(screen.getByRole("combobox", { name: "合成数据集" }), {
     target: { value: dataset.id },
   });
 }
 describe("scheduled simulation workspace", () => {
+  it("exposes exact accessible names independent of select option text", async () => {
+    mount();
+    await ready();
+    // ByRole string names use exact matching; unlike Playwright, no exact option.
+    for (const name of ["UTC 周期", "检测模板", "合成数据集"]) {
+      const control = screen.getByRole("combobox", { name });
+      expect(control).toHaveAccessibleName(name);
+      expect(control).toHaveAttribute("aria-label", name);
+      expect(screen.getByLabelText(name, { exact: true })).toBe(control);
+    }
+  });
   it("defaults deny even privileged profile; no fetch without explicit scoped grants", () => {
     render(
       <Workspace
@@ -199,7 +210,7 @@ describe("scheduled simulation workspace", () => {
       mount();
       await ready();
       fill();
-      fireEvent.change(screen.getByLabelText("UTC 周期"), {
+      fireEvent.change(screen.getByRole("combobox", { name: "UTC 周期" }), {
         target: { value: String(cycle) },
       });
       fireEvent.click(screen.getByRole("button", { name: "创建暂停计划" }));
@@ -240,7 +251,7 @@ describe("scheduled simulation workspace", () => {
     fireEvent.click(screen.getByRole("button", { name: schedule.label }));
     await screen.findByRole("button", { name: "编辑计划" });
     fireEvent.click(screen.getByRole("button", { name: "编辑计划" }));
-    fireEvent.change(screen.getByLabelText("UTC 周期"), {
+    fireEvent.change(screen.getByRole("combobox", { name: "UTC 周期" }), {
       target: { value: "2" },
     });
     fireEvent.click(screen.getByRole("button", { name: "保存新修订并暂停" }));

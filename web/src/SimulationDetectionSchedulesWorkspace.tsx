@@ -624,6 +624,7 @@ function Workspace({
         <label>
           UTC 周期
           <select
+            aria-label="UTC 周期"
             value={cycle}
             onChange={(e) => setCycle(Number(e.target.value) as 0 | 1 | 2)}
           >
@@ -635,6 +636,7 @@ function Workspace({
         <label>
           检测模板
           <select
+            aria-label="检测模板"
             value={templateId}
             onChange={(e) => setTemplateId(e.target.value)}
           >
@@ -651,6 +653,7 @@ function Workspace({
         <label>
           合成数据集
           <select
+            aria-label="合成数据集"
             value={datasetId}
             onChange={(e) => setDatasetId(e.target.value)}
           >
