@@ -287,10 +287,10 @@ describe("task list navigation in the real App component", () => {
     await screen.findByRole("heading", { name: "审计导出任务" });
     expect(window.location.hash).toBe(`#audit/detail/${secondID}`);
     expect(calls("/api/auth/me").length).toBeGreaterThan(authReads);
+    await screen.findByText(/XLSX 仅包含所选列的表头/);
     expect(calls("/api/audit/exports/detail").at(-1)![0]).toBe(
       `/api/audit/exports/detail?taskUUID=${secondID}`,
     );
-    await screen.findByText(/XLSX 仅包含所选列的表头/);
     act(() => window.history.back());
     await screen.findByTestId("task-detail-identity");
     expect(currentEntry()).toEqual(saved);
@@ -702,7 +702,7 @@ describe("identity and outstanding response isolation", () => {
     profile = { ...profile, csrfToken: `${profile.csrfToken}-rotated` };
     act(() => window.dispatchEvent(new Event("focus")));
     await screen.findByRole("heading", { name: "账户概览" });
-    expect(oldSignal.aborted).toBe(true);
+    await waitFor(() => expect(oldSignal.aborted).toBe(true));
     await act(async () =>
       late.resolve(
         await response({
