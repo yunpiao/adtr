@@ -195,16 +195,16 @@ func TestSimulationRiskQueryStrictSubjectAndNoClientScope(t *testing.T) {
 }
 
 func TestSimulationEventHintSchemaAdditiveCompatibility(t *testing.T) {
-	for _, v := range []int{-1, 0, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 1000} {
-		if simulationEventProfileSchemaAvailable(v) != (v == 24 || v == 25 || v == 26 || v == 27 || v == 28 || v == 29 || v == 30 || v == 31) {
+	for _, v := range []int{-1, 0, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 1000} {
+		if simulationEventProfileSchemaAvailable(v) != (v == 24 || v == 25 || v == 26 || v == 27 || v == 28 || v == 29 || v == 30 || v == 31 || v == 32) {
 			t.Fatal("event hint schema", v)
 		}
 	}
 }
 
 func TestSimulationRiskHintSchemaAdditiveCompatibility(t *testing.T) {
-	for _, v := range []int{-1, 0, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 1000} {
-		if simulationRiskProfileSchemaAvailable(v) != (v == 25 || v == 26 || v == 27 || v == 28 || v == 29 || v == 30 || v == 31) {
+	for _, v := range []int{-1, 0, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 1000} {
+		if simulationRiskProfileSchemaAvailable(v) != (v == 25 || v == 26 || v == 27 || v == 28 || v == 29 || v == 30 || v == 31 || v == 32) {
 			t.Fatal("risk hint schema", v)
 		}
 	}

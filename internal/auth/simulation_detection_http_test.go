@@ -133,12 +133,12 @@ func TestSimulationDetectionPermissionMigrationPreservesBoundaries(t *testing.T)
 	sql := SimulationDetectionPermissionSchema
 	// Migration 26 is immutable history: migration 27 introduces scheduling.
 	for _, mark := range accessMarks {
-		if mark == "simulation_detection_schedules" || mark == "simulation_labels" || mark == "simulation_rule_catalog" || mark == "simulation_rule_catalog_publish" || mark == "simulation_detection_exceptions" || mark == "simulation_dns_ip" {
+		if mark == "simulation_detection_schedules" || mark == "simulation_labels" || mark == "simulation_rule_catalog" || mark == "simulation_rule_catalog_publish" || mark == "simulation_detection_exceptions" || mark == "simulation_dns_ip" || mark == "simulation_asset_assessment" {
 			if strings.Contains(sql, "'"+mark+"'") {
 				t.Fatal("historical migration gained future capability")
 			}
-			if !strings.Contains(SimulationDNSIPPermissionSchema, "'"+mark+"'") {
-				t.Fatal("migration31 missing current mark")
+			if !strings.Contains(SimulationAssetAssessmentPermissionSchema, "'"+mark+"'") {
+				t.Fatal("migration32 missing current mark")
 			}
 			continue
 		}

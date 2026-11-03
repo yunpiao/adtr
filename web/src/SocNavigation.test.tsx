@@ -814,3 +814,50 @@ describe("independent simulated DNS/IP navigation", () => {
     },
   );
 });
+
+describe("independent simulated asset assessment navigation", () => {
+  it("requires the asset assessment hint, never inherits administrator or detection hints", () => {
+    const view = render(
+      <Navigation
+        actor={{
+          ...profile,
+          simulationDetectionReadable: true,
+          simulationDetectionSchedulesReadable: true,
+        }}
+      />,
+    );
+    expect(
+      screen.queryByRole("button", { name: "模拟资产分类" }),
+    ).not.toBeInTheDocument();
+    view.rerender(
+      <Navigation
+        actor={{ ...profile, simulationAssetAssessmentReadable: true }}
+      />,
+    );
+    expect(
+      screen.getByRole("button", { name: "模拟资产分类" }),
+    ).toBeInTheDocument();
+    view.rerender(
+      <Navigation
+        actor={{ ...profile, simulationAssetAssessmentReadable: false }}
+      />,
+    );
+    expect(
+      screen.queryByRole("button", { name: "模拟资产分类" }),
+    ).not.toBeInTheDocument();
+  });
+  it.each(["gated", "blocked", "forced"] as const)(
+    "hides granted asset assessment when %s",
+    (state) => {
+      render(
+        <Navigation
+          actor={{ ...profile, simulationAssetAssessmentReadable: true }}
+          {...{ [state]: true }}
+        />,
+      );
+      expect(
+        screen.queryByRole("button", { name: "模拟资产分类" }),
+      ).not.toBeInTheDocument();
+    },
+  );
+});

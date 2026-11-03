@@ -8,6 +8,7 @@ export interface Profile {
   simulationRuleCatalogReadable?: boolean;
   simulationDetectionExceptionsReadable?: boolean;
   simulationDNSIPReadable?: boolean;
+  simulationAssetAssessmentReadable?: boolean;
   simulationRuleCatalogPublishable?: boolean;
   ID: number;
   username: string;

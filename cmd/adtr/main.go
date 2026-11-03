@@ -101,6 +101,7 @@ func run() (runErr error) {
 		return store.Migrate(migrationCtx, cfg.Database)
 	}
 	simulationDetectionEnabled := os.Getenv("ADTR_SIMULATION_DETECTION_ENABLED") == "true"
+	simulationAssetAssessmentEnabled := os.Getenv("ADTR_SIMULATION_ASSET_ASSESSMENT_ENABLED") == "true"
 	simulationDNSIPEnabled := os.Getenv("ADTR_SIMULATION_DNS_IP_ENABLED") == "true"
 	simulationDetectionSchedulesEnabled := os.Getenv("ADTR_SIMULATION_DETECTION_SCHEDULES_ENABLED") == "true"
 	var detectionScheduleEngine *simulationdetectionschedules.Engine
@@ -308,6 +309,9 @@ func run() (runErr error) {
 			simulationLabelsHandler := authentication.SimulationLabelsHandler(os.Getenv("ADTR_SIMULATION_LABELS_ENABLED") == "true")
 			mux.Handle("/api/simulation/labels", simulationLabelsHandler)
 			mux.Handle("/api/simulation/labels/", simulationLabelsHandler)
+			simulationAssetAssessmentHandler := authentication.SimulationAssetAssessmentHandler(simulationAssetAssessmentEnabled)
+			mux.Handle("/api/simulation/asset-assessment", simulationAssetAssessmentHandler)
+			mux.Handle("/api/simulation/asset-assessment/", simulationAssetAssessmentHandler)
 			simulationDNSIPHandler := authentication.SimulationDNSIPHandler(simulationDNSIPEnabled, taskEngine)
 			mux.Handle("/api/simulation/dns-ip", simulationDNSIPHandler)
 			mux.Handle("/api/simulation/dns-ip/", simulationDNSIPHandler)

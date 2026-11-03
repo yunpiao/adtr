@@ -1,0 +1,363 @@
+{
+  "contract": "adtr.simulation-asset-assessment.v1",
+  "simulation": true,
+  "id": "baseline-report",
+  "tenantId": "tenant",
+  "domainId": "domain",
+  "actorId": 7,
+  "epoch": 1,
+  "observationId": "synthetic-assets-v1",
+  "sourceHash": "6be8913831b020241446685c6b834f5e14bcf966190e3e7b9a72e69738c11a72",
+  "scenarioId": "baseline",
+  "version": "simulated-asset-v1",
+  "asOf": "2026-11-01T12:00:00Z",
+  "createdAt": "2026-11-01T12:00:00Z",
+  "rows": [
+    {
+      "version": "simulated-asset-v1",
+      "source": "synthetic",
+      "tenantId": "tenant",
+      "domainId": "domain",
+      "objectId": "user-enabled-recent",
+      "observationId": "synthetic-assets-v1",
+      "kind": "user",
+      "observedAt": "2026-11-01T12:00:00Z",
+      "asOf": "2026-11-01T12:00:00Z",
+      "accountStatus": {
+        "value": "enabled",
+        "reason": "explicit_flags_clear"
+      },
+      "activity": {
+        "value": "recent",
+        "reason": "last_login_within_window"
+      },
+      "groupType": {
+        "value": "not_applicable",
+        "reason": "asset_kind"
+      },
+      "groupScope": {
+        "value": "not_applicable",
+        "reason": "asset_kind"
+      }
+    },
+    {
+      "version": "simulated-asset-v1",
+      "source": "synthetic",
+      "tenantId": "tenant",
+      "domainId": "domain",
+      "objectId": "user-disabled-never",
+      "observationId": "synthetic-assets-v1",
+      "kind": "user",
+      "observedAt": "2026-11-01T12:00:00Z",
+      "asOf": "2026-11-01T12:00:00Z",
+      "accountStatus": {
+        "value": "disabled",
+        "reason": "explicit_disabled_flag"
+      },
+      "activity": {
+        "value": "never_observed",
+        "reason": "explicit_never_assertion"
+      },
+      "groupType": {
+        "value": "not_applicable",
+        "reason": "asset_kind"
+      },
+      "groupScope": {
+        "value": "not_applicable",
+        "reason": "asset_kind"
+      }
+    },
+    {
+      "version": "simulated-asset-v1",
+      "source": "synthetic",
+      "tenantId": "tenant",
+      "domainId": "domain",
+      "objectId": "user-locked-boundary",
+      "observationId": "synthetic-assets-v1",
+      "kind": "user",
+      "observedAt": "2026-11-01T12:00:00Z",
+      "asOf": "2026-11-01T12:00:00Z",
+      "accountStatus": {
+        "value": "locked",
+        "reason": "explicit_locked_flag"
+      },
+      "activity": {
+        "value": "inactive",
+        "reason": "last_login_at_or_before_boundary"
+      },
+      "groupType": {
+        "value": "not_applicable",
+        "reason": "asset_kind"
+      },
+      "groupScope": {
+        "value": "not_applicable",
+        "reason": "asset_kind"
+      }
+    },
+    {
+      "version": "simulated-asset-v1",
+      "source": "synthetic",
+      "tenantId": "tenant",
+      "domainId": "domain",
+      "objectId": "user-unknown-disabled",
+      "observationId": "synthetic-assets-v1",
+      "kind": "user",
+      "observedAt": "2026-11-01T12:00:00Z",
+      "asOf": "2026-11-01T12:00:00Z",
+      "accountStatus": {
+        "value": "unknown",
+        "reason": "missing_evidence"
+      },
+      "activity": {
+        "value": "unknown",
+        "reason": "missing_evidence"
+      },
+      "groupType": {
+        "value": "not_applicable",
+        "reason": "asset_kind"
+      },
+      "groupScope": {
+        "value": "not_applicable",
+        "reason": "asset_kind"
+      }
+    },
+    {
+      "version": "simulated-asset-v1",
+      "source": "synthetic",
+      "tenantId": "tenant",
+      "domainId": "domain",
+      "objectId": "computer-recent-boundary",
+      "observationId": "synthetic-assets-v1",
+      "kind": "computer",
+      "observedAt": "2026-11-01T12:00:00Z",
+      "asOf": "2026-11-01T12:00:00Z",
+      "accountStatus": {
+        "value": "enabled",
+        "reason": "explicit_flags_clear"
+      },
+      "activity": {
+        "value": "recent",
+        "reason": "last_login_within_window"
+      },
+      "groupType": {
+        "value": "not_applicable",
+        "reason": "asset_kind"
+      },
+      "groupScope": {
+        "value": "not_applicable",
+        "reason": "asset_kind"
+      }
+    },
+    {
+      "version": "simulated-asset-v1",
+      "source": "synthetic",
+      "tenantId": "tenant",
+      "domainId": "domain",
+      "objectId": "computer-inactive-boundary",
+      "observationId": "synthetic-assets-v1",
+      "kind": "computer",
+      "observedAt": "2026-11-01T12:00:00Z",
+      "asOf": "2026-11-01T12:00:00Z",
+      "accountStatus": {
+        "value": "enabled",
+        "reason": "explicit_flags_clear"
+      },
+      "activity": {
+        "value": "inactive",
+        "reason": "last_login_at_or_before_boundary"
+      },
+      "groupType": {
+        "value": "not_applicable",
+        "reason": "asset_kind"
+      },
+      "groupScope": {
+        "value": "not_applicable",
+        "reason": "asset_kind"
+      }
+    },
+    {
+      "version": "simulated-asset-v1",
+      "source": "synthetic",
+      "tenantId": "tenant",
+      "domainId": "domain",
+      "objectId": "computer-missing",
+      "observationId": "synthetic-assets-v1",
+      "kind": "computer",
+      "observedAt": "2026-11-01T12:00:00Z",
+      "asOf": "2026-11-01T12:00:00Z",
+      "accountStatus": {
+        "value": "unknown",
+        "reason": "missing_evidence"
+      },
+      "activity": {
+        "value": "unknown",
+        "reason": "missing_evidence"
+      },
+      "groupType": {
+        "value": "not_applicable",
+        "reason": "asset_kind"
+      },
+      "groupScope": {
+        "value": "not_applicable",
+        "reason": "asset_kind"
+      }
+    },
+    {
+      "version": "simulated-asset-v1",
+      "source": "synthetic",
+      "tenantId": "tenant",
+      "domainId": "domain",
+      "objectId": "group-security-global",
+      "observationId": "synthetic-assets-v1",
+      "kind": "group",
+      "observedAt": "2026-11-01T12:00:00Z",
+      "asOf": "2026-11-01T12:00:00Z",
+      "accountStatus": {
+        "value": "not_applicable",
+        "reason": "asset_kind"
+      },
+      "activity": {
+        "value": "not_applicable",
+        "reason": "asset_kind"
+      },
+      "groupType": {
+        "value": "security",
+        "reason": "explicit_security_flag"
+      },
+      "groupScope": {
+        "value": "global",
+        "reason": "explicit_scope"
+      }
+    },
+    {
+      "version": "simulated-asset-v1",
+      "source": "synthetic",
+      "tenantId": "tenant",
+      "domainId": "domain",
+      "objectId": "group-distribution-local",
+      "observationId": "synthetic-assets-v1",
+      "kind": "group",
+      "observedAt": "2026-11-01T12:00:00Z",
+      "asOf": "2026-11-01T12:00:00Z",
+      "accountStatus": {
+        "value": "not_applicable",
+        "reason": "asset_kind"
+      },
+      "activity": {
+        "value": "not_applicable",
+        "reason": "asset_kind"
+      },
+      "groupType": {
+        "value": "distribution",
+        "reason": "explicit_security_flag"
+      },
+      "groupScope": {
+        "value": "domain_local",
+        "reason": "explicit_scope"
+      }
+    },
+    {
+      "version": "simulated-asset-v1",
+      "source": "synthetic",
+      "tenantId": "tenant",
+      "domainId": "domain",
+      "objectId": "group-security-universal",
+      "observationId": "synthetic-assets-v1",
+      "kind": "group",
+      "observedAt": "2026-11-01T12:00:00Z",
+      "asOf": "2026-11-01T12:00:00Z",
+      "accountStatus": {
+        "value": "not_applicable",
+        "reason": "asset_kind"
+      },
+      "activity": {
+        "value": "not_applicable",
+        "reason": "asset_kind"
+      },
+      "groupType": {
+        "value": "security",
+        "reason": "explicit_security_flag"
+      },
+      "groupScope": {
+        "value": "universal",
+        "reason": "explicit_scope"
+      }
+    },
+    {
+      "version": "simulated-asset-v1",
+      "source": "synthetic",
+      "tenantId": "tenant",
+      "domainId": "domain",
+      "objectId": "group-unknown",
+      "observationId": "synthetic-assets-v1",
+      "kind": "group",
+      "observedAt": "2026-11-01T12:00:00Z",
+      "asOf": "2026-11-01T12:00:00Z",
+      "accountStatus": {
+        "value": "not_applicable",
+        "reason": "asset_kind"
+      },
+      "activity": {
+        "value": "not_applicable",
+        "reason": "asset_kind"
+      },
+      "groupType": {
+        "value": "unknown",
+        "reason": "missing_evidence"
+      },
+      "groupScope": {
+        "value": "unknown",
+        "reason": "missing_evidence"
+      }
+    }
+  ],
+  "summary": {
+    "total": 11,
+    "complete": false,
+    "kinds": {
+      "computer": 3,
+      "group": 4,
+      "user": 4
+    },
+    "accountStatus": {
+      "disabled": 1,
+      "enabled": 3,
+      "locked": 1,
+      "not_applicable": 4,
+      "unknown": 2
+    },
+    "activity": {
+      "inactive": 2,
+      "never_observed": 1,
+      "not_applicable": 4,
+      "recent": 2,
+      "unknown": 2
+    },
+    "groupType": {
+      "distribution": 1,
+      "not_applicable": 7,
+      "security": 2,
+      "unknown": 1
+    },
+    "groupScope": {
+      "domain_local": 1,
+      "global": 1,
+      "not_applicable": 7,
+      "universal": 1,
+      "unknown": 1
+    },
+    "reasons": {
+      "asset_kind": 22,
+      "explicit_disabled_flag": 1,
+      "explicit_flags_clear": 3,
+      "explicit_locked_flag": 1,
+      "explicit_never_assertion": 1,
+      "explicit_scope": 3,
+      "explicit_security_flag": 3,
+      "last_login_at_or_before_boundary": 2,
+      "last_login_within_window": 2,
+      "missing_evidence": 6
+    }
+  },
+  "hash": "5dcdc0d45b101153824496b50b328a8a2044da028a5dcbc4a464cd9ad2829c91"
+}

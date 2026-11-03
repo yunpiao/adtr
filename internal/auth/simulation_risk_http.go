@@ -296,5 +296,5 @@ func simulationRiskProfileReadable(ctx context.Context, tx pgx.Tx, actor User) (
 
 // Only known additive schemas may advertise the risk navigation hint.
 func simulationRiskProfileSchemaAvailable(version int) bool {
-	return version == 25 || version == 26 || version == 27 || version == 28 || version == 29 || version == 30 || version == 31
+	return version == 25 || version == 26 || version == 27 || version == 28 || version == 29 || version == 30 || version == 31 || version == 32
 }
