@@ -28,6 +28,7 @@ test("fixed synthetic observation exports every matching row and recovers the sa
  await page.getByRole("button",{name:"核对并打开连接详情",exact:true}).click();
  await expect(page.getByRole("region",{name:"模拟 DNS/IP 工作区",exact:true})).toBeVisible();
  await page.getByLabel("固定观测",{exact:true}).selectOption("synthetic-observation");
+ await page.getByRole("button",{name:"应用筛选",exact:true}).click();
  await expect(page.getByTestId("dns-ip-page-summary")).toContainText("38");
  const domain="domainId=simulation-domain-a";
  const rows:Row[]=[];
@@ -38,6 +39,7 @@ test("fixed synthetic observation exports every matching row and recovers the sa
  expect(rows).toEqual(expectedRows());
  await page.getByRole("button",{name:"下一页",exact:true}).click();
  await expect(page.getByTestId("dns-ip-page-summary")).toContainText("38");
+ await expect(page.getByTestId("dns-ip-page-summary")).toContainText("本页 18 条");
  // Intercept only delivery, never fabricate a server body or successful task.
  let posts=0;let submitted:any;let body:any;
  await page.route(`**${api}/export`,async route=>{posts++;body=route.request().postDataJSON();const response=await route.fetch();expect(response.status()).toBe(200);submitted=await response.json();await route.abort("failed");});
@@ -45,7 +47,7 @@ test("fixed synthetic observation exports every matching row and recovers the sa
  await expect.poll(()=>posts).toBe(1);
  await expect.poll(()=>submitted!==undefined).toBe(true);
  await page.unroute(`**${api}/export`);
- await page.getByLabel("恢复操作 ID",{exact:true}).fill(body.operationId);
+ await expect(page.getByLabel("恢复操作 ID",{exact:true})).toHaveValue(body.operationId);
  await page.getByRole("button",{name:"恢复原操作回执",exact:true}).click();
  const taskID=submitted.submission.task.taskUUID;
  expect(submitted.intent.export).toEqual({observationId:body.observationId,observationHash:body.observationHash,keyword:"",family:"",operationId:body.operationId});
@@ -68,6 +70,7 @@ test("fixed synthetic observation exports every matching row and recovers the sa
  await page.reload();
  await page.getByRole("radio",{name:"选择数据源 simulation.example.test",exact:true}).check();
  await page.getByRole("button",{name:"核对并打开连接详情",exact:true}).click();
+ await page.getByLabel("固定观测",{exact:true}).selectOption("synthetic-observation");
  await page.getByLabel("恢复操作 ID",{exact:true}).fill(body.operationId);
  await page.getByRole("button",{name:"恢复原操作回执",exact:true}).click();
  await page.getByRole("button",{name:"刷新导出任务",exact:true}).click();

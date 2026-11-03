@@ -59,6 +59,18 @@ class DNSIPAcceptanceContract(unittest.TestCase):
   s=self.text('web/simulation-dns-ip-e2e/dns-ip.spec.ts')
   for t in ('route.fetch()','route.abort("failed")','posts).toBe(1)','page.waitForEvent("download")','execFileSync("python3"','--validate-workbook','toEqual(expectedRows())','page.reload()','toEqual(bytes)','boundingBox()','viewport!.height'):self.assertIn(t,s)
   for t in ('route.fulfill','test.skip','storageState','addStyleTag'):self.assertNotIn(t,s)
+ def test_browser_applies_selection_before_summary_and_recovers_locked_id(self):
+  s=self.text('web/simulation-dns-ip-e2e/dns-ip.spec.ts')
+  select='await page.getByLabel("固定观测",{exact:true}).selectOption("synthetic-observation");'
+  apply='await page.getByRole("button",{name:"应用筛选",exact:true}).click();'
+  summary='await expect(page.getByTestId("dns-ip-page-summary")).toContainText("38");'
+  self.assertLess(s.index(select),s.index(apply));self.assertLess(s.index(apply),s.index(summary))
+  self.assertIn('toContainText("本页 18 条")',s)
+  before,after=s.split('await page.reload();',1)
+  self.assertIn('toHaveValue(body.operationId)',before)
+  self.assertNotIn('fill(body.operationId)',before)
+  self.assertLess(after.index(select),after.index('fill(body.operationId)'))
+  self.assertLess(after.index(select),after.index('fill("no-such-host")'))
  def test_missing_or_skipped_named_test_fails(self):
   for ev in ([],[{'Action':'skip','Test':'Required'}],[{'Action':'pass','Test':'Other'}],[{'Action':'pass','Test':'Required'},{'Action':'skip','Test':'Required/child'}]):
    with patch('test_simulation_dns_ip_integration.run',return_value=SimpleNamespace(stdout='\n'.join(map(json.dumps,ev)))):
