@@ -280,7 +280,7 @@ func simulationRiskProfileReadable(ctx context.Context, tx pgx.Tx, actor User) (
 	if err := tx.QueryRow(ctx, "SELECT version FROM adtr.schema_version WHERE singleton").Scan(&version); err != nil {
 		return false, err
 	}
-	if version != 25 && version != 26 && version != 27 && version != 28 && version != 29 && version != 30 {
+	if !simulationRiskProfileSchemaAvailable(version) {
 		return false, nil
 	}
 	var role string
@@ -292,4 +292,9 @@ func simulationRiskProfileReadable(ctx context.Context, tx pgx.Tx, actor User) (
 		return false, err
 	}
 	return grants["simulation_risk"].Readable, nil
+}
+
+// Only known additive schemas may advertise the risk navigation hint.
+func simulationRiskProfileSchemaAvailable(version int) bool {
+	return version == 25 || version == 26 || version == 27 || version == 28 || version == 29 || version == 30 || version == 31
 }

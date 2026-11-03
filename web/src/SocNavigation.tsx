@@ -19,6 +19,7 @@ export type SocPage =
   | "simulation-labels"
   | "simulation-rule-catalog"
   | "simulation-detection-exceptions"
+  | "simulation-dns-ip"
   | "simulation-dashboard"
   | "system"
   | "operational-logs"
@@ -90,6 +91,7 @@ export const SOC_WORKSPACE_LABELS: Record<SocPage, string> = {
   "simulation-labels": "模拟敏感资产标记",
   "simulation-rule-catalog": "模拟规则目录与编辑器",
   "simulation-detection-exceptions": "模拟检测例外",
+  "simulation-dns-ip": "模拟 DNS/IP",
   "simulation-dashboard": "合成态势总览",
   system: "系统健康",
   "operational-logs": "运行日志与诊断包",
@@ -366,6 +368,11 @@ export default function SocNavigation({
               !blocked &&
               !forced &&
               button("simulation-dashboard", "audit")}
+            {profile.simulationDNSIPReadable === true &&
+              !gated &&
+              !blocked &&
+              !forced &&
+              button("simulation-dns-ip", "assets")}
             {profile.simulationDetectionExceptionsReadable === true &&
               !gated &&
               !blocked &&

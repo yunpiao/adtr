@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"github.com/yunpiao/adtr/internal/simulationdetectionexceptions"
+	"github.com/yunpiao/adtr/internal/simulationdnsip"
 	"os"
 	"strings"
 	"testing"
@@ -74,7 +75,7 @@ func TestPostgresDashboardSnapshot(t *testing.T) {
 	db := connect()
 	defer db.Close(context.Background())
 	schema := `CREATE SCHEMA adtr; CREATE TABLE adtr.schema_version(singleton boolean PRIMARY KEY DEFAULT true CHECK(singleton),version integer NOT NULL); `
-	if _, e = db.Exec(ctx, schema+simulationevents.SchemaSQL+simulationevents.ImmutableSchemaSQL+simulationrisk.SchemaSQL+simulationrisk.ImmutableSchemaSQL+simulationdetection.SchemaSQL+simulationdetection.ImmutableSchemaSQL+tasks.Schema+simulationdetectionschedules.SchemaSQL+simulationdetectionschedules.ImmutableSchemaSQL+simulationlabels.SchemaSQL+simulationlabels.ImmutableSchemaSQL+simulationrulecatalog.SchemaSQL+simulationrulecatalog.ImmutableSchemaSQL+simulationdetectionexceptions.SchemaSQL+simulationdetectionexceptions.ImmutableSchemaSQL+`CREATE TABLE adtr.dashboard_test_audit(kind text,operation text);`); e != nil {
+	if _, e = db.Exec(ctx, schema+simulationevents.SchemaSQL+simulationevents.ImmutableSchemaSQL+simulationrisk.SchemaSQL+simulationrisk.ImmutableSchemaSQL+simulationdetection.SchemaSQL+simulationdetection.ImmutableSchemaSQL+tasks.Schema+simulationdetectionschedules.SchemaSQL+simulationdetectionschedules.ImmutableSchemaSQL+simulationlabels.SchemaSQL+simulationlabels.ImmutableSchemaSQL+simulationrulecatalog.SchemaSQL+simulationrulecatalog.ImmutableSchemaSQL+simulationdetectionexceptions.SchemaSQL+simulationdetectionexceptions.ImmutableSchemaSQL+simulationdnsip.SchemaSQL+simulationdnsip.ImmutableSchemaSQL+`CREATE TABLE adtr.dashboard_test_audit(kind text,operation text);`); e != nil {
 		t.Fatal(e)
 	}
 	if _, e = db.Exec(ctx, "INSERT INTO adtr.schema_version VALUES(true,$1)", schemaversion.Current); e != nil {

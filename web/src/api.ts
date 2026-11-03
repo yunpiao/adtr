@@ -7,6 +7,7 @@ export interface Profile {
   simulationLabelsReadable?: boolean;
   simulationRuleCatalogReadable?: boolean;
   simulationDetectionExceptionsReadable?: boolean;
+  simulationDNSIPReadable?: boolean;
   simulationRuleCatalogPublishable?: boolean;
   ID: number;
   username: string;

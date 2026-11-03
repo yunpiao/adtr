@@ -27,6 +27,7 @@ import SimulationRiskWorkspace from "./SimulationRiskWorkspace";
 import SimulationDetectionWorkspace from "./SimulationDetectionWorkspace";
 import SimulationRuleCatalogWorkspace from "./SimulationRuleCatalogWorkspace";
 import SimulationDetectionExceptionsWorkspace from "./SimulationDetectionExceptionsWorkspace";
+import SimulationDNSIPWorkspace from "./SimulationDNSIPWorkspace";
 import SimulationLabelsWorkspace from "./SimulationLabelsWorkspace";
 import SimulationDetectionSchedulesWorkspace from "./SimulationDetectionSchedulesWorkspace";
 import SimulationDashboardWorkspace from "./SimulationDashboardWorkspace";
@@ -85,6 +86,7 @@ function pageFromHash(): Page {
       "simulation-labels",
       "simulation-rule-catalog",
       "simulation-detection-exceptions",
+      "simulation-dns-ip",
       "simulation-dashboard",
       "credential-use",
       "directory",
@@ -470,6 +472,7 @@ export default function App() {
       page === "simulation-labels" ||
       page === "simulation-rule-catalog" ||
       page === "simulation-detection-exceptions" ||
+      page === "simulation-dns-ip" ||
       page === "simulation-dashboard" ||
       page === "system" ||
       page === "operational-logs" ||
@@ -688,6 +691,15 @@ export default function App() {
                     )}
                     {active === "simulation-detection-schedules" && (
                       <SimulationDetectionSchedulesWorkspace
+                        profile={profile}
+                        sessionChanged={() => {
+                          setPage("account");
+                          refresh();
+                        }}
+                      />
+                    )}
+                    {active === "simulation-dns-ip" && (
+                      <SimulationDNSIPWorkspace
                         profile={profile}
                         sessionChanged={() => {
                           setPage("account");

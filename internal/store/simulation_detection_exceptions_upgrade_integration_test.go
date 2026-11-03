@@ -24,7 +24,7 @@ func TestSchema30UpgradePreservesHistoryAndGrants(t *testing.T) {
 	if Ready(f.ctx, f.config) == nil {
 		t.Fatal("schema29 accepted by current binary")
 	}
-	if err := Migrate(f.ctx, f.config); err != nil {
+	if err := migrateTo(f.ctx, f.config, 30); err != nil {
 		t.Fatal(err)
 	}
 	after := f.snapshot()
@@ -37,12 +37,12 @@ func TestSchema30UpgradePreservesHistoryAndGrants(t *testing.T) {
 	if err := f.conn.QueryRow(f.ctx, `SELECT version=30 AND NOT EXISTS(SELECT FROM adtr.access_permissions WHERE mark='simulation_detection_exceptions') AND to_regclass('adtr.simulation_exception_heads') IS NOT NULL AND to_regclass('adtr.simulation_exception_receipts') IS NOT NULL FROM adtr.schema_version`).Scan(&valid); err != nil || !valid {
 		t.Fatal("migration missing independent schema or invented grant", err)
 	}
-	if err := Ready(f.ctx, f.config); err != nil {
-		t.Fatal("current schema30 rejected", err)
+	if err := Ready(f.ctx, f.config); err == nil {
+		t.Fatal("historical schema30 accepted by current binary")
 	}
 	catalog := f.catalogSnapshot()
 	snapshot := f.snapshot()
-	if err := Migrate(f.ctx, f.config); err != nil {
+	if err := migrateTo(f.ctx, f.config, 30); err != nil {
 		t.Fatal(err)
 	}
 	if catalog != f.catalogSnapshot() || !reflect.DeepEqual(snapshot, f.snapshot()) {
@@ -57,7 +57,7 @@ func TestSchema30FailureRollsBackPermissionAndTables(t *testing.T) {
 	f.exec(`CREATE TABLE adtr.simulation_exception_receipts (sentinel text)`)
 	before := f.snapshot()
 	catalog := f.catalogSnapshot()
-	if err := Migrate(f.ctx, f.config); err == nil {
+	if err := migrateTo(f.ctx, f.config, 30); err == nil {
 		t.Fatal("collision migration unexpectedly succeeded")
 	}
 	if !reflect.DeepEqual(before, f.snapshot()) || catalog != f.catalogSnapshot() {
@@ -75,15 +75,15 @@ func TestSchema30ConcurrentUpgrade(t *testing.T) {
 	f := newSimulationDetectionExceptionsUpgradeFixture(t)
 	results := make(chan error, 2)
 	for i := 0; i < 2; i++ {
-		go func() { results <- Migrate(f.ctx, f.config) }()
+		go func() { results <- migrateTo(f.ctx, f.config, 30) }()
 	}
 	for i := 0; i < 2; i++ {
 		if err := <-results; err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := Ready(f.ctx, f.config); err != nil {
-		t.Fatal("current schema30 rejected", err)
+	if err := Ready(f.ctx, f.config); err == nil {
+		t.Fatal("historical schema30 accepted by current binary")
 	}
 	var grants int
 	if err := f.conn.QueryRow(f.ctx, "SELECT count(*) FROM adtr.access_permissions WHERE mark='simulation_detection_exceptions'").Scan(&grants); err != nil || grants != 0 {

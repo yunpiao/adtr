@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/yunpiao/adtr/internal/simulationdetectionexceptions"
+	"github.com/yunpiao/adtr/internal/simulationdnsip"
 	"github.com/yunpiao/adtr/internal/simulationlabels"
 	"github.com/yunpiao/adtr/internal/simulationrulecatalog"
 	"net/http/httptest"
@@ -34,6 +35,7 @@ func TestSimulationDetectionSchedulesHTTPAuthorityReceiptsAndCAS(t *testing.T) {
 	f.exec(SimulationLabelsPermissionSchema + simulationlabels.SchemaSQL + simulationlabels.ImmutableSchemaSQL)
 	f.exec(SimulationRuleCatalogPermissionSchema + simulationrulecatalog.SchemaSQL + simulationrulecatalog.ImmutableSchemaSQL)
 	f.exec(SimulationDetectionExceptionsPermissionSchema + simulationdetectionexceptions.SchemaSQL + simulationdetectionexceptions.ImmutableSchemaSQL)
+	f.exec(SimulationDNSIPPermissionSchema + simulationdnsip.SchemaSQL + simulationdnsip.ImmutableSchemaSQL)
 	f.exec("UPDATE adtr.schema_version SET version=$1", schemaversion.Current)
 	f.seedGroup("one", "schedule-group", narrowResourceRole, "domain-a")
 	auth := simulationDetectionSchedulesTaskAuthorizer(f.s.now)

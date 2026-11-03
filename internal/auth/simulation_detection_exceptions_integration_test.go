@@ -13,6 +13,7 @@ import (
 	"github.com/yunpiao/adtr/internal/simulationdetection"
 	exceptions "github.com/yunpiao/adtr/internal/simulationdetectionexceptions"
 	"github.com/yunpiao/adtr/internal/simulationdetectionschedules"
+	"github.com/yunpiao/adtr/internal/simulationdnsip"
 	"github.com/yunpiao/adtr/internal/simulationevents"
 	"github.com/yunpiao/adtr/internal/simulationlabels"
 	"github.com/yunpiao/adtr/internal/simulationrisk"
@@ -33,6 +34,7 @@ func TestSimulationDetectionExceptionsHTTPAuthorityAndRevocation(t *testing.T) {
 	f.exec(SimulationLabelsPermissionSchema + simulationlabels.SchemaSQL + simulationlabels.ImmutableSchemaSQL)
 	f.exec(SimulationRuleCatalogPermissionSchema + simulationrulecatalog.SchemaSQL + simulationrulecatalog.ImmutableSchemaSQL)
 	f.exec(SimulationDetectionExceptionsPermissionSchema + exceptions.SchemaSQL + exceptions.ImmutableSchemaSQL)
+	f.exec(SimulationDNSIPPermissionSchema + simulationdnsip.SchemaSQL + simulationdnsip.ImmutableSchemaSQL)
 	f.exec("UPDATE adtr.schema_version SET version=$1", schemaversion.Current)
 	f.seedGroup("one", "exception-writers", narrowResourceRole, "domain-a")
 	f.seedGroup("one", "exception-readers", widerResourceRole, "domain-a")

@@ -7,6 +7,7 @@ import (
 	"github.com/yunpiao/adtr/internal/simulationdetection"
 	"github.com/yunpiao/adtr/internal/simulationdetectionexceptions"
 	"github.com/yunpiao/adtr/internal/simulationdetectionschedules"
+	"github.com/yunpiao/adtr/internal/simulationdnsip"
 	"github.com/yunpiao/adtr/internal/simulationevents"
 	"github.com/yunpiao/adtr/internal/simulationlabels"
 	"github.com/yunpiao/adtr/internal/simulationrisk"
@@ -294,6 +295,12 @@ func migrateTo(ctx context.Context, config *pgx.ConnConfig, target int) error {
 			return errors.New("simulation detection exceptions schema migration failed")
 		}
 		version = 30
+	}
+	if version < 31 && target >= 31 {
+		if _, err := tx.Exec(ctx, auth.SimulationDNSIPPermissionSchema+simulationdnsip.SchemaSQL+simulationdnsip.ImmutableSchemaSQL); err != nil {
+			return errors.New("simulation DNS/IP schema migration failed")
+		}
+		version = 31
 	}
 	if _, err := tx.Exec(ctx, "UPDATE adtr.schema_version SET version=$1 WHERE singleton=true", version); err != nil {
 		return errors.New("schema version update failed")
