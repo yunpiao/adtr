@@ -140,6 +140,8 @@ type eventsRequest struct {
 
 func evaluate(ctx context.Context, command string, data []byte) (any, error) {
 	switch command {
+	case "directory-changes":
+		return directoryChanges(data)
 	case "rule-exceptions":
 		return exceptions(ctx, data)
 	case "rule-catalog":
@@ -279,7 +281,7 @@ func evaluate(ctx context.Context, command string, data []byte) (any, error) {
 }
 func run(args []string, input io.Reader, output, stderr io.Writer) int {
 	if len(args) != 1 {
-		fmt.Fprintln(stderr, "usage: adtr-simulate assets|groups|dns|dns-xlsx|risk|rules|events|case-replay|rule-catalog|labels|label-changes|rule-exceptions < synthetic.json")
+		fmt.Fprintln(stderr, "usage: adtr-simulate directory-changes|assets|groups|dns|dns-xlsx|risk|rules|events|case-replay|rule-catalog|labels|label-changes|rule-exceptions < synthetic.json")
 		return 2
 	}
 	data, err := io.ReadAll(io.LimitReader(input, maxInput+1))
