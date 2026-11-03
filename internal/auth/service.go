@@ -39,6 +39,7 @@ type Service struct {
 	now       func() time.Time
 }
 type User struct {
+	SimulationAssetAssessmentReadable     *bool `json:"simulationAssetAssessmentReadable,omitempty"`
 	SimulationDNSIPReadable               *bool `json:"simulationDNSIPReadable,omitempty"`
 	SimulationDetectionExceptionsReadable *bool `json:"simulationDetectionExceptionsReadable,omitempty"`
 	// Navigation hint only, populated only by authenticated login and /me.
@@ -369,6 +370,11 @@ func (s *Service) handle(ctx context.Context, r *http.Request, path string, in r
 			return nil, "", false, err
 		}
 		u.SimulationDNSIPReadable = &dnsIPReadable
+		assetAssessmentReadable, err := simulationAssetAssessmentProfileReadable(ctx, tx, u)
+		if err != nil {
+			return nil, "", false, err
+		}
+		u.SimulationAssetAssessmentReadable = &assetAssessmentReadable
 		if err = tx.Commit(ctx); err != nil {
 			return nil, "", false, err
 		}
@@ -460,6 +466,11 @@ func (s *Service) handle(ctx context.Context, r *http.Request, path string, in r
 			return nil, "", false, err
 		}
 		u.SimulationDNSIPReadable = &dnsIPReadable
+		assetAssessmentReadable, err := simulationAssetAssessmentProfileReadable(ctx, tx, u)
+		if err != nil {
+			return nil, "", false, err
+		}
+		u.SimulationAssetAssessmentReadable = &assetAssessmentReadable
 		return u, "", false, tx.Commit(ctx)
 	}
 	if path == "/logout" {

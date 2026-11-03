@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"github.com/yunpiao/adtr/internal/schemaversion"
+	"github.com/yunpiao/adtr/internal/simulationassetassessment"
 	"github.com/yunpiao/adtr/internal/simulationdetection"
 	"github.com/yunpiao/adtr/internal/simulationdetectionexceptions"
 	"github.com/yunpiao/adtr/internal/simulationdetectionschedules"
@@ -301,6 +302,12 @@ func migrateTo(ctx context.Context, config *pgx.ConnConfig, target int) error {
 			return errors.New("simulation DNS/IP schema migration failed")
 		}
 		version = 31
+	}
+	if version < 32 && target >= 32 {
+		if _, err := tx.Exec(ctx, auth.SimulationAssetAssessmentPermissionSchema+simulationassetassessment.SchemaSQL+simulationassetassessment.ImmutableSchemaSQL); err != nil {
+			return errors.New("simulation asset assessment schema migration failed")
+		}
+		version = 32
 	}
 	if _, err := tx.Exec(ctx, "UPDATE adtr.schema_version SET version=$1 WHERE singleton=true", version); err != nil {
 		return errors.New("schema version update failed")

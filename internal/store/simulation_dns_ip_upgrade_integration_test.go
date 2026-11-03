@@ -24,7 +24,7 @@ func TestSchema31UpgradePreservesHistoryAndGrants(t *testing.T) {
 	if Ready(f.ctx, f.config) == nil {
 		t.Fatal("schema30 accepted by current binary")
 	}
-	if err := Migrate(f.ctx, f.config); err != nil {
+	if err := migrateTo(f.ctx, f.config, 31); err != nil {
 		t.Fatal(err)
 	}
 	after := f.snapshot()
@@ -37,12 +37,12 @@ func TestSchema31UpgradePreservesHistoryAndGrants(t *testing.T) {
 	if err := f.conn.QueryRow(f.ctx, `SELECT version=31 AND NOT EXISTS(SELECT FROM adtr.access_permissions WHERE mark='simulation_dns_ip') AND to_regclass('adtr.simulation_dns_ip_observations') IS NOT NULL AND to_regclass('adtr.simulation_dns_ip_receipts') IS NOT NULL FROM adtr.schema_version`).Scan(&valid); err != nil || !valid {
 		t.Fatal("migration missing independent schema or invented grant", err)
 	}
-	if err := Ready(f.ctx, f.config); err != nil {
-		t.Fatal("current schema31 rejected", err)
+	if err := Ready(f.ctx, f.config); err == nil {
+		t.Fatal("historical schema31 accepted by current binary")
 	}
 	catalog := f.catalogSnapshot()
 	snapshot := f.snapshot()
-	if err := Migrate(f.ctx, f.config); err != nil {
+	if err := migrateTo(f.ctx, f.config, 31); err != nil {
 		t.Fatal(err)
 	}
 	if catalog != f.catalogSnapshot() || !reflect.DeepEqual(snapshot, f.snapshot()) {
@@ -57,7 +57,7 @@ func TestSchema31FailureRollsBackPermissionAndTables(t *testing.T) {
 	f.exec(`CREATE TABLE adtr.simulation_dns_ip_receipts (sentinel text)`)
 	before := f.snapshot()
 	catalog := f.catalogSnapshot()
-	if err := Migrate(f.ctx, f.config); err == nil {
+	if err := migrateTo(f.ctx, f.config, 31); err == nil {
 		t.Fatal("collision migration unexpectedly succeeded")
 	}
 	if !reflect.DeepEqual(before, f.snapshot()) || catalog != f.catalogSnapshot() {
@@ -75,15 +75,15 @@ func TestSchema31ConcurrentUpgrade(t *testing.T) {
 	f := newSimulationDNSIPUpgradeFixture(t)
 	results := make(chan error, 2)
 	for i := 0; i < 2; i++ {
-		go func() { results <- Migrate(f.ctx, f.config) }()
+		go func() { results <- migrateTo(f.ctx, f.config, 31) }()
 	}
 	for i := 0; i < 2; i++ {
 		if err := <-results; err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := Ready(f.ctx, f.config); err != nil {
-		t.Fatal("current schema31 rejected", err)
+	if err := Ready(f.ctx, f.config); err == nil {
+		t.Fatal("historical schema31 accepted by current binary")
 	}
 	var grants int
 	if err := f.conn.QueryRow(f.ctx, "SELECT count(*) FROM adtr.access_permissions WHERE mark='simulation_dns_ip'").Scan(&grants); err != nil || grants != 0 {

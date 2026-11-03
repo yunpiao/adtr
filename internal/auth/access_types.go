@@ -123,7 +123,7 @@ var accessRoutes = map[string]accessRoute{
 	"/permissions": {"GET", "permissions", false, "", ""}, "/permissions/save": {"POST", "permissions", true, "roleID permissions", ""},
 	"/menu": {"GET", "", false, "", ""}, "/check": {"POST", "", false, "paths", ""},
 }
-var accessMarks = []string{"users", "roles", "permissions", "tasks", "audit", "audit_exports", "system", "schedules", "task_archive", "domains", "operation_accounts", "system_logs", "directory_assets", "user_asset_exports", "group_asset_exports", "computer_asset_exports", "simulation_events", "simulation_risk", "simulation_detection", "simulation_detection_schedules", "simulation_labels", "simulation_rule_catalog", "simulation_rule_catalog_publish", "simulation_detection_exceptions", "simulation_dns_ip"}
+var accessMarks = []string{"users", "roles", "permissions", "tasks", "audit", "audit_exports", "system", "schedules", "task_archive", "domains", "operation_accounts", "system_logs", "directory_assets", "user_asset_exports", "group_asset_exports", "computer_asset_exports", "simulation_events", "simulation_risk", "simulation_detection", "simulation_detection_schedules", "simulation_labels", "simulation_rule_catalog", "simulation_rule_catalog_publish", "simulation_detection_exceptions", "simulation_dns_ip", "simulation_asset_assessment"}
 
 func validAccessText(s string, max int) bool {
 	if !utf8.ValidString(s) || utf8.RuneCountInString(s) > max {
