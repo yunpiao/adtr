@@ -118,7 +118,13 @@ func TestSimulationAssetAssessmentHTTPAuthorityEpochAndRollback(t *testing.T) {
 	call(author, "/receipt?domainId=domain-a&operationId=op-1", nil, 200)
 	call(reader, "/receipt?domainId=domain-a&operationId=op-1", nil, 404)
 	// Matching domain/report IDs and explicit rights in another tenant reveal nothing.
-	f.exec("UPDATE adtr.users SET role_id=$1 WHERE id=$2", widerResourceRole, f.other)
+	// A custom role requires the viewer base role (users_custom_role_base).
+	// f.other begins as a platform administrator; convert both fields atomically.
+	f.exec("UPDATE adtr.users SET role='viewer',role_id=$1 WHERE tenant_id='two' AND id=$2", widerResourceRole, f.other)
+	var foreignBaseRole, foreignCustomRole string
+	if e = f.conn.QueryRow(f.ctx, "SELECT role,role_id FROM adtr.users WHERE tenant_id='two' AND id=$1", f.other).Scan(&foreignBaseRole, &foreignCustomRole); e != nil || foreignBaseRole != "viewer" || foreignCustomRole != widerResourceRole {
+		t.Fatal("foreign operator fixture role contract", e)
+	}
 	f.seedGroup("two", "foreign-assets", widerResourceRole, "domain-a")
 	f.exec("INSERT INTO adtr.access_permissions(tenant_id,role_id,mark,readable,writeable) VALUES('two',$1,'simulation_asset_assessment',true,true)", widerResourceRole)
 	foreign := f.client(f.other)
