@@ -8,6 +8,7 @@ import {
   within,
 } from "@testing-library/react";
 import { beforeEach, afterEach, describe, it, expect, vi } from "vitest";
+import userEvent from "@testing-library/user-event";
 import DomainsWorkspace, { discardDomainIntent } from "./DomainsWorkspace";
 import App from "./App";
 import { marks, labels, type Permission } from "./access-api";
@@ -125,6 +126,30 @@ const calls = (path: string) =>
   fetcher.mock.calls.filter(([url]) => url.split("?")[0] === path);
 const body = (path: string) =>
   JSON.parse(calls(path).at(-1)![1].body as string);
+const statusChoices = [
+  { value: "unverified", label: "已保存，未验证" },
+  { value: "testing", label: "正在检测" },
+  { value: "verified", label: "上次检测通过" },
+  { value: "error", label: "上次检测未通过" },
+] as const;
+const statusCheckbox = (label: string) =>
+  within(screen.getByRole("group", { name: "连接状态" })).getByRole(
+    "checkbox",
+    { name: label },
+  ) as HTMLInputElement;
+const chooseStatuses = (values: readonly string[]) => {
+  // Deliberately interact in reverse order to check canonical query ordering.
+  for (const { value, label } of [...statusChoices].reverse()) {
+    const checkbox = statusCheckbox(label);
+    if (checkbox.checked !== values.includes(value)) fireEvent.click(checkbox);
+  }
+};
+const selectedStatuses = () =>
+  statusChoices
+    .filter(({ label }) => statusCheckbox(label).checked)
+    .map(({ value }) => value);
+const domainListParams = () =>
+  new URL(calls("/api/domains").at(-1)![0], "http://localhost").searchParams;
 async function start() {
   render(<DomainsWorkspace profile={profile} sessionChanged={vi.fn()} />);
   await screen.findByRole("table", { name: "获授权的域连接" });
@@ -287,6 +312,7 @@ describe("domain workspace security flows", () => {
     render(<DomainsWorkspace profile={profile} sessionChanged={vi.fn()} />);
     await screen.findByText("服务器未授予域连接读取权限。");
     expect(calls("/api/domains")).toHaveLength(0);
+    expect(screen.queryByRole("group", { name: "连接状态" })).toBeNull();
     expect(body("/api/access/check").paths).toEqual(domainOperations);
   });
   it("saves local unverified registration with write-only credentials, CSRF and explicit F47 assignment", async () => {
@@ -662,6 +688,7 @@ describe("domain workspace security flows", () => {
     click("域连接");
     await screen.findByRole("table", { name: "获授权的域连接" });
     fill("域或域控关键词", "synthetic");
+    chooseStatuses(["unverified", "error"]);
     click("查询域连接");
     await waitFor(() =>
       expect(calls("/api/domains").at(-1)![0]).toContain(
@@ -669,6 +696,7 @@ describe("domain workspace security flows", () => {
       ),
     );
     await screen.findByRole("button", { name: "查看 synthetic.invalid" });
+    chooseStatuses(["testing", "verified"]);
     click("新增域连接");
     fill("AD 密码", "temporary secret");
     const sessionReads = calls("/api/auth/me").length;
@@ -680,6 +708,11 @@ describe("domain workspace security flows", () => {
     expect(calls("/api/domains").at(-1)![0]).toContain(
       "filterKeyword=synthetic",
     );
+    expect(selectedStatuses()).toEqual(["testing", "verified"]);
+    expect(domainListParams().getAll("filterStatus")).toEqual([
+      "unverified",
+      "error",
+    ]);
     expect(screen.queryByLabelText("AD 密码")).toBeNull();
     expect(window.location.href).not.toContain("temporary");
     act(() => window.history.forward());
@@ -687,6 +720,11 @@ describe("domain workspace security flows", () => {
     await screen.findByRole("table", { name: "获授权的域连接" });
     expect(screen.queryByLabelText("AD 密码")).toBeNull();
     expect(screen.queryByDisplayValue("temporary secret")).toBeNull();
+    expect(selectedStatuses()).toEqual(["testing", "verified"]);
+    expect(domainListParams().getAll("filterStatus")).toEqual([
+      "unverified",
+      "error",
+    ]);
   });
   it("filters are literal, page changes reset correctly and empty scope is distinct from error", async () => {
     await start();
@@ -705,6 +743,358 @@ describe("domain workspace security flows", () => {
     click("刷新域连接");
     await screen.findByText(/当前筛选下没有获授权的域连接/);
   });
+});
+
+describe("domain multi-status filtering", () => {
+  it.each(
+    Array.from({ length: 16 }, (_, mask) => ({
+      mask,
+      values: statusChoices
+        .filter((_, index) => (mask & (1 << index)) !== 0)
+        .map(({ value }) => value),
+    })),
+  )(
+    "applies status subset $mask as ordered repeated keys only after submit",
+    async ({ values }) => {
+      await start();
+      const before = fetcher.mock.calls.length;
+      const group = screen.getByRole("group", { name: "连接状态" });
+      expect(group).toHaveAccessibleDescription(
+        "可多选；未选择表示全部状态。选择后点击“查询域连接”应用。",
+      );
+      expect(within(group).getAllByRole("checkbox")).toHaveLength(4);
+      chooseStatuses(values);
+      expect(selectedStatuses()).toEqual(values);
+      expect(fetcher.mock.calls).toHaveLength(before);
+      click("查询域连接");
+      await waitFor(() =>
+        expect(domainListParams().getAll("filterStatus")).toEqual(values),
+      );
+      await screen.findByRole("table", { name: "获授权的域连接" });
+      expect(calls("/api/domains")).toHaveLength(values.length ? 2 : 1);
+      expect(domainListParams().getAll("filterStatus")).not.toContain("");
+      expect(calls("/api/domains").at(-1)![0]).not.toMatch(/%2C|,/i);
+      expect(domainListParams().get("pageIdx")).toBe("1");
+      expect(sessionStorage.length + localStorage.length).toBe(0);
+    },
+  );
+
+  it("supports keyboard toggling without reading or submitting until Apply", async () => {
+    await start();
+    const user = userEvent.setup();
+    const before = fetcher.mock.calls.length;
+    statusCheckbox("已保存，未验证").focus();
+    await user.keyboard(" ");
+    await user.tab();
+    expect(statusCheckbox("正在检测")).toHaveFocus();
+    await user.keyboard(" ");
+    expect(selectedStatuses()).toEqual(["unverified", "testing"]);
+    expect(fetcher.mock.calls).toHaveLength(before);
+    click("查询域连接");
+    await waitFor(() =>
+      expect(domainListParams().getAll("filterStatus")).toEqual([
+        "unverified",
+        "testing",
+      ]),
+    );
+  });
+
+  it("deduplicates repeated toggles and ignores DOM values outside the known statuses", async () => {
+    await start();
+    const checkbox = statusCheckbox("上次检测未通过");
+    checkbox.value = "error,unknown";
+    fireEvent.click(checkbox);
+    fireEvent.click(checkbox);
+    fireEvent.click(checkbox);
+    click("查询域连接");
+    await waitFor(() =>
+      expect(domainListParams().getAll("filterStatus")).toEqual(["error"]),
+    );
+    await screen.findByRole("table", { name: "获授权的域连接" });
+    chooseStatuses([]);
+    expect(domainListParams().getAll("filterStatus")).toEqual(["error"]);
+    click("查询域连接");
+    await waitFor(() =>
+      expect(domainListParams().has("filterStatus")).toBe(false),
+    );
+    expect(calls("/api/domains")).toHaveLength(3);
+  });
+
+  it("preserves applied combinations and all other fields through paging, refresh and details while drafts remain independent", async () => {
+    override = (url) => {
+      if (url.split("?")[0] !== "/api/domains") return undefined;
+      const params = new URL(url, "http://localhost").searchParams;
+      const pageIdx = Number(params.get("pageIdx"));
+      const pageSize = Number(params.get("pageSize"));
+      return response({
+        ...list(),
+        page: {
+          pageIdx,
+          pageSize,
+          total: 31,
+          totalPage: Math.ceil(31 / pageSize),
+        },
+        exhausted: pageIdx * pageSize >= 31,
+      });
+    };
+    await start();
+    fill("域或域控关键词", "synthetic%_");
+    fill("域名筛选", "synthetic.invalid,second.invalid");
+    fill("每页条数", "10");
+    fill("创建时间排序", "1");
+    chooseStatuses(["unverified", "error"]);
+    click("查询域连接");
+    await waitFor(() =>
+      expect([...domainListParams()]).toEqual([
+        ["filterKeyword", "synthetic%_"],
+        ["filterDomain", "synthetic.invalid"],
+        ["filterDomain", "second.invalid"],
+        ["filterStatus", "unverified"],
+        ["filterStatus", "error"],
+        ["pageSize", "10"],
+        ["tmSort", "1"],
+        ["pageIdx", "1"],
+      ]),
+    );
+    await screen.findByRole("button", { name: "下一页" });
+    click("下一页");
+    await screen.findByRole("table", { name: "获授权的域连接" });
+    expect(domainListParams().get("pageIdx")).toBe("2");
+    const appliedURL = calls("/api/domains").at(-1)![0];
+    const beforeDraft = fetcher.mock.calls.length;
+    chooseStatuses(["testing", "verified"]);
+    fill("域或域控关键词", "unsubmitted");
+    fill("域名筛选", "draft.invalid");
+    fill("每页条数", "30");
+    fill("创建时间排序", "-1");
+    expect(fetcher.mock.calls).toHaveLength(beforeDraft);
+    click("下一页");
+    await screen.findByRole("table", { name: "获授权的域连接" });
+    expect(domainListParams().get("pageIdx")).toBe("3");
+    expect(domainListParams().getAll("filterStatus")).toEqual([
+      "unverified",
+      "error",
+    ]);
+    expect(domainListParams().get("filterKeyword")).toBe("synthetic%_");
+    expect(domainListParams().get("pageSize")).toBe("10");
+    click("上一页");
+    await screen.findByRole("table", { name: "获授权的域连接" });
+    expect(calls("/api/domains").at(-1)![0]).toBe(appliedURL);
+    const beforeRefresh = calls("/api/domains").length;
+    click("刷新域连接");
+    await screen.findByRole("table", { name: "获授权的域连接" });
+    expect(calls("/api/domains")).toHaveLength(beforeRefresh + 1);
+    expect(calls("/api/domains").at(-1)![0]).toBe(appliedURL);
+    click("查看 synthetic.invalid");
+    await screen.findByRole("heading", {
+      name: "域连接详情：synthetic.invalid",
+    });
+    click("返回域连接列表");
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "查看 synthetic.invalid" }),
+      ).toHaveFocus(),
+    );
+    expect(calls("/api/domains").at(-1)![0]).toBe(appliedURL);
+    expect(selectedStatuses()).toEqual(["testing", "verified"]);
+    expect(screen.getByLabelText("域或域控关键词")).toHaveValue("unsubmitted");
+    expect(screen.getByLabelText("域名筛选")).toHaveValue("draft.invalid");
+    expect(screen.getByLabelText("每页条数")).toHaveValue("30");
+    expect(screen.getByLabelText("创建时间排序")).toHaveValue("-1");
+    click("查询域连接");
+    await waitFor(() =>
+      expect([...domainListParams()]).toEqual([
+        ["filterKeyword", "unsubmitted"],
+        ["filterDomain", "draft.invalid"],
+        ["filterStatus", "testing"],
+        ["filterStatus", "verified"],
+        ["pageSize", "30"],
+        ["tmSort", "-1"],
+        ["pageIdx", "1"],
+      ]),
+    );
+    await screen.findByRole("button", { name: "下一页" });
+    click("下一页");
+    await screen.findByRole("table", { name: "获授权的域连接" });
+    expect(domainListParams().get("pageIdx")).toBe("2");
+    chooseStatuses(["error"]);
+    click("重置筛选");
+    await waitFor(() =>
+      expect([...domainListParams()]).toEqual([
+        ["pageSize", "20"],
+        ["tmSort", "-1"],
+        ["pageIdx", "1"],
+      ]),
+    );
+    expect(selectedStatuses()).toEqual([]);
+    expect(screen.getByLabelText("域或域控关键词")).toHaveValue("");
+    expect(screen.getByLabelText("域名筛选")).toHaveValue("");
+    expect(screen.getByLabelText("每页条数")).toHaveValue("20");
+    expect(screen.getByLabelText("创建时间排序")).toHaveValue("-1");
+  });
+
+  it("keeps the applied statuses when another draft field fails local validation", async () => {
+    await start();
+    chooseStatuses(["unverified", "error"]);
+    click("查询域连接");
+    await screen.findByRole("table", { name: "获授权的域连接" });
+    const before = calls("/api/domains").length;
+    chooseStatuses(["verified"]);
+    fill("域名筛选", "not a domain");
+    click("查询域连接");
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "域筛选须为有效 DNS 域名",
+    );
+    expect(calls("/api/domains")).toHaveLength(before);
+    expect(domainListParams().getAll("filterStatus")).toEqual([
+      "unverified",
+      "error",
+    ]);
+    click("刷新域连接");
+    await screen.findByRole("table", { name: "获授权的域连接" });
+    expect(domainListParams().getAll("filterStatus")).toEqual([
+      "unverified",
+      "error",
+    ]);
+    expect(selectedStatuses()).toEqual(["verified"]);
+    click("重置筛选");
+    await screen.findByRole("table", { name: "获授权的域连接" });
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(selectedStatuses()).toEqual([]);
+  });
+
+  it("lets read-only users combine statuses without granting mutation controls", async () => {
+    override = (url, init) => {
+      if (url === "/api/access/menu")
+        return response({
+          menu: metadata().map((entry) => ({
+            ...entry,
+            auth: { readable: true, writeable: false },
+          })),
+        });
+      if (url === "/api/access/check")
+        return response({
+          results: JSON.parse(init.body as string).paths.map((path: string) =>
+            path.startsWith("GET "),
+          ),
+        });
+      return undefined;
+    };
+    await start();
+    chooseStatuses(["unverified", "error"]);
+    click("查询域连接");
+    await screen.findByRole("table", { name: "获授权的域连接" });
+    expect(domainListParams().getAll("filterStatus")).toEqual([
+      "unverified",
+      "error",
+    ]);
+    expect(screen.queryByRole("button", { name: "新增域连接" })).toBeNull();
+    click("查看 synthetic.invalid");
+    await screen.findByRole("heading", {
+      name: "域连接详情：synthetic.invalid",
+    });
+    expect(screen.queryByRole("button", { name: "编辑域连接" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "检测已保存连接" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "删除域连接" })).toBeNull();
+    expect(
+      fetcher.mock.calls.filter(
+        ([url, init]) =>
+          url.startsWith("/api/domains") && init.method === "POST",
+      ),
+    ).toHaveLength(0);
+  });
+
+  it.each(["allowed", "forbidden"])(
+    "ignores a late old status response after the new combination is %s",
+    async (outcome) => {
+      await start();
+      let resolve!: (value: Response) => void;
+      let staleSignal!: AbortSignal;
+      override = (url, init) => {
+        if (url.split("?")[0] !== "/api/domains") return undefined;
+        const statuses = new URL(url, "http://localhost").searchParams.getAll(
+          "filterStatus",
+        );
+        if (statuses.includes("unverified")) {
+          staleSignal = init.signal!;
+          return new Promise((done) => {
+            resolve = done;
+          });
+        }
+        return outcome === "forbidden"
+          ? response({ error: "forbidden" }, 403)
+          : response(list([connection({ domain: "current.invalid" })]));
+      };
+      chooseStatuses(["unverified", "error"]);
+      click("查询域连接");
+      await waitFor(() => expect(resolve).toBeTypeOf("function"));
+      chooseStatuses(["testing", "verified"]);
+      click("查询域连接");
+      if (outcome === "forbidden") await screen.findByRole("alert");
+      else await screen.findByRole("button", { name: "查看 current.invalid" });
+      expect(staleSignal.aborted).toBe(true);
+      await act(async () =>
+        resolve(
+          await response(list([connection({ domain: "stale.invalid" })])),
+        ),
+      );
+      expect(screen.queryByText("stale.invalid")).toBeNull();
+      expect(domainListParams().getAll("filterStatus")).toEqual([
+        "testing",
+        "verified",
+      ]);
+      expect(selectedStatuses()).toEqual(["testing", "verified"]);
+      expect(calls("/api/domains")).toHaveLength(3);
+      if (outcome === "forbidden") {
+        expect(screen.queryByRole("table")).toBeNull();
+        expect(screen.queryByText(/当前筛选下没有获授权的域连接/)).toBeNull();
+        expect(screen.getByRole("alert")).toBeVisible();
+      }
+    },
+  );
+
+  it.each(["actor", "session"])(
+    "discards both status sets and pending reads when the %s changes",
+    async (change) => {
+      const { rerender } = render(
+        <DomainsWorkspace profile={profile} sessionChanged={vi.fn()} />,
+      );
+      await screen.findByRole("table", { name: "获授权的域连接" });
+      let resolve!: (value: Response) => void;
+      let staleSignal!: AbortSignal;
+      const staleResponse = await response(
+        list([connection({ domain: "old-identity.invalid" })]),
+      );
+      override = (url, init) => {
+        if (
+          url.split("?")[0] !== "/api/domains" ||
+          !url.includes("filterStatus")
+        )
+          return undefined;
+        staleSignal = init.signal!;
+        return new Promise((done) => {
+          resolve = done;
+        });
+      };
+      chooseStatuses(["unverified", "error"]);
+      click("查询域连接");
+      await waitFor(() => expect(resolve).toBeTypeOf("function"));
+      chooseStatuses(["testing", "verified"]);
+      profile =
+        change === "actor"
+          ? { ...profile, ID: 2, username: "another" }
+          : { ...profile, csrfToken: "rotated-session" };
+      rerender(<DomainsWorkspace profile={profile} sessionChanged={vi.fn()} />);
+      await screen.findByRole("table", { name: "获授权的域连接" });
+      expect(staleSignal.aborted).toBe(true);
+      expect(selectedStatuses()).toEqual([]);
+      expect(domainListParams().has("filterStatus")).toBe(false);
+      await act(async () => resolve(staleResponse));
+      expect(screen.queryByText("old-identity.invalid")).toBeNull();
+      expect(selectedStatuses()).toEqual([]);
+      expect(calls("/api/domains")).toHaveLength(3);
+    },
+  );
 });
 
 describe("domain navigation and revision isolation", () => {
@@ -968,8 +1358,10 @@ describe("domain history live identity boundary", () => {
     click("域连接");
     await screen.findByRole("table", { name: "获授权的域连接" });
     fill("域或域控关键词", "actor-one-query");
+    chooseStatuses(["unverified", "error"]);
     click("查询域连接");
     await screen.findByRole("button", { name: "查看 synthetic.invalid" });
+    chooseStatuses(["testing", "verified"]);
     click("查看 synthetic.invalid");
     await screen.findByRole("heading", {
       name: "域连接详情：synthetic.invalid",
@@ -1000,6 +1392,8 @@ describe("domain history live identity boundary", () => {
     click("域连接");
     await screen.findByRole("table", { name: "获授权的域连接" });
     expect(screen.getByLabelText("域或域控关键词")).toHaveValue("");
+    expect(selectedStatuses()).toEqual([]);
+    expect(domainListParams().has("filterStatus")).toBe(false);
   });
 });
 
@@ -1040,8 +1434,10 @@ it("defers restored row focus until live history verification releases the hidde
 it("hash-only domain navigation clears sensitive forms while preserving queue filters", async () => {
   await start();
   fill("域或域控关键词", "synthetic");
+  chooseStatuses(["unverified", "error"]);
   click("查询域连接");
   await screen.findByRole("button", { name: "查看 synthetic.invalid" });
+  chooseStatuses(["testing", "verified"]);
   click("新增域连接");
   fill("AD 密码", "discard hash secret");
   act(() => {
@@ -1051,6 +1447,11 @@ it("hash-only domain navigation clears sensitive forms while preserving queue fi
   await screen.findByRole("table", { name: "获授权的域连接" });
   expect(screen.queryByDisplayValue("discard hash secret")).toBeNull();
   expect(screen.getByLabelText("域或域控关键词")).toHaveValue("synthetic");
+  expect(selectedStatuses()).toEqual(["testing", "verified"]);
+  expect(domainListParams().getAll("filterStatus")).toEqual([
+    "unverified",
+    "error",
+  ]);
 });
 
 it("returns to page two with row focus and resets to page one only on a new filter", async () => {
