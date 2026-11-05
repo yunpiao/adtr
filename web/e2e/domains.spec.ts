@@ -3,6 +3,7 @@ import {
   test,
   expect,
   type BrowserContext,
+  type Locator,
   type Page,
   type Request,
 } from "@playwright/test";
@@ -151,6 +152,72 @@ async function openGroup(page: Page, name: string) {
   await expect(
     page.getByRole("heading", { name: `资源组详情：${name}`, exact: true }),
   ).toBeVisible();
+}
+
+// Measure actual rendered text fragments, not merely element visibility. These
+// are read-only observations of the persisted row; no fixture text is injected.
+async function measureListFact(field: Locator) {
+  await expect(field).toBeVisible();
+  const geometry = await field.evaluate((node) => {
+    const bounds = (rect: DOMRect) => ({
+      left: rect.left,
+      right: rect.right,
+      top: rect.top,
+      bottom: rect.bottom,
+    });
+    const cell = node.closest("td")!;
+    const style = getComputedStyle(node);
+    const fragments = [];
+    const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT);
+    while (walker.nextNode()) {
+      if (!walker.currentNode.textContent?.trim()) continue;
+      const range = document.createRange();
+      range.selectNodeContents(walker.currentNode);
+      fragments.push(...Array.from(range.getClientRects(), bounds));
+    }
+    return {
+      text: node.textContent,
+      bounds: bounds(node.getBoundingClientRect()),
+      cellBounds: bounds(cell.getBoundingClientRect()),
+      fragments,
+      overflowWrap: style.overflowWrap,
+      whiteSpace: style.whiteSpace,
+      textOverflow: style.textOverflow,
+      scrollWidth: node.scrollWidth,
+      clientWidth: node.clientWidth,
+      scrollHeight: node.scrollHeight,
+      clientHeight: node.clientHeight,
+      viewportWidth: window.innerWidth,
+    };
+  });
+  expect(geometry.fragments.length).toBeGreaterThan(0);
+  expect(geometry.overflowWrap).toBe("anywhere");
+  expect(geometry.whiteSpace).toBe("normal");
+  expect(geometry.textOverflow).not.toBe("ellipsis");
+  expect(geometry.scrollWidth).toBeLessThanOrEqual(geometry.clientWidth);
+  expect(geometry.scrollHeight).toBeLessThanOrEqual(geometry.clientHeight);
+  for (const fragment of geometry.fragments) {
+    expect(fragment.right).toBeGreaterThan(fragment.left);
+    expect(fragment.bottom).toBeGreaterThan(fragment.top);
+    // One CSS pixel allows subpixel rounding, not hidden/clipped content.
+    expect(fragment.left).toBeGreaterThanOrEqual(
+      Math.max(0, geometry.bounds.left, geometry.cellBounds.left) - 1,
+    );
+    expect(fragment.right).toBeLessThanOrEqual(
+      Math.min(
+        geometry.viewportWidth,
+        geometry.bounds.right,
+        geometry.cellBounds.right,
+      ) + 1,
+    );
+    expect(fragment.top).toBeGreaterThanOrEqual(
+      Math.max(geometry.bounds.top, geometry.cellBounds.top) - 1,
+    );
+    expect(fragment.bottom).toBeLessThanOrEqual(
+      Math.min(geometry.bounds.bottom, geometry.cellBounds.bottom) + 1,
+    );
+  }
+  return geometry;
 }
 
 // Actual browser, API, PostgreSQL, worker and synthetic TLS/LDAP fixture only.
@@ -652,6 +719,39 @@ test("real domain enrollment, explicit grant, TLS diagnostics, rotation and loca
     returnedDomainIds: string[];
     total: number;
   }> = [];
+  const listFactEvidence: Array<{
+    viewport: { width: number; height: number } | null;
+    domainId: string;
+    createdAt: string;
+    observedAt: string;
+  }> = [];
+  const persistedRow = page
+    .getByRole("table", { name: "获授权的域连接", exact: true })
+    .getByRole("row")
+    .filter({ has: domainRow });
+  const idField = persistedRow.getByText(`域 ID：${id}`, { exact: true });
+  const createdField = persistedRow.locator('td[data-label="创建时间（UTC）"]');
+  const observedField = persistedRow.locator(
+    'td[data-label="上次检测（UTC）"]',
+  );
+  const measureListFacts = async () => {
+    const fields = {
+      domainId: await measureListFact(idField),
+      createdAt: await measureListFact(createdField),
+      observedAt: await measureListFact(observedField),
+    };
+    expect(
+      await page
+        .locator(".domain-table-scroll")
+        .evaluate((node) => node.scrollWidth <= node.clientWidth),
+    ).toBe(true);
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= window.innerWidth,
+      ),
+    ).toBe(true);
+    return { viewport: page.viewportSize(), fields };
+  };
   const applyStatusDraft = async (selected: readonly Status[]) => {
     const expectedStates = statusOptions
       .map(([status]) => status)
@@ -679,9 +779,28 @@ test("real domain enrollment, explicit grant, TLS diagnostics, rotation and loca
     if (includesVerified) {
       expect(body.List[0]).toMatchObject({
         domainId: id,
+        createdAt: initial.createdAt,
         connectionState: "verified",
+        lastDiagnostic: { observedAt: result1.diagnostic.observedAt },
       });
+      const connection = body.List[0];
+      expect(Number.isFinite(Date.parse(connection.createdAt))).toBe(true);
+      expect(Date.parse(connection.createdAt)).toBeLessThan(
+        Date.parse(connection.lastDiagnostic.observedAt),
+      );
       await expect(domainRow).toBeVisible();
+      await expect(persistedRow).toHaveCount(1);
+      await expect(idField).toHaveText(`域 ID：${connection.domainId}`);
+      await expect(createdField).toHaveText(connection.createdAt);
+      await expect(observedField).toHaveText(
+        connection.lastDiagnostic.observedAt,
+      );
+      listFactEvidence.push({
+        viewport: page.viewportSize(),
+        domainId: connection.domainId,
+        createdAt: connection.createdAt,
+        observedAt: connection.lastDiagnostic.observedAt,
+      });
     } else {
       await expect(domainRow).toHaveCount(0);
       await expect(
@@ -739,6 +858,13 @@ test("real domain enrollment, explicit grant, TLS diagnostics, rotation and loca
   await applyStatusDraft(["verified", "error"]);
   await page.locator(".domain-advanced-filters summary").click();
   await expect(page.getByLabel("每页条数", { exact: true })).not.toBeVisible();
+  await expect(
+    page.getByRole("columnheader", { name: "创建时间（UTC）", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("columnheader", { name: "上次检测（UTC）", exact: true }),
+  ).toBeVisible();
+  const desktopListFacts = await measureListFacts();
   await capture("domains-soc-queue-desktop.png");
   // Unapplied exclusions remain a draft while detail/history reads keep the
   // applied verified+error set. The existing row must remain accessible.
@@ -805,6 +931,7 @@ test("real domain enrollment, explicit grant, TLS diagnostics, rotation and loca
       .locator(".domain-table-scroll")
       .evaluate((node) => node.scrollWidth <= node.clientWidth),
   ).toBe(true);
+  const mobileListFacts = await measureListFacts();
   await capture("domains-soc-queue-mobile-focus.png", false);
   await capture("domains-soc-queue-mobile.png");
   expect(
@@ -940,6 +1067,11 @@ test("real domain enrollment, explicit grant, TLS diagnostics, rotation and loca
       writes: filterWrites,
       context:
         "unapplied testing+error survived detail and Back/Forward while applied verified+error retained the verified row",
+    },
+    listFacts: {
+      source: "AD-F-001 / FLD-0013 / FLD-0018",
+      responseRows: listFactEvidence,
+      geometry: [desktopListFacts, mobileListFacts],
     },
     mobileGeometry: { queueTitle, headingBox, guidanceBox, dangerContrast },
   };
