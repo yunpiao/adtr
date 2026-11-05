@@ -232,7 +232,8 @@ remain required. See [task UI boundaries](soc-task-ui.md#audit-task-to-original-
 The original UI-0541 `type=index` control was previously optional and absent from
 this bounded Audit/XLSX view. The history table now displays “本页序号” as its first
 column. Each current response page starts at 1; sorting and a new response can
-renumber rows. Empty results have no numbered rows. The ordinal is never a task
+renumber rows. Every table heading has explicit `scope="col"` to identify its
+column association for assistive technology. Empty results have no numbered rows. The ordinal is never a task
 identity, global rank, stored field, download selector or exported XLSX column.
 All selection/navigation continues to use the original taskUUID and all existing
 permission, error, actor-change and stale-response boundaries remain in force.

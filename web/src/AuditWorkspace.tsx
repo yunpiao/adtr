@@ -546,15 +546,15 @@ function AuditList({
               <caption>操作审计记录</caption>
               <thead>
                 <tr>
-                  <th>本页序号</th>
-                  <th>选择</th>
-                  <th>ID / 可见性</th>
-                  <th>登录用户 / 用户 ID</th>
-                  <th>登录 IP</th>
-                  <th>类型 / 事件</th>
-                  <th>结果</th>
-                  <th>审计时间（UTC）</th>
-                  <th>记录字段</th>
+                  <th scope="col">本页序号</th>
+                  <th scope="col">选择</th>
+                  <th scope="col">ID / 可见性</th>
+                  <th scope="col">登录用户 / 用户 ID</th>
+                  <th scope="col">登录 IP</th>
+                  <th scope="col">类型 / 事件</th>
+                  <th scope="col">结果</th>
+                  <th scope="col">审计时间（UTC）</th>
+                  <th scope="col">记录字段</th>
                 </tr>
               </thead>
               <tbody>

@@ -285,6 +285,9 @@ function selectRow(id = "auth.1") {
 }
 function expectPageOrdinals(ids: string[]) {
   const table = screen.getByRole("table", { name: "操作审计记录" });
+  const headers = within(table).getAllByRole("columnheader");
+  expect(headers).toHaveLength(9);
+  headers.forEach((header) => expect(header).toHaveAttribute("scope", "col"));
   expect(within(table).getAllByRole("columnheader")[0]).toHaveTextContent(
     "本页序号",
   );

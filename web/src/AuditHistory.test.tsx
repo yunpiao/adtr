@@ -175,6 +175,9 @@ async function start(changed = vi.fn()) {
 }
 function expectHistoryOrdinals(ids: string[]) {
   const table = screen.getByRole("table", { name: "导出历史记录" });
+  const headers = within(table).getAllByRole("columnheader");
+  expect(headers).toHaveLength(8);
+  headers.forEach((header) => expect(header).toHaveAttribute("scope", "col"));
   expect(within(table).getAllByRole("columnheader")[0]).toHaveTextContent(
     "本页序号",
   );
