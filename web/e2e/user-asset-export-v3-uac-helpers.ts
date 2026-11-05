@@ -12,6 +12,7 @@ import { hash } from "./user-asset-export-v3-helpers";
 import {
   directoryUACResponseBytes,
   directoryUACResponseFailureCheck,
+  directoryUACRequestReadSnapshot,
 } from "./directory-v2-response-observer";
 
 export const exportPrefix = "/api/user-assets/v3/exports";
@@ -312,12 +313,37 @@ const uacHostPhases = [
 type UACHostPhase = (typeof uacHostPhases)[number];
 const uacSettleRequests = ["same", "different", "unknown"] as const;
 type UACSettleRequest = (typeof uacSettleRequests)[number];
+const uacApplicationReads = [
+  "completed_no_abort_seen",
+  "completed_before_abort",
+  "unknown",
+] as const;
+type UACApplicationRead = (typeof uacApplicationReads)[number];
+const uacApplicationSamples = [
+  "available_at_failure",
+  "available_at_settle",
+  "unavailable",
+] as const;
+type UACApplicationSample = (typeof uacApplicationSamples)[number];
+function applicationReadSnapshot(request: Request): UACApplicationRead {
+  try {
+    const snapshot = directoryUACRequestReadSnapshot(request);
+    return uacApplicationReads.find((value) => value === snapshot) ?? "unknown";
+  } catch {
+    // An unavailable diagnostic cannot suppress the native failure category.
+    return "unknown";
+  }
+}
 type UACNativeSnapshot = Readonly<{
   native: UACNativeFailure;
   hostPhase: UACHostPhase;
+  appRead: UACApplicationRead;
 }>;
 type UACNativeReport = Readonly<
-  UACNativeSnapshot & { settleRequest: UACSettleRequest }
+  UACNativeSnapshot & {
+    settleRequest: UACSettleRequest;
+    appSample: UACApplicationSample;
+  }
 >;
 
 // Diagnostic-only calls to trusted synchronous Playwright APIs. Reject getters
@@ -402,6 +428,8 @@ type UACObserverFailure = Readonly<
     native?: UACNativeFailure;
     hostPhase?: UACHostPhase;
     settleRequest?: UACSettleRequest;
+    appRead?: UACApplicationRead;
+    appSample?: UACApplicationSample;
   }
 >;
 const observerFailureDetails = new WeakMap<object, UACObserverFailure>();
@@ -456,7 +484,7 @@ export function uacFailureMessage(
       "unknown";
     const nativeSuffix =
       branch === "request_failed"
-        ? `;native=${native};host_phase=${hostPhase};settle_request=${settleRequest}`
+        ? `;native=${native};host_phase=${hostPhase};settle_request=${settleRequest};app_read=${uacApplicationReads.find((value) => value === observer.appRead) ?? "unknown"};app_sample=${uacApplicationSamples.find((value) => value === observer.appSample) ?? "unavailable"}`
         : "";
     return `uac_evidence_invalid:${code};stage=${safeStage}${check ? `;check=${check}` : ""}${branch ? `;observer=${branch};case=${mode};relation=${relation}` : ""}${inspect ? `;inspect=${inspect}` : ""}${nativeSuffix}`;
   }
@@ -1015,6 +1043,9 @@ export function observeUACExportWrites(
       let native: UACNativeReport | undefined;
       if (firstPoison?.observer === "request_failed") {
         let settleRequest: UACSettleRequest = "unknown";
+        let appRead = firstNative?.appRead ?? "unknown";
+        let appSample: UACApplicationSample =
+          appRead === "unknown" ? "unavailable" : "available_at_failure";
         // The original predicate has already failed. No new API read on success,
         // post_count, or a different first cause; never re-read skipped taskID.
         if (
@@ -1027,8 +1058,18 @@ export function observeUACExportWrites(
             const token = request
               ? requestTokens.get(request as Request)
               : undefined;
-            if (token)
+            if (token) {
               settleRequest = token === firstFailedToken ? "same" : "different";
+              // Reuse the already-read exact Request only after the original
+              // predicate failed. A later snapshot is not event-time state.
+              if (settleRequest === "same" && appRead === "unknown") {
+                const snapshot = applicationReadSnapshot(request as Request);
+                if (snapshot !== "unknown") {
+                  appRead = snapshot;
+                  appSample = "available_at_settle";
+                }
+              }
+            }
           } catch {
             /* Diagnostics remain unknown, not a replacement error. */
           }
@@ -1037,6 +1078,8 @@ export function observeUACExportWrites(
           native: firstNative?.native ?? "other",
           hostPhase: firstNative?.hostPhase ?? "unknown",
           settleRequest,
+          appRead,
+          appSample,
         });
       }
       throw observerFailure(
@@ -1164,16 +1207,18 @@ export function observeUACExportWrites(
         nativeClaimed = true;
         let native: UACNativeFailure = "other";
         let hostPhase: UACHostPhase = "unknown";
+        let appRead: UACApplicationRead = "unknown";
         try {
           firstFailedToken = requestTokens.get(request);
           const phase = hostPhases.get(request)?.phase;
           hostPhase =
             uacHostPhases.find((value) => value === phase) ?? "unknown";
+          appRead = applicationReadSnapshot(request);
           native = nativeRequestFailure(request);
         } catch {
           /* Keep the original poison and fixed fallback metadata. */
         }
-        firstNative = Object.freeze({ native, hostPhase });
+        firstNative = Object.freeze({ native, hostPhase, appRead });
       }
     }
   };

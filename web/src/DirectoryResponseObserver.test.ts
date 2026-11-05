@@ -10,6 +10,7 @@ import {
   directoryV4ControlsResponseJSON,
   directoryUACResponseBytes,
   directoryUACResponseFailureCheck,
+  directoryUACRequestReadSnapshot,
 } from "../e2e/directory-v2-response-observer";
 import { createHash, webcrypto } from "node:crypto";
 import { parseDirectoryV4UniqueJSON } from "./directory-v4-controls-json";
@@ -1924,7 +1925,15 @@ describe("host directory response identity", () => {
           text: inspector,
         });
         const take = vi.spyOn(observer(), "take");
+        expect(
+          directoryUACRequestReadSnapshot(captured.request()),
+        ).toBeUndefined();
         const bytes = await directoryUACResponseBytes(captured);
+        expect(directoryUACRequestReadSnapshot(captured.request())).toBe(
+          "completed_no_abort_seen",
+        );
+        expect(page.waitForFunction).toHaveBeenCalledOnce();
+        expect(page.evaluate).toHaveBeenCalledOnce();
         expect(bytes.equals(raw)).toBe(true);
         expect(fetch).toHaveBeenCalledOnce();
         expect(inspector).not.toHaveBeenCalled();
@@ -2121,6 +2130,9 @@ describe("host directory response identity", () => {
       expect(directoryUACResponseFailureCheck(error)).toBe(
         "observed_byte_binding",
       );
+      expect(
+        directoryUACRequestReadSnapshot(captured.request()),
+      ).toBeUndefined();
       expect(buffers.length).toBe(1);
       expect(buffers[0].every((byte) => byte === 0)).toBe(true);
       expect(hostRecord?.text).toBe("");
@@ -2207,6 +2219,9 @@ describe("host directory response identity", () => {
         directoryUACResponseBytes(captured),
         "observed_body_read",
       );
+      expect(
+        directoryUACRequestReadSnapshot(captured.request()),
+      ).toBeUndefined();
       expect(error.message.includes("UNIT_PRIVATE")).toBe(false);
     });
 
@@ -2285,6 +2300,152 @@ describe("host directory response identity", () => {
       expect(bytes.length).toBeGreaterThan(0);
       bytes.fill(0);
       expect(observer().peek(cIdentity, 0)?.signalAborted).toBe(true);
+      expect(directoryUACRequestReadSnapshot(captured.request())).toBe(
+        "completed_before_abort",
+      );
+    });
+
+    it("keeps exact-request snapshots immutable after later abort and repeated take", async () => {
+      const { consume, fetch, page } = await harness({ path: route });
+      const controller = new AbortController();
+      const first = await consume(controller),
+        second = await consume();
+      const take = vi.spyOn(observer(), "take");
+      (await directoryUACResponseBytes(first)).fill(0);
+      controller.abort();
+      expect(directoryUACRequestReadSnapshot(first.request())).toBe(
+        "completed_no_abort_seen",
+      );
+      expect(directoryUACRequestReadSnapshot(second.request())).toBeUndefined();
+      expect(
+        directoryUACRequestReadSnapshot({ ...first.request() }),
+      ).toBeUndefined();
+      expect(fetch).toHaveBeenCalledTimes(2);
+      expect(page.waitForFunction).toHaveBeenCalledOnce();
+      expect(page.evaluate).toHaveBeenCalledOnce();
+      expect(take).toHaveBeenCalledOnce();
+      await closed(directoryUACResponseBytes(first), "observed_body_read");
+      expect(directoryUACRequestReadSnapshot(first.request())).toBe(
+        "completed_no_abort_seen",
+      );
+      (await directoryUACResponseBytes(second)).fill(0);
+      expect(directoryUACRequestReadSnapshot(second.request())).toBe(
+        "completed_no_abort_seen",
+      );
+      expect(fetch).toHaveBeenCalledTimes(2);
+      expect(page.waitForFunction).toHaveBeenCalledTimes(3);
+      expect(page.evaluate).toHaveBeenCalledTimes(3);
+      expect(take).toHaveBeenCalledTimes(3);
+    });
+
+    it.each(["before EOF", "before release", "cancel"])(
+      "leaves the snapshot unavailable after %s",
+      async (failure) => {
+        const { latest, fetch } = await harness({ path: route });
+        const controller = new AbortController();
+        const native = await window.fetch(route, { signal: controller.signal });
+        const captured = latest();
+        expect(
+          directoryUACRequestReadSnapshot(captured.request()),
+        ).toBeUndefined();
+        if (failure === "cancel") await native.body!.cancel();
+        else {
+          const reader = native.body!.getReader();
+          await reader.read();
+          if (failure === "before release") await reader.read();
+          controller.abort();
+          reader.releaseLock();
+        }
+        await closed(directoryUACResponseBytes(captured), "observed_body_read");
+        expect(
+          directoryUACRequestReadSnapshot(captured.request()),
+        ).toBeUndefined();
+        expect(fetch).toHaveBeenCalledOnce();
+      },
+    );
+
+    it.each([
+      "missing",
+      "false",
+      "inherited",
+      "completed accessor",
+      "signal accessor",
+      "proxy",
+    ])(
+      "keeps bytes accepted but snapshot unavailable for %s diagnostic fields",
+      async (kind) => {
+        const { consume, fetch, page } = await harness({ path: route });
+        const captured = await consume();
+        const getter = vi.fn(() => (kind === "signal accessor" ? false : true));
+        const descriptorTrap = vi.fn(() => {
+          throw new Error("PRIVATE_TRAP");
+        });
+        const ownKeysTrap = vi.fn(() => {
+          throw new Error("PRIVATE_TRAP");
+        });
+        page.evaluate.mockImplementationOnce(async (fn, argument) => {
+          const value = fn(argument);
+          const record = value.record;
+          if (kind === "missing") delete record.completedRead;
+          if (kind === "false") record.completedRead = false;
+          if (kind === "inherited") {
+            delete record.completedRead;
+            Object.setPrototypeOf(record, { completedRead: true });
+          }
+          if (kind === "completed accessor" || kind === "signal accessor")
+            Object.defineProperty(
+              record,
+              kind === "completed accessor" ? "completedRead" : "signalAborted",
+              { get: getter },
+            );
+          if (kind === "proxy")
+            value.record = new Proxy(record, {
+              // Preserve the existing finally text clear without its default
+              // receiver triggering an unrelated property-descriptor lookup.
+              set: (target, key, value) => Reflect.set(target, key, value),
+              getOwnPropertyDescriptor: descriptorTrap,
+              ownKeys: ownKeysTrap,
+            });
+          return value;
+        });
+        const take = vi.spyOn(observer(), "take");
+        const bytes = await directoryUACResponseBytes(captured);
+        expect(bytes.toString()).toBe('{"sequence":1}');
+        bytes.fill(0);
+        expect(
+          directoryUACRequestReadSnapshot(captured.request()),
+        ).toBeUndefined();
+        expect(getter).toHaveBeenCalledTimes(
+          kind === "signal accessor" ? 2 : 0,
+        );
+        expect(descriptorTrap).not.toHaveBeenCalled();
+        expect(ownKeysTrap).not.toHaveBeenCalled();
+        expect(fetch).toHaveBeenCalledOnce();
+        expect(page.waitForFunction).toHaveBeenCalledOnce();
+        expect(page.evaluate).toHaveBeenCalledOnce();
+        expect(take).toHaveBeenCalledOnce();
+      },
+    );
+
+    it("looks up hostile request keys without getters or proxy traps", async () => {
+      const { consume, fetch, page } = await harness({ path: route });
+      const captured = await consume();
+      const trap = vi.fn(() => {
+        throw new Error("PRIVATE_TRAP");
+      });
+      const key = new Proxy(captured.request(), {
+        get: trap,
+        getOwnPropertyDescriptor: trap,
+        getPrototypeOf: trap,
+        ownKeys: trap,
+      });
+      expect(directoryUACRequestReadSnapshot(key)).toBeUndefined();
+      const accessorKey = Object.create(null, { url: { get: trap } });
+      expect(directoryUACRequestReadSnapshot(accessorKey)).toBeUndefined();
+      expect(trap).not.toHaveBeenCalled();
+      expect(fetch).toHaveBeenCalledOnce();
+      expect(page.waitForFunction).not.toHaveBeenCalled();
+      expect(page.evaluate).not.toHaveBeenCalled();
     });
 
     it("waits for the actual delayed native raw digest before the one take", async () => {
