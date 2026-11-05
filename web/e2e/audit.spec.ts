@@ -406,8 +406,8 @@ async function verifyAuditKeywordDraftClear(page: Page) {
   page.on("request", record);
   try {
     await keyword.fill("  synthetic clear draft  ");
-    await start.fill("2026-09-01T00:00:00");
-    await end.fill("2026-10-01T00:00:00");
+    await start.fill("2026-09-01T00:00");
+    await end.fill("2026-10-01T00:00");
     await sort.selectOption("1");
     await size.selectOption("10");
     const draft = await form.evaluate((node) =>
