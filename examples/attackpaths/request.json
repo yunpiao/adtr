@@ -1,0 +1,26 @@
+{
+  "snapshot": {
+    "version": "adtr.simulated-attackpaths.v1",
+    "simulated": true,
+    "scope": {"tenantId": "synthetic-tenant", "domainId": "synthetic-domain"},
+    "observationId": "synthetic-observation-1",
+    "nodes": [
+      {"id": "workstation", "name": "Synthetic workstation"},
+      {"id": "account", "name": "Synthetic account"},
+      {"id": "server", "name": "Synthetic server"}
+    ],
+    "edges": [
+      {"id": "event-1", "from": "workstation", "to": "account", "ruleId": "synthetic-rule", "occurredAt": "2026-11-01T10:00:00Z"},
+      {"id": "event-2", "from": "account", "to": "server", "ruleId": "synthetic-rule", "occurredAt": "2026-11-01T10:01:00Z"}
+    ]
+  },
+  "query": {
+    "scope": {"tenantId": "synthetic-tenant", "domainId": "synthetic-domain"},
+    "from": "workstation",
+    "to": "server",
+    "ruleIds": ["synthetic-rule"],
+    "start": "2026-11-01T10:00:00Z",
+    "end": "2026-11-01T11:00:00Z",
+    "maxDepth": 2
+  }
+}
