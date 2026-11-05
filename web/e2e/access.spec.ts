@@ -4,6 +4,202 @@ import { createHmac } from "node:crypto";
 // AD-F-176 role users: exact additive readonly consumer.
 import { verifyRoleUsersRead } from "./role-users-read";
 // End AD-F-176 role users import.
+// AD-F-171 user times: additive observation of the existing final users GET.
+function userTimesRequire(value: unknown): asserts value {
+  if (!value) throw new Error("access_user_times_check_failed");
+}
+function userTimesObject(value: unknown): Record<string, unknown> {
+  userTimesRequire(
+    value !== null && typeof value === "object" && !Array.isArray(value),
+  );
+  return value as Record<string, unknown>;
+}
+function observeAccessUserTimes(page: Page): Promise<BulkResponse | null> {
+  const expected = new Map([
+    ["pageIdx", "1"],
+    ["pageSize", "20"],
+    ["sort", "1"],
+    ["search", "e2e."],
+    ["isSelf", "false"],
+  ]);
+  // The native page response is observed, never replaced or re-requested. Catch
+  // immediately so an earlier legacy assertion failure cannot leave a rejection.
+  return page
+    .waitForResponse(
+      (response) => {
+        try {
+          const request = response.request(),
+            url = new URL(request.url());
+          return (
+            request.frame() === page.mainFrame() &&
+            request.resourceType() === "fetch" &&
+            request.method() === "GET" &&
+            request.postData() === null &&
+            url.origin === new URL(page.url()).origin &&
+            url.pathname === "/api/access/users" &&
+            url.searchParams.size === expected.size &&
+            [...expected].every(
+              ([key, value]) =>
+                url.searchParams.getAll(key).length === 1 &&
+                url.searchParams.get(key) === value,
+            )
+          );
+        } catch {
+          return false;
+        }
+      },
+      { timeout: 15_000 },
+    )
+    .catch(() => null);
+}
+async function verifyAccessUserTimes(
+  page: Page,
+  observed: Promise<BulkResponse | null>,
+  ids: readonly number[],
+) {
+  try {
+    const response = await observed;
+    userTimesRequire(
+      response !== null &&
+        response.status() === 200 &&
+        !response.fromServiceWorker(),
+    );
+    userTimesRequire((await response.finished()) === null);
+    userTimesRequire(
+      (response.headers()["content-type"] ?? "").split(";")[0] ===
+        "application/json",
+    );
+    const data = userTimesObject(await response.json()),
+      pagination = userTimesObject(data.page);
+    userTimesRequire(
+      pagination.pageIdx === 1 &&
+        pagination.pageSize === 20 &&
+        pagination.total === 2 &&
+        pagination.totalPage === 1 &&
+        data.exhausted === true,
+    );
+    userTimesRequire(
+      Array.isArray(data.List) &&
+        data.List.length === 2 &&
+        ids.length === 2 &&
+        new Set(ids).size === 2 &&
+        ids.every((id) => Number.isSafeInteger(id) && id > 0),
+    );
+    const table = page.getByRole("table", {
+      name: "平台用户列表",
+      exact: true,
+    });
+    const rows = table.locator("tbody tr");
+    userTimesRequire((await rows.count()) === 2);
+    for (const [field, heading] of [
+      ["createTm", "创建时间（UTC）"],
+      ["pwdUpdateTm", "密码更新时间（UTC）"],
+    ] as const) {
+      userTimesRequire(
+        (await table
+          .getByRole("columnheader", { name: heading, exact: true })
+          .count()) === 1,
+      );
+      for (let index = 0; index < ids.length; index++) {
+        const value = userTimesObject(data.List[index]),
+          time = value[field];
+        userTimesRequire(
+          value.ID === ids[index] &&
+            value.username ===
+              (index === 0 ? "e2e.viewer" : "e2e.bulk-viewer") &&
+            typeof time === "string" &&
+            /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$/.test(time) &&
+            Number.isFinite(Date.parse(time)),
+        );
+        // Exact identity, not row position alone, binds the visible times.
+        const row = rows.filter({
+          has: page
+            .getByRole("rowheader")
+            .filter({ hasText: `ID ${ids[index]}` }),
+        });
+        userTimesRequire((await row.count()) === 1);
+        userTimesRequire(
+          (await row.getByRole("rowheader").innerText()).trim() ===
+            `${value.username}\nID ${ids[index]}`,
+        );
+        const cell = row.locator(`td[data-field="${field}"]`);
+        userTimesRequire(
+          (await cell.count()) === 1 && (await cell.innerText()) === time,
+        );
+        const details = row.locator("details");
+        userTimesRequire(
+          (await details.count()) === 1 &&
+            !(await details.evaluate(
+              (node) => (node as HTMLDetailsElement).open,
+            )),
+        );
+        try {
+          await details.locator("summary").click();
+          userTimesRequire(
+            await details.evaluate((node) => (node as HTMLDetailsElement).open),
+          );
+          const values = await details
+            .locator("dl > div")
+            .evaluateAll((nodes) =>
+              nodes.map((node) => ({
+                label: node.querySelector("dt")?.textContent,
+                value: node.querySelector("dd")?.textContent,
+              })),
+            );
+          const matched = values.filter((entry) => entry.label === heading);
+          userTimesRequire(matched.length === 1 && matched[0].value === time);
+        } finally {
+          if (
+            await details.evaluate((node) => (node as HTMLDetailsElement).open)
+          )
+            await details.locator("summary").click();
+        }
+      }
+    }
+    // Restore the existing screenshot's table viewport after inspecting details.
+    await table.evaluate((node) => {
+      const parent = node.parentElement;
+      if (parent) parent.scrollLeft = 0;
+    });
+    await table.scrollIntoViewIfNeeded();
+    await page.evaluate(
+      () =>
+        new Promise<void>((resolve) =>
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+        ),
+    );
+    userTimesRequire((await rows.locator("details[open]").count()) === 0);
+    for (const field of ["createTm", "pwdUpdateTm"]) {
+      const visible = await rows
+        .locator(`td[data-field="${field}"]`)
+        .evaluateAll(
+          (cells) =>
+            cells.length === 2 &&
+            cells.every((cell) => {
+              const range = document.createRange();
+              range.selectNodeContents(cell);
+              const boxes = [...range.getClientRects()];
+              return (
+                boxes.length > 0 &&
+                boxes.every(
+                  (box) =>
+                    box.width > 0 &&
+                    box.height > 0 &&
+                    box.left >= 0 &&
+                    box.right <= innerWidth &&
+                    box.top >= 0 &&
+                    box.bottom <= innerHeight,
+                )
+              );
+            }),
+        );
+      userTimesRequire(visible);
+    }
+  } catch {
+    throw new Error("access_user_times_check_failed");
+  }
+}
+// End AD-F-171 user times observation helpers.
 
 // AD-F-176 bulk acceptance: additive host helpers, no production API changes.
 import type {
@@ -1307,12 +1503,21 @@ test("real browser → API → PostgreSQL users and function permissions", async
       }
 
       bulkPhase = "safe_screenshot";
+      // AD-F-171 user times: observe the unchanged final filter request.
+      const userTimesResponse = observeAccessUserTimes(page);
+      // End AD-F-171 user times observer registration.
       await page.getByLabel("搜索用户名", { exact: true }).fill("e2e.");
       await page.getByLabel("排序", { exact: true }).selectOption("1");
       await page.getByRole("button", { name: "应用筛选", exact: true }).click();
       await expect(rows).toHaveCount(2);
       await page.setViewportSize({ width: 1440, height: 900 });
       await table.scrollIntoViewIfNeeded();
+      // AD-F-171 user times: compare the native response before the existing image.
+      await verifyAccessUserTimes(page, userTimesResponse, [
+        savedUser.ID,
+        viewerID,
+      ]);
+      // End AD-F-171 user times native comparison.
       for (const [index, name, expectedRole] of [
         [0, readerUsername, "viewer"],
         [1, viewerUsername, roleName],
