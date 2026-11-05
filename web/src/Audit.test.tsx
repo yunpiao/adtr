@@ -283,6 +283,29 @@ async function exportDetail() {
 function selectRow(id = "auth.1") {
   fireEvent.click(screen.getByRole("checkbox", { name: `选择 ${id}` }));
 }
+function expectPageOrdinals(ids: string[]) {
+  const table = screen.getByRole("table", { name: "操作审计记录" });
+  const headers = within(table).getAllByRole("columnheader");
+  expect(headers).toHaveLength(9);
+  headers.forEach((header) => expect(header).toHaveAttribute("scope", "col"));
+  expect(within(table).getAllByRole("columnheader")[0]).toHaveTextContent(
+    "本页序号",
+  );
+  const rows = Array.from(table.querySelectorAll("tbody > tr")).filter(
+    (element) => !element.classList.contains("audit-expanded-row"),
+  );
+  expect(rows).toHaveLength(ids.length);
+  rows.forEach((element, index) => {
+    expect(element.firstElementChild).toHaveTextContent(
+      new RegExp(`^${index + 1}$`),
+    );
+    expect(
+      within(element as HTMLElement).getByRole("button", {
+        name: new RegExp(`^(查看|收起)元数据 ${ids[index]}$`),
+      }),
+    ).toHaveAttribute("id", `audit-record-toggle-${ids[index]}`);
+  });
+}
 const selectColumn = (label: string) =>
   fireEvent.click(screen.getByRole("checkbox", { name: `导出列：${label}` }));
 function storedText() {
@@ -551,6 +574,12 @@ describe("audit workspace DOM unit behavior", () => {
       expect(
         screen.queryByRole("button", { name: "当前筛选导出" }),
       ).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("columnheader", { name: "本页序号" }),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: "清空审计关键词" }),
+      ).not.toBeInTheDocument();
     },
   );
   it("keeps readonly records readable while hiding writes and export without task-submit permission", async () => {
@@ -563,6 +592,15 @@ describe("audit workspace DOM unit behavior", () => {
           })
         : undefined;
     await start();
+    expectPageOrdinals(["auth.1"]);
+    fill("审计关键词", "readonly draft");
+    const count = fetcher.mock.calls.length;
+    click("清空审计关键词");
+    expect(screen.getByLabelText("审计关键词", { exact: true })).toHaveValue(
+      "",
+    );
+    expect(screen.getByLabelText("审计关键词", { exact: true })).toHaveFocus();
+    expect(fetcher.mock.calls).toHaveLength(count);
     expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
     for (const name of ["当前筛选导出", "隐藏所选记录", "恢复所选记录"])
       expect(screen.queryByRole("button", { name })).not.toBeInTheDocument();
@@ -1507,7 +1545,7 @@ describe("SOC audit presentation and inline record lifecycle", () => {
       screen.queryByRole("button", { name: "查看元数据 auth.1" }),
     ).not.toBeInTheDocument();
   });
-  it.each([401, 403])(
+  it.each([401, 403, 500])(
     "clears records on a refreshed %s response without reporting zero matching records",
     async (status) => {
       const changed = vi.fn();
@@ -1516,7 +1554,14 @@ describe("SOC audit presentation and inline record lifecycle", () => {
       override = (url) =>
         url.startsWith("/api/audit?")
           ? response(
-              { error: status === 401 ? "unauthenticated" : "forbidden" },
+              {
+                error:
+                  status === 401
+                    ? "unauthenticated"
+                    : status === 403
+                      ? "forbidden"
+                      : "internal",
+              },
               status,
             )
           : undefined;
@@ -1532,6 +1577,12 @@ describe("SOC audit presentation and inline record lifecycle", () => {
       ).not.toBeInTheDocument();
       expect(
         screen.queryByText("没有符合筛选条件的审计记录。"),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("columnheader", { name: "本页序号" }),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: "查看元数据 auth.1" }),
       ).not.toBeInTheDocument();
       if (status === 401) expect(changed).toHaveBeenCalled();
     },
@@ -1585,5 +1636,291 @@ describe("SOC audit presentation and inline record lifecycle", () => {
       "导出历史",
     ])
       expect(screen.queryByRole("button", { name })).not.toBeInTheDocument();
+  });
+});
+
+describe("audit page ordinals and keyword draft controls", () => {
+  it("numbers returned business rows per page and sort without using ordinals as selection or expansion identity", async () => {
+    const rows = Array.from({ length: 23 }, (_, index) =>
+      row({ ID: `auth.${index + 1}` }),
+    );
+    override = (url) => {
+      if (!url.startsWith("/api/audit?")) return;
+      const query = new URLSearchParams(url.split("?")[1]);
+      const pageIdx = Number(query.get("pageIdx"));
+      const pageSize = Number(query.get("pageSize"));
+      const ordered =
+        query.get("createSort") === "1" ? rows : [...rows].reverse();
+      return response({
+        List: ordered.slice((pageIdx - 1) * pageSize, pageIdx * pageSize),
+        page: {
+          pageIdx,
+          pageSize,
+          total: rows.length,
+          totalPage: Math.ceil(rows.length / pageSize),
+        },
+        exhausted: pageIdx * pageSize >= rows.length,
+      });
+    };
+    await start();
+    expectPageOrdinals(
+      rows
+        .slice(3)
+        .reverse()
+        .map((value) => value.ID),
+    );
+    selectRow("auth.22");
+    click("查看元数据 auth.23");
+    expectPageOrdinals(
+      rows
+        .slice(3)
+        .reverse()
+        .map((value) => value.ID),
+    );
+    const fields = screen.getByRole("region", { name: "审计记录字段 auth.23" });
+    expect(fields.closest("td")).toHaveAttribute("colspan", "9");
+    expect(
+      screen.getByRole("checkbox", { name: "选择 auth.22" }),
+    ).toBeChecked();
+    expect(
+      screen.getByRole("checkbox", { name: "选择 auth.23" }),
+    ).not.toBeChecked();
+    click("下一页");
+    await screen.findByRole("button", { name: "查看元数据 auth.3" });
+    expectPageOrdinals(["auth.3", "auth.2", "auth.1"]);
+    expect(
+      screen.queryByRole("region", { name: "审计记录字段 auth.23" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText("已选择 0 条；每次最多 100 条")).toBeVisible();
+    fill("每页审计数", "10");
+    fill("审计排序", "1");
+    click("筛选审计");
+    await screen.findByRole("button", { name: "查看元数据 auth.10" });
+    expectPageOrdinals(rows.slice(0, 10).map((value) => value.ID));
+    expect(calls("").at(-1)![0]).toContain(
+      "pageIdx=1&pageSize=10&createSort=1",
+    );
+    selectRow("auth.2");
+    click("隐藏所选记录");
+    fill("操作原因", "Synthetic exact-ID check");
+    proof();
+    click("确认隐藏");
+    await screen.findByRole("table", { name: "操作审计记录" });
+    expect(body("/delete").id).toEqual(["auth.2"]);
+  });
+
+  it("clears only the keyword draft with focus, preserving every other draft, active page, rows, selection and expansion until submit", async () => {
+    override = (url) => {
+      if (!url.startsWith("/api/audit?")) return;
+      const query = new URLSearchParams(url.split("?")[1]);
+      const pageIdx = Number(query.get("pageIdx"));
+      const pageSize = Number(query.get("pageSize"));
+      return response({
+        ...list([row({ ID: `auth.${pageIdx + 10}` })]),
+        page: {
+          pageIdx,
+          pageSize,
+          total: 21,
+          totalPage: Math.ceil(21 / pageSize),
+        },
+        exhausted: pageIdx * pageSize >= 21,
+      });
+    };
+    await start();
+    fill("审计关键词", "applied");
+    fill("每页审计数", "10");
+    click("筛选审计");
+    await screen.findByRole("table", { name: "操作审计记录" });
+    click("下一页");
+    await screen.findByRole("button", { name: "查看元数据 auth.12" });
+    selectRow("auth.12");
+    click("查看元数据 auth.12");
+    fill("审计关键词", "unsubmitted draft");
+    fill("开始时间（UTC）", "2026-10-06T01:02:03");
+    fill("结束时间（UTC）", "2026-10-07T01:02:03");
+    fill("审计可见性", "hidden");
+    fill("审计排序", "1");
+    fill("每页审计数", "50");
+    choose("审计事件筛选", ["resource.update"]);
+    choose("审计类型筛选", ["7"]);
+    const input = screen.getByRole("textbox", {
+      name: "审计关键词",
+    });
+    const clear = screen.getByRole("button", {
+      name: "清空审计关键词",
+    });
+    expect(clear.closest("label")).toBeNull();
+    expect(clear).toHaveAttribute("type", "button");
+    const requestCount = fetcher.mock.calls.length;
+    click("清空审计关键词");
+    click("清空审计关键词");
+    await act(async () => {});
+    expect(input).toHaveValue("");
+    expect(input).toHaveFocus();
+    expect(fetcher.mock.calls).toHaveLength(requestCount);
+    expect(
+      screen.getByLabelText("开始时间（UTC）", { exact: true }),
+    ).toHaveValue("2026-10-06T01:02:03.000");
+    expect(
+      screen.getByLabelText("结束时间（UTC）", { exact: true }),
+    ).toHaveValue("2026-10-07T01:02:03.000");
+    expect(screen.getByLabelText("审计可见性")).toHaveValue("hidden");
+    expect(screen.getByLabelText("审计排序")).toHaveValue("1");
+    expect(screen.getByLabelText("每页审计数")).toHaveValue("50");
+    expect(screen.getByLabelText("审计事件筛选", { exact: true })).toHaveValue([
+      "resource.update",
+    ]);
+    expect(screen.getByLabelText("审计类型筛选", { exact: true })).toHaveValue([
+      "7",
+    ]);
+    expect(screen.getByLabelText("分页")).toHaveTextContent("第 2 / 3 页");
+    expect(screen.getByLabelText("审计查询结果摘要")).toHaveTextContent(
+      "未隐藏记录",
+    );
+    expectPageOrdinals(["auth.12"]);
+    expect(
+      screen.getByRole("checkbox", { name: "选择 auth.12" }),
+    ).toBeChecked();
+    expect(
+      screen.getByRole("region", { name: "审计记录字段 auth.12" }),
+    ).toBeVisible();
+    expect(screen.getByRole("button", { name: "当前筛选导出" })).toBeEnabled();
+    expect(calls("").at(-1)![0]).toContain(
+      "pageIdx=2&pageSize=10&createSort=-1&visibility=visible&keyword=applied",
+    );
+    click("筛选审计");
+    await screen.findByRole("button", { name: "查看元数据 auth.11" });
+    const applied = new URLSearchParams(calls("").at(-1)![0].split("?")[1]);
+    expect(applied.get("keyword")).toBeNull();
+    expect(applied.get("pageIdx")).toBe("1");
+    expect(applied.get("pageSize")).toBe("50");
+    expect(applied.get("visibility")).toBe("hidden");
+    expect(applied.get("createSort")).toBe("1");
+    expect(applied.get("startTm")).toBe("2026-10-06T01:02:03.000Z");
+    expect(applied.get("endTm")).toBe("2026-10-07T01:02:03.000Z");
+    expect(applied.getAll("filterEvent")).toEqual(["resource.update"]);
+    expect(applied.getAll("logTypeList")).toEqual(["7"]);
+    expect(screen.getByText("已选择 0 条；每次最多 100 条")).toBeVisible();
+    expect(
+      screen.queryByRole("region", { name: "审计记录字段 auth.12" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("keeps the applied export filter after draft clearing and restores the applied keyword on list remount", async () => {
+    await start();
+    fill("审计关键词", "applied keyword");
+    fill("开始时间（UTC）", "2026-10-06T01:02:03");
+    choose("审计事件筛选", ["login"]);
+    choose("审计类型筛选", ["9"]);
+    fill("审计排序", "1");
+    click("筛选审计");
+    await screen.findByRole("table", { name: "操作审计记录" });
+    fill("审计关键词", "draft keyword");
+    click("清空审计关键词");
+    click("导出历史");
+    await screen.findByRole("table", { name: "导出历史记录" });
+    click("返回审计列表");
+    await screen.findByRole("table", { name: "操作审计记录" });
+    expect(screen.getByLabelText("审计关键词", { exact: true })).toHaveValue(
+      "applied keyword",
+    );
+    click("清空审计关键词");
+    fill("开始时间（UTC）", "2026-10-05T01:02:03");
+    choose("审计事件筛选", ["resource.update"]);
+    choose("审计类型筛选", ["7"]);
+    fill("审计排序", "-1");
+    click("当前筛选导出");
+    await screen.findByLabelText("操作者当前密码");
+    expect(screen.getByLabelText("导出筛选摘要")).toHaveTextContent(
+      "applied keyword",
+    );
+    proof();
+    click("确认创建导出");
+    await screen.findByLabelText("导出实际结果");
+    expect(body("/exports")).toMatchObject({
+      keyword: "applied keyword",
+      startTm: "2026-10-06T01:02:03.000Z",
+      filterEvent: ["login"],
+      logTypeList: [9],
+      createSort: 1,
+    });
+    expect(body("/exports")).not.toHaveProperty("pageIdx");
+    expect(body("/exports")).not.toHaveProperty("pageSize");
+  });
+
+  it("fully clears unsubmitted drafts even while the applied filter is already empty", async () => {
+    await start();
+    fill("每页审计数", "10");
+    click("筛选审计");
+    await screen.findByRole("table", { name: "操作审计记录" });
+    fill("审计关键词", "discard draft");
+    click("清空审计关键词");
+    fill("审计关键词", "another draft");
+    fill("开始时间（UTC）", "2026-10-07T01:02:03");
+    fill("结束时间（UTC）", "2026-10-06T01:02:03");
+    fill("审计可见性", "all");
+    fill("审计排序", "1");
+    fill("每页审计数", "50");
+    choose("审计事件筛选", ["login", "resource.update"]);
+    choose("审计类型筛选", ["7", "9"]);
+    click("筛选审计");
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "开始时间必须早于结束时间",
+    );
+    click("清除审计筛选");
+    await screen.findByRole("table", { name: "操作审计记录" });
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    for (const label of ["审计关键词", "开始时间（UTC）", "结束时间（UTC）"])
+      expect(screen.getByLabelText(label, { exact: true })).toHaveValue("");
+    expect(screen.getByLabelText("审计可见性")).toHaveValue("visible");
+    expect(screen.getByLabelText("审计排序")).toHaveValue("-1");
+    expect(screen.getByLabelText("每页审计数")).toHaveValue("20");
+    expect(screen.getByLabelText("审计事件筛选", { exact: true })).toHaveValue(
+      [],
+    );
+    expect(screen.getByLabelText("审计类型筛选", { exact: true })).toHaveValue(
+      [],
+    );
+    expect(calls("").at(-1)![0]).toBe(
+      "/api/audit?pageIdx=1&pageSize=20&createSort=-1&visibility=visible",
+    );
+  });
+
+  it("leaves no ordinal or private row after an empty result or actor switch with an ignored late response", async () => {
+    const mounted = await start();
+    expectPageOrdinals(["auth.1"]);
+    fill("审计关键词", "private draft");
+    let resolve!: (value: Response) => void;
+    override = (url) =>
+      url.startsWith("/api/audit?")
+        ? new Promise((r) => {
+            resolve = r;
+          })
+        : undefined;
+    click("刷新审计列表");
+    const pending = calls("").at(-1)!;
+    override = (url) =>
+      url.startsWith("/api/audit?") ? response(list([])) : undefined;
+    mounted.rerender(
+      <AuditWorkspace
+        profile={{ ...profile, ID: 2, csrfToken: "another-actor" }}
+        sessionChanged={vi.fn()}
+      />,
+    );
+    expect(
+      screen.queryByRole("columnheader", { name: "本页序号" }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByDisplayValue("private draft")).not.toBeInTheDocument();
+    expect(pending[1].signal.aborted).toBe(true);
+    await screen.findByText("没有符合筛选条件的审计记录。");
+    expectPageOrdinals([]);
+    await act(async () => resolve(await response(list())));
+    expectPageOrdinals([]);
+    expect(
+      screen.queryByRole("button", { name: "查看元数据 auth.1" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByLabelText("审计关键词", { exact: true })).toHaveValue(
+      "",
+    );
   });
 });
