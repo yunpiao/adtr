@@ -52,7 +52,7 @@ def restore_role_users_bulk_reader(text):
     return text.replace(OUTER_READER, LEGACY_READER, 1)
 
 
-BROWSER_HELPER_SHA256 = 'f92ac4d52053651910d522666cd664dff2ff38f8862a7e94e5af099f93adb3e9'
+BROWSER_HELPER_SHA256 = '9a82f35f01571b540d97f127d9de767f585dbfe9efc898e29a8424a7aa506dd0'
 
 
 def validate_role_users_browser_helper(raw):

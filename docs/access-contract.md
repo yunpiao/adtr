@@ -212,6 +212,14 @@ proof control. Entry buttons are non-submitting, and the query controls are neve
 nested inside the role-edit form. Returning to a role detail reopens its normal
 server-backed view rather than retaining a privileged draft or its proof.
 
+The workspace's responsive rules are imported from a scoped, bundled same-origin
+stylesheet. This is required by the existing `style-src 'self'` policy: an inline
+style block is not an allowed way to supply the narrow-screen card layout. The
+policy is unchanged. Removing the stylesheet/import leaves the read workflow but
+loses its mobile wrapping and labelled row layout. Desktop remains a table; at
+390px the real browser must verify the block layout and all six user fields
+without horizontal clipping, rather than only the first two visible columns.
+
 Reads use the existing literal case-insensitive username search with at most 50
 Unicode codepoints, fixed creation-time descending order (`sort=-1`) and the
 original UI's page sizes 10, 20, 30, 40 and 50. Applying search/size changes returns

@@ -39,7 +39,7 @@ class RoleUsersReadEvidenceContract(unittest.TestCase):
         self.tree = 'b' * 40
         self.identity = evidence.identity(self.environment, 'a' * 40, self.tree)
         self.images = [png_fixture(width=w, height=h) for w, h in evidence.DIMENSIONS]
-        self.summary = dict(schemaVersion=1, case='role_users_readonly_workspace',
+        self.summary = dict(schemaVersion=2, case='role_users_readonly_workspace',
             status='browser_passed_after_legacy_context_cleanup', identity=self.identity,
             customRoleID='R' * 24, readerID=2, customUserID=3,
             requests=[dict(phase=phase, role=role, method='GET', status=200, roleBound=True, exactQuery=True,
@@ -49,8 +49,16 @@ class RoleUsersReadEvidenceContract(unittest.TestCase):
                 for phase, role, search, size, count in evidence.READS],
             screenshots=[dict(file=file, bytes=len(image), sha256=evidence.digest(image), width=w, height=h,
                 viewport=dict(width=w, height=h), fullPage=False, proofControls=0, visibleUsers=1,
-                headingVisible=True, usernameVisible=True, roleVisible=True)
+                headingVisible=True, usernameVisible=True, roleVisible=True,
+                layout=dict(mode='stacked' if w == 390 else 'table', tableDisplay='block' if w == 390 else 'table',
+                    bodyDisplay='block' if w == 390 else 'table-row-group', rowDisplay='block' if w == 390 else 'table-row',
+                    cellDisplay='block' if w == 390 else 'table-cell', cellsComputedDisplay=True, cellsWithinViewport=True,
+                    contentFits=True, horizontalOverflow=False, headersVisuallyHidden=w == 390,
+                    mobileFieldLabels=w == 390, visibleFields=6))
                 for file, image, (w, h) in zip(evidence.FILES[1:], self.images, evidence.DIMENSIONS)],
+            styleDelivery=dict(documentHTTP=200, documentSameOrigin=True, documentHTML=True,
+                documentCSPExact=True, stylesheetSameOrigin=True, stylesheetRulePresent=True,
+                inlineStyleElements=0, inlineStyleAttributes=0),
             checks=dict(mutatingRequests=0, readOnlyCheckPOSTs=0, userRequests=11, listClosed=True, detailReturned=True,
                 viewerSelected=True, finalListVisible=True, localStorageEmpty=True, sessionStorageEmpty=True,
                 extraSensitiveMutations=0, newContexts=0,
@@ -160,6 +168,35 @@ class RoleUsersReadEvidenceContract(unittest.TestCase):
                 self.invalid_summary(bad)
         (self.root / evidence.SOURCE_PATHS[0]).write_bytes(b'changed source')
         self.reject()
+
+    def test_csp_external_style_and_six_field_layout_evidence_cannot_regress_to_partial_columns(self):
+        for index in range(2):
+            for key, value in [('mode', 'unknown'), ('tableDisplay', 'grid'), ('bodyDisplay', 'flex'),
+                ('rowDisplay', 'inline'), ('cellDisplay', 'contents'), ('visibleFields', 2),
+                ('cellsComputedDisplay', False), ('cellsWithinViewport', False), ('contentFits', False),
+                ('horizontalOverflow', True)]:
+                bad = copy.deepcopy(self.summary)
+                bad['screenshots'][index]['layout'][key] = value
+                self.invalid_summary(bad)
+        bad = copy.deepcopy(self.summary)
+        bad['screenshots'][1]['layout'] = copy.deepcopy(bad['screenshots'][0]['layout'])
+        self.invalid_summary(bad)
+        for key, value in [('documentHTTP', 302), ('documentSameOrigin', False), ('documentHTML', False),
+            ('documentCSPExact', False), ('stylesheetSameOrigin', False), ('stylesheetRulePresent', False),
+            ('inlineStyleElements', 1), ('inlineStyleAttributes', 1)]:
+            bad = copy.deepcopy(self.summary)
+            bad['styleDelivery'][key] = value
+            self.invalid_summary(bad)
+        bad = copy.deepcopy(self.summary)
+        bad['schemaVersion'] = 1
+        self.invalid_summary(bad)
+        # The original 43-source/partial-column manifest is insufficient for
+        # this successor even when someone updates its hashes and PNG metadata.
+        bad = copy.deepcopy(self.summary)
+        del bad['styleDelivery']
+        for item in bad['screenshots']:
+            del item['layout']
+        self.invalid_summary(bad)
 
     def test_source_snapshot_cannot_change_between_checkout_and_stage(self):
         target = self.root / evidence.SOURCE_PATHS[0]
@@ -335,6 +372,40 @@ class RoleUsersReadSourceContract(unittest.TestCase):
             with self.assertRaises(ValueError):
                 source.validate_role_users_browser_helper(raw)
 
+    def test_exact_fixed_label_cssom_serializations_execute_actual_browser_constant(self):
+        text = Path('web/e2e/role-users-read.ts').read_text()
+        begin, end = '// ROLE-USERS-LABEL-CONTENT-BEGIN\n', '// ROLE-USERS-LABEL-CONTENT-END\n'
+        self.assertEqual(text.count(begin), 1)
+        self.assertEqual(text.count(end), 1)
+        declaration = text[text.index(begin) + len(begin):text.index(end)]
+        # No TypeScript/compiler dependency: this actual producer declaration is
+        # JavaScript, executed by the repository's required Node runtime.
+        program = declaration + r"""
+const fixed = ["当前角色", "手机号", "邮箱", "账户状态", "MFA 状态"];
+let accepted = 0, rejected = 0;
+if (roleUsersLabelContent.length !== fixed.length) throw new Error("label count");
+for (const [index, entry] of roleUsersLabelContent.entries()) {
+  const label = fixed[index];
+  const joined = JSON.stringify(label + "："), tokens = JSON.stringify(label) + " " + JSON.stringify("：");
+  if (entry.label !== label || entry.content.length !== 2 || entry.content[0] !== joined || entry.content[1] !== tokens) throw new Error("labels differ");
+  for (const content of [joined, tokens]) {
+    if (!entry.content.includes(content)) throw new Error("valid serialization rejected");
+    accepted++;
+  }
+  for (const content of ["", "none", "normal", null, 1, "attr(data-label) \"：\"", JSON.stringify(label),
+      JSON.stringify("其他："), joined + " ", " " + joined, tokens.replace(" ", "  "), tokens + " \"extra\"",
+      JSON.stringify("："), JSON.stringify(label + ":"), tokens.replace("：", ":")]) {
+    if (entry.content.includes(content)) throw new Error("invalid serialization accepted");
+    rejected++;
+  }
+}
+console.log(JSON.stringify({accepted, rejected}));
+"""
+        result = subprocess.run(['node', '--input-type=module', '-'], input=program.encode(), check=True,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10)
+        self.assertEqual(json.loads(result.stdout), dict(accepted=10, rejected=75))
+        self.assertEqual(result.stderr, b'')
+
     def test_helper_source_identity_and_no_mock_retry_or_new_sensitive_action(self):
         text = Path('web/e2e/role-users-read.ts').read_text()
         block = text.split('  // ROLE-USERS-SOURCES-BEGIN\n')[1].split('  // ROLE-USERS-SOURCES-END\n')[0]
@@ -349,6 +420,21 @@ class RoleUsersReadSourceContract(unittest.TestCase):
         self.assertIn('"not_exercised_one_user_per_role"', text)
         self.assertEqual(text.count('await page.screenshot('), 1)
         self.assertEqual(len(evidence.READS), 11)
+        self.assertEqual(len(evidence.SOURCE_PATHS), 45)
+        for path in ('cmd/adtr/main.go', 'web/src/role-users-read.css'):
+            self.assertIn(path, evidence.SOURCE_PATHS)
+        self.assertIn('maxRedirects: 0', text)
+        self.assertEqual(text.count('requestContext.get('), 1)
+        self.assertIn('documentResponse.dispose()', text)
+        self.assertIn('headers["content-security-policy"]', text)
+        self.assertIn('Array.from(document.styleSheets)', text)
+        self.assertIn('field.getAttribute("data-label") === labelContent[index].label', text)
+        self.assertIn('labelContent[index].content.includes(', text)
+        self.assertIn('new URL(sheet.href).origin !== location.origin', text)
+        for required in ('layout.cellsComputedDisplay', 'layout.cellsWithinViewport', 'layout.contentFits',
+            '!layout.horizontalOverflow', 'layout.headersVisuallyHidden === (width === 390)',
+            'layout.mobileFieldLabels === (width === 390)', 'layout.visibleFields === 6'):
+            self.assertIn(required, text)
         self.assertIn('retries: 0', Path('web/playwright.config.ts').read_text())
         self.assertIn('else 420)', Path('scripts/test_auth_e2e.py').read_text())
 

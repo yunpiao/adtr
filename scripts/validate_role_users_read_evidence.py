@@ -28,6 +28,7 @@ SOURCE_PATHS = (
     '.github/workflows/ci.yml',
     'AGENTS.md',
     'README.md',
+    'cmd/adtr/main.go',
     'docs/access-contract.md',
     'docs/architecture.md',
     'docs/delivery.md',
@@ -63,6 +64,7 @@ SOURCE_PATHS = (
     'web/src/access-api.ts',
     'web/src/access-common.tsx',
     'web/src/api.ts',
+    'web/src/role-users-read.css',
     'web/src/role-users-read.test.ts',
     'web/src/role-users-read.ts',
     'web/src/session-invalidation.ts',
@@ -84,7 +86,7 @@ READS = (
     ('viewer_initial', 'viewer', 'empty', 20, 1),
 )
 ROOT_KEYS = ('schemaVersion', 'case', 'status', 'identity', 'customRoleID', 'readerID',
-             'customUserID', 'requests', 'screenshots', 'checks', 'sourceSHA256')
+             'customUserID', 'requests', 'screenshots', 'checks', 'sourceSHA256', 'styleDelivery')
 
 
 def png_size(raw, dimensions):
@@ -143,7 +145,7 @@ def png_size(raw, dimensions):
 
 def validate_summary(data, current, sources, images):
     exact(data, ROOT_KEYS)
-    equals(data['schemaVersion'], 1)
+    equals(data['schemaVersion'], 2)
     equals(data['case'], 'role_users_readonly_workspace')
     equals(data['status'], 'browser_passed_after_legacy_context_cleanup')
     equals(data['identity'], current)
@@ -162,7 +164,15 @@ def validate_summary(data, current, sources, images):
         png_size(image, (width, height))
         equals(item, dict(file=name, bytes=len(image), sha256=digest(image), width=width, height=height,
             viewport=dict(width=width, height=height), fullPage=False, proofControls=0, visibleUsers=1,
-            headingVisible=True, usernameVisible=True, roleVisible=True))
+            headingVisible=True, usernameVisible=True, roleVisible=True,
+            layout=dict(mode='stacked' if width == 390 else 'table', tableDisplay='block' if width == 390 else 'table',
+                bodyDisplay='block' if width == 390 else 'table-row-group', rowDisplay='block' if width == 390 else 'table-row',
+                cellDisplay='block' if width == 390 else 'table-cell', cellsComputedDisplay=True, cellsWithinViewport=True,
+                contentFits=True, horizontalOverflow=False, headersVisuallyHidden=width == 390,
+                mobileFieldLabels=width == 390, visibleFields=6)))
+    equals(data['styleDelivery'], dict(documentHTTP=200, documentSameOrigin=True, documentHTML=True,
+        documentCSPExact=True, stylesheetSameOrigin=True, stylesheetRulePresent=True,
+        inlineStyleElements=0, inlineStyleAttributes=0))
     checks = data['checks']
     exact(checks, ('mutatingRequests', 'readOnlyCheckPOSTs', 'userRequests', 'listClosed', 'detailReturned',
         'viewerSelected', 'finalListVisible', 'localStorageEmpty', 'sessionStorageEmpty',

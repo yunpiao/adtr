@@ -1,4 +1,5 @@
 import { useLayoutEffect, useRef, useState } from "react";
+import "./role-users-read.css";
 import { ApiError } from "./api";
 import { errorText, type Role, type UserList } from "./access-api";
 import {
@@ -166,22 +167,7 @@ export default function RoleUsersReadPanel({
   };
   const active = scope && !closed;
   return (
-    <section
-      className="role-users-read"
-      aria-label="角色关联用户工作区"
-      style={{ overflowWrap: "anywhere" }}
-    >
-      <style>{`
-        @media (max-width: 600px) {
-          .role-users-read .table-scroll { overflow: visible; }
-          .role-users-read table, .role-users-read tbody, .role-users-read tr, .role-users-read th, .role-users-read td { display: block; width: auto; min-width: 0; }
-          .role-users-read caption { display: block; }
-          .role-users-read thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
-          .role-users-read tbody tr { margin-bottom: 1rem; border: 1px solid currentColor; border-radius: .5rem; padding: .5rem; }
-          .role-users-read tbody th, .role-users-read tbody td { padding: .35rem; border: 0; }
-          .role-users-read tbody td::before { content: attr(data-label) "："; font-weight: 600; }
-        }
-      `}</style>
+    <section className="role-users-read" aria-label="角色关联用户工作区">
       <h3>
         {active ? `角色关联用户：${role.name}` : "角色关联用户读取已关闭"}
       </h3>

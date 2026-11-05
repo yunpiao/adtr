@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import {
   act,
   fireEvent,
@@ -168,6 +169,75 @@ const setSearch = (value: string) =>
   });
 
 describe("fixed-role associated user workflow", () => {
+  it("loads only scoped bundled CSS under the existing same-origin style policy", () => {
+    const source = readFileSync("src/RoleUsersReadPanel.tsx", "utf8");
+    const css = readFileSync("src/role-users-read.css", "utf8");
+    expect(source).toContain('import "./role-users-read.css";');
+    expect(source).not.toMatch(/<style\b|\bstyle\s*=/u);
+    expect(css).toMatch(/\.role-users-read\s*\{\s*overflow-wrap:\s*anywhere;/u);
+    expect(css).toContain("@media (max-width: 600px)");
+    expect(css).toContain('content: attr(data-label) "：";');
+    expect(css).not.toMatch(/display:\s*none|visibility:\s*hidden/u);
+    const selectors = [
+      ...css.replace(/\/\*[\s\S]*?\*\//gu, "").matchAll(/([^{}]+)\{/gu),
+    ]
+      .map((match) => match[1].trim())
+      .filter((selector) => !selector.startsWith("@"));
+    expect(selectors.length).toBeGreaterThan(0);
+    for (const group of selectors)
+      for (const selector of group.split(","))
+        expect(selector.trim()).toMatch(/^\.role-users-read(?:\s|$)/u);
+  });
+  it("retains native table headers and all mobile field labels without inline styles", async () => {
+    await openRoles();
+    const region = screen.getByRole("region", { name: "角色关联用户工作区" });
+    expect(region).not.toHaveAttribute("style");
+    expect(region.querySelector("style, [style]")).toBeNull();
+    const result = within(region).getByRole("table", {
+      name: "角色关联用户列表",
+    });
+    expect(result.tagName).toBe("TABLE");
+    expect(result).not.toHaveAttribute("role");
+    const headers = within(result).getAllByRole("columnheader");
+    expect(headers.map((header) => header.textContent)).toEqual([
+      "用户名 / 用户 ID",
+      "当前角色 / 角色 ID",
+      "手机号",
+      "邮箱",
+      "账户状态",
+      "MFA 状态",
+    ]);
+    for (const header of headers) {
+      expect(header.tagName).toBe("TH");
+      expect(header).toHaveAttribute("scope", "col");
+      expect(header.closest("[hidden], [aria-hidden=true]")).toBeNull();
+    }
+    const rowHeader = within(result).getByRole("rowheader", {
+      name: "member01 ID 1",
+    });
+    expect(rowHeader.tagName).toBe("TH");
+    expect(rowHeader).toHaveAttribute("scope", "row");
+    const cells = within(rowHeader.closest("tr")!).getAllByRole("cell");
+    expect(cells.map((cell) => cell.getAttribute("data-label"))).toEqual([
+      "当前角色",
+      "手机号",
+      "邮箱",
+      "账户状态",
+      "MFA 状态",
+    ]);
+    expect(cells.map((cell) => cell.textContent)).toEqual([
+      `${role.name}${role.id}`,
+      "13800138000",
+      "member1@example.test",
+      "账户已停用",
+      "已关闭",
+    ]);
+    for (const cell of cells) {
+      expect(cell.tagName).toBe("TD");
+      expect(cell).not.toHaveAttribute("role");
+    }
+  });
+
   it("opens from a real list target, displays current facts and distinct count semantics without write controls", async () => {
     await openRoles();
     expect(

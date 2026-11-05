@@ -13,6 +13,7 @@ const sourcePaths = [
   ".github/workflows/ci.yml",
   "AGENTS.md",
   "README.md",
+  "cmd/adtr/main.go",
   "docs/access-contract.md",
   "docs/architecture.md",
   "docs/delivery.md",
@@ -48,6 +49,7 @@ const sourcePaths = [
   "web/src/access-api.ts",
   "web/src/access-common.tsx",
   "web/src/api.ts",
+  "web/src/role-users-read.css",
   "web/src/role-users-read.test.ts",
   "web/src/role-users-read.ts",
   "web/src/session-invalidation.ts",
@@ -55,6 +57,22 @@ const sourcePaths = [
   "web/src/style.css",
   // ROLE-USERS-SOURCES-END
 ] as const;
+// ROLE-USERS-LABEL-CONTENT-BEGIN
+// CSSOM may preserve the two content tokens or serialize their exact join.
+const roleUsersLabelContent = [
+  "当前角色",
+  "手机号",
+  "邮箱",
+  "账户状态",
+  "MFA 状态",
+].map((label) => ({
+  label,
+  content: [
+    JSON.stringify(label + "："),
+    JSON.stringify(label) + " " + JSON.stringify("："),
+  ],
+}));
+// ROLE-USERS-LABEL-CONTENT-END
 type ObjectValue = Record<string, unknown>;
 type ExpectedUser = {
   username: "e2e.bulk-viewer" | "e2e.viewer";
@@ -326,6 +344,25 @@ export async function verifyRoleUsersRead(
     }
     const button = (name: string) => () =>
       panel.getByRole("button", { name, exact: true }).click();
+    phase = "served_document_policy";
+    // Only this same-origin document GET uses the request context. User rows
+    // still come exclusively from the actual UI request and its own response.
+    const requestContext = page.context().request;
+    const documentResponse = await requestContext.get(base.origin + "/", {
+      maxRedirects: 0,
+    });
+    try {
+      const headers = documentResponse.headers();
+      requireValue(
+        documentResponse.status() === 200 &&
+          documentResponse.url() === base.origin + "/" &&
+          headers["content-type"]?.split(";")[0] === "text/html" &&
+          headers["content-security-policy"] ===
+            "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+      );
+    } finally {
+      await documentResponse.dispose();
+    }
     phase = "open_role_list";
     await page.getByRole("button", { name: "角色管理", exact: true }).click();
     await read("custom_initial", custom, "", 20, 1, () =>
@@ -394,6 +431,44 @@ export async function verifyRoleUsersRead(
         .getByRole("button", { name: `查看关联用户 ${roleName}`, exact: true })
         .click(),
     );
+    phase = "external_stylesheet";
+    const externalStyle = await page.evaluate(() => {
+      const hasRoleRule = (rules: CSSRuleList): boolean =>
+        Array.from(rules).some((rule) =>
+          rule instanceof CSSStyleRule
+            ? rule.selectorText.includes(".role-users-read")
+            : "cssRules" in rule &&
+              hasRoleRule((rule as CSSGroupingRule).cssRules),
+        );
+      return Array.from(document.styleSheets).some((sheet) => {
+        if (
+          !sheet.href ||
+          new URL(sheet.href).origin !== location.origin ||
+          !(sheet.ownerNode instanceof HTMLLinkElement) ||
+          sheet.ownerNode.rel !== "stylesheet"
+        )
+          return false;
+        try {
+          return hasRoleRule(sheet.cssRules);
+        } catch {
+          return false;
+        }
+      });
+    });
+    requireValue(externalStyle);
+    await expect(panel.locator("style")).toHaveCount(0);
+    await expect(panel.locator("[style]")).toHaveCount(0);
+    await expect(panel).not.toHaveAttribute("style");
+    const styleDelivery = {
+      documentHTTP: 200,
+      documentSameOrigin: true,
+      documentHTML: true,
+      documentCSPExact: true,
+      stylesheetSameOrigin: true,
+      stylesheetRulePresent: true,
+      inlineStyleElements: 0,
+      inlineStyleAttributes: 0,
+    };
     // Both images show this new panel, never the legacy bulk-assignment image.
     for (const [width, height] of [
       [1440, 1000],
@@ -412,6 +487,93 @@ export async function verifyRoleUsersRead(
       await expect(
         table.locator("tbody tr").getByRole("cell").first(),
       ).toBeInViewport({ ratio: 1 });
+      // Visibility of the first two columns is insufficient: all six fields
+      // and their rendered content must fit the real screenshot viewport.
+      const fields = table.locator("tbody tr").locator("th, td");
+      await expect(fields).toHaveCount(6);
+      for (let index = 0; index < 6; index++) {
+        await expect(fields.nth(index)).toBeVisible();
+        await expect(fields.nth(index)).toBeInViewport({ ratio: 1 });
+      }
+      const layout = await table.evaluate((element, labelContent) => {
+        const body = element.querySelector("tbody"),
+          row = body?.querySelector("tr"),
+          head = element.querySelector("thead");
+        if (!body || !row || !head)
+          throw new Error("role_users_layout_missing");
+        const fields = Array.from(row.querySelectorAll<HTMLElement>("th, td")),
+          mobile = innerWidth === 390,
+          headStyle = getComputedStyle(head),
+          headBox = head.getBoundingClientRect();
+        const headersVisuallyHidden =
+          headStyle.position === "absolute" &&
+          headBox.width <= 1 &&
+          headBox.height <= 1 &&
+          headStyle.overflow === "hidden" &&
+          headStyle.clipPath === "inset(50%)";
+        const display = mobile ? "block" : "table-cell";
+        const cellsComputedDisplay =
+          fields.length === 6 &&
+          fields.every((field) => getComputedStyle(field).display === display);
+        const cellsWithinViewport = fields.every((field) => {
+          const box = field.getBoundingClientRect();
+          return (
+            box.width > 0 &&
+            box.height > 0 &&
+            box.left >= 0 &&
+            box.top >= 0 &&
+            box.right <= innerWidth &&
+            box.bottom <= innerHeight
+          );
+        });
+        const contentFits = fields.every(
+          (field) =>
+            field.scrollWidth <= field.clientWidth + 1 &&
+            field.scrollHeight <= field.clientHeight + 1,
+        );
+        const scroll = element.parentElement;
+        const horizontalOverflow =
+          !scroll ||
+          scroll.scrollWidth > scroll.clientWidth + 1 ||
+          document.documentElement.scrollWidth > innerWidth + 1;
+        const mobileFieldLabels = fields
+          .slice(1)
+          .every(
+            (field, index) =>
+              field.getAttribute("data-label") === labelContent[index].label &&
+              labelContent[index].content.includes(
+                getComputedStyle(field, "::before").content,
+              ),
+          );
+        return {
+          mode: mobile ? "stacked" : "table",
+          tableDisplay: getComputedStyle(element).display,
+          bodyDisplay: getComputedStyle(body).display,
+          rowDisplay: getComputedStyle(row).display,
+          cellDisplay: display,
+          cellsComputedDisplay,
+          cellsWithinViewport,
+          contentFits,
+          horizontalOverflow,
+          headersVisuallyHidden,
+          mobileFieldLabels,
+          visibleFields: fields.length,
+        };
+      }, roleUsersLabelContent);
+      requireValue(
+        layout.mode === (width === 390 ? "stacked" : "table") &&
+          layout.tableDisplay === (width === 390 ? "block" : "table") &&
+          layout.bodyDisplay ===
+            (width === 390 ? "block" : "table-row-group") &&
+          layout.rowDisplay === (width === 390 ? "block" : "table-row") &&
+          layout.cellsComputedDisplay &&
+          layout.cellsWithinViewport &&
+          layout.contentFits &&
+          !layout.horizontalOverflow &&
+          layout.headersVisuallyHidden === (width === 390) &&
+          layout.mobileFieldLabels === (width === 390) &&
+          layout.visibleFields === 6,
+      );
       await expect(
         page.locator('input[type="password"], input[name="totpCode"], .proof'),
       ).toHaveCount(0);
@@ -436,6 +598,7 @@ export async function verifyRoleUsersRead(
         headingVisible: true,
         usernameVisible: true,
         roleVisible: true,
+        layout,
       });
     }
     phase = "return_detail";
@@ -474,7 +637,7 @@ export async function verifyRoleUsersRead(
     );
     phase = "write_evidence";
     const summary = {
-      schemaVersion: 1,
+      schemaVersion: 2,
       case: "role_users_readonly_workspace",
       status: "browser_passed_after_legacy_context_cleanup",
       identity,
@@ -483,6 +646,7 @@ export async function verifyRoleUsersRead(
       customUserID: customID,
       requests,
       screenshots,
+      styleDelivery,
       checks: {
         mutatingRequests: mutations,
         readOnlyCheckPOSTs: checkPOSTs,
