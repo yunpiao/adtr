@@ -19,10 +19,12 @@ apparently compatible wire format. Source mapping and full behavior remain open.
 
 `New(Input)` returns an immutable `Configuration` or an error wrapping
 `ErrInvalid`. It does not trim, coerce, default, deduplicate or repair inputs.
-There is no JSON input decoder: callers must explicitly construct the typed
-engineering input. Floating-point durations cannot be passed to its integer
-field without an explicit caller conversion; a future adapter must independently
-reject fractional or unsupported legacy values, not silently truncate them.
+Callers may explicitly construct the typed engineering input or use the strict
+`Parse` adapter for this exact synthetic snapshot format, documented in the
+[offline CLI contract](learning-config-cli-contract.md). The adapter rejects
+fractional/exponent durations and unsupported legacy fields rather than
+converting them. Typed callers remain responsible for avoiding lossy conversions
+before `New`; the integer field cannot recover a fraction already discarded.
 
 All parameters are required for this engineering format:
 
@@ -72,6 +74,7 @@ input's digest binding, mutation isolation, concurrent reads under race checking
 zero-value rejection, all numeric/count/text boundaries, duplicate and unknown
 fields, controls, invalid UTF-8, and case-sensitive vocabulary rejection.
 
+The offline CLI is a snapshot validator and digest tool, not a runtime consumer.
 There is no persistence, CRUD lifecycle, tenant/session authorization, domain
 resolution, UI, API, scheduler, learned result, actual AD access, or external I/O.
 Caller-provided vocabulary and fixture labels cannot replace live authorization

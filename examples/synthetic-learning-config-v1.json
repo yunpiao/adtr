@@ -1,0 +1,10 @@
+{
+  "format": "synthetic-learning-config-v1",
+  "synthetic": true,
+  "ruleLabel": "rule-a",
+  "dataSourceLabel": "source-a",
+  "domainLabel": "domain-a",
+  "windowSeconds": 3600,
+  "allowedFields": ["user.name", "event.id"],
+  "selectedFields": ["user.name"]
+}
