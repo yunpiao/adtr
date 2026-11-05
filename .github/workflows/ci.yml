@@ -337,7 +337,9 @@ jobs:
         id: access-role-bulk-evidence
         timeout-minutes: 1
         if: ${{ success() && matrix.name == 'access' }}
-        run: python3 scripts/validate_access_role_bulk_evidence.py --source-root .
+        run: |
+          python3 scripts/validate_access_role_bulk_evidence.py --source-root .
+          python3 scripts/validate_role_users_read_evidence.py --source-root .
       - name: Retain validated bulk access role assignment evidence
         timeout-minutes: 1
         if: ${{ success() && matrix.name == 'access' && steps.access-role-bulk-evidence.outcome == 'success' }}
@@ -347,6 +349,9 @@ jobs:
           path: |
             web/playwright-report/access-role-bulk-validated/access-role-bulk-evidence.json
             web/playwright-report/access-role-bulk-validated/access-role-bulk-users-1440.png
+            web/playwright-report/role-users-read-validated/role-users-read-evidence.json
+            web/playwright-report/role-users-read-validated/role-users-read-1440.png
+            web/playwright-report/role-users-read-validated/role-users-read-390.png
           if-no-files-found: error
           retention-days: 7
       - name: Validate exact maintenance target observation evidence

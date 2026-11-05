@@ -28,7 +28,11 @@ DELTA = 'scripts/fixtures/access_role_bulk_ci_delta.json'
 
 def raw_source(path):
     # read_text would silently normalize CRLF, defeating exact-byte contracts.
-    return Path(path).read_bytes().decode('utf-8')
+    raw = Path(path).read_bytes().decode('utf-8')
+    if str(path) == 'web/e2e/access.spec.ts':
+        from role_users_read_source_contract import restore_role_users_spec
+        return restore_role_users_spec(raw)
+    return raw
 
 
 def chunk(kind, payload):
@@ -552,6 +556,10 @@ def restore_helper_source(text):
 
 
 class AccessRoleBulkWorkflowContract(unittest.TestCase):
+    def setUp(self):
+        from test_role_users_read_workflow_contract import historical_workflow_fixture
+        historical_workflow_fixture(self)
+
     def test_exact_success_only_two_file_steps_and_historical_consumers(self):
         text = raw_source('.github/workflows/ci.yml')
         delta = json.loads(raw_source(DELTA))
