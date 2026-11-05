@@ -12,8 +12,17 @@ import struct
 import unicodedata
 import zlib
 import validate_directory_v4_evidence as backend
+import validate_raw_dn_references_v4_evidence as references
 
 SOURCES = {
+    'cmd/adtr/main.go',
+
+    'web/e2e/raw-dn-references-v4-helpers.ts',
+    'scripts/validate_raw_dn_references_v4_evidence.py',
+    'web/src/raw-dn-references-v4-api.ts',
+    'internal/domains/raw_dn_references_v4.go',
+    'internal/auth/raw_dn_references_v4_http.go',
+
     'internal/auth/access_types.go', 'internal/auth/access_http.go', 'internal/auth/resource_types.go',
     'web/e2e/group-members-v4-response-observer.ts', 'web/src/GroupMembersV4Observer.test.ts',
     'web/e2e/group-members-v4.spec.ts', 'web/e2e/group-members-v4-helpers.ts',
@@ -57,7 +66,7 @@ def expected_ui(root, provenance):
 
 
 def validate(data, provenance, ui_provenance, read_screenshot):
-    exact(data, ['format', 'backend', 'uiProvenance', 'noObservation', 'ui', 'readerUi', 'reader'], 'envelope')
+    exact(data, ['format', 'backend', 'uiProvenance', 'noObservation', 'ui', 'readerUi', 'reader', 'rawReferences', 'readerRawReferences'], 'envelope')
     require(type(data['format']) is int and data['format'] == 1, 'format')
     backend.validate(data['backend'], provenance)
     require(data['uiProvenance'] == ui_provenance, 'UI source/checkout/run mismatch')
@@ -72,6 +81,8 @@ def validate(data, provenance, ui_provenance, read_screenshot):
     validate_ui(b, data['readerUi'], read_screenshot, 'custom_readonly_role', 'reader-')
     require(data['readerUi']['discovery'] == ui['discovery'] and data['readerUi']['reread'] == ui['reread'], 'same reader/producer observation')
     validate_reader(data, ui_provenance)
+    references.validate(data['rawReferences'], b, ui, read_screenshot, '', require, exact, display, validate_png)
+    references.validate(data['readerRawReferences'], b, data['readerUi'], read_screenshot, 'reader-', require, exact, display, validate_png)
 
 
 READABLE = ['directory_assets', 'domains']
@@ -80,6 +91,7 @@ PERMISSIONS = {'users', 'roles', 'permissions', 'tasks', 'audit', 'audit_exports
                'system_logs', 'directory_assets', 'user_asset_exports', 'group_asset_exports', 'computer_asset_exports'}
 READ_PATHS = ['/api/domain-selection', '/api/domain-selection/resolve',
               '/api/directory/v4/observation', '/api/group-assets/v4/members']
+PRIMARY_READ_PATHS = [*READ_PATHS, references.PATH]
 WRITE_PATHS = ['/api/directory/v4/sync', '/api/directory/v4/cancel',
                '/api/directory-credential-use/v4/grant', '/api/directory-credential-use/v4/revoke']
 
@@ -105,7 +117,7 @@ def validate_reader(data, ui_provenance):
     require(reader['provenance'] == ui_provenance, 'reader exact checkout/source/run')
     validate_permissions(reader['permissions'], PERMISSIONS, 'reader permissions')
     validate_permissions(reader['menu'], set(READABLE), 'reader menu')
-    require(reader['checks'] == [*({'method': 'GET', 'path': path, 'allowed': True} for path in READ_PATHS), *({'method': 'POST', 'path': path, 'allowed': False} for path in WRITE_PATHS)], 'reader route checks')
+    require(reader['checks'] == [*({'method': 'GET', 'path': path, 'allowed': True} for path in PRIMARY_READ_PATHS), *({'method': 'POST', 'path': path, 'allowed': False} for path in WRITE_PATHS)], 'reader route checks')
     require(type(reader['checks']) is list and all(type(check.get('allowed')) is bool for check in reader['checks']), 'boolean route checks')
     require(type(reader['denied']) is list and all(type(probe.get('status')) is int for probe in reader['denied']), 'integer probe statuses')
     require(reader['denied'] == [{'method': 'POST', 'path': path, 'status': 403, 'value': {'error': 'forbidden'}} for path in WRITE_PATHS], 'direct denied probes')

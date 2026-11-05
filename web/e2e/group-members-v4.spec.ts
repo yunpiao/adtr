@@ -1,4 +1,8 @@
-import { observeGroupMembersV4Responses, groupMembersV4ResponseWitness } from "./group-members-v4-response-observer";
+import { captureRawDNReferences } from "./raw-dn-references-v4-helpers";
+import {
+  observeGroupMembersV4Responses,
+  groupMembersV4ResponseWitness,
+} from "./group-members-v4-response-observer";
 import {
   openMembers,
   captureMembers,
@@ -863,7 +867,7 @@ test("group members dictionary4 real Worker TLS LDAP PostgreSQL API UI facts", a
       state: "succeeded",
     },
     safe,
-    async response => (await groupMembersV4ResponseWitness(response)).value,
+    async (response) => (await groupMembersV4ResponseWitness(response)).value,
   );
   const observed = await readJSON(
     context,
@@ -1083,9 +1087,25 @@ test("group members dictionary4 real Worker TLS LDAP PostgreSQL API UI facts", a
     testInfo,
   );
   safe(ui);
+  const rawReferences = await captureRawDNReferences(
+    page,
+    actorId,
+    domainId,
+    beforeConnection,
+    taskUUID,
+    observed.source,
+    expected,
+    stored,
+    testInfo,
+  );
+  safe(rawReferences);
   // Switch the actual shared browser cookie through real logout and login.
   await page.setViewportSize({ width: 1440, height: 900 });
   await navigateTo(page, "退出登录");
+  await expect(
+    page.getByRole("region", { name: "引用此 DN 原文的组", exact: true }),
+  ).toHaveCount(0);
+  rawReferences.logoutCleared = true;
   await login(page, readerUsername, readerInitial);
   await expect(
     page.getByRole("heading", { name: "修改密码", exact: true }),
@@ -1129,6 +1149,7 @@ test("group members dictionary4 real Worker TLS LDAP PostgreSQL API UI facts", a
       "/api/domain-selection/resolve",
       "/api/directory/v4/observation",
       "/api/group-assets/v4/members",
+      "/api/directory-assets/v4/raw-dn-references",
     ].map((path) => ({ method: "GET", path, allowed: true })),
     ...[
       "/api/directory/v4/sync",
@@ -1166,6 +1187,18 @@ test("group members dictionary4 real Worker TLS LDAP PostgreSQL API UI facts", a
     taskUUID,
     observed.source,
     expected,
+    testInfo,
+    true,
+  );
+  const readerRawReferences = await captureRawDNReferences(
+    page,
+    readerId,
+    domainId,
+    beforeConnection,
+    taskUUID,
+    observed.source,
+    expected,
+    stored,
     testInfo,
     true,
   );
@@ -1232,6 +1265,15 @@ test("group members dictionary4 real Worker TLS LDAP PostgreSQL API UI facts", a
     after,
     denied: readerDenied,
   };
+  await navigateTo(page, "退出登录");
+  await expect(
+    page.getByRole("heading", { name: "登录账户", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("region", { name: "引用此 DN 原文的组", exact: true }),
+  ).toHaveCount(0);
+  readerRawReferences.logoutCleared = true;
+  safe(readerRawReferences);
   safe(readerUi);
   safe(reader);
   safe(consoles);
@@ -1245,6 +1287,8 @@ test("group members dictionary4 real Worker TLS LDAP PostgreSQL API UI facts", a
           noObservation,
           ui,
           readerUi,
+          rawReferences,
+          readerRawReferences,
           reader,
           backend: {
             format: 1,

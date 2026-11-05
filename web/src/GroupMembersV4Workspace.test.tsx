@@ -118,6 +118,36 @@ const page = (url: string, total = 26) => {
     page: { pageIdx, pageSize, total, totalPage: Math.ceil(total / pageSize) },
   };
 };
+const referencesPath = "/api/directory-assets/v4/raw-dn-references";
+const references = (url: string, total = 26, kind = "group") => {
+  const p = new URL(url, "https://test.invalid").searchParams;
+  const target = row(Number(p.get("objectGUID")!.slice(-12)));
+  if (kind !== "group")
+    Object.assign(target, {
+      kind,
+      objectClass: [kind, "top"].sort(),
+      samAccountName: `${kind}-${Number(target.objectGUID.slice(-12))}`,
+      rawMember: null,
+      returnedMemberCount: null,
+      memberReadState: "not_returned",
+    });
+  const values = page(url, total);
+  return {
+    ...detail(),
+    object: target,
+    list: values.list.map((r) => ({
+      ...r,
+      rawMember: [target.distinguishedName],
+      returnedMemberCount: 1,
+    })),
+    page: values.page,
+    coverage: {
+      groupCount: total + 3,
+      memberReturnedGroupCount: total + 1,
+      memberNotReturnedGroupCount: 2,
+    },
+  };
+};
 const response = (value: unknown, status = 200, actor = "1") =>
   Promise.resolve(
     new Response(JSON.stringify(value), {
@@ -174,7 +204,9 @@ beforeEach(() => {
         })),
       });
     if (path === "/api/access/check")
-      return response({ results: [true, true, true, true] });
+      return response({
+        results: JSON.parse(String(init.body)).paths.map(() => true),
+      });
     if (path === "/api/domain-selection")
       return response({
         List: [choice],
@@ -183,7 +215,24 @@ beforeEach(() => {
       });
     if (path === "/api/domain-selection/resolve")
       return response({ selection: choice, checkedAt: "2026-10-10T00:00:00Z" });
-    if (path === listPath) return response(page(url));
+    if (path === listPath) {
+      const value = page(url);
+      const kind =
+        new URL(url, "https://test.invalid").searchParams.get("kind") ??
+        "group";
+      if (kind !== "group")
+        value.list = value.list.map((r) => ({
+          ...r,
+          kind,
+          objectClass: [kind, "top"].sort(),
+          samAccountName: `${kind}-${Number(r.objectGUID.slice(-12))}`,
+          rawMember: null,
+          returnedMemberCount: null,
+          memberReadState: "not_returned",
+        }));
+      return response(value);
+    }
+    if (path === referencesPath) return response(references(url));
     if (path === detailPath) {
       const value = detail();
       value.object.objectGUID = new URL(
@@ -806,5 +855,310 @@ describe("new transport boundaries", () => {
       expect(() =>
         parseGroupMembersV4Page({ ...value, ...change }, query),
       ).toThrow();
+  });
+});
+
+describe("same-observation raw DN references", () => {
+  async function expandReferences() {
+    fireEvent.click(
+      screen.getAllByRole("button", { name: "引用此 DN 原文的组" })[0],
+    );
+    return screen.findByRole("region", { name: "引用此 DN 原文的组" });
+  }
+  it.each(["group", "user", "computer"])(
+    "reads %s from the same v4 observation and binds seven query keys",
+    async (kind) => {
+      await open();
+      if (kind !== "group")
+        fireEvent.change(screen.getByLabelText("对象类别"), {
+          target: { value: kind },
+        });
+      await screen.findByText(`${kind}-1`);
+      override = (url) =>
+        url.startsWith(referencesPath)
+          ? response(references(url, 26, kind))
+          : undefined;
+      const region = await expandReferences();
+      expect(params(referencesPath)).toEqual({
+        ...q,
+        pageIdx: "1",
+        pageSize: "25",
+      });
+      expect(region).toHaveTextContent("member 未返回的组：2");
+      expect(within(region).getAllByRole("listitem")).toHaveLength(25);
+      click("引用组下一页");
+      await waitFor(() =>
+        expect(
+          screen.getByRole("region", { name: "引用此 DN 原文的组" }),
+        ).toHaveTextContent("引用组第 2 页"),
+      );
+      expect(params(referencesPath).observationId).toBe(q.observationId);
+      click("重读 DN 原文引用");
+      await screen.findByRole("region", { name: "引用此 DN 原文的组" });
+      expect(params(referencesPath).pageIdx).toBe("2");
+      fireEvent.change(screen.getByLabelText("每页引用组数"), {
+        target: { value: "50" },
+      });
+      await waitFor(() =>
+        expect(
+          screen.getByRole("region", { name: "引用此 DN 原文的组" }),
+        ).toHaveTextContent("引用组第 1 页"),
+      );
+      expect(params(referencesPath).pageSize).toBe("50");
+      click("关闭 DN 原文引用");
+      fireEvent.blur(window);
+      fireEvent.focus(window);
+      await screen.findByText(`${kind}-1`);
+      expect(
+        screen.queryByRole("region", { name: "引用此 DN 原文的组" }),
+      ).toBeNull();
+      expect(fetcher.mock.calls.some(([url]) => url.includes("/v3/"))).toBe(
+        false,
+      );
+    },
+  );
+  it("shows exact zero text and unknown coverage, never empty membership inference", async () => {
+    await open();
+    override = (url) =>
+      url.startsWith(referencesPath) ? response(references(url, 0)) : undefined;
+    const region = await expandReferences();
+    expect(region).toHaveTextContent("本观测未发现完全相同的 DN 文本引用");
+    expect(region).toHaveTextContent("member 未返回的组：2");
+    expect(
+      within(region).getByRole("button", { name: "引用组下一页" }),
+    ).toBeDisabled();
+    expect(
+      within(region).getByRole("button", { name: "引用组上一页" }),
+    ).toBeDisabled();
+  });
+  it.each([
+    "kind",
+    "source",
+    "object",
+    "close",
+    "reread",
+    "back",
+    "forward",
+    "unmount",
+    "session",
+  ])("ignores an uncancelable late reference after %s", async (action) => {
+    const mounted = await open(),
+      held = deferred();
+    let heldURL = "";
+    override = (url) => {
+      if (url.startsWith(referencesPath)) {
+        heldURL = url;
+        return held.promise;
+      }
+    };
+    fireEvent.click(
+      screen.getAllByRole("button", { name: "引用此 DN 原文的组" })[0],
+    );
+    await waitFor(() => expect(calls(referencesPath)).toHaveLength(1));
+    if (action === "kind")
+      fireEvent.change(screen.getByLabelText("对象类别"), {
+        target: { value: "user" },
+      });
+    if (action === "source") click("重新选择数据源");
+    if (action === "object")
+      fireEvent.click(
+        screen.getAllByRole("button", { name: "查看原始成员" })[1],
+      );
+    if (action === "close") click("关闭 DN 原文引用");
+    if (action === "reread") click("重读原观测");
+    if (action === "back" || action === "forward")
+      fireEvent(window, new PopStateEvent("popstate", { state: action }));
+    if (action === "unmount") mounted.unmount();
+    if (action === "session")
+      fireEvent(
+        window,
+        new StorageEvent("storage", {
+          key: SESSION_INVALIDATION_STORAGE,
+          newValue: "c".repeat(32),
+          storageArea: localStorage,
+        }),
+      );
+    await act(async () => held.resolve(await response(references(heldURL))));
+    expect(
+      screen.queryByRole("region", { name: "引用此 DN 原文的组" }),
+    ).toBeNull();
+  });
+  it.each([401, 403, 409])(
+    "clears all private facts on reference %i",
+    async (status) => {
+      await open();
+      override = (url) =>
+        url.startsWith(referencesPath) ? response({}, status) : undefined;
+      fireEvent.click(
+        screen.getAllByRole("button", { name: "引用此 DN 原文的组" })[0],
+      );
+      await screen.findByRole("alert");
+      expect(screen.queryByText("group-1")).toBeNull();
+      expect(
+        screen.queryByRole("region", { name: "引用此 DN 原文的组" }),
+      ).toBeNull();
+    },
+  );
+  it.each([
+    "actor-header",
+    "actor-after",
+    "source-after",
+    "source-facts",
+    "object-facts",
+    "deny",
+  ])("fails closed on reference %s", async (mode) => {
+    await open();
+    let received = false;
+    override = (url, init) => {
+      if (url.startsWith(referencesPath)) {
+        received = true;
+        const value = references(url);
+        if (mode === "source-facts")
+          value.source = { ...source, dc_host_name: "other.invalid" };
+        if (mode === "object-facts") {
+          value.object.distinguishedName = "CN=other";
+          value.list.forEach((r) => {
+            r.rawMember = ["CN=other"];
+          });
+        }
+        return response(value, 200, mode === "actor-header" ? "2" : "1");
+      }
+      if (received && mode === "actor-after" && url === "/api/auth/me")
+        return response({ ...profile, ID: 2 });
+      if (
+        received &&
+        mode === "source-after" &&
+        url.startsWith("/api/domain-selection/resolve")
+      )
+        return response({}, 409);
+      if (
+        mode === "deny" &&
+        url === "/api/access/check" &&
+        JSON.parse(String(init.body)).paths.length === 1
+      )
+        return response({ results: [false] });
+    };
+    fireEvent.click(
+      screen.getAllByRole("button", { name: "引用此 DN 原文的组" })[0],
+    );
+    await screen.findByRole("alert");
+    expect(
+      screen.queryByRole("region", { name: "引用此 DN 原文的组" }),
+    ).toBeNull();
+  });
+});
+
+describe("raw DN reference transport guards", () => {
+  const query = { ...q, pageIdx: 1, pageSize: 25 };
+  const read = () =>
+    groupMembersV4Read.references(
+      query,
+      choice,
+      profile,
+      new AbortController().signal,
+    );
+  it("rejects omitted pins and changed source choice before dispatch", async () => {
+    for (const key of Object.keys(query)) {
+      const bad = { ...query };
+      Reflect.deleteProperty(bad, key);
+      await expect(
+        groupMembersV4Read.references(
+          bad,
+          choice,
+          profile,
+          new AbortController().signal,
+        ),
+      ).rejects.toMatchObject({ code: "invalid_input" });
+    }
+    for (const patch of [
+      { domainId: "other" },
+      { revision: "2" },
+      { credentialRevision: "2" },
+    ])
+      await expect(
+        groupMembersV4Read.references(
+          query,
+          { ...choice, ...patch },
+          profile,
+          new AbortController().signal,
+        ),
+      ).rejects.toMatchObject({ code: "invalid_input" });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+  it.each(["utf8", "oversize", "json", "partial", "unknown"])(
+    "rejects %s body without returning partial facts",
+    async (mode) => {
+      override = (url) => {
+        if (!url.startsWith(referencesPath)) return;
+        const headers = { "X-ADTR-User-ID": "1" };
+        if (mode === "utf8")
+          return Promise.resolve(
+            new Response(new Uint8Array([0xff]), { headers }),
+          );
+        if (mode === "oversize")
+          return Promise.resolve(
+            new Response("{}", {
+              headers: {
+                ...headers,
+                "Content-Length": String(directoryV2BodyLimit + 1),
+              },
+            }),
+          );
+        if (mode === "json")
+          return Promise.resolve(new Response("{", { headers }));
+        if (mode === "unknown")
+          return response({ ...references(url), extra: true });
+        let count = 0;
+        return Promise.resolve(
+          new Response(
+            new ReadableStream(
+              {
+                pull(c) {
+                  if (count++ === 0)
+                    c.enqueue(
+                      new TextEncoder().encode(JSON.stringify(references(url))),
+                    );
+                  else c.error(new Error("synthetic-stream-failure"));
+                },
+              },
+              { highWaterMark: 0 },
+            ),
+            { headers },
+          ),
+        );
+      };
+      await expect(read()).rejects.toBeDefined();
+    },
+  );
+  it.each([401, 403, 409])(
+    "preserves authoritative %i even with an oversized malformed body",
+    async (status) => {
+      override = (url) =>
+        url.startsWith(referencesPath)
+          ? Promise.resolve(
+              new Response("{", {
+                status,
+                headers: { "Content-Length": String(directoryV2BodyLimit + 1) },
+              }),
+            )
+          : undefined;
+      await expect(read()).rejects.toMatchObject({ status });
+    },
+  );
+  it.each([
+    null,
+    {},
+    { results: [] },
+    { results: [true, true] },
+    { results: ["true"] },
+    { results: [true], extra: true },
+  ])("rejects malformed single-route preflight %#", async (value) => {
+    override = (url, init) =>
+      url === "/api/access/check" &&
+      JSON.parse(String(init.body)).paths.length === 1
+        ? response(value)
+        : undefined;
+    await expect(read()).rejects.toMatchObject({ code: "invalid_response" });
+    expect(calls(referencesPath)).toHaveLength(0);
   });
 });

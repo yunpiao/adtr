@@ -16,6 +16,11 @@ import {
   validGroupMembersV4Query,
   type GroupMembersV4Query,
 } from "./group-members-v4-api";
+import {
+  parseRawDNReferencesV4,
+  validRawDNReferencesV4Query,
+  type RawDNReferencesV4Query,
+} from "./raw-dn-references-v4-api";
 import { integer, object } from "./task-api";
 
 export const groupMembersV4ReadOperations = [
@@ -26,6 +31,7 @@ export const groupMembersV4ReadOperations = [
 ] as const;
 export interface GroupMembersV4PageQuery {
   domainId: string;
+  kind?: "user" | "group" | "computer";
   observationId?: string;
   pageIdx: number;
   pageSize: number;
@@ -92,7 +98,8 @@ export function parseGroupMembersV4Page(
   if (
     rows.some(
       (r, i) =>
-        r.kind !== "group" || (i > 0 && rows[i - 1].objectGUID >= r.objectGUID),
+        r.kind !== (q.kind ?? "group") ||
+        (i > 0 && rows[i - 1].objectGUID >= r.objectGUID),
     )
   )
     return invalid();
@@ -236,6 +243,8 @@ export const groupMembersV4Read = {
     if (
       !validDomainID(q.domainId) ||
       q.domainId !== choice.domainId ||
+      (q.kind !== undefined &&
+        !["user", "group", "computer"].includes(q.kind)) ||
       !integer(q.pageIdx, 1, 10000) ||
       ![25, 50, 100].includes(q.pageSize) ||
       (q.observationId !== undefined && !validDomainID(q.observationId)) ||
@@ -246,13 +255,56 @@ export const groupMembersV4Read = {
     await resolveSource(choice, profile, signal);
     const query = new URLSearchParams({
       domainId: q.domainId,
-      kind: "group",
+      kind: q.kind ?? "group",
       pageIdx: String(q.pageIdx),
       pageSize: String(q.pageSize),
       ...(q.observationId ? { observationId: q.observationId } : {}),
     });
     const value = parseGroupMembersV4Page(
       await json(`/api/directory/v4/observation?${query}`, signal, profile.ID),
+      q,
+    );
+    await resolveSource(choice, profile, signal);
+    await session(profile, signal);
+    return value;
+  },
+  async references(
+    q: RawDNReferencesV4Query,
+    choice: SourceChoice,
+    profile: Profile,
+    signal: AbortSignal,
+  ) {
+    if (
+      !validRawDNReferencesV4Query(q) ||
+      q.domainId !== choice.domainId ||
+      q.expectedRevision !== choice.revision ||
+      q.expectedCredentialRevision !== choice.credentialRevision
+    )
+      throw new ApiError("invalid_input");
+    await groupMembersV4Read.authorize(profile, signal);
+    const checks = await json(
+      "/api/access/check",
+      signal,
+      undefined,
+      { paths: ["GET /api/directory-assets/v4/raw-dn-references"] },
+      profile.csrfToken,
+    );
+    if (
+      !object(checks) ||
+      !exact(checks, ["results"]) ||
+      !Array.isArray(checks.results) ||
+      checks.results.length !== 1 ||
+      typeof checks.results[0] !== "boolean"
+    )
+      return invalid();
+    if (!checks.results[0]) throw new ApiError("forbidden", 403);
+    await resolveSource(choice, profile, signal);
+    const value = parseRawDNReferencesV4(
+      await json(
+        `/api/directory-assets/v4/raw-dn-references?${new URLSearchParams({ ...q, pageIdx: String(q.pageIdx), pageSize: String(q.pageSize) })}`,
+        signal,
+        profile.ID,
+      ),
       q,
     );
     await resolveSource(choice, profile, signal);

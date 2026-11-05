@@ -11,6 +11,13 @@ import { navigateTo } from "./navigation";
 import { openMembers } from "./group-members-v4-helpers";
 import { groupMembersV4ResponseJSON } from "./group-members-v4-response-observer";
 export const emptyMembershipSources = [
+  "web/e2e/raw-dn-references-v4-helpers.ts",
+  "scripts/validate_raw_dn_references_v4_evidence.py",
+  "web/src/raw-dn-references-v4-api.ts",
+  "internal/domains/raw_dn_references_v4.go",
+  "internal/auth/raw_dn_references_v4_http.go",
+  "cmd/adtr/main.go",
+
   "internal/auth/task_http.go",
   "internal/auth/task_public.go",
   "web/e2e/specialized-task-controls.ts",
