@@ -240,3 +240,42 @@ with less information. Even an exact native `aborted` label does not prove that
 an application AbortController caused it. Synthetic native-stream tests inject
 both the event and its error category; real attribution requires a newly
 approved exact-head CI observation. Original failed runs remain preserved.
+
+### Historical application-read snapshot at native failure (C only)
+
+For a first `request_failed` poison, `app_read` may additionally report
+`completed_no_abort_seen` or `completed_before_abort`. Both come only from the
+same Request's existing C atomic-take snapshot, after its original document,
+request identity, metadata, EOF, one-reader/one-release, no-cancel and raw-byte
+count/SHA checks pass. The additional `completedRead` latch must be exactly true.
+That latch is set after successful native reader release while the signal is
+live. With `signalAborted=true`, `completed_before_abort` therefore records that
+complete read/release preceded the abort observed by this snapshot. With false,
+`completed_no_abort_seen` records only that no abort was observed at the take;
+an abort may occur later. Neither value establishes the cause of a native
+`ERR_ABORTED`, the UI action that called abort, or complete export acceptance.
+
+`app_sample=available_at_failure` means the host already held that historical
+projection when its first native failure callback ran. If unavailable then,
+`available_at_settle` may use a later available projection only after the original
+`post_binding` settlement predicate fails and the already-read selected Request
+has the same permanent token as the first failed Request. It says when the host
+could obtain the saved projection, not when the browser took it relative to the
+native event. Other cases report `app_read=unknown;app_sample=unavailable`.
+Different/untracked/omitted selected Requests and `post_count` failures cannot
+supply a fallback. A projection frozen at failure cannot be replaced by later
+progress, another case or a reentrant event.
+
+The private WeakMap retains only one closed string per Request, never the Request
+strongly or its browser record, URL, headers, bytes, proof, key or error. Extraction
+uses two own data-property descriptors, rejecting proxies/accessors and unknown
+values without changing the byte-read verdict. The synchronous lookup makes no
+Playwright API, browser evaluation, wait or transport call. No `requestfinished`
+listener, timestamp, configuration, dependency, timeout, retry, artifact or schema
+is added; existing poison, take, cache, validation and publication rules remain.
+The only side effects are weakly keyed constant metadata and two closed failure
+suffixes. This metadata is needed to distinguish a completed historical read
+with an observed later abort from one with no abort seen at its take; removing it
+restores the same rejection with less information. Offline/native-stream tests
+exercise the actual helpers but inject native failure events, so real attribution
+still requires a new exact-head CI observation. Existing failed runs are preserved.

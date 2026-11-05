@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { types } from "node:util";
 import type {
   BrowserContext,
   Page,
@@ -964,6 +965,52 @@ async function readObservedBody(response: Response): Promise<ObservedBody> {
 // this API does not claim a live uncanceled witness.
 type DirectoryUACResponseCheck = "observed_body_read" | "observed_byte_binding";
 const uacResponseFailures = new WeakMap<object, DirectoryUACResponseCheck>();
+type DirectoryUACReadSnapshot =
+  | "completed_no_abort_seen"
+  | "completed_before_abort";
+// Only a closed historical projection survives, keyed weakly by the exact
+// Request. The atomic take already happened; this is never a live signal read.
+const uacReadSnapshots = new WeakMap<
+  BrowserRequest,
+  DirectoryUACReadSnapshot
+>();
+export function directoryUACRequestReadSnapshot(
+  request: BrowserRequest,
+): DirectoryUACReadSnapshot | undefined {
+  return uacReadSnapshots.get(request);
+}
+function rememberUACReadSnapshot(
+  request: BrowserRequest,
+  record: unknown,
+): void {
+  try {
+    if (
+      uacReadSnapshots.has(request) ||
+      record === null ||
+      typeof record !== "object" ||
+      types.isProxy(record)
+    )
+      return;
+    // Browser evaluation returns serialized data. Refuse hostile test seams
+    // too: no accessor, prototype traversal, proxy trap or dynamic coercion.
+    const completed = Object.getOwnPropertyDescriptor(record, "completedRead");
+    const aborted = Object.getOwnPropertyDescriptor(record, "signalAborted");
+    if (
+      !completed ||
+      !Object.hasOwn(completed, "value") ||
+      completed.value !== true ||
+      !aborted ||
+      !Object.hasOwn(aborted, "value")
+    )
+      return;
+    if (aborted.value === true)
+      uacReadSnapshots.set(request, "completed_before_abort");
+    else if (aborted.value === false)
+      uacReadSnapshots.set(request, "completed_no_abort_seen");
+  } catch {
+    /* A diagnostic cannot change the existing byte-read verdict. */
+  }
+}
 export function directoryUACResponseFailureCheck(
   error: unknown,
 ): DirectoryUACResponseCheck | undefined {
@@ -1053,6 +1100,7 @@ export async function directoryUACResponseBytes(
     bytes = Buffer.from(text, "utf8");
     if (createHash("sha256").update(bytes).digest("hex") !== nativeSHA256)
       throw new Error("uac_observed_response_invalid:observed_byte_binding");
+    rememberUACReadSnapshot(request, record);
     const owned = bytes;
     bytes = undefined;
     return owned;

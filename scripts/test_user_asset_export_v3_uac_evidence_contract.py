@@ -496,7 +496,7 @@ const unused = stub('const fail = () => { throw new Error("unexpected_offline_de
 const imports = new Map([
   [parserURL, { "./api": stub('export class ApiError extends Error { constructor() { super("invalid_response"); } }') }],
   [helperURL, { "../src/directory-v4-controls-json": parserURL,
-    "./directory-v2-response-observer": stub('export const directoryUACResponseBytes = async (response) => response.body(); export const directoryUACResponseFailureCheck = () => undefined;'),
+    "./directory-v2-response-observer": stub('export const directoryUACResponseBytes = async (response) => response.body(); export const directoryUACRequestReadSnapshot=()=>undefined; export const directoryUACResponseFailureCheck = () => undefined;'),
     "./user-asset-export-v3-helpers": stub('import { createHash } from "node:crypto"; export const hash = (v) => createHash("sha256").update(v).digest("hex");') }],
   [fixtureURL, { "./navigation": unused, "@playwright/test": unused, "./directory-v2-response-observer": unused }],
 ]);
@@ -655,7 +655,7 @@ const {registerHooks,isBuiltin}=require('node:module');const{pathToFileURL}=requ
 const root=process.argv[1],local=n=>pathToFileURL(path.join(root,n)).href,stub=s=>'data:text/javascript,'+encodeURIComponent(s);
 const helperURL=local('web/e2e/user-asset-export-v3-uac-helpers.ts'),parserURL=local('web/src/directory-v4-controls-json.ts');
 const tags=new WeakMap();globalThis.__uacUnitBytes=r=>r.read();globalThis.__uacUnitFailure=e=>e!==null&&typeof e==='object'?tags.get(e):undefined;
-const imports=new Map([[helperURL,{'../src/directory-v4-controls-json':parserURL,'./user-asset-export-v3-helpers':stub('import{createHash}from"node:crypto";export const hash=v=>createHash("sha256").update(v).digest("hex");'),'./directory-v2-response-observer':stub('export const directoryUACResponseBytes=r=>globalThis.__uacUnitBytes(r);export const directoryUACResponseFailureCheck=e=>globalThis.__uacUnitFailure(e);')}],[parserURL,{'./api':stub('export class ApiError extends Error{}')}] ]);
+const imports=new Map([[helperURL,{'../src/directory-v4-controls-json':parserURL,'./user-asset-export-v3-helpers':stub('import{createHash}from"node:crypto";export const hash=v=>createHash("sha256").update(v).digest("hex");'),'./directory-v2-response-observer':stub('export const directoryUACResponseBytes=r=>globalThis.__uacUnitBytes(r);export const directoryUACRequestReadSnapshot=()=>undefined; export const directoryUACResponseFailureCheck=e=>globalThis.__uacUnitFailure(e);')}],[parserURL,{'./api':stub('export class ApiError extends Error{}')}] ]);
 const hooks=registerHooks({resolve(s,c,n){const d=imports.get(c.parentURL);if(d&&Object.hasOwn(d,s))return{url:d[s],shortCircuit:true};if(d&&!isBuiltin(s))throw new Error('unexpected_offline_dependency');return n(s,c);},load(url,c,n){const out=n(url,c);return url===helperURL?{...out,source:Buffer.from(out.source).toString()+'\nglobalThis.__uacUnitCache=safeResponses;\n'}:out;}});
 let h;try{h=require(path.join(root,'web/e2e/user-asset-export-v3-uac-helpers.ts'));}finally{hooks.deregister();}
 const check=x=>{if(!x)throw new Error('unit_assertion');};
@@ -864,7 +864,7 @@ const stubExports = (names) => stub(names.map(n=>`export const ${n}=globalThis._
 const helperStub = stub('export const '+['captureUACReadOnlyScreenshot','storedUACSource','storedUACExport','readUACOriginalReceipt','observeUACExportWrites'].map(n=>`${n}=globalThis.__uacMocks.${n}`).join(',')+';\n'+['expectedUACRequest','safeResponse','safeValue','sameValue','uacRequire','uacFailureMessage','exportPrefix'].map(n=>`export const ${n}=globalThis.__actualUAC.${n};`).join('\n'));
 const imports = new Map([
  [helperURL,{'../src/directory-v4-controls-json':parserURL,'./user-asset-export-v3-helpers':stubExports(['hash']),
- './directory-v2-response-observer':stub('export const directoryUACResponseBytes = async (response) => response.body(); export const directoryUACResponseFailureCheck = (error) => globalThis.__uacObservedCheck?.(error);')}],
+ './directory-v2-response-observer':stub('export const directoryUACResponseBytes = async (response) => response.body(); export const directoryUACRequestReadSnapshot=()=>undefined; export const directoryUACResponseFailureCheck = (error) => globalThis.__uacObservedCheck?.(error);')}],
  [parserURL,{'./api':stub('export class ApiError extends Error {}')}],
  [specURL,{'@playwright/test':stubExports(['test','expect']),'node:fs/promises':stubExports(Object.keys(fsMock)),
  './navigation':stubExports(['navigateTo']),'./group-assets-v3-fixture':stubExports(['setupUACGroupFixture','proof','readJSON']),
@@ -1250,7 +1250,7 @@ async function runScenario(name,variation={}){
  : variation.keyOldProofCollision ? 'request_inspection;case=not_returned;relation=current;inspect=locator_privacy'
  : 'response_check;case=not_returned;relation=current';
  const responseCheck = variation.currentKeyReflection || variation.lateProof ? ';check=body_privacy' : '';
- const nativeSuffix = variation.requestFailed || variation.priorRequestFailed ? ';native=other;host_phase='+(variation.priorRequestFailed?'event_recorded':'request_inspection')+';settle_request=unknown' : '';
+ const nativeSuffix = variation.requestFailed || variation.priorRequestFailed ? ';native=other;host_phase='+(variation.priorRequestFailed?'event_recorded':'request_inspection')+';settle_request=unknown;app_read=completed_no_abort_seen;app_sample=available_at_failure' : '';
  check(settled.message==='uac_evidence_invalid:post_binding;stage=export_settle'+responseCheck+';observer='+expectedBranch+nativeSuffix,'exact_closed_failure');break;}
   // Actual original-key receipt helper follows settlement before the next case.
   const receiptValue={taskID:responseValue.taskID,task:{state:'succeeded'},request:exp};
@@ -1314,7 +1314,7 @@ const helperURL=local('web/e2e/user-asset-export-v3-uac-helpers.ts');
 const parserURL=local('web/src/directory-v4-controls-json.ts');
 const observed=new WeakMap();globalThis.__uacObservedChecks=observed;
 const deps=new Map([[helperURL,{'../src/directory-v4-controls-json':parserURL,
- './directory-v2-response-observer':stub('export const directoryUACResponseBytes=async r=>r.body();export const directoryUACResponseFailureCheck=e=>e!==null&&typeof e==="object"?globalThis.__uacObservedChecks.get(e):undefined;'),
+ './directory-v2-response-observer':stub('export const directoryUACResponseBytes=async r=>r.body();export const directoryUACRequestReadSnapshot=()=>undefined; export const directoryUACResponseFailureCheck=e=>e!==null&&typeof e==="object"?globalThis.__uacObservedChecks.get(e):undefined;'),
  './user-asset-export-v3-helpers':stub('import {createHash} from "node:crypto";export const hash=v=>{globalThis.__uacHashFault?.(v);return createHash("sha256").update(v).digest("hex");};')}],
  [parserURL,{'./api':stub('export class ApiError extends Error{constructor(){super("invalid_response");}}')}]]);
 const hook=registerHooks({resolve(s,c,n){const d=deps.get(c.parentURL);if(d&&Object.hasOwn(d,s))return{url:d[s],shortCircuit:true};if(d&&!isBuiltin(s))throw Error('unexpected_offline_dependency');return n(s,c);}});
@@ -1349,7 +1349,7 @@ function setup(options={}){
  return state;
 }
 async function failure(fn,expected,label){let error;try{await fn();}catch(e){error=e;}check(error!==undefined,'must_reject_'+label);const message=h.uacFailureMessage(error,'export_settle');check(message===expected,'message_'+label);check(error.cause===undefined,'fresh_cause_'+label);const before=message;error.message='private-mutated-message';error.observer='forged';error.case='private-value';error.inspect='forged';check(h.uacFailureMessage(error,'export_settle')===before,'immutable_owned_'+label);rows.push({label,message});return error;}
-const msg=(branch,{code='post_binding',mode='set',relation='current',inspect,check:responseCheck}={})=>`uac_evidence_invalid:${code};stage=export_settle${responseCheck?';check='+responseCheck:''};observer=${branch};case=${mode};relation=${relation}${inspect?';inspect='+inspect:''}${branch==='request_failed'?';native=other;host_phase=request_inspection;settle_request=unknown':''}`;
+const msg=(branch,{code='post_binding',mode='set',relation='current',inspect,check:responseCheck}={})=>`uac_evidence_invalid:${code};stage=export_settle${responseCheck?';check='+responseCheck:''};observer=${branch};case=${mode};relation=${relation}${inspect?';inspect='+inspect:''}${branch==='request_failed'?';native=other;host_phase=request_inspection;settle_request=unknown;app_read=unknown;app_sample=unavailable':''}`;
 async function one(label,options,branch,extra={}){const s=setup();s.arm();if(options.secret)s.known.push(options.secret);if(Object.hasOwn(options,'storage'))s.setStorage(options.storage);if(options.reader)s.setReader(options.reader);if(options.before)options.before(s);const x=s.emit(options);if(options.after)options.after(s,x);await failure(()=>s.o.settleCase('export-set'),msg(branch,extra),label);if(options.restore)options.restore();await s.dispose();}
 
 (async () => {
@@ -1466,8 +1466,10 @@ const stub=s=>'data:text/javascript,'+encodeURIComponent(s);
 const helperURL=local('web/e2e/user-asset-export-v3-uac-helpers.ts');
 const parserURL=local('web/src/directory-v4-controls-json.ts');
 const observed=new WeakMap();globalThis.__uacObservedChecks=observed;
+globalThis.__uacReadSnapshots=new WeakMap();globalThis.__uacReadSnapshotFaults=new WeakSet();globalThis.__uacReadSnapshotLookups=new WeakMap();
+const snapshotCalls=r=>globalThis.__uacReadSnapshotLookups.get(r)??0;
 const deps=new Map([[helperURL,{'../src/directory-v4-controls-json':parserURL,
- './directory-v2-response-observer':stub('export const directoryUACResponseBytes=async r=>r.body();export const directoryUACResponseFailureCheck=e=>e!==null&&typeof e==="object"?globalThis.__uacObservedChecks.get(e):undefined;'),
+ './directory-v2-response-observer':stub('export const directoryUACResponseBytes=async r=>r.body();export const directoryUACRequestReadSnapshot=r=>{if(globalThis.__uacReadSnapshotLookups)globalThis.__uacReadSnapshotLookups.set(r,(globalThis.__uacReadSnapshotLookups.get(r)??0)+1);if(globalThis.__uacReadSnapshotFaults?.has(r))throw new Error("unit-private-snapshot-fault");return globalThis.__uacReadSnapshots?.get(r);}; export const directoryUACResponseFailureCheck=e=>e!==null&&typeof e==="object"?globalThis.__uacObservedChecks.get(e):undefined;'),
  './user-asset-export-v3-helpers':stub('import {createHash} from "node:crypto";export const hash=v=>{globalThis.__uacHashFault?.(v);return createHash("sha256").update(v).digest("hex");};')}],
  [parserURL,{'./api':stub('export class ApiError extends Error{constructor(){super("invalid_response");}}')}]]);
 const hook=registerHooks({resolve(s,c,n){const d=deps.get(c.parentURL);if(d&&Object.hasOwn(d,s))return{url:d[s],shortCircuit:true};if(d&&!isBuiltin(s))throw Error('unexpected_offline_dependency');return n(s,c);}});
@@ -1502,7 +1504,7 @@ function setup(options={}){
  return state;
 }
 async function failure(fn,expected,label){let error;try{await fn();}catch(e){error=e;}check(error!==undefined,'must_reject_'+label);const message=h.uacFailureMessage(error,'export_settle');check(message===expected,'message_'+label);check(error.cause===undefined,'fresh_cause_'+label);const before=message;error.message='private-mutated-message';error.observer='forged';error.case='private-value';error.inspect='forged';check(h.uacFailureMessage(error,'export_settle')===before,'immutable_owned_'+label);rows.push({label,message});return error;}
-const msg=(branch,{code='post_binding',mode='set',relation='current',inspect,check:responseCheck,native='aborted',phase='request_inspection',match='same'}={})=>`uac_evidence_invalid:${code};stage=export_settle${responseCheck?';check='+responseCheck:''};observer=${branch};case=${mode};relation=${relation}${inspect?';inspect='+inspect:''}${branch==='request_failed'?';native='+native+';host_phase='+phase+';settle_request='+match:''}`;
+const msg=(branch,{code='post_binding',mode='set',relation='current',inspect,check:responseCheck,native='aborted',phase='request_inspection',match='same',appRead='unknown',appSample='unavailable'}={})=>`uac_evidence_invalid:${code};stage=export_settle${responseCheck?';check='+responseCheck:''};observer=${branch};case=${mode};relation=${relation}${inspect?';inspect='+inspect:''}${branch==='request_failed'?';native='+native+';host_phase='+phase+';settle_request='+match+';app_read='+appRead+';app_sample='+appSample:''}`;
 async function one(label,options,branch,extra={}){const s=setup();s.arm();if(options.secret)s.known.push(options.secret);if(Object.hasOwn(options,'storage'))s.setStorage(options.storage);if(options.reader)s.setReader(options.reader);if(options.before)options.before(s);const x=s.emit(options);if(options.after)options.after(s,x);await failure(()=>s.o.settleCase('export-set'),msg(branch,extra),label);if(options.restore)options.restore();await s.dispose();}
 (async()=>{
 const nativeLabels=new Map([['net::ERR_ABORTED','aborted'],['net::ERR_CONNECTION_RESET','connection_reset'],['net::ERR_CONNECTION_CLOSED','connection_closed'],['net::ERR_CONNECTION_REFUSED','connection_refused'],['net::ERR_TIMED_OUT','timed_out'],['net::ERR_FAILED','failed']]);
@@ -1514,9 +1516,10 @@ async function nativeCase(label,options={}){
  release(locator());
  let selected=x.response;if(Object.hasOwn(options,'selected'))selected=options.selected;
  if(options.selection)selected=options.selection(s,x);
- await failure(()=>s.o.settleCase('export-set',selected),msg('request_failed',{native:options.native??'other',match:options.match??'same'}),label);
+ await failure(()=>s.o.settleCase('export-set',selected),msg('request_failed',{native:options.native??'other',match:options.match??'same',appRead:options.appRead??'unknown',appSample:options.appSample??'unavailable'}),label);
  if(options.expectedFailureCalls!==undefined)check(s.apiCalls.failure===options.expectedFailureCalls,'failure_api_calls_'+label);
  if(options.expectedRequestCalls!==undefined)check(s.apiCalls.request===options.expectedRequestCalls,'request_api_calls_'+label);
+ if(options.expectedSnapshotCalls!==undefined)check(snapshotCalls(x.req)===options.expectedSnapshotCalls,'snapshot_lookup_calls_'+label);
  await s.dispose();
 }
 for(const [text,native]of nativeLabels)await nativeCase('exact_'+native,{native,configure:(s,x)=>{x.req.failure=()=>{s.apiCalls.failure++;return{errorText:text};};},expectedFailureCalls:1,expectedRequestCalls:1});
@@ -1542,6 +1545,19 @@ await nativeCase('failure_api_reentry',{native:'aborted',configure:(s,x)=>{x.req
 await nativeCase('same_request_repeat_after_first_failure',{native:'aborted',afterFailed:(s,x)=>{s.context.emit('request',x.req);s.context.emit('requestfailed',x.req);},expectedFailureCalls:1});
 await nativeCase('same_request_repeat_during_failure_api',{native:'aborted',configure:(s,x)=>{x.req.failure=()=>{s.apiCalls.failure++;s.context.emit('request',x.req);s.context.emit('requestfailed',x.req);return{errorText:'net::ERR_ABORTED'};};},expectedFailureCalls:1});
 await nativeCase('first_native_snapshot_sticky',{native:'connection_closed',configure:(s,x)=>{x.req.failure=()=>{s.apiCalls.failure++;return{errorText:'net::ERR_CONNECTION_CLOSED'};};},afterFailed:(s,x)=>{x.req.failure=()=>{hookCalls++;return{errorText:'net::ERR_ABORTED'};};s.context.emit('requestfailed',x.req);},expectedFailureCalls:1});
+// Only closed, exact-Request historical samples are consulted, never a new read.
+for(const read of ['completed_no_abort_seen','completed_before_abort']){
+ await nativeCase('sample_at_failure_'+read,{native:'aborted',appRead:read,appSample:'available_at_failure',expectedSnapshotCalls:1,configure:(s,x)=>globalThis.__uacReadSnapshots.set(x.req,read)});
+ await nativeCase('sample_at_settle_'+read,{native:'aborted',appRead:read,appSample:'available_at_settle',expectedSnapshotCalls:2,afterFailed:(s,x)=>globalThis.__uacReadSnapshots.set(x.req,read)});
+}
+await nativeCase('at_failure_sample_sticky',{native:'aborted',appRead:'completed_no_abort_seen',appSample:'available_at_failure',configure:(s,x)=>globalThis.__uacReadSnapshots.set(x.req,'completed_no_abort_seen'),afterFailed:(s,x)=>{globalThis.__uacReadSnapshots.set(x.req,'completed_before_abort');s.context.emit('requestfailed',x.req);}});
+await nativeCase('sample_missing_when_selected_response_omitted',{native:'aborted',selected:undefined,match:'unknown',expectedSnapshotCalls:1,afterFailed:(s,x)=>globalThis.__uacReadSnapshots.set(x.req,'completed_before_abort')});
+await nativeCase('different_request_cannot_supply_sample',{native:'aborted',match:'different',expectedSnapshotCalls:1,selection:(s,x)=>{const other=s.emit();globalThis.__uacReadSnapshots.set(other.req,'completed_before_abort');return other.response;}});
+await nativeCase('untracked_request_cannot_supply_sample',{native:'aborted',match:'unknown',expectedSnapshotCalls:1,selection:(s,x)=>{const other=s.request();globalThis.__uacReadSnapshots.set(other.req,'completed_before_abort');return other.response;}});
+await nativeCase('sample_at_failure_not_replaced_during_native_api_reentry',{native:'aborted',appRead:'completed_no_abort_seen',appSample:'available_at_failure',configure:(s,x)=>{globalThis.__uacReadSnapshots.set(x.req,'completed_no_abort_seen');x.req.failure=()=>{s.apiCalls.failure++;globalThis.__uacReadSnapshots.set(x.req,'completed_before_abort');s.context.emit('requestfailed',x.req);return{errorText:'net::ERR_ABORTED'};};},expectedFailureCalls:1});
+await nativeCase('throwing_application_snapshot_preserves_native',{native:'aborted',configure:(s,x)=>globalThis.__uacReadSnapshotFaults.add(x.req),expectedFailureCalls:1,expectedSnapshotCalls:2});
+{const s=setup();s.arm();const x=s.emit();await s.o.settleCase('export-set',x.response);s.context.emit('requestfailed',x.req);globalThis.__uacReadSnapshots.set(x.req,'completed_before_abort');await failure(()=>s.o.settleCase('export-set',x.response),msg('request_failed',{code:'post_count',phase:'event_recorded',match:'unknown'}),'post_count_cannot_supply_later_sample');check(s.apiCalls.request===0&&snapshotCalls(x.req)===1,'post_count_no_selected_request_or_fallback_read');await s.dispose();}
+for(const [name,value]of [['raw_string','private-response-body'],['proxy',hostile()],['promise',Promise.resolve('completed_before_abort')]])await nativeCase('unknown_application_snapshot_'+name,{native:'aborted',configure:(s,x)=>globalThis.__uacReadSnapshots.set(x.req,value),expectedSnapshotCalls:2});
 // Identity requires an existing per-request token, not taskID, URL or shape.
 await nativeCase('optional_response_omitted',{native:'aborted',selected:undefined,match:'unknown',expectedRequestCalls:0});
 await nativeCase('registered_different_request_same_fields',{native:'aborted',match:'different',selection:(s,x)=>{const other=s.emit();return other.response;}});
@@ -1554,8 +1570,8 @@ await nativeCase('response_proxy_prototype',{native:'aborted',match:'unknown',se
 await nativeCase('response_prototype_data_method',{native:'aborted',selection:(s,x)=>Object.create({request(){s.apiCalls.request++;return x.req;}}),expectedRequestCalls:1});
 // No new API reads when the old condition is successful, a post_count guard
 // fails, or another first cause already wins.
-{const s=setup();s.arm();const x=s.emit();await s.o.settleCase('export-set',hostile());check(s.apiCalls.request===0&&s.apiCalls.failure===0,'success_zero_new_api');s.context.emit('requestfailed',x.req);await failure(()=>s.o.settleCase('export-set',x.response),msg('request_failed',{code:'post_count',phase:'event_recorded',match:'unknown'}),'post_count_no_identity_read');check(s.apiCalls.request===0&&s.apiCalls.failure===1,'post_count_zero_request_api');await s.dispose();}
-{const s=setup();s.arm();const x=s.emit();s.emit();s.context.emit('requestfailed',x.req);await failure(()=>s.o.settleCase('export-set',x.response),msg('duplicate_create'),'other_first_cause_no_api');check(s.apiCalls.request===0&&s.apiCalls.failure===0,'other_first_zero_api');await s.dispose();}
+{const s=setup();s.arm();const x=s.emit();await s.o.settleCase('export-set',hostile());check(s.apiCalls.request===0&&s.apiCalls.failure===0&&snapshotCalls(x.req)===0,'success_zero_new_api');s.context.emit('requestfailed',x.req);await failure(()=>s.o.settleCase('export-set',x.response),msg('request_failed',{code:'post_count',phase:'event_recorded',match:'unknown'}),'post_count_no_identity_read');check(s.apiCalls.request===0&&s.apiCalls.failure===1,'post_count_zero_request_api');await s.dispose();}
+{const s=setup();s.arm();const x=s.emit();s.emit();s.context.emit('requestfailed',x.req);await failure(()=>s.o.settleCase('export-set',x.response),msg('duplicate_create'),'other_first_cause_no_api');check(s.apiCalls.request===0&&s.apiCalls.failure===0&&snapshotCalls(x.req)===0,'other_first_zero_api');await s.dispose();}
 // Event-time host checkpoints, not a later observation or browser stream state.
 for(const phase of ['response_wait','response_check']){
  const s=setup();s.arm();const x=s.request();let signal,release;const seen=new Promise(r=>signal=r),gate=new Promise(r=>release=r);
@@ -1579,11 +1595,13 @@ check(hookCalls===0,'all_unknown_getter_proxy_hooks_zero');
 const native=[...new Set(rows.map(x=>x.message?.match(/;native=([^;]+)/)?.[1]).filter(Boolean))].sort();
 const phases=[...new Set(rows.map(x=>x.message?.match(/;host_phase=([^;]+)/)?.[1]).filter(Boolean))].sort();
 const matches=[...new Set(rows.map(x=>x.message?.match(/;settle_request=([^;]+)/)?.[1]).filter(Boolean))].sort();
-check(native.length===7&&phases.length===5&&matches.length===3,'all_new_closed_enums');
-process.stdout.write(JSON.stringify({scope:'Actual C helper with synthetic synchronous API/response-byte seams; explicit reentry/property injections; no browser/network/native-cause claim.',rows,native,phases,matches,unknownHooks:hookCalls,rawZeroingAssertions,actualPrototypeControl},null,2)+'\n');
+const appReads=[...new Set(rows.map(x=>x.message?.match(/;app_read=([^;]+)/)?.[1]).filter(Boolean))].sort();
+const appSamples=[...new Set(rows.map(x=>x.message?.match(/;app_sample=([^;]+)/)?.[1]).filter(Boolean))].sort();
+check(native.length===7&&phases.length===5&&matches.length===3&&appReads.length===3&&appSamples.length===3,'all_new_closed_enums');
+process.stdout.write(JSON.stringify({scope:'Actual C helper with synthetic synchronous API/response-byte seams; explicit reentry/property injections; no browser/network/native-cause claim.',rows,native,phases,matches,appReads,appSamples,unknownHooks:hookCalls,rawZeroingAssertions,actualPrototypeControl},null,2)+'\n');
 })().catch(()=>{process.stderr.write('native_failure_probe_failed\n');process.exitCode=1;});
 """)
-        self.assertEqual(len(result['rows']), 63)
+        self.assertEqual(len(result['rows']), 77)
         self.assertEqual(result['unknownHooks'], 0)
         self.assertFalse(result['actualPrototypeControl'])
         self.assertEqual(result['native'], sorted(['aborted', 'connection_reset', 'connection_closed',
@@ -1591,6 +1609,8 @@ process.stdout.write(JSON.stringify({scope:'Actual C helper with synthetic synch
         self.assertEqual(result['phases'], sorted(['request_inspection', 'response_wait',
                                                 'response_check', 'event_recorded', 'unknown']))
         self.assertEqual(result['matches'], ['different', 'same', 'unknown'])
+        self.assertEqual(result['appReads'], ['completed_before_abort', 'completed_no_abort_seen', 'unknown'])
+        self.assertEqual(result['appSamples'], ['available_at_failure', 'available_at_settle', 'unavailable'])
 
     def test_actual_production_native_stream_acceptance_unchanged_with_injected_failure(self):
         result = self._run_probe(r"""
@@ -1628,11 +1648,14 @@ async function run(name,{abort=false,failed=false}={}){
  const id='POST '+origin+h.exportPrefix, browser=window.__adtrDirectoryV2ResponseObserver;
  const atAppReturn=browser.peek(id,0);check(atAppReturn.eof&&atAppReturn.completedRead&&atAppReturn.readers===1&&atAppReturn.released===1&&atAppReturn.cancelCalls===0&&!atAppReturn.signalAborted,'completed_before_abort');
  if(abort)control.abort();
+ const snapshotAtFailure=o.directoryUACRequestReadSnapshot(request);
  if(failed)context.emit('requestfailed',request);
  const main=await h.safeResponse(response,1,known);check(main.taskID===task.taskUUID&&main.replayed===false&&h.sameValue(main.request,expected),'actual_main_predicates');
  let settled=true,closedDiagnostic=null;try{await observer.settleCase(main.taskID,response)}catch(error){settled=false;closedDiagnostic=h.uacFailureMessage(error,'export_settle');}
  const final=browser.peek(id,0);
- check(settled===!failed,'settle_matches_native_failure_rule');if(failed)check(/^uac_evidence_invalid:post_binding;stage=export_settle;observer=request_failed;case=not_returned;relation=current;native=aborted;host_phase=(request_inspection|response_wait|response_check|event_recorded|unknown);settle_request=same$/.test(closedDiagnostic),'closed_injected_native_signature');check(failureAPICalls===(failed?1:0),'only_first_failure_api');
+ check(settled===!failed,'settle_matches_native_failure_rule');if(failed)check(/^uac_evidence_invalid:post_binding;stage=export_settle;observer=request_failed;case=not_returned;relation=current;native=aborted;host_phase=(request_inspection|response_wait|response_check|event_recorded|unknown);settle_request=same;app_read=(completed_no_abort_seen|completed_before_abort);app_sample=(available_at_failure|available_at_settle)$/.test(closedDiagnostic),'closed_injected_native_signature');check(failureAPICalls===(failed?1:0),'only_first_failure_api');
+ const readSnapshot=o.directoryUACRequestReadSnapshot(request);check(readSnapshot==='completed_no_abort_seen'||readSnapshot==='completed_before_abort','validated_read_snapshot');
+ if(failed){check(closedDiagnostic.endsWith(';app_read='+(snapshotAtFailure??readSnapshot)+';app_sample='+(snapshotAtFailure?'available_at_failure':'available_at_settle')),'snapshot_availability_is_not_live_state');}
  check(fetchCalls===1&&inspectorBodyCalls===0,'no_extra_transport');
  return{name,actualProductionCreateAccepted:true,applicationBodyCompletedBeforeOptionalAbort:true,applicationByteCount:bytes.length,finalObserverState:final.state,signalAborted:final.signalAborted,completedRead:final.completedRead,eof:final.eof,readers:final.readers,released:final.released,cancelCalls:final.cancelCalls,mainSafeResponseAccepted:true,observerSettled:settled,closedDiagnostic,requestFailedWasInjected:failed,nativeBrowserReasonObserved:false,nativeFailureTextWasInjected:failed,failureAPICalls,responseRequestCalls,fetchCalls,inspectorBodyCalls};
 }
