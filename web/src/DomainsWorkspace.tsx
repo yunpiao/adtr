@@ -597,6 +597,7 @@ function DomainList({
                     <th>配置的域控</th>
                     <th>加密连接</th>
                     <th>状态</th>
+                    <th>创建时间（UTC）</th>
                     <th>上次检测（UTC）</th>
                     <th>操作</th>
                   </tr>
@@ -606,6 +607,9 @@ function DomainList({
                     <tr key={c.domainId}>
                       <td data-label="域名">
                         <strong>{c.domain}</strong>
+                        <small className="domain-row-id">
+                          域 ID：{c.domainId}
+                        </small>
                         <small>
                           {sourceLabels[c.credentialSource ?? "custom"]}
                         </small>
@@ -620,7 +624,16 @@ function DomainList({
                           </small>
                         )}
                       </td>
-                      <td data-label="上次检测（UTC）">
+                      <td
+                        className="domain-time-cell"
+                        data-label="创建时间（UTC）"
+                      >
+                        {c.createdAt}
+                      </td>
+                      <td
+                        className="domain-time-cell"
+                        data-label="上次检测（UTC）"
+                      >
                         {c.lastDiagnostic?.observedAt ?? "尚无当前版本终态结果"}
                       </td>
                       <td data-label="操作">

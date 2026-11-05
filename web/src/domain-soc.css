@@ -343,7 +343,7 @@
     padding: 8px;
   }
   .domain-table-scroll td:first-child,
-  .domain-table-scroll td:nth-child(5),
+  .domain-table-scroll td.domain-time-cell,
   .domain-table-scroll td:last-child {
     grid-column: 1 / -1;
   }

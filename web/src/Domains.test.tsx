@@ -303,6 +303,193 @@ describe("domain safe DTO and validation", () => {
     ).toEqual({ readable: true, writeable: true });
   });
 });
+describe("domain list identity and creation facts", () => {
+  const first = connection({
+    domainId: "synthetic-long-domain-id-" + "a".repeat(103),
+    createdAt: "2026-09-01T12:34:56.123456Z",
+    updatedAt: "2026-10-02T03:04:05Z",
+    connectionState: "verified",
+    lastDiagnostic: diagnostic(),
+    latestTaskUUID: taskID,
+  });
+  const second = connection({
+    domainId: "synthetic-second-domain-id",
+    domain: "second.invalid",
+    createdAt: "2026-08-01T23:45:01Z",
+    updatedAt: "2026-10-03T03:04:05Z",
+  });
+  const assertRow = (value: Connection) => {
+    const row = screen
+      .getByRole("button", { name: `查看 ${value.domain}` })
+      .closest("tr")!;
+    expect(
+      within(row).getByText(`域 ID：${value.domainId}`, { exact: true }),
+    ).toBeVisible();
+    const created = row.querySelector('[data-label="创建时间（UTC）"]')!;
+    const observed = row.querySelector('[data-label="上次检测（UTC）"]')!;
+    expect(created.textContent).toBe(value.createdAt);
+    expect(observed.textContent).toBe(
+      value.lastDiagnostic?.observedAt ?? "尚无当前版本终态结果",
+    );
+    expect(created).toHaveClass("domain-time-cell");
+    expect(observed).toHaveClass("domain-time-cell");
+    expect(
+      within(row).queryByText(value.updatedAt, { exact: true }),
+    ).toBeNull();
+  };
+  it("shows complete API identity and exact creation time separately from updates and diagnostics, including never tested rows", async () => {
+    override = (url) =>
+      url.split("?")[0] === "/api/domains"
+        ? response(list([first, second]))
+        : undefined;
+    await start();
+    expect(
+      screen.getAllByRole("columnheader").map((node) => node.textContent),
+    ).toEqual([
+      "域名",
+      "配置的域控",
+      "加密连接",
+      "状态",
+      "创建时间（UTC）",
+      "上次检测（UTC）",
+      "操作",
+    ]);
+    assertRow(first);
+    assertRow(second);
+    expect(calls("/api/domains")).toHaveLength(1);
+    expect(calls("/api/domains/detail")).toHaveLength(0);
+  });
+  it("keeps facts bound to their records through server sorting, paging and detail return", async () => {
+    override = (url) => {
+      const parsed = new URL(url, "http://localhost");
+      if (parsed.pathname === "/api/domains/detail")
+        return response({ connection: second });
+      if (parsed.pathname !== "/api/domains") return undefined;
+      const pageIdx = Number(parsed.searchParams.get("pageIdx") ?? 1);
+      const ascending = parsed.searchParams.get("tmSort") === "1";
+      const items =
+        pageIdx === 2
+          ? [second]
+          : ascending
+            ? [second, first]
+            : [first, second];
+      return response({
+        ...list(items),
+        page: { pageIdx, pageSize: 20, total: 21, totalPage: 2 },
+        exhausted: pageIdx === 2,
+      });
+    };
+    await start();
+    assertRow(first);
+    assertRow(second);
+    fill("创建时间排序", "1");
+    click("查询域连接");
+    await waitFor(() => expect(domainListParams().get("tmSort")).toBe("1"));
+    await screen.findByRole("table");
+    const rows = screen.getAllByRole("row").slice(1);
+    expect(
+      within(rows[0]).getByText(`域 ID：${second.domainId}`),
+    ).toBeVisible();
+    expect(within(rows[1]).getByText(`域 ID：${first.domainId}`)).toBeVisible();
+    assertRow(first);
+    assertRow(second);
+    click("下一页");
+    await waitFor(() => expect(domainListParams().get("pageIdx")).toBe("2"));
+    await screen.findByRole("table");
+    assertRow(second);
+    expect(screen.queryByText(`域 ID：${first.domainId}`)).toBeNull();
+    click("查看 second.invalid");
+    await screen.findByRole("heading", { name: "域连接详情：second.invalid" });
+    expect(screen.getByText(second.domainId, { exact: true })).toBeVisible();
+    expect(screen.getByText(second.createdAt, { exact: true })).toBeVisible();
+    click("返回域连接列表");
+    await screen.findByRole("table");
+    assertRow(second);
+    expect(domainListParams().get("pageIdx")).toBe("2");
+    expect(domainListParams().get("tmSort")).toBe("1");
+  });
+  it.each(["empty", "failure", "forbidden"])(
+    "clears old facts on %s and ignores a late response with different facts",
+    async (outcome) => {
+      override = (url) =>
+        url.split("?")[0] === "/api/domains"
+          ? response(list([first]))
+          : undefined;
+      await start();
+      assertRow(first);
+      let resolve!: (value: Response) => void;
+      let signal!: AbortSignal;
+      override = (url, init) => {
+        const parsed = new URL(url, "http://localhost");
+        if (parsed.pathname !== "/api/domains") return undefined;
+        if (parsed.searchParams.get("filterKeyword") === "pending") {
+          signal = init.signal!;
+          return new Promise((done) => {
+            resolve = done;
+          });
+        }
+        return outcome === "empty"
+          ? response(list([]))
+          : response(
+              {
+                error: outcome === "forbidden" ? "forbidden" : "internal_error",
+              },
+              outcome === "forbidden" ? 403 : 500,
+            );
+      };
+      fill("域或域控关键词", "pending");
+      click("查询域连接");
+      await waitFor(() => expect(resolve).toBeTypeOf("function"));
+      expect(screen.queryByText(`域 ID：${first.domainId}`)).toBeNull();
+      expect(screen.queryByText(first.createdAt)).toBeNull();
+      fill("域或域控关键词", "current");
+      click("查询域连接");
+      if (outcome === "empty")
+        await screen.findByText(/当前筛选下没有获授权的域连接/);
+      else await screen.findByRole("alert");
+      expect(signal.aborted).toBe(true);
+      await act(async () => resolve(await response(list([second]))));
+      expect(screen.queryByRole("table")).toBeNull();
+      for (const value of [first, second]) {
+        expect(screen.queryByText(`域 ID：${value.domainId}`)).toBeNull();
+        expect(screen.queryByText(value.createdAt)).toBeNull();
+      }
+      expect(calls("/api/domains")).toHaveLength(3);
+    },
+  );
+  it("preserves identity and creation facts on browser Back and Forward without reopening details", async () => {
+    override = (url) => {
+      if (url.split("?")[0] === "/api/domains") return response(list([first]));
+      if (url.split("?")[0] === "/api/domains/detail")
+        return response({ connection: first });
+      return undefined;
+    };
+    render(<App />);
+    await screen.findByRole("heading", { name: "账户概览" });
+    await revealNavigation("域连接");
+    click("域连接");
+    await screen.findByRole("table");
+    assertRow(first);
+    click("查看 synthetic.invalid");
+    await screen.findByRole("heading", {
+      name: "域连接详情：synthetic.invalid",
+    });
+    expect(screen.getByText(first.domainId, { exact: true })).toBeVisible();
+    expect(screen.getByText(first.createdAt, { exact: true })).toBeVisible();
+    act(() => window.history.back());
+    await waitFor(() => expect(window.location.hash).toBe("#domains"));
+    await screen.findByRole("table");
+    assertRow(first);
+    act(() => window.history.forward());
+    await waitFor(() => expect(window.location.hash).toBe("#domains/detail"));
+    await screen.findByRole("table");
+    assertRow(first);
+    expect(
+      screen.queryByRole("heading", { name: "域连接详情：synthetic.invalid" }),
+    ).toBeNull();
+  });
+});
+
 describe("domain workspace security flows", () => {
   it("uses all exact route checks and hides denied UI without fetching domain data", async () => {
     override = (url) =>
