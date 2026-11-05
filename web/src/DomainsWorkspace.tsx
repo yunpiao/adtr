@@ -54,14 +54,14 @@ type Context = {
 type ListFilters = {
   filterKeyword: string;
   filterDomain: string;
-  filterStatus: string;
+  filterStatus: Connection["connectionState"][];
   pageSize: string;
   tmSort: string;
 };
 const initialFilters: ListFilters = {
   filterKeyword: "",
   filterDomain: "",
-  filterStatus: "",
+  filterStatus: [],
   pageSize: "20",
   tmSort: "-1",
 };
@@ -406,6 +406,9 @@ function DomainList({
   const query = queryString({
     ...applied,
     pageIdx: page,
+    filterStatus: connectionStates.filter((s) =>
+      applied.filterStatus.includes(s),
+    ),
     filterDomain: applied.filterDomain
       ? applied.filterDomain.split(/[\s,]+/u)
       : [],
@@ -479,21 +482,37 @@ function DomainList({
               }
             />
           </Field>
-          <Field label="连接状态">
-            <select
-              value={filters.filterStatus}
-              onChange={(e) =>
-                setFilters({ ...filters, filterStatus: e.target.value })
-              }
-            >
-              <option value="">全部状态</option>
+          <fieldset
+            className="domain-status-filter"
+            aria-describedby="domain-status-help"
+          >
+            <legend>连接状态</legend>
+            <div className="domain-status-options">
               {connectionStates.map((s) => (
-                <option key={s} value={s}>
+                <label key={s}>
+                  <input
+                    type="checkbox"
+                    checked={filters.filterStatus.includes(s)}
+                    onChange={(e) => {
+                      const checked = e.target.checked;
+                      setFilters((current) => ({
+                        ...current,
+                        filterStatus: connectionStates.filter((state) =>
+                          state === s
+                            ? checked
+                            : current.filterStatus.includes(state),
+                        ),
+                      }));
+                    }}
+                  />
                   {connectionLabels[s]}
-                </option>
+                </label>
               ))}
-            </select>
-          </Field>
+            </div>
+            <p id="domain-status-help">
+              可多选；未选择表示全部状态。选择后点击“查询域连接”应用。
+            </p>
+          </fieldset>
         </div>
         <details className="domain-advanced-filters">
           <summary>
@@ -542,15 +561,8 @@ function DomainList({
             type="button"
             className="secondary"
             onClick={() => {
-              const reset = {
-                filterKeyword: "",
-                filterDomain: "",
-                filterStatus: "",
-                pageSize: "20",
-                tmSort: "-1",
-              };
-              setFilters(reset);
-              setApplied(reset);
+              setFilters(initialFilters);
+              setApplied(initialFilters);
               setPage(1);
               setError("");
             }}

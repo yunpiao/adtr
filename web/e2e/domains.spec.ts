@@ -1,5 +1,11 @@
 import { navigateTo } from "./navigation";
-import { test, expect, type BrowserContext, type Page } from "@playwright/test";
+import {
+  test,
+  expect,
+  type BrowserContext,
+  type Page,
+  type Request,
+} from "@playwright/test";
 import { createHmac, createHash } from "node:crypto";
 import { readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
@@ -598,17 +604,155 @@ test("real domain enrollment, explicit grant, TLS diagnostics, rotation and loca
     exact: true,
   });
   await expect(domainRow).toBeVisible();
+  // FLD-0004 permits a set. Exercise the existing local states against the
+  // persisted verified domain without adding a connection, proof, or write.
+  const statusOptions = [
+    ["unverified", "已保存，未验证"],
+    ["testing", "正在检测"],
+    ["verified", "上次检测通过"],
+    ["error", "上次检测未通过"],
+  ] as const;
+  type Status = (typeof statusOptions)[number][0];
+  const statusGroup = page.getByRole("group", {
+    name: "连接状态",
+    exact: true,
+  });
+  let listReads = 0;
+  let filterWrites = 0;
+  const listReadQueries: Array<Array<[string, string]>> = [];
+  const observeFilters = (request: Request) => {
+    const path = new URL(request.url()).pathname;
+    if (request.method() === "GET" && path === "/api/domains") {
+      listReads++;
+      listReadQueries.push(Array.from(new URL(request.url()).searchParams));
+    }
+    if (request.method() !== "GET" && path.startsWith("/api/")) filterWrites++;
+  };
+  page.on("request", observeFilters);
+  const expectStatusDraft = async (selected: readonly Status[]) => {
+    for (const [status, label] of statusOptions)
+      await expect(
+        statusGroup.getByRole("checkbox", { name: label, exact: true }),
+      ).toBeChecked({ checked: selected.includes(status) });
+  };
+  const editStatusDraft = async (selected: readonly Status[]) => {
+    const readsBefore = listReads;
+    for (const [status, label] of statusOptions)
+      await statusGroup
+        .getByRole("checkbox", { name: label, exact: true })
+        .setChecked(selected.includes(status));
+    await expectStatusDraft(selected);
+    expect(listReads).toBe(readsBefore);
+    expect(filterWrites).toBe(0);
+  };
+  const statusFilterEvidence: Array<{
+    viewport: { width: number; height: number } | null;
+    requestedStates: Status[];
+    returnedStates: string[];
+    returnedDomainIds: string[];
+    total: number;
+  }> = [];
+  const applyStatusDraft = async (selected: readonly Status[]) => {
+    const expectedStates = statusOptions
+      .map(([status]) => status)
+      .filter((status) => selected.includes(status));
+    const responsePromise = page.waitForResponse(
+      (response) =>
+        response.request().method() === "GET" &&
+        new URL(response.url()).pathname === "/api/domains",
+    );
+    await page.getByRole("button", { name: "查询域连接", exact: true }).click();
+    const response = await responsePromise;
+    expect(response.status()).toBe(200);
+    const query = new URL(response.url()).searchParams;
+    expect(query.getAll("filterStatus")).toEqual(expectedStates);
+    expect(query.get("filterKeyword")).toBe(domain);
+    expect(query.get("pageIdx")).toBe("1");
+    expect(query.get("pageSize")).toBe("10");
+    expect(query.get("tmSort")).toBe("-1");
+    const body = await response.json();
+    safe(body);
+    const includesVerified =
+      selected.length === 0 || selected.includes("verified");
+    expect(body.page.total).toBe(includesVerified ? 1 : 0);
+    expect(body.List).toHaveLength(includesVerified ? 1 : 0);
+    if (includesVerified) {
+      expect(body.List[0]).toMatchObject({
+        domainId: id,
+        connectionState: "verified",
+      });
+      await expect(domainRow).toBeVisible();
+    } else {
+      await expect(domainRow).toHaveCount(0);
+      await expect(
+        page.getByText(
+          "当前筛选下没有获授权的域连接。新登记需要显式资源组分配。",
+          { exact: true },
+        ),
+      ).toBeVisible();
+    }
+    await expectStatusDraft(selected);
+    expect(filterWrites).toBe(0);
+    statusFilterEvidence.push({
+      viewport: page.viewportSize(),
+      requestedStates: expectedStates,
+      returnedStates: body.List.map(
+        (item: { connectionState: string }) => item.connectionState,
+      ),
+      returnedDomainIds: body.List.map(
+        (item: { domainId: string }) => item.domainId,
+      ),
+      total: body.page.total,
+    });
+  };
+  const restoredFilterQueries: Array<{
+    navigation: string;
+    queries: Array<Array<[string, string]>>;
+  }> = [];
+  const restoreStatusList = async (
+    navigation: string,
+    action: () => Promise<unknown>,
+  ) => {
+    const before = listReadQueries.length;
+    await action();
+    await expect.poll(() => listReadQueries.length).toBeGreaterThan(before);
+    await expect(domainRow).toBeVisible();
+    const queries = listReadQueries.slice(before);
+    for (const entries of queries) {
+      const query = new URLSearchParams(entries);
+      expect(query.getAll("filterStatus")).toEqual(["verified", "error"]);
+      expect(query.get("filterKeyword")).toBe(domain);
+      expect(query.get("pageIdx")).toBe("1");
+      expect(query.get("pageSize")).toBe("10");
+      expect(query.get("tmSort")).toBe("-1");
+    }
+    restoredFilterQueries.push({ navigation, queries });
+  };
+  await editStatusDraft(["error", "verified"]);
+  await applyStatusDraft(["error", "verified"]);
+  await editStatusDraft(["unverified", "error"]);
+  await applyStatusDraft(["unverified", "error"]);
+  await capture("domains-soc-status-empty-desktop.png");
+  await editStatusDraft([]);
+  await applyStatusDraft([]);
+  await editStatusDraft(["verified", "error"]);
+  await applyStatusDraft(["verified", "error"]);
   await page.locator(".domain-advanced-filters summary").click();
   await expect(page.getByLabel("每页条数", { exact: true })).not.toBeVisible();
   await capture("domains-soc-queue-desktop.png");
+  // Unapplied exclusions remain a draft while detail/history reads keep the
+  // applied verified+error set. The existing row must remain accessible.
+  await editStatusDraft(["testing", "error"]);
+  await expect(domainRow).toBeVisible();
   await domainRow.click();
   await expect(
     page.getByRole("heading", { name: `域连接详情：${domain}`, exact: true }),
   ).toBeVisible();
-  await page
-    .getByRole("button", { name: "返回域连接列表", exact: true })
-    .click();
+  await restoreStatusList("detail-return", () =>
+    page.getByRole("button", { name: "返回域连接列表", exact: true }).click(),
+  );
   await expect(domainRow).toBeFocused();
+  await expectStatusDraft(["testing", "error"]);
   await expect(page.getByLabel("域或域控关键词", { exact: true })).toHaveValue(
     domain,
   );
@@ -617,13 +761,15 @@ test("real domain enrollment, explicit grant, TLS diagnostics, rotation and loca
   await expect(
     page.getByRole("heading", { name: `域连接详情：${domain}`, exact: true }),
   ).toBeVisible();
-  await page.goBack();
+  await restoreStatusList("back", () => page.goBack());
   await expect(domainRow).toBeFocused();
+  await expectStatusDraft(["testing", "error"]);
   await expect(page.getByLabel("域或域控关键词", { exact: true })).toHaveValue(
     domain,
   );
-  await page.goForward();
+  await restoreStatusList("forward", () => page.goForward());
   await expect(domainRow).toBeVisible();
+  await expectStatusDraft(["testing", "error"]);
   await expect(page.getByLabel("域或域控关键词", { exact: true })).toHaveValue(
     domain,
   );
@@ -631,6 +777,12 @@ test("real domain enrollment, explicit grant, TLS diagnostics, rotation and loca
     "每页 10 条",
   );
   await page.setViewportSize({ width: 390, height: 844 });
+  await applyStatusDraft(["testing", "error"]);
+  await capture("domains-soc-status-empty-mobile.png");
+  await editStatusDraft(["verified", "error"]);
+  await applyStatusDraft(["verified", "error"]);
+  expect(filterWrites).toBe(0);
+  page.off("request", observeFilters);
   await page.getByRole("button", { name: "查询域连接", exact: true }).focus();
   // Genuine keyboard traversal must reach the row action in the compact queue.
   for (
@@ -779,6 +931,16 @@ test("real domain enrollment, explicit grant, TLS diagnostics, rotation and loca
       diagnostic: result1.diagnostic,
     },
     visuals,
+    statusFilters: {
+      source: "AD-F-001 / FLD-0004",
+      states: statusOptions.map(([status]) => status),
+      cases: statusFilterEvidence,
+      restoredQueries: restoredFilterQueries,
+      draftEditingListReads: 0,
+      writes: filterWrites,
+      context:
+        "unapplied testing+error survived detail and Back/Forward while applied verified+error retained the verified row",
+    },
     mobileGeometry: { queueTitle, headingBox, guidanceBox, dangerContrast },
   };
   writeFileSync(
