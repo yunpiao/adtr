@@ -593,13 +593,13 @@ function DomainList({
                 <caption>获授权的域连接</caption>
                 <thead>
                   <tr>
-                    <th>域名</th>
-                    <th>配置的域控</th>
-                    <th>加密连接</th>
-                    <th>状态</th>
-                    <th>创建时间（UTC）</th>
-                    <th>上次检测（UTC）</th>
-                    <th>操作</th>
+                    <th scope="col">域名</th>
+                    <th scope="col">配置的域控</th>
+                    <th scope="col">加密连接</th>
+                    <th scope="col">状态</th>
+                    <th scope="col">创建时间（UTC）</th>
+                    <th scope="col">上次检测（UTC）</th>
+                    <th scope="col">操作</th>
                   </tr>
                 </thead>
                 <tbody>

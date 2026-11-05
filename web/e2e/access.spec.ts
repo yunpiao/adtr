@@ -1,6 +1,9 @@
 import { navigateTo } from "./navigation";
 import { test, expect, type BrowserContext, type Page } from "@playwright/test";
 import { createHmac } from "node:crypto";
+// AD-F-176 role users: exact additive readonly consumer.
+import { verifyRoleUsersRead } from "./role-users-read";
+// End AD-F-176 role users import.
 
 // AD-F-176 bulk acceptance: additive host helpers, no production API changes.
 import type {
@@ -1510,4 +1513,13 @@ test("real browser → API → PostgreSQL users and function permissions", async
     throw new Error("access_role_bulk_failed:evidence_write");
   }
   // End AD-F-176 success writer.
+  // AD-F-176 role users: run only after all legacy cleanup and evidence.
+  await verifyRoleUsersRead(
+    page,
+    roleID,
+    roleName,
+    savedUser.ID,
+    bulkRunIdentity,
+  );
+  // End AD-F-176 role users readonly consumer.
 });

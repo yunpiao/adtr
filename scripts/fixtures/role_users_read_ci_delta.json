@@ -1,0 +1,32 @@
+{
+  "format": 1,
+  "baselineCommit": "a76c6389551279649516c58e74f6cf5223c1621f",
+  "files": {
+    "workflow": {
+      "path": ".github/workflows/ci.yml",
+      "baselineSHA256": "a3b5ec391fb478352d289c032e19e52d617d9b08d769403562b10a63219e7a3b",
+      "currentSHA256": "90091e86fc5da2d73f931b417a411725555a61608bb7117020c3bf88acc1b9e9",
+      "replacements": [
+        {
+          "old": "        run: python3 scripts/validate_access_role_bulk_evidence.py --source-root .\n",
+          "new": "        run: |\n          python3 scripts/validate_access_role_bulk_evidence.py --source-root .\n          python3 scripts/validate_role_users_read_evidence.py --source-root .\n"
+        },
+        {
+          "old": "            web/playwright-report/access-role-bulk-validated/access-role-bulk-users-1440.png\n",
+          "new": "            web/playwright-report/access-role-bulk-validated/access-role-bulk-users-1440.png\n            web/playwright-report/role-users-read-validated/role-users-read-evidence.json\n            web/playwright-report/role-users-read-validated/role-users-read-1440.png\n            web/playwright-report/role-users-read-validated/role-users-read-390.png\n"
+        }
+      ]
+    },
+    "helper": {
+      "path": "scripts/ci_workflow_contract.py",
+      "baselineSHA256": "ba9c22970570006d3bf720cae5c8bd0512ce32be9f9b7d06d9047eecbbce5484",
+      "currentSHA256": "35dddef9007222fa2bcacd954a24d06ef7ef7f8808f2af4299ddf9d5527788fc",
+      "replacements": [
+        {
+          "old": "def restore_user_uac_workflow(text):\n",
+          "new": "def restore_user_uac_workflow(text):\n    from role_users_read_workflow import restore_role_users_read\n    return restore_user_uac_workflow_predecessor(restore_role_users_read(text))\n\n\ndef restore_user_uac_workflow_predecessor(text):\n"
+        }
+      ]
+    }
+  }
+}

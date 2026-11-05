@@ -166,6 +166,13 @@ def _load_delta(kind):
 
 
 def _restore(text, kind, domain):
+    if kind == 'ci' and domain in ('workflow', 'helper'):
+        from role_users_read_workflow import restore_role_users_read
+        text = restore_role_users_read(text, domain)
+    return _restore_predecessor(text, kind, domain)
+
+
+def _restore_predecessor(text, kind, domain):
     _require(type(text) is str and type(kind) is str and type(domain) is str
              and kind in ANCHORS and domain in ANCHORS[kind])
     delta = _load_delta(kind)
@@ -225,6 +232,10 @@ def _diagnostic_scope():
 
 
 class UACProjectionContract(unittest.TestCase):
+    def setUp(self):
+        from test_role_users_read_workflow_contract import historical_workflow_fixture
+        historical_workflow_fixture(self)
+
     def test_exact_current_only_inverse_and_hardcoded_five_predecessors(self):
         for kind, domains in ANCHORS.items():
             for domain, anchor in domains.items():

@@ -354,6 +354,8 @@ describe("domain list identity and creation facts", () => {
       "上次检测（UTC）",
       "操作",
     ]);
+    for (const header of screen.getAllByRole("columnheader"))
+      expect(header).toHaveAttribute("scope", "col");
     assertRow(first);
     assertRow(second);
     expect(calls("/api/domains")).toHaveLength(1);

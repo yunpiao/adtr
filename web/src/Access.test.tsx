@@ -674,6 +674,29 @@ describe("users and assignment workflows", () => {
   });
 });
 describe("roles and explicit function permissions", () => {
+  it("opens a read-only role-user view through the app without leaking its target into history", async () => {
+    await startApp();
+    await click("角色管理");
+    await screen.findByRole("table", { name: "角色列表" });
+    await click("查看关联用户 Viewer");
+    await screen.findByRole("table", { name: "角色关联用户列表" });
+    expect(
+      new URL(calls("/users").at(-1)![0], "http://localhost").searchParams.get(
+        "roleID",
+      ),
+    ).toBe("viewer");
+    expect(screen.queryByLabelText("操作者当前密码")).not.toBeInTheDocument();
+    expect(window.location.hash).toBe("#access/roles/users");
+    expect(window.history.state).toEqual({});
+    await click("返回角色列表");
+    await screen.findByRole("table", { name: "角色列表" });
+    expect(
+      screen.queryByRole("table", { name: "角色关联用户列表" }),
+    ).not.toBeInTheDocument();
+    expect(calls("/roles/save")).toHaveLength(0);
+    expect(calls("/roles/delete")).toHaveLength(0);
+    expect(calls("/assignments")).toHaveLength(0);
+  });
   it("creates a role, automatically pairs write with read, and sends only grant input", async () => {
     render(<AccessRoles context={context} />);
     await screen.findByRole("table");
