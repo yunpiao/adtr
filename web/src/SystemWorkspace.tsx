@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { fixedHistoryWindow } from "./system-history-window";
 import "./system-soc.css";
 import { ApiError, type Profile } from "./api";
 import { accessRequest, type Permission } from "./access-api";
@@ -461,52 +462,116 @@ const graphLabels: Record<GraphType, string> = {
 function Resources({ context }: { context: SystemContext }) {
   const [range, setRange] = useState(900),
     [graph, setGraph] = useState<GraphType>("cpu_basic"),
-    [storageId, setStorageId] = useState("runtime-root");
+    [storageId, setStorageId] = useState("runtime-root"),
+    [selection, setSelection] = useState("900"),
+    [draftStart, setDraftStart] = useState(""),
+    [draftEnd, setDraftEnd] = useState(""),
+    [windowError, setWindowError] = useState(""),
+    [fixed, setFixed] = useState<{ startTime: number; endTime: number } | null>(
+      null,
+    );
+  const serverTime = useRef<number | null>(null);
+  const queryKey = `${fixed ? `${fixed.startTime}:${fixed.endTime}` : `rolling:${range}`}:${graph}:${storageId}`;
   const read = useSystemRead(
-    `${range}:${graph}:${storageId}`,
+    queryKey,
     async (signal) => {
-      const [current, storage] = await Promise.all([
-        systemAPI.current(signal),
-        context.can("GET /api/system/storage")
-          ? systemAPI.storage(1, 50, signal)
-          : Promise.resolve(null),
-      ]);
-      const selectedStorage =
-        storage?.storage.find((item) => item.id === storageId) ??
-        storage?.storage[0];
-      const missingStorage = graph === "disk_usage" && !selectedStorage;
-      const endTime = Math.floor(Date.parse(current.checkedAt) / 1000),
-        query: HistoryInput = {
-          instance: "local-api",
-          graphType: graph,
-          startTime: endTime - range,
-          endTime,
-          ...(graph === "disk_usage" && selectedStorage
-            ? { storageId: selectedStorage.id }
-            : {}),
-        };
-      const history =
-        context.can("GET /api/system/resources/history") && !missingStorage
-          ? await systemAPI.history(query, signal)
-          : null;
-      return { current, storage, history, query, missingStorage };
+      let failed = false;
+      try {
+        const [current, storage] = await Promise.all([
+          systemAPI.current(signal).then((current) => {
+            // A valid current clock remains useful if history fails. Never let an
+            // aborted query or a late response after this read failed restore it.
+            if (!signal.aborted && !failed)
+              serverTime.current = Math.floor(
+                Date.parse(current.checkedAt) / 1000,
+              );
+            return current;
+          }),
+          context.can("GET /api/system/storage")
+            ? systemAPI.storage(1, 50, signal)
+            : Promise.resolve(null),
+        ]);
+        const selectedStorage =
+          storage?.storage.find((item) => item.id === storageId) ??
+          storage?.storage[0];
+        const missingStorage = graph === "disk_usage" && !selectedStorage;
+        const endTime = Math.floor(Date.parse(current.checkedAt) / 1000),
+          query: HistoryInput = {
+            instance: "local-api",
+            graphType: graph,
+            startTime: fixed?.startTime ?? endTime - range,
+            endTime: fixed?.endTime ?? endTime,
+            ...(graph === "disk_usage" && selectedStorage
+              ? { storageId: selectedStorage.id }
+              : {}),
+          };
+        const history =
+          context.can("GET /api/system/resources/history") && !missingStorage
+            ? await systemAPI.history(query, signal)
+            : null;
+        return { current, storage, history, query, missingStorage };
+      } catch (error) {
+        failed = true;
+        if (
+          !signal.aborted &&
+          error instanceof ApiError &&
+          [401, 403].includes(error.status)
+        )
+          serverTime.current = null;
+        throw error;
+      }
     },
     context.sessionChanged,
     15000,
   );
+  function applyFixed(event: React.FormEvent) {
+    event.preventDefault();
+    const next = fixedHistoryWindow(draftStart, draftEnd);
+    if (!next) {
+      setWindowError(
+        "请输入有效的 UTC 整秒起止时间，开始须早于结束，且范围不超过 24 小时。",
+      );
+      return;
+    }
+    if (serverTime.current === null || next.endTime > serverTime.current) {
+      setWindowError(
+        "结束时间不得晚于最近服务器检查时间；请刷新资源与历史取得新的服务器时间后再提交。",
+      );
+      return;
+    }
+    setWindowError("");
+    if (fixed?.startTime === next.startTime && fixed?.endTime === next.endTime)
+      read.refresh();
+    else setFixed(next);
+  }
   return (
     <>
       <h3>运行资源与历史</h3>
+      <p>
+        已应用：
+        {fixed
+          ? "固定 UTC 时间窗（刷新和自动读取不移动起止时间）"
+          : "滚动时间窗（随服务器检查时间前移）"}
+        。当前资源仍显示本次读取的最新观测，不是历史终点的快照。
+      </p>
       <div className="form-grid">
         <Field label="历史时间范围">
           <select
-            value={range}
-            onChange={(e) => setRange(Number(e.target.value))}
+            value={selection}
+            onChange={(e) => {
+              setSelection(e.target.value);
+              setWindowError("");
+              if (e.target.value !== "fixed") {
+                setRange(Number(e.target.value));
+                setFixed(null);
+              }
+            }}
           >
             <option value={900}>最近 15 分钟</option>
             <option value={3600}>最近 1 小时</option>
             <option value={21600}>最近 6 小时</option>
             <option value={86400}>最近 24 小时</option>
+            <option value="fixed">固定 UTC 时间窗</option>
           </select>
         </Field>
         <Field label="历史指标">
@@ -522,6 +587,40 @@ function Resources({ context }: { context: SystemContext }) {
           </select>
         </Field>
       </div>
+      {selection === "fixed" && (
+        <form onSubmit={applyFixed}>
+          <p>
+            草稿仅在提交后应用。格式：YYYY-MM-DDTHH:mm:ssZ，UTC 整秒；最长 24
+            小时，终点不包含。未来时间以服务器检查时间为准。
+          </p>
+          <div className="form-grid">
+            <Field label="固定开始时间（UTC）">
+              <input
+                value={draftStart}
+                placeholder="2026-10-07T07:00:00Z"
+                onChange={(e) => {
+                  setDraftStart(e.target.value);
+                  setWindowError("");
+                }}
+              />
+            </Field>
+            <Field label="固定结束时间（UTC）">
+              <input
+                value={draftEnd}
+                placeholder="2026-10-07T08:00:00Z"
+                onChange={(e) => {
+                  setDraftEnd(e.target.value);
+                  setWindowError("");
+                }}
+              />
+            </Field>
+          </div>
+          {windowError && <p role="alert">{windowError}</p>}
+          <button type="submit" disabled={read.busy}>
+            应用固定时间窗
+          </button>
+        </form>
+      )}
       {graph === "disk_usage" && (
         <Field label="已登记存储目标">
           <select
@@ -552,7 +651,7 @@ function Resources({ context }: { context: SystemContext }) {
           />
           {read.data.history ? (
             <HistoryView
-              key={`${range}:${graph}:${storageId}`}
+              key={queryKey}
               history={read.data.history}
               query={read.data.query}
             />

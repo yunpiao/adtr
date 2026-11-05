@@ -512,8 +512,7 @@ describe("system read-only route restoration", () => {
             return response({ error: "forbidden" }, 403);
         }
         if (url === "/api/access/check") {
-          if (failure === "non-array-results")
-            return response({ results: {} });
+          if (failure === "non-array-results") return response({ results: {} });
           if (failure === "short-results")
             return response({
               results: systemOperations.slice(1).map(() => true),
@@ -533,8 +532,7 @@ describe("system read-only route restoration", () => {
       };
       render(<App />);
       const denied = ["denied-menu", "false-readable"].includes(failure);
-      if (denied)
-        await screen.findByText("当前账户没有系统健康读取权限。");
+      if (denied) await screen.findByText("当前账户没有系统健康读取权限。");
       else await screen.findByRole("alert");
       expectNoReader();
       if (!denied) {
@@ -980,6 +978,443 @@ describe("system health interface", () => {
       ).toBe(String(seconds - 86400)),
     );
     expect(screen.getByText(/灰色区域为缺测区间/)).toBeVisible();
+  });
+  it("isolates fixed UTC drafts, rereads identical windows and returns to server rolling time", async () => {
+    const measured = current();
+    override = (url) =>
+      url.includes("/resources/current") ? response(measured) : undefined;
+    await start();
+    click("资源与历史");
+    await screen.findByRole("img", { name: /2 个实际样本/ });
+    const first = calls("/resources/history").length;
+    fill("历史时间范围", "fixed");
+    fill("固定开始时间（UTC）", "2026-10-07T06:00:00Z");
+    fill("固定结束时间（UTC）", now);
+    expect(calls("/resources/history")).toHaveLength(first);
+    expect(screen.getByText(/已应用：滚动时间窗/)).toBeVisible();
+    click("应用固定时间窗");
+    await waitFor(() =>
+      expect(calls("/resources/history")).toHaveLength(first + 1),
+    );
+    await screen.findByRole("img", { name: /2 个实际样本/ });
+    const fixedURL = calls("/resources/history").at(-1)![0];
+    const query = new URL(fixedURL, "http://local").searchParams;
+    expect(query.get("startTime")).toBe(String(seconds - 7200));
+    expect(query.get("endTime")).toBe(String(seconds));
+    expect(screen.getByText(/已应用：固定 UTC 时间窗/)).toBeVisible();
+    fill("固定开始时间（UTC）", "");
+    click("应用固定时间窗");
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "请输入有效的 UTC 整秒",
+    );
+    expect(calls("/resources/history")).toHaveLength(first + 1);
+    expect(screen.getByRole("img", { name: /2 个实际样本/ })).toBeVisible();
+    measured.checkedAt = "2026-10-07T08:05:00Z";
+    click("刷新资源与历史");
+    await waitFor(() =>
+      expect(calls("/resources/history")).toHaveLength(first + 2),
+    );
+    await screen.findByRole("img", { name: /2 个实际样本/ });
+    expect(calls("/resources/history").at(-1)![0]).toBe(fixedURL);
+    fill("固定开始时间（UTC）", "2026-10-07T06:00:00Z");
+    click("应用固定时间窗");
+    await waitFor(() =>
+      expect(calls("/resources/history")).toHaveLength(first + 3),
+    );
+    await screen.findByRole("img", { name: /2 个实际样本/ });
+    expect(calls("/resources/history").at(-1)![0]).toBe(fixedURL);
+    fill("历史时间范围", "900");
+    await waitFor(() =>
+      expect(calls("/resources/history")).toHaveLength(first + 4),
+    );
+    expect(
+      new URL(
+        calls("/resources/history").at(-1)![0],
+        "http://local",
+      ).searchParams.get("endTime"),
+    ).toBe(String(seconds + 300));
+  });
+  it.each([
+    ["", now],
+    ["2026-02-30T00:00:00Z", now],
+    [now, now],
+    [now, "2026-10-07T07:00:00Z"],
+    ["1969-12-31T23:59:59Z", "1970-01-01T00:00:01Z"],
+    ["2026-10-06T07:59:59Z", now],
+    ["2026-10-07T07:00:00Z", "2026-10-07T08:00:01Z"],
+  ])(
+    "rejects draft %s to %s without replacing confirmed history",
+    async (startTime, endTime) => {
+      await start();
+      click("资源与历史");
+      const chart = await screen.findByRole("img", { name: /2 个实际样本/ });
+      fill("历史时间范围", "fixed");
+      fill("固定开始时间（UTC）", startTime);
+      fill("固定结束时间（UTC）", endTime);
+      click("应用固定时间窗");
+      expect(screen.getByRole("alert")).toBeVisible();
+      expect(calls("/resources/history")).toHaveLength(1);
+      expect(chart).toBeVisible();
+    },
+  );
+  it("keeps fixed times across polling and metric or registered storage changes", async () => {
+    const measured = current();
+    override = (url) =>
+      url.includes("/resources/current") ? response(measured) : undefined;
+    await start();
+    click("资源与历史");
+    await screen.findByRole("img", { name: /2 个实际样本/ });
+    fill("历史时间范围", "fixed");
+    fill("固定开始时间（UTC）", "2026-10-07T06:00:00Z");
+    fill("固定结束时间（UTC）", now);
+    click("应用固定时间窗");
+    await waitFor(() => expect(calls("/resources/history")).toHaveLength(2));
+    await screen.findByRole("img", { name: /2 个实际样本/ });
+    for (const graph of ["ram_basic", "container_ram", "disk_usage"]) {
+      fill("历史指标", graph);
+      await waitFor(() =>
+        expect(
+          new URL(
+            calls("/resources/history").at(-1)![0],
+            "http://local",
+          ).searchParams.get("graphType"),
+        ).toBe(graph),
+      );
+      await waitFor(() =>
+        expect(
+          screen.getByRole("button", { name: "刷新资源与历史" }),
+        ).toBeEnabled(),
+      );
+      const params = new URL(
+        calls("/resources/history").at(-1)![0],
+        "http://local",
+      ).searchParams;
+      expect(params.get("startTime")).toBe(String(seconds - 7200));
+      expect(params.get("endTime")).toBe(String(seconds));
+      expect(params.get("storageId")).toBe(
+        graph === "disk_usage" ? "runtime-root" : null,
+      );
+    }
+    await screen.findByRole("img", { name: /2 个实际样本/ });
+    vi.useFakeTimers();
+    try {
+      // Restart the poll with fake timers, then advance its normal 15 second cadence.
+      click("刷新资源与历史");
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      const count = calls("/resources/history").length;
+      measured.checkedAt = "2026-10-07T09:00:00Z";
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(15000);
+      });
+      expect(calls("/resources/history")).toHaveLength(count + 1);
+      const params = new URL(
+        calls("/resources/history").at(-1)![0],
+        "http://local",
+      ).searchParams;
+      expect(params.get("startTime")).toBe(String(seconds - 7200));
+      expect(params.get("endTime")).toBe(String(seconds));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+  it("can apply a valid fixed window after the first rolling history fails", async () => {
+    override = (url) =>
+      url.includes("/resources/history") &&
+      new URL(url, "http://local").searchParams.get("startTime") ===
+        String(seconds - 900)
+        ? response({ error: "invalid_input" }, 400)
+        : undefined;
+    await start();
+    click("资源与历史");
+    await screen.findByRole("alert");
+    fill("历史时间范围", "fixed");
+    fill("固定开始时间（UTC）", "2026-10-07T06:00:00Z");
+    fill("固定结束时间（UTC）", now);
+    click("应用固定时间窗");
+    await screen.findByRole("img", { name: /2 个实际样本/ });
+    expect(calls("/resources/history")).toHaveLength(2);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+  it.each([401, 403])(
+    "does not restore a server clock from late current after storage %s",
+    async (status) => {
+      let release!: (value: Response) => void;
+      override = (url) => {
+        if (url.includes("/resources/current"))
+          return new Promise((resolve) => {
+            release = resolve;
+          });
+        if (url.split("?")[0] === "/api/system/storage")
+          return response(
+            { error: status === 401 ? "unauthenticated" : "forbidden" },
+            status,
+          );
+        return undefined;
+      };
+      await start();
+      click("资源与历史");
+      await waitFor(() =>
+        expect(
+          screen.getByRole("button", { name: "刷新资源与历史" }),
+        ).toBeEnabled(),
+      );
+      await act(async () => release(await response(current())));
+      fill("历史时间范围", "fixed");
+      fill("固定开始时间（UTC）", "2026-10-07T06:00:00Z");
+      fill("固定结束时间（UTC）", now);
+      click("应用固定时间窗");
+      expect(
+        screen.getByText(/结束时间不得晚于最近服务器检查时间/),
+      ).toBeVisible();
+      expect(calls("/resources/history")).toHaveLength(0);
+      expect(calls("/resources/current")).toHaveLength(1);
+    },
+  );
+  it("does not let an aborted old current response advance the fixed submission clock", async () => {
+    let release!: (value: Response) => void, oldSignal!: AbortSignal;
+    await start();
+    override = (url, init) =>
+      url.includes("/resources/current")
+        ? new Promise((resolve) => {
+            release = resolve;
+            oldSignal = init.signal as AbortSignal;
+          })
+        : undefined;
+    click("资源与历史");
+    await waitFor(() => expect(release).toBeTypeOf("function"));
+    override = () => undefined;
+    fill("历史时间范围", "3600");
+    await screen.findByRole("img", { name: /2 个实际样本/ });
+    expect(oldSignal.aborted).toBe(true);
+    const late = current();
+    late.checkedAt = "2026-10-08T08:00:00Z";
+    await act(async () => release(await response(late)));
+    const count = calls("/resources/history").length;
+    fill("历史时间范围", "fixed");
+    fill("固定开始时间（UTC）", now);
+    fill("固定结束时间（UTC）", "2026-10-07T08:00:01Z");
+    click("应用固定时间窗");
+    expect(
+      screen.getByText(/结束时间不得晚于最近服务器检查时间/),
+    ).toBeVisible();
+    expect(calls("/resources/history")).toHaveLength(count);
+  });
+  it.each([400, 401, 403, 503])(
+    "clears fixed history on server %s and permits explicit recovery",
+    async (status) => {
+      const changed = vi.fn();
+      render(<SystemWorkspace profile={profile} sessionChanged={changed} />);
+      await screen.findByRole("table", { name: "已登记节点" });
+      click("资源与历史");
+      await screen.findByRole("img", { name: /2 个实际样本/ });
+      fill("历史时间范围", "fixed");
+      fill("固定开始时间（UTC）", "2026-10-06T08:00:00Z");
+      fill("固定结束时间（UTC）", now);
+      click("应用固定时间窗");
+      await waitFor(() => expect(calls("/resources/history")).toHaveLength(2));
+      await screen.findByRole("img", { name: /2 个实际样本/ });
+      const applied = calls("/resources/history").at(-1)![0];
+      override = (url) =>
+        url.includes("/resources/history")
+          ? response(
+              {
+                error:
+                  status === 401
+                    ? "unauthenticated"
+                    : status === 403
+                      ? "forbidden"
+                      : status === 503
+                        ? "database_unavailable"
+                        : "invalid_input",
+              },
+              status,
+            )
+          : undefined;
+      click("刷新资源与历史");
+      await waitFor(() =>
+        expect(
+          screen.getByRole("button", { name: "刷新资源与历史" }),
+        ).toBeEnabled(),
+      );
+      expect(screen.queryByRole("img")).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("heading", { name: "CPU 使用率历史" }),
+      ).not.toBeInTheDocument();
+      expect(changed).toHaveBeenCalledTimes(status === 401 ? 1 : 0);
+      if (status !== 401) expect(screen.getByRole("alert")).toBeVisible();
+      override = () => undefined;
+      click("刷新资源与历史");
+      await screen.findByRole("img", { name: /2 个实际样本/ });
+      expect(calls("/resources/history").at(-1)![0]).toBe(applied);
+    },
+  );
+  it("ignores delayed fixed history after switching query and after leaving the panel", async () => {
+    await start();
+    click("资源与历史");
+    await screen.findByRole("img", { name: /2 个实际样本/ });
+    fill("历史时间范围", "fixed");
+    fill("固定开始时间（UTC）", "2026-10-07T06:00:00Z");
+    fill("固定结束时间（UTC）", now);
+    let release!: (value: Response) => void, pendingSignal!: AbortSignal;
+    override = (url, init) =>
+      url.includes("/resources/history")
+        ? new Promise((resolve) => {
+            release = resolve;
+            pendingSignal = init.signal as AbortSignal;
+          })
+        : undefined;
+    click("应用固定时间窗");
+    await waitFor(() => expect(release).toBeTypeOf("function"));
+    const oldReply = release,
+      oldSignal = pendingSignal;
+    override = () => undefined;
+    fill("历史时间范围", "3600");
+    await screen.findByRole("img", { name: /2 个实际样本/ });
+    expect(oldSignal.aborted).toBe(true);
+    await act(async () =>
+      oldReply(
+        await response(
+          history(
+            new URLSearchParams({
+              graphType: "cpu_basic",
+              startTime: String(seconds - 7200),
+            }),
+          ),
+        ),
+      ),
+    );
+    expect(screen.getByText(/已应用：滚动时间窗/)).toBeVisible();
+    expect(screen.getByText(/范围（UTC）/)).toHaveTextContent(
+      "2026-10-07T07:00:00.000Z",
+    );
+    fill("历史时间范围", "fixed");
+    override = (url, init) =>
+      url.includes("/resources/history")
+        ? new Promise((resolve) => {
+            release = resolve;
+            pendingSignal = init.signal as AbortSignal;
+          })
+        : undefined;
+    click("应用固定时间窗");
+    await waitFor(() => expect(release).not.toBe(oldReply));
+    click("系统信息");
+    await screen.findByRole("table", { name: "已登记节点" });
+    expect(pendingSignal.aborted).toBe(true);
+    await act(async () =>
+      release(
+        await response(
+          history(
+            new URLSearchParams({
+              graphType: "cpu_basic",
+              startTime: String(seconds - 7200),
+            }),
+          ),
+        ),
+      ),
+    );
+    expect(screen.queryByRole("img")).not.toBeInTheDocument();
+    override = () => undefined;
+    click("资源与历史");
+    await screen.findByRole("img", { name: /2 个实际样本/ });
+    expect(screen.getByLabelText("历史时间范围")).toHaveValue("900");
+    expect(
+      screen.queryByLabelText("固定开始时间（UTC）"),
+    ).not.toBeInTheDocument();
+  });
+  it("keeps fixed bounds when registered disks change and suppresses history without a registered target", async () => {
+    let items = [disk, { ...disk, id: "registered-test", mount: "/test" }];
+    override = (url) =>
+      url.split("?")[0] === "/api/system/storage"
+        ? response({ ...storage(), storage: items, total: items.length })
+        : undefined;
+    await start();
+    click("资源与历史");
+    await screen.findByRole("img", { name: /2 个实际样本/ });
+    fill("历史时间范围", "fixed");
+    fill("固定开始时间（UTC）", "2026-10-07T06:00:00Z");
+    fill("固定结束时间（UTC）", now);
+    click("应用固定时间窗");
+    await waitFor(() => expect(calls("/resources/history")).toHaveLength(2));
+    await screen.findByRole("img", { name: /2 个实际样本/ });
+    fill("历史指标", "disk_usage");
+    await screen.findByRole("heading", { name: "API 文件系统使用率历史" });
+    fill("已登记存储目标", "registered-test");
+    await waitFor(() =>
+      expect(
+        new URL(
+          calls("/resources/history").at(-1)![0],
+          "http://local",
+        ).searchParams.get("storageId"),
+      ).toBe("registered-test"),
+    );
+    await screen.findByRole("img", { name: /2 个实际样本/ });
+    const query = new URL(
+      calls("/resources/history").at(-1)![0],
+      "http://local",
+    ).searchParams;
+    expect(query.get("startTime")).toBe(String(seconds - 7200));
+    expect(query.get("endTime")).toBe(String(seconds));
+    const count = calls("/resources/history").length;
+    items = [];
+    click("刷新资源与历史");
+    await screen.findByText(
+      "没有可读取的已登记存储目标，无法查询文件系统历史。",
+    );
+    expect(calls("/resources/history")).toHaveLength(count);
+    expect(screen.queryByRole("img")).not.toBeInTheDocument();
+  });
+  it("renders an empty fixed window without substituting current observations", async () => {
+    await start();
+    click("资源与历史");
+    await screen.findByRole("img", { name: /2 个实际样本/ });
+    override = (url) => {
+      if (!url.includes("/resources/history")) return undefined;
+      const q = new URL(url, "http://local").searchParams;
+      const result = history(q);
+      result.info[0].data.timestamp = [];
+      result.info[0].data.value = [];
+      return response({
+        ...result,
+        info: [
+          {
+            mode: "cpu_basic",
+            data: {
+              timestamp: [],
+              value: [],
+              dataStatistics: {
+                max: null,
+                min: null,
+                avg: null,
+                current: null,
+              },
+            },
+          },
+        ],
+        gaps: [
+          {
+            startTime: Number(q.get("startTime")),
+            endTime: Number(q.get("endTime")),
+          },
+        ],
+        availableSince: now,
+      });
+    };
+    fill("历史时间范围", "fixed");
+    fill("固定开始时间（UTC）", "1970-01-01T00:00:00Z");
+    fill("固定结束时间（UTC）", "1970-01-01T00:00:01Z");
+    click("应用固定时间窗");
+    await screen.findByText("此范围没有真实历史样本，统计值不可用。");
+    expect(screen.queryByRole("img")).not.toBeInTheDocument();
+    expect(screen.getAllByText("不可用")).toHaveLength(4);
+    expect(screen.getByText(/已应用：固定 UTC 时间窗/)).toBeVisible();
+    expect(screen.getByText(/范围（UTC）/)).toHaveTextContent(
+      "1970-01-01T00:00:00.000Z 至 1970-01-01T00:00:01.000Z",
+    );
+    expect(
+      screen.getByRole("heading", { name: "CPU 使用率历史" }),
+    ).toBeVisible();
   });
   it("renders empty history with unavailable statistics", async () => {
     override = (url) =>
