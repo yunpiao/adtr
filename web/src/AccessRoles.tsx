@@ -1,4 +1,10 @@
 import { useEffect, useState } from "react";
+import RoleUsersReadPanel from "./RoleUsersReadPanel";
+import {
+  canReadRoleUsers,
+  roleUsersIdentity,
+  validRoleUsersTarget,
+} from "./role-users-read";
 import {
   accessRequest,
   permissionInputs,
@@ -44,20 +50,55 @@ export function grantMetadata(
 type View =
   | { kind: "list" }
   | { kind: "create" }
+  | { kind: "users"; role: Role; origin: "list" | "detail" }
   | { kind: "detail" | "delete"; role: Role };
 export default function AccessRoles({ context }: { context: AccessContext }) {
+  // A new identity/session never inherits a selected role from its predecessor.
+  return (
+    <RolesWorkspace
+      key={roleUsersIdentity(context.profile)}
+      context={context}
+    />
+  );
+}
+function RolesWorkspace({ context }: { context: AccessContext }) {
   const [view, setView] = useState<View>({ kind: "list" }),
     [notice, setNotice] = useState(""),
-    [revision, setRevision] = useState(0);
+    [revision, setRevision] = useState(0),
+    [usersDenied, setUsersDenied] = useState(false);
+  const usersReadable = !usersDenied && canReadRoleUsers(context);
   const done = (message = "已返回列表，请核对最新服务器状态。") => {
     setNotice(message);
     setRevision((n) => n + 1);
     setView({ kind: "list" });
+    window.history.replaceState({}, "", "#access/roles");
   };
   const open = (next: View) => {
+    if (
+      next.kind === "users" &&
+      (!usersReadable || !validRoleUsersTarget(next.role))
+    )
+      return;
     setNotice("");
     setView(next);
     window.history.pushState({}, "", `#access/roles/${next.kind}`);
+  };
+  useEffect(() => {
+    const dismiss = () => {
+      setView({ kind: "list" });
+      setNotice("");
+      setRevision((value) => value + 1);
+    };
+    window.addEventListener("popstate", dismiss);
+    window.addEventListener("hashchange", dismiss);
+    return () => {
+      window.removeEventListener("popstate", dismiss);
+      window.removeEventListener("hashchange", dismiss);
+    };
+  }, []);
+  const returnToRole = (role: Role) => {
+    setView({ kind: "detail", role });
+    window.history.replaceState({}, "", "#access/roles/detail");
   };
   return (
     <>
@@ -68,13 +109,36 @@ export default function AccessRoles({ context }: { context: AccessContext }) {
         </div>
       )}
       {view.kind === "list" ? (
-        <RolesList key={revision} context={context} open={open} />
+        <RolesList
+          key={revision}
+          context={context}
+          open={open}
+          usersReadable={usersReadable}
+        />
+      ) : view.kind === "users" ? (
+        <RoleUsersReadPanel
+          context={context}
+          role={view.role}
+          close={() =>
+            view.origin === "detail" ? returnToRole(view.role) : done()
+          }
+          returnToList={() => done()}
+          returnToRole={
+            view.origin === "detail" ? () => returnToRole(view.role) : undefined
+          }
+          accessDenied={() => setUsersDenied(true)}
+        />
       ) : (
         <RoleForm
           context={context}
           mode={view.kind}
           role={"role" in view ? view.role : undefined}
           done={done}
+          showUsers={
+            usersReadable
+              ? (role) => open({ kind: "users", role, origin: "detail" })
+              : undefined
+          }
         />
       )}
     </>
@@ -83,9 +147,11 @@ export default function AccessRoles({ context }: { context: AccessContext }) {
 function RolesList({
   context,
   open,
+  usersReadable,
 }: {
   context: AccessContext;
   open: (view: View) => void;
+  usersReadable: boolean;
 }) {
   const [query, setQuery] = useState<Record<string, QueryValue>>({
       pageIdx: 1,
@@ -177,6 +243,17 @@ function RolesList({
                     <td>{role.created}</td>
                     <td>
                       <div className="row-actions">
+                        {usersReadable && validRoleUsersTarget(role) && (
+                          <button
+                            type="button"
+                            className="secondary"
+                            onClick={() =>
+                              open({ kind: "users", role, origin: "list" })
+                            }
+                          >
+                            查看关联用户 {role.name}
+                          </button>
+                        )}
                         {context.can("GET /api/access/roles/detail") && (
                           <button
                             className="secondary"
@@ -223,11 +300,13 @@ function RoleForm({
   mode,
   role,
   done,
+  showUsers,
 }: {
   context: AccessContext;
   mode: "create" | "detail" | "delete";
   role?: Role;
   done: (message?: string) => void;
+  showUsers?: (role: Role) => void;
 }) {
   const task = useMutation(context, done),
     [detail, setDetail] = useState<{
@@ -311,6 +390,19 @@ function RoleForm({
             : `角色详情：${currentRole!.name}`}
       </h3>
       <ErrorNotice error={task.error} />
+      {mode === "detail" &&
+        showUsers &&
+        currentRole &&
+        currentRole.id === role?.id &&
+        validRoleUsersTarget(currentRole) && (
+          <button
+            type="button"
+            className="secondary"
+            onClick={() => showUsers(currentRole)}
+          >
+            查看关联用户 {currentRole.name}
+          </button>
+        )}
       {mode === "delete" ? (
         <p className="warning">
           确认删除角色 {role!.name}？内置角色及仍被分配的角色不能删除。

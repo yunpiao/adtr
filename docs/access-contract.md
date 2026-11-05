@@ -194,3 +194,74 @@ scenario passed. Its exact current-head browser/API/PostgreSQL result, retained
 artifact, independent PNG review and cleanup review are required. This narrow
 two-user result does not cover every single/bulk input combination, source-field
 compatibility, capacity, deployment, or full AD-F-176/product acceptance.
+
+## AD-F-176 role-associated users read workspace
+
+Engineering Issue #286 follows the role-user query portion of original Issue #9:
+FLD-2908/2909 (page), FLD-2910 (`roleID`), FLD-2911 (`search`), FLD-2915/2916
+(totals), FLD-2919/2921/2923/2924 (username, role ID, phone, email), and UI-0630
+("应用用户"). It adds navigation from a real role list/detail into the existing
+persistent query, not a new assignment API or a new function grant.
+
+The list and detail entries open a separate read-only workspace. The selected
+role ID stays fixed for every request, including search, paging and refresh.
+The workspace requires both the current `users.readable` menu grant and
+`GET /api/access/users` operation permission; reading roles does not authorize
+reading user profiles. It exposes no assignment, save, delete, password or MFA
+proof control. Entry buttons are non-submitting, and the query controls are never
+nested inside the role-edit form. Returning to a role detail reopens its normal
+server-backed view rather than retaining a privileged draft or its proof.
+
+The workspace's responsive rules are imported from a scoped, bundled same-origin
+stylesheet. This is required by the existing `style-src 'self'` policy: an inline
+style block is not an allowed way to supply the narrow-screen card layout. The
+policy is unchanged. Removing the stylesheet/import leaves the read workflow but
+loses its mobile wrapping and labelled row layout. Desktop remains a table; at
+390px the real browser must verify the block layout and all six user fields
+without horizontal clipping, rather than only the first two visible columns.
+
+Reads use the existing literal case-insensitive username search with at most 50
+Unicode codepoints, fixed creation-time descending order (`sort=-1`) and the
+original UI's page sizes 10, 20, 30, 40 and 50. Applying search/size changes returns
+to page 1. The fixed `roleID` is necessary to prevent accidental all-user queries;
+`pageIdx` and `pageSize` bound and locate the requested server page. Removing
+these query controls would lose the selected role or page, not grant extra
+authorization. The existing API's bounded `pageSize=-1` mode is not exposed here.
+
+Each response is runtime-checked before presentation, including its requested
+page and each user's exact role binding. Invalid responses and transport errors
+are errors, not empty results. Every read is current data: the role list's older
+`userNum` and a later user query's `page.total` are not an atomic snapshot. An
+empty result says only that the current query has no matching users; it does not
+prove that a concurrently removed role still exists. A changed collection can
+leave a page empty, so the workspace offers a path back to its first page while
+keeping the applied search and page size. Inconsistent count/row relationships
+are rejected with a refreshable error rather than silently repaired; concurrent
+changes can cause that error because this endpoint does not promise a frozen
+snapshot.
+
+The read lifetime is bound to the selected role, current actor and CSRF session
+generation. Close, return, browser history navigation, target changes and
+permission/session changes invalidate pending work and hide old private rows;
+a late response cannot restore them. Read-only identity checks before and after
+the user query verify the cookie's current actor and session against the opened
+workspace. They add two authentication GETs per read; they do not make cookie
+changes and the user query atomic. A mismatch rejects presentation and requests
+identity refresh instead of adopting a different actor's result. A 403 discards
+the rows and prevents further reads through that entry, while 401 or a required
+password change delegates to
+the existing identity refresh. No user response, credentials or identity token
+is written to browser storage or history state. Navigation hashes describe a
+view, not user profiles or a durable resource locator.
+
+New DOM fixtures are isolated synthetic examples and only establish client
+behavior. The real browser case must use the existing disposable PostgreSQL
+fixture, actual API reads and original synthetic users/roles. Its additional
+work is read-only, with no new administrator-sensitive mutation, proof wait,
+retry or time-budget increase. The original bulk-role assertions and its
+two-file artifact remain distinct and mandatory; their screenshot is not
+evidence of this new workspace. New safe workspace images require their own
+exact source/run binding and independent pixel review. Current-head native
+execution, source review, evidence admission and main-push verification remain
+separate gates. This slice does not close Issue #9 or change product acceptance
+from 0/209.

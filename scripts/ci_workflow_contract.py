@@ -10,6 +10,11 @@ from pathlib import Path
 
 
 def restore_user_uac_workflow(text):
+    from role_users_read_workflow import restore_role_users_read
+    return restore_user_uac_workflow_predecessor(restore_role_users_read(text))
+
+
+def restore_user_uac_workflow_predecessor(text):
     """Reverse C's workflow domain only; full delta bytes are frozen separately.
 
     No hash of the helper's own source or of its containing CI delta is embedded

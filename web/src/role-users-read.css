@@ -1,0 +1,51 @@
+/* Bundled same-origin CSS is required by the application's style-src 'self' CSP. */
+.role-users-read {
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 600px) {
+  .role-users-read .table-scroll {
+    overflow: visible;
+  }
+
+  .role-users-read table,
+  .role-users-read tbody,
+  .role-users-read tr,
+  .role-users-read th,
+  .role-users-read td {
+    display: block;
+    width: auto;
+    min-width: 0;
+  }
+
+  .role-users-read caption {
+    display: block;
+  }
+
+  /* Keep column headers in the accessibility tree while rows become cards. */
+  .role-users-read thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+
+  .role-users-read tbody tr {
+    margin-bottom: 1rem;
+    border: 1px solid currentColor;
+    border-radius: 0.5rem;
+    padding: 0.5rem;
+  }
+
+  .role-users-read tbody th,
+  .role-users-read tbody td {
+    padding: 0.35rem;
+    border: 0;
+  }
+
+  .role-users-read tbody td::before {
+    content: attr(data-label) "：";
+    font-weight: 600;
+  }
+}
