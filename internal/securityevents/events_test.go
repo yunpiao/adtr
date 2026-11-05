@@ -240,3 +240,57 @@ func TestEqualTimeOrderingAndIdentitySeparation(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestCaseSnapshotRestoreValidation(t *testing.T) {
+	c, err := NewCase(testScope, testProvenance, "case-restore")
+	if err != nil {
+		t.Fatal(err)
+	}
+	v, err := c.Snapshot(testScope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restored, err := RestoreCase(testScope, testProvenance, v)
+	if err != nil || restored != c {
+		t.Fatalf("initial restore: %+v %v", restored, err)
+	}
+	next, _, err := c.Apply(testScope, Change{Action: "mark_suspicious", Actor: "actor", Reason: "synthetic check", At: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), ExpectedRevision: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated, _ := next.Snapshot(testScope)
+	restored, err = RestoreCase(testScope, testProvenance, updated)
+	if err != nil || restored != next {
+		t.Fatalf("updated restore: %+v %v", restored, err)
+	}
+	mutations := []func(*CaseSnapshot){func(v *CaseSnapshot) { v.ID = "" }, func(v *CaseSnapshot) { v.State = "injected" }, func(v *CaseSnapshot) { v.Mark = "real" }, func(v *CaseSnapshot) { v.Revision = 0 }, func(v *CaseSnapshot) { v.Provenance.Synthetic = false }, func(v *CaseSnapshot) { v.Provenance.Fixture = "other" }, func(v *CaseSnapshot) { v.UpdatedAt = time.Time{} }, func(v *CaseSnapshot) { v.UpdatedAt = time.Date(1999, 1, 1, 0, 0, 0, 0, time.UTC) }, func(v *CaseSnapshot) { v.Revision = 1 }}
+	for i, mutate := range mutations {
+		bad := updated
+		mutate(&bad)
+		if _, err = RestoreCase(testScope, testProvenance, bad); !errors.Is(err, ErrInvalid) {
+			t.Fatalf("mutation %d: %v", i, err)
+		}
+	}
+	for _, field := range []string{"tenant", "domain"} {
+		bad := updated
+		if field == "tenant" {
+			bad.Tenant = "other"
+		} else {
+			bad.Domain = "other"
+		}
+		if _, err = RestoreCase(testScope, testProvenance, bad); !errors.Is(err, ErrDenied) {
+			t.Fatal(field, err)
+		}
+	}
+	for _, mutate := range []func(*CaseSnapshot){func(v *CaseSnapshot) { v.State = "closed" }, func(v *CaseSnapshot) { v.Mark = "benign" }, func(v *CaseSnapshot) { v.UpdatedAt = time.Now() }} {
+		bad := v
+		mutate(&bad)
+		if _, err = RestoreCase(testScope, testProvenance, bad); !errors.Is(err, ErrInvalid) {
+			t.Fatal(err)
+		}
+	}
+	stale := Change{Action: "close", Actor: "actor", Reason: "synthetic check", At: updated.UpdatedAt.Add(-time.Second), ExpectedRevision: updated.Revision}
+	if _, _, err = restored.Apply(testScope, stale); !errors.Is(err, ErrInvalid) {
+		t.Fatal(err)
+	}
+}

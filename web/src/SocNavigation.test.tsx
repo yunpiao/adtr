@@ -531,3 +531,38 @@ describe("SOC shell integration", () => {
     expect(document.body.style.overflow).toBe("");
   });
 });
+
+describe("synthetic event navigation hint", () => {
+  it("defaults deny even for admin and does not add network requests", () => {
+    const fetcher = vi.fn();
+    vi.stubGlobal("fetch", fetcher);
+    const view = render(<Navigation actor={profile} />);
+    expect(
+      screen.queryByRole("button", { name: "合成安全事件" }),
+    ).not.toBeInTheDocument();
+    view.rerender(
+      <Navigation actor={{ ...profile, simulationEventsReadable: true }} />,
+    );
+    expect(
+      screen.getByRole("button", { name: "合成安全事件" }),
+    ).toBeInTheDocument();
+    view.rerender(
+      <Navigation actor={{ ...profile, simulationEventsReadable: false }} />,
+    );
+    expect(
+      screen.queryByRole("button", { name: "合成安全事件" }),
+    ).not.toBeInTheDocument();
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+  it("hides a granted hint while session is gated", () => {
+    render(
+      <Navigation
+        actor={{ ...profile, simulationEventsReadable: true }}
+        gated
+      />,
+    );
+    expect(
+      screen.queryByRole("button", { name: "合成安全事件" }),
+    ).not.toBeInTheDocument();
+  });
+});

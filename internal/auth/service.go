@@ -39,6 +39,8 @@ type Service struct {
 	now       func() time.Time
 }
 type User struct {
+	// Navigation hint only, populated only by authenticated login and /me.
+	SimulationEventsReadable                    *bool     `json:"simulationEventsReadable,omitempty"`
 	ID                                          int64     `json:"ID"`
 	Username                                    string    `json:"username"`
 	Role                                        string    `json:"role"`
@@ -314,6 +316,11 @@ func (s *Service) handle(ctx context.Context, r *http.Request, path string, in r
 		if _, err = tx.Exec(ctx, "DELETE FROM adtr.auth_attempts WHERE bucket=$1", digest("login:"+username)); err != nil {
 			return nil, "", false, err
 		}
+		readable, err := simulationEventProfileReadable(ctx, tx, u)
+		if err != nil {
+			return nil, "", false, err
+		}
+		u.SimulationEventsReadable = &readable
 		if err = tx.Commit(ctx); err != nil {
 			return nil, "", false, err
 		}
@@ -360,6 +367,11 @@ func (s *Service) handle(ctx context.Context, r *http.Request, path string, in r
 		return nil, "", false, fail(403, "forbidden")
 	}
 	if path == "/me" {
+		readable, err := simulationEventProfileReadable(ctx, tx, u)
+		if err != nil {
+			return nil, "", false, err
+		}
+		u.SimulationEventsReadable = &readable
 		return u, "", false, tx.Commit(ctx)
 	}
 	if path == "/logout" {

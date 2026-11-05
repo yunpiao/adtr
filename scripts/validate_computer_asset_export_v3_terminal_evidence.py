@@ -5,6 +5,7 @@ reconstructed from raw PostgreSQL observation bytes, not the exporter response.
 The original all-matched/empty acceptance gate is unchanged.
 """
 import argparse
+from application_schema import CURRENT_SCHEMA
 from decimal import Decimal
 from pathlib import Path
 import re
@@ -208,7 +209,7 @@ def validate(data, read_artifact, provenance, suite=None):
     no_secrets(data)
     failure = data['suite'] == 'failureRecovery'
     exact(data['sensitiveBudget'], ['before', 'after'], 'budget envelope')
-    before = {'schemaVersion': 23, 'owner': 7, 'producer': 9, 'observations': 1, 'directoryUses': 1, 'exportTasks': 0}
+    before = {'schemaVersion': CURRENT_SCHEMA, 'owner': 7, 'producer': 9, 'observations': 1, 'directoryUses': 1, 'exportTasks': 0}
     after = {**before, 'owner': 9, 'exportTasks': 2 if failure else 1}
     require(data['sensitiveBudget'] == {'before': before, 'after': after}, 'bounded MFA budget/no recollection')
     require(all(type(n) is int for point in data['sensitiveBudget'].values() for n in point.values()), 'integer budget')

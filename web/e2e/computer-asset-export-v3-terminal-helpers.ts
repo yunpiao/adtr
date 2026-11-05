@@ -1,3 +1,4 @@
+import { currentApplicationSchema } from "./application-schema";
 import { runningGuard } from "./owned-running-control";
 import { expect, type Page, type BrowserContext, type TestInfo } from "@playwright/test";
 import { readFile, writeFile, readdir, readlink } from "node:fs/promises";
@@ -24,7 +25,7 @@ export async function terminalSetup(page: Page, context: BrowserContext) {
   const actorId = (await readJSON(context, "/api/auth/me")).ID as number;
   expect(actorId).not.toBe(fixture.actorId);
   const before = await sensitiveBudget(actorId, fixture.actorId);
-  expect(before).toEqual({ schemaVersion: 23, owner: 7, producer: 9, observations: 1, directoryUses: 1, exportTasks: 0 });
+  expect(before).toEqual({ schemaVersion: currentApplicationSchema, owner: 7, producer: 9, observations: 1, directoryUses: 1, exportTasks: 0 });
   await openAssets(page, actorId);
   await page.locator("summary").filter({ hasText: /^创建时间筛选与排序$/u }).click();
   await page.getByLabel("创建时间排序", { exact: true }).selectOption("desc");

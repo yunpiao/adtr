@@ -206,11 +206,11 @@ class RunningEvidenceTests(unittest.TestCase):
             source.update(bodyBase64=base64.b64encode(raw).decode(),sha256=v.sha(raw),count=len(body['objects']))
             with self.assertRaises(ValueError): self.check(data,files)
 
-    def test_schema23_and_inherited_user_class_are_required(self):
+    def test_current_schema_and_inherited_user_class_are_required(self):
         import base64
         import json
         for point in ('before','after'):
-            for bad in (22,24,True):
+            for bad in (v.CURRENT_SCHEMA - 1, v.CURRENT_SCHEMA + 1, True):
                 data,files=specimen();data['sensitiveBudget'][point]['schemaVersion']=bad
                 with self.assertRaises(ValueError):self.check(data,files)
         for classes in (['computer'],['user']):

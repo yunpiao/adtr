@@ -304,3 +304,35 @@ func (c Case) Apply(s Scope, ch Change) (Case, Audit, error) {
 	next.updatedAt = ch.At.UTC()
 	return next, Audit{c.id, ch.Action, ch.Actor, ch.Reason, c.state, next.state, c.mark, next.mark, ch.At.UTC(), next.revision, c.provenance}, nil
 }
+
+// CaseSnapshot is a persistence boundary, not an HTTP mutation input. RestoreCase
+// validates every field before constructing the private state machine.
+type CaseSnapshot struct {
+	ID, Tenant, Domain, State, Mark string
+	Revision                        uint64
+	UpdatedAt                       time.Time
+	Provenance                      Provenance
+}
+
+func RestoreCase(s Scope, p Provenance, v CaseSnapshot) (Case, error) {
+	if !validScope(s, false) || v.Tenant != s.Tenant || v.Domain != s.Domain {
+		return Case{}, ErrDenied
+	}
+	if !validProvenance(p) || v.Provenance != p || !field(v.ID) || v.Revision == 0 || (v.State != "open" && v.State != "closed") || (v.Mark != "" && v.Mark != "benign" && v.Mark != "suspicious") {
+		return Case{}, ErrInvalid
+	}
+	if v.Revision == 1 {
+		if v.State != "open" || v.Mark != "" || !v.UpdatedAt.IsZero() {
+			return Case{}, ErrInvalid
+		}
+	} else if v.UpdatedAt.IsZero() || v.UpdatedAt.Year() < 2000 || v.UpdatedAt.Year() > 2100 {
+		return Case{}, ErrInvalid
+	}
+	return Case{id: v.ID, tenant: v.Tenant, domain: v.Domain, state: v.State, mark: v.Mark, revision: v.Revision, updatedAt: v.UpdatedAt.UTC(), provenance: p}, nil
+}
+func (c Case) Snapshot(s Scope) (CaseSnapshot, error) {
+	if _, err := c.View(s); err != nil {
+		return CaseSnapshot{}, err
+	}
+	return CaseSnapshot{c.id, c.tenant, c.domain, c.state, c.mark, c.revision, c.updatedAt, c.provenance}, nil
+}

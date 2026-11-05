@@ -1,4 +1,6 @@
 export interface Profile {
+  // Navigation hint only; API independently rechecks current permissions.
+  simulationEventsReadable?: boolean;
   ID: number;
   username: string;
   role: string;
