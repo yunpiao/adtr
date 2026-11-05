@@ -13,7 +13,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 import AuditWorkspace from "./AuditWorkspace";
 import { type Profile } from "./api";
-import { auditAPI } from "./audit-api";
+import { auditAPI, auditOperations } from "./audit-api";
 import {
   emptyHistoryQuery,
   exportDownloadPath,
@@ -173,6 +173,22 @@ async function start(changed = vi.fn()) {
   await screen.findByRole("table", { name: "导出历史记录" });
   return mounted;
 }
+function expectHistoryOrdinals(ids: string[]) {
+  const table = screen.getByRole("table", { name: "导出历史记录" });
+  expect(within(table).getAllByRole("columnheader")[0]).toHaveTextContent(
+    "本页序号",
+  );
+  const rows = Array.from(table.querySelectorAll("tbody > tr"));
+  expect(rows).toHaveLength(ids.length);
+  rows.forEach((element, index) => {
+    expect(element.firstElementChild).toHaveTextContent(
+      new RegExp(`^${index + 1}$`),
+    );
+    expect(
+      within(element as HTMLElement).getByText(ids[index], { exact: true }),
+    ).toBeVisible();
+  });
+}
 
 describe("export history transport contracts", () => {
   it("encodes distinct canonical statuses and explicit UTC creation bounds", () => {
@@ -325,6 +341,7 @@ describe("persisted export history DOM", () => {
     clicks("导出历史");
     await screen.findByRole("table", { name: "导出历史记录" });
     expect(screen.getByText(exportFilename(id))).toBeVisible();
+    expectHistoryOrdinals([id]);
     expect(screen.getByLabelText(`导出进度 ${id}`)).toHaveValue(37);
     expect(screen.getByText(/实际行数：0/)).toBeVisible();
     expect(screen.queryByLabelText("应用类型")).not.toBeInTheDocument();
@@ -356,9 +373,23 @@ describe("persisted export history DOM", () => {
           });
         },
       );
-      return response(history(rows, pageIdx, pageSize, pageSize + 1));
+      return response(
+        history(
+          q.get("sortTm") === "1" ? rows.reverse() : rows,
+          pageIdx,
+          pageSize,
+          pageSize + 1,
+        ),
+      );
     };
     await start();
+    expectHistoryOrdinals(
+      Array.from(
+        { length: 20 },
+        (_, i) =>
+          `00000000-0000-4000-8000-${String(i + 100).padStart(12, "0")}`,
+      ),
+    );
     fill("每页导出数", "10");
     fill("导出创建开始时间（UTC）", "2026-10-06T01:02:03");
     fill("导出创建结束时间（UTC，不包含）", "2026-10-08T01:02:03");
@@ -385,11 +416,19 @@ describe("persisted export history DOM", () => {
     await waitFor(() =>
       expect(screen.getByRole("button", { name: "下一页" })).toBeEnabled(),
     );
+    expectHistoryOrdinals(
+      Array.from(
+        { length: 10 },
+        (_, i) =>
+          `00000000-0000-4000-8000-${String(109 - i).padStart(12, "0")}`,
+      ),
+    );
     clicks("下一页");
     await waitFor(() =>
       expect(requests("history").at(-1)![0]).toContain("pageIdx=2"),
     );
     await screen.findByText("共 11 条 · 第 2 / 2 页");
+    expectHistoryOrdinals(["00000000-0000-4000-8000-000000000200"]);
     clicks("清空导出筛选");
     await waitFor(() =>
       expect(requests("history").at(-1)![0]).toContain(
@@ -453,6 +492,9 @@ describe("persisted export history DOM", () => {
     await screen.findByRole("alert");
     expect(screen.queryByText(exportFilename(id))).not.toBeInTheDocument();
     expect(
+      screen.queryByRole("columnheader", { name: "本页序号" }),
+    ).not.toBeInTheDocument();
+    expect(
       screen.queryByText("当前页没有符合条件的可见导出。"),
     ).not.toBeInTheDocument();
     current = response(history([]));
@@ -460,6 +502,7 @@ describe("persisted export history DOM", () => {
     expect(
       await screen.findByText("当前页没有符合条件的可见导出。"),
     ).toBeVisible();
+    expectHistoryOrdinals([]);
   });
   it("clears old account rows and aborts ignored late history responses on actor switch", async () => {
     let resolve!: (value: Response) => void;
@@ -484,10 +527,15 @@ describe("persisted export history DOM", () => {
       />,
     );
     expect(screen.queryByText(exportFilename(id))).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("columnheader", { name: "本页序号" }),
+    ).not.toBeInTheDocument();
     expect(oldRequest[1].signal.aborted).toBe(true);
     await screen.findByText("当前页没有符合条件的可见导出。");
+    expectHistoryOrdinals([]);
     await act(async () => oldResolve(response(history())));
     expect(screen.queryByText(exportFilename(id))).not.toBeInTheDocument();
+    expectHistoryOrdinals([]);
   });
   it("rejects cross-tab actor changes and expired sessions without showing an empty success", async () => {
     const changed = vi.fn();
@@ -499,6 +547,9 @@ describe("persisted export history DOM", () => {
     clicks("刷新导出历史");
     await waitFor(() => expect(changed).toHaveBeenCalledTimes(1));
     expect(screen.queryByText(exportFilename(id))).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("columnheader", { name: "本页序号" }),
+    ).not.toBeInTheDocument();
     mounted.unmount();
     override = (url) =>
       url.startsWith("/api/audit/exports/history")
@@ -612,5 +663,91 @@ describe("persisted export history DOM", () => {
     bytes.blob = async () => ({ size: 20 }) as Blob;
     await act(async () => resolve(bytes));
     expect(anchor).not.toHaveBeenCalled();
+  });
+});
+
+describe("export history page ordinal permissions and identity", () => {
+  it("renumbers reordered rows while opening details by the original task UUID", async () => {
+    override = (url) => {
+      if (url.startsWith("/api/audit/exports/history")) {
+        const first = row("cancelled");
+        const second = row("cancelled", {
+          taskUUID: other,
+          fileName: exportFilename(other),
+        });
+        const ordered =
+          new URLSearchParams(url.split("?")[1]).get("sortTm") === "1"
+            ? [second, first]
+            : [first, second];
+        return response(history(ordered));
+      }
+      if (url.startsWith("/api/audit/exports/detail")) {
+        const result = detail();
+        return response({
+          ...result,
+          task: { ...result.task, taskUUID: other },
+        });
+      }
+    };
+    await start();
+    expectHistoryOrdinals([id, other]);
+    fill("导出创建时间排序", "1");
+    clicks("筛选导出历史");
+    await waitFor(() => expectHistoryOrdinals([other, id]));
+    const businessRow = screen.getByText(other, { exact: true }).closest("tr")!;
+    fireEvent.click(
+      within(businessRow).getByRole("button", { name: "查看导出详情" }),
+    );
+    await screen.findByLabelText("导出实际结果");
+    expect(requests("detail").at(-1)![0]).toBe(
+      `/api/audit/exports/detail?taskUUID=${other}`,
+    );
+    expect(
+      screen.queryByRole("table", { name: "导出历史记录" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows page ordinals for read-only history without exposing a denied detail action", async () => {
+    override = (url) =>
+      url === "/api/access/check"
+        ? response({
+            results: auditOperations.map((operation) =>
+              ["GET /api/audit", "GET /api/audit/exports/history"].includes(
+                operation,
+              ),
+            ),
+          })
+        : undefined;
+    await start();
+    expectHistoryOrdinals([id]);
+    expect(
+      screen.queryByRole("button", { name: "查看导出详情" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "下载 XLSX" }),
+    ).not.toBeInTheDocument();
+    expect(requests("detail")).toHaveLength(0);
+    expect(requests("download")).toHaveLength(0);
+  });
+
+  it("does not request or retain numbered history rows without its explicit permission", async () => {
+    override = (url) =>
+      url === "/api/access/check"
+        ? response({
+            results: auditOperations.map(
+              (operation) => operation !== "GET /api/audit/exports/history",
+            ),
+          })
+        : undefined;
+    render(<AuditWorkspace profile={profile} sessionChanged={vi.fn()} />);
+    await screen.findByText("当前账户没有导出历史读取权限。");
+    expect(requests("history")).toHaveLength(0);
+    expect(
+      screen.queryByRole("table", { name: "导出历史记录" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("columnheader", { name: "本页序号" }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText(exportFilename(id))).not.toBeInTheDocument();
   });
 });

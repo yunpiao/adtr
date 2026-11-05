@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { AuditRecordDetails, AuditResult } from "./audit-presentation";
 import "./audit-soc.css";
 import { ApiError, type Profile } from "./api";
@@ -263,6 +263,7 @@ function AuditList({
     [selected, setSelected] = useState<string[]>([]),
     [expanded, setExpanded] = useState<string[]>([]),
     [formError, setError] = useState("");
+  const keywordInput = useRef<HTMLInputElement>(null);
   const query = auditQuery(filter, pageIdx, pageSize);
   const read = useAuditRead(
     query,
@@ -386,16 +387,31 @@ function AuditList({
               defaultValue={filter.endTm.slice(0, 19)}
             />
           </Field>
-          <Field
-            label="审计关键词"
-            help="搜索记录中实际采集的登录用户或 IP，最多 50 个字符"
-          >
-            <input
-              name="keyword"
-              maxLength={50}
-              defaultValue={filter.keyword}
-            />
-          </Field>
+          <div className="audit-keyword-field">
+            <Field
+              label="审计关键词"
+              help="搜索记录中实际采集的登录用户或 IP，最多 50 个字符"
+            >
+              <input
+                ref={keywordInput}
+                name="keyword"
+                maxLength={50}
+                defaultValue={filter.keyword}
+              />
+            </Field>
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => {
+                if (keywordInput.current) {
+                  keywordInput.current.value = "";
+                  keywordInput.current.focus();
+                }
+              }}
+            >
+              清空审计关键词
+            </button>
+          </div>
           <Field label="审计可见性">
             <select name="visibility" defaultValue={filter.visibility}>
               <option value="visible">未隐藏记录</option>
@@ -530,6 +546,7 @@ function AuditList({
               <caption>操作审计记录</caption>
               <thead>
                 <tr>
+                  <th>本页序号</th>
                   <th>选择</th>
                   <th>ID / 可见性</th>
                   <th>登录用户 / 用户 ID</th>
@@ -541,9 +558,10 @@ function AuditList({
                 </tr>
               </thead>
               <tbody>
-                {read.data.List.map((row) => (
+                {read.data.List.map((row, index) => (
                   <Fragment key={row.ID}>
                     <tr>
+                      <td>{index + 1}</td>
                       <td>
                         {(context.can("POST /api/audit/delete") ||
                           context.can("POST /api/audit/restore")) && (
@@ -620,7 +638,7 @@ function AuditList({
                     </tr>
                     {expanded.includes(row.ID) && (
                       <tr className="audit-expanded-row">
-                        <td colSpan={8}>
+                        <td colSpan={9}>
                           <AuditRecordDetails
                             row={row}
                             close={() => {
