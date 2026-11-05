@@ -23,7 +23,14 @@ import type {
 
 // Only explicit, read-only system views may be retained. Login, MFA and
 // privileged-write proofs must never become automatic failure artifacts.
-test.use({ trace: "off", screenshot: "off", video: "off" });
+test.use({
+  trace: "off",
+  screenshot: "off",
+  video: "off",
+  // A non-UTC browser proves the fixed UTC text never becomes local time.
+  // This test-only setting does not alter the server clock or sample timestamps.
+  timezoneId: "Asia/Shanghai",
+});
 
 type Permission = {
   mark: string;
@@ -235,6 +242,103 @@ async function assertSystemTab(page: Page, label: string) {
   ).toHaveAttribute("aria-current", "page");
 }
 
+// Fixed inputs are UTC text, never browser-local datetime controls. Observe
+// real browser requests; no route fulfillment, clock freeze or sample injection.
+const utcSecond = (second: number) =>
+  new Date(second * 1000).toISOString().replace(".000Z", "Z");
+// Admit only Requests emitted after the operation begins, then require that
+// exact Request to finish. A response to an earlier poll is not a witness.
+// A new poll may still coincide with the action: this proves a new read after
+// the operation, not which callback caused it (covered independently by DOM).
+async function observeNewFixedRead(
+  page: Page,
+  start: number,
+  end: number,
+  graph: string,
+  action: () => Promise<unknown>,
+) {
+  const origin = new URL(page.url()).origin;
+  let started = false,
+    settled = false;
+  let request: Request | undefined, response: Response | undefined;
+  let finish!: (value: Response | null) => void;
+  const completed = new Promise<Response | null>((resolve) => {
+    finish = (value) => {
+      if (!settled) {
+        settled = true;
+        resolve(value);
+      }
+    };
+  });
+  const onRequest = (candidate: Request) => {
+    const url = new URL(candidate.url());
+    if (
+      started &&
+      !settled &&
+      !request &&
+      candidate.method() === "GET" &&
+      candidate.frame() === page.mainFrame() &&
+      url.origin === origin &&
+      url.pathname === "/api/system/resources/history" &&
+      url.searchParams.get("instance") === "local-api" &&
+      url.searchParams.get("graphType") === graph &&
+      url.searchParams.get("startTime") === String(start) &&
+      url.searchParams.get("endTime") === String(end)
+    )
+      request = candidate;
+  };
+  const onResponse = (candidate: Response) => {
+    if (candidate.request() === request) response = candidate;
+  };
+  const onFinished = (candidate: Request) => {
+    if (candidate === request)
+      finish(response?.status() === 200 ? response : null);
+  };
+  const onFailed = (candidate: Request) => {
+    if (candidate === request) finish(null);
+  };
+  page.on("request", onRequest);
+  page.on("response", onResponse);
+  page.on("requestfinished", onFinished);
+  page.on("requestfailed", onFailed);
+  // Same bounded observation budget as the existing native route witness.
+  const timer = setTimeout(() => finish(null), 15_000);
+  try {
+    started = true;
+    await action();
+    const result = await completed;
+    if (!result) throw new Error("New fixed history read incomplete");
+    return result;
+  } catch {
+    throw new Error("System fixed history read witness failed");
+  } finally {
+    clearTimeout(timer);
+    page.off("request", onRequest);
+    page.off("response", onResponse);
+    page.off("requestfinished", onFinished);
+    page.off("requestfailed", onFailed);
+    finish(null);
+    await completed;
+  }
+}
+
+async function applyFixedHistory(page: Page, start: number, end: number) {
+  await page.getByLabel("历史时间范围", { exact: true }).selectOption("fixed");
+  await page
+    .getByLabel("固定开始时间（UTC）", { exact: true })
+    .fill(utcSecond(start));
+  await page
+    .getByLabel("固定结束时间（UTC）", { exact: true })
+    .fill(utcSecond(end));
+  const graph = await page.getByLabel("历史指标", { exact: true }).inputValue();
+  const response = await observeNewFixedRead(page, start, end, graph, () =>
+    page.getByRole("button", { name: "应用固定时间窗", exact: true }).click(),
+  );
+  expect(response.status()).toBe(200);
+  await expect(page.getByText(/已应用：固定 UTC 时间窗/)).toBeVisible();
+  return response;
+}
+
 async function submitMutation(page: Page, path: string, button: string) {
   const [response] = await Promise.all([
     page.waitForResponse(
@@ -255,6 +359,7 @@ type SystemVisual = {
   state:
     | "healthy"
     | "history"
+    | "fixed-history"
     | "container-memory"
     | "worker-stale"
     | "recovered";
@@ -607,6 +712,8 @@ test("real browser → Linux sampler → PostgreSQL history/settings and actual 
     );
     await assertSystemTab(page, "资源与历史");
     await expect(page.getByRole("img", { name: /实际样本/ })).toBeVisible();
+    const routeEnd = Math.floor(Date.parse(current!.checkedAt) / 1000);
+    await applyFixedHistory(page, routeEnd - 900, routeEnd);
     await observeRouteRead(
       page,
       "resources-reload",
@@ -617,6 +724,13 @@ test("real browser → Linux sampler → PostgreSQL history/settings and actual 
     );
     await assertSystemTab(page, "资源与历史");
     await expect(page.getByRole("img", { name: /实际样本/ })).toBeVisible();
+    await expect(page.getByLabel("历史时间范围", { exact: true })).toHaveValue(
+      "900",
+    );
+    await expect(
+      page.getByLabel("固定开始时间（UTC）", { exact: true }),
+    ).toHaveCount(0);
+    await applyFixedHistory(page, routeEnd - 900, routeEnd);
     await observeRouteRead(
       page,
       "health-click",
@@ -642,6 +756,12 @@ test("real browser → Linux sampler → PostgreSQL history/settings and actual 
     );
     await assertSystemTab(page, "资源与历史");
     await expect(page.getByRole("img", { name: /实际样本/ })).toBeVisible();
+    await expect(page.getByLabel("历史时间范围", { exact: true })).toHaveValue(
+      "900",
+    );
+    await expect(
+      page.getByLabel("固定开始时间（UTC）", { exact: true }),
+    ).toHaveCount(0);
     await observeRouteRead(
       page,
       "health-forward",
@@ -782,7 +902,11 @@ test("real browser → Linux sampler → PostgreSQL history/settings and actual 
       await expect(card.locator('[data-state="healthy"]')).toHaveCount(0);
     },
   );
-  const endTime = Math.floor(Date.now() / 1000),
+  const historyClock: Current = await readJSON(
+    context,
+    "/api/system/resources/current?instance=local-api",
+  );
+  const endTime = Math.floor(Date.parse(historyClock.checkedAt) / 1000),
     startTime = endTime - 86400;
   const history: History = await readJSON(
     context,
@@ -837,6 +961,101 @@ test("real browser → Linux sampler → PostgreSQL history/settings and actual 
       page.getByText("仅绘制真实观测点", { exact: false }),
     ).toBeVisible();
   });
+  // Anchor to an already persisted RAM observation, not the client clock.
+  // Its one-second bucket proves inclusive start and exclusive end behavior.
+  const fixedStart = visibleHistory.info[0].data.timestamp[0],
+    fixedEnd = fixedStart + 1,
+    fixedValue = visibleHistory.info[0].data.value[0];
+  const fixedResponse = await applyFixedHistory(page, fixedStart, fixedEnd);
+  const fixedHistory = (await fixedResponse.json()) as History;
+  expect(fixedHistory.info[0].data.timestamp).toEqual([fixedStart]);
+  expect(fixedHistory.info[0].data.value).toEqual([fixedValue]);
+  expect(fixedHistory.info[0].data.dataStatistics).toEqual({
+    max: Number(fixedValue),
+    min: Number(fixedValue),
+    avg: Number(fixedValue),
+    current: Number(fixedValue),
+  });
+  const fixedQuery = new URL(fixedResponse.url()).searchParams;
+  expect(fixedQuery.get("instance")).toBe("local-api");
+  expect(fixedQuery.get("graphType")).toBe("ram_basic");
+  expect(fixedQuery.has("storageId")).toBe(false);
+  await expect(historyChart).toHaveAccessibleName(/1 个实际样本/);
+  // An edited, unapplied draft must not replace the confirmed query on refresh.
+  await page
+    .getByLabel("固定结束时间（UTC）", { exact: true })
+    .fill(utcSecond(fixedEnd + 30));
+  const fixedRefreshResponse = await observeNewFixedRead(
+    page,
+    fixedStart,
+    fixedEnd,
+    "ram_basic",
+    () =>
+      page.getByRole("button", { name: "刷新资源与历史", exact: true }).click(),
+  );
+  expect(fixedRefreshResponse.status()).toBe(200);
+  expect((await fixedRefreshResponse.json()).info).toEqual(fixedHistory.info);
+  await page
+    .getByLabel("固定结束时间（UTC）", { exact: true })
+    .fill(utcSecond(fixedEnd));
+  await captureSystemViews(
+    page,
+    testInfo,
+    "fixed-history",
+    visuals,
+    async () => {
+      await expect(page.getByText(/已应用：固定 UTC 时间窗/)).toBeVisible();
+      await expect(
+        page.getByLabel("历史时间范围", { exact: true }),
+      ).toHaveValue("fixed");
+      await expect(
+        page.getByLabel("固定开始时间（UTC）", { exact: true }),
+      ).toHaveValue(utcSecond(fixedStart));
+      await expect(
+        page.getByLabel("固定结束时间（UTC）", { exact: true }),
+      ).toHaveValue(utcSecond(fixedEnd));
+      await expect(historyChart).toHaveAccessibleName(/1 个实际样本/);
+    },
+  );
+  const excludedResponse = await applyFixedHistory(
+    page,
+    fixedStart - 1,
+    fixedStart,
+  );
+  const excluded = (await excludedResponse.json()) as History;
+  expect(excluded.info[0].data.timestamp).toEqual([]);
+  expect(excluded.info[0].data.dataStatistics).toEqual({
+    max: null,
+    min: null,
+    avg: null,
+    current: null,
+  });
+  expect(excluded.gaps).toEqual([
+    { startTime: fixedStart - 1, endTime: fixedStart },
+  ]);
+  await expect(
+    page.getByText("此范围没有真实历史样本，统计值不可用。"),
+  ).toBeVisible();
+  await applyFixedHistory(page, fixedStart, fixedEnd);
+  // After repeated submission, a new completed request uses the same window.
+  const repeatedResponse = await applyFixedHistory(page, fixedStart, fixedEnd);
+  expect((await repeatedResponse.json()).info).toEqual(fixedHistory.info);
+  const fixedDiskResponse = await observeNewFixedRead(
+    page,
+    fixedStart,
+    fixedEnd,
+    "disk_usage",
+    () =>
+      page.getByLabel("历史指标", { exact: true }).selectOption("disk_usage"),
+  );
+  expect(fixedDiskResponse.status()).toBe(200);
+  const fixedDiskQuery = new URL(fixedDiskResponse.url()).searchParams;
+  expect(fixedDiskQuery.get("startTime")).toBe(String(fixedStart));
+  expect(fixedDiskQuery.get("endTime")).toBe(String(fixedEnd));
+  expect(fixedDiskQuery.get("storageId")).toBe("runtime-root");
+  await expect(
+    page.getByRole("heading", { name: "API 文件系统使用率历史", exact: true }),
+  ).toBeVisible();
   const beforeSampling =
     Math.floor(Date.parse(history.availableSince!) / 1000) - 10;
   const empty: History = await readJSON(
@@ -944,7 +1163,9 @@ test("real browser → Linux sampler → PostgreSQL history/settings and actual 
     ).toHaveCount(0);
     await navigateTo(page, "系统健康");
     await page.getByRole("button", { name: "存储管理", exact: true }).click();
-    await expect(rootStorage.getByText("版本 1", { exact: true })).toBeVisible();
+    await expect(
+      rootStorage.getByText("版本 1", { exact: true }),
+    ).toBeVisible();
     await expect(savedThreshold).toBeVisible();
     await observeRouteRead(
       page,
@@ -955,7 +1176,9 @@ test("real browser → Linux sampler → PostgreSQL history/settings and actual 
       () => page.reload({ waitUntil: "domcontentloaded", timeout: 15_000 }),
     );
     await assertSystemTab(page, "存储管理");
-    await expect(rootStorage.getByText("版本 1", { exact: true })).toBeVisible();
+    await expect(
+      rootStorage.getByText("版本 1", { exact: true }),
+    ).toBeVisible();
     await expect(savedThreshold).toBeVisible();
     expect(navigationWrites, "read-only reload writes").toBe(0);
   } finally {
@@ -1483,6 +1706,7 @@ test("real browser → Linux sampler → PostgreSQL history/settings and actual 
     "web/playwright.config.ts",
     "web/src/SystemWorkspace.tsx",
     "web/src/system-common.tsx",
+    "web/src/system-history-window.ts",
     "web/src/system-api.ts",
     "web/src/system-soc.css",
     "web/src/App.tsx",
@@ -1508,10 +1732,11 @@ test("real browser → Linux sampler → PostgreSQL history/settings and actual 
     .update(readFileSync(`/proc/${workerPID}/exe`))
     .digest("hex");
   expect(runningWorkerSHA256).toBe(apiWorkerSHA256);
-  expect(visuals).toHaveLength(10);
+  expect(visuals).toHaveLength(12);
   for (const state of [
     "healthy",
     "history",
+    "fixed-history",
     "container-memory",
     "worker-stale",
     "recovered",
@@ -1536,6 +1761,9 @@ test("real browser → Linux sampler → PostgreSQL history/settings and actual 
     runtime: {
       node: process.version,
       browserVersion: context.browser()!.version(),
+      browserTimeZone: await page.evaluate(
+        () => Intl.DateTimeFormat().resolvedOptions().timeZone,
+      ),
       nativeStreamMode: process.env.ADTR_E2E_NATIVE_STREAM_MODE ?? null,
       apiRevision: info.version.revision,
       apiModified: info.version.modified,
@@ -1595,6 +1823,21 @@ test("real browser → Linux sampler → PostgreSQL history/settings and actual 
           .update(JSON.stringify(visibleHistory))
           .digest("hex"),
       },
+      fixedHistory: {
+        query: fixedQuery.toString(),
+        sampleCount: fixedHistory.info[0].data.timestamp.length,
+        firstSample: fixedStart,
+        endExclusive: fixedEnd,
+        statistics: fixedHistory.info[0].data.dataStatistics,
+        responseSHA256: createHash("sha256")
+          .update(JSON.stringify(fixedHistory))
+          .digest("hex"),
+        newSameWindowReadAfterRefresh: true,
+        newSameWindowReadAfterRepeatedSubmit: true,
+        exclusiveEndEmpty: true,
+        diskQuery: fixedDiskQuery.toString(),
+        navigationRestoresRolling: true,
+      },
       containerHistory: {
         graphType: containerHistory.graphType,
         availableSince: containerHistory.availableSince,
@@ -1641,7 +1884,7 @@ test("real browser → Linux sampler → PostgreSQL history/settings and actual 
       allCyclesCompletedAfterResume: true,
     },
     checks: [
-      "1440×900 and 390×844 kernel/worker-confirmed, history, container memory, stale worker and recovered views",
+      "1440×900 and 390×844 kernel/worker-confirmed, history, fixed UTC history, container memory, stale worker and recovered views",
       "no document horizontal overflow in any captured view",
       "anomaly cards include actual evidence and a handling suggestion",
       "unconfigured capabilities remain separate and never show healthy status",
