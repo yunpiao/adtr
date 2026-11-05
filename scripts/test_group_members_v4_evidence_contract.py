@@ -16,10 +16,14 @@ def specimen():
     # rows group-shaped solely for backend validator mutation tests.
     for i, obj in enumerate(backend['objects']):
         obj['kind'] = 'group' if 12 <= i < 24 else 'user' if i < 12 else 'computer'
+        number = i + 1 if i < 12 else i - 11 if i < 24 else i - 23
+        unit = {'user': 'Users', 'group': 'Groups', 'computer': 'Computers'}[obj['kind']]
+        obj['distinguishedName'] = f"CN={obj['kind']}-{number:02d},OU={unit},DC=synthetic,DC=invalid"
     import json, base64
     body = json.loads(base64.b64decode(backend['bodyBase64']))
     for stored, obj in zip(body['objects'], backend['objects']):
         stored['base']['kind'] = obj['kind']
+        stored['base']['distinguishedName'] = obj['distinguishedName']
     raw = json.dumps(body).encode()
     backend['bodyBase64'] = base64.b64encode(raw).decode()
     backend['sha256'] = hashlib.sha256(raw).hexdigest()
@@ -55,12 +59,34 @@ def specimen():
     reader = {'actorId': 3, 'producerActorId': 2, 'roleId': 'r' * 24,
               'permissions': permissions,
               'menu': [copy.deepcopy(p) for p in permissions if p['auth']['readable']],
-              'checks': [*({'method': 'GET', 'path': path, 'allowed': True} for path in v.READ_PATHS),
+              'checks': [*({'method': 'GET', 'path': path, 'allowed': True} for path in v.PRIMARY_READ_PATHS),
                          *({'method': 'POST', 'path': path, 'allowed': False} for path in v.WRITE_PATHS)],
               'provenance': copy.deepcopy(provenance),
               'before': copy.deepcopy(snapshot), 'after': copy.deepcopy(snapshot),
               'denied': [{'method': 'POST', 'path': path, 'status': 403, 'value': {'error': 'forbidden'}} for path in v.WRITE_PATHS]}
     data.update(readerUi=reader_ui, reader=reader)
+    for key, old_ui, prefix in [('rawReferences', ui, ''), ('readerRawReferences', reader_ui, 'reader-')]:
+        raw_ui = {'actorId': old_ui['actorId'], 'authorization': old_ui['authorization'], 'observationId': backend['taskUUID'], 'writes': [], 'navigationCleared': True, 'logoutCleared': True, 'cases': []}
+        for width, height in [(1440, 900), (390, 844)]:
+            for index in [0, 13, 24]:
+                obj = backend['objects'][index]
+                result = [] if index == 24 else [backend['objects'][14]]
+                query = {'domainId': q['domainId'], 'expectedRevision': '1', 'expectedCredentialRevision': '2', 'observationId': backend['taskUUID'], 'objectGUID': obj['objectGUID'], 'pageIdx': '1', 'pageSize': '25'}
+                value = {'dictionaryVersion': 4, 'selection': {'domainId': q['domainId'], 'revision': '1', 'credentialRevision': '2'}, 'observationId': backend['taskUUID'], 'source': backend['source'], 'object': obj, 'list': result, 'page': {'pageIdx': 1, 'pageSize': 25, 'total': len(result), 'totalPage': 1 if result else 0}, 'coverage': {'groupCount': 12, 'memberReturnedGroupCount': 11, 'memberNotReturnedGroupCount': 1}}
+                raw = json.dumps(value).encode()
+                witness = {'byteLength': len(raw), 'sha256': hashlib.sha256(raw).hexdigest(), 'state': 'complete', 'uncanceledEOF': True, 'eof': True, 'status': 200, 'actor': str(old_ui['actorId']), 'cache': 'no-store', 'readers': 1, 'released': 1, 'signalAborted': False, 'cancelCalls': 0, 'method': 'GET', 'path': v.references.PATH}
+                reply = {'query': [list(pair) for pair in query.items()], 'value': value, 'witness': witness}
+                name = f'group-members-v4-raw-dn-{prefix}{width}-{index}.png'
+                screenshots[name] = screenshots[f'group-members-v4-{width}-12.png']
+                raw_ui['cases'].append({'viewport': {'width': width, 'height': height}, 'reply': reply, 'reread': copy.deepcopy(reply), 'rendered': [f"{v.display(g['distinguishedName'])} · {g['objectGUID']}" for g in result], 'closed': True, 'screenshot': {'filename': name, 'sha256': hashlib.sha256(screenshots[name]).hexdigest()}})
+        for case, index in zip(raw_ui['cases'], [0, 13, 24, 0, 13, 24]):
+            case['restored'] = copy.deepcopy(case['reply'])
+            case['reopened'] = copy.deepcopy(case['reply'])
+            case['replacement'] = copy.deepcopy(case['reply'])
+            replacement = case['replacement']
+            replacement['query'] = [[key, backend['objects'][index + 1]['objectGUID'] if key == 'objectGUID' else value] for key, value in replacement['query']]
+            replacement['value'].update(object=backend['objects'][index + 1], list=[], page={'pageIdx': 1, 'pageSize': 25, 'total': 0, 'totalPage': 0})
+        data[key] = raw_ui
     return data, screenshots
 
 
@@ -132,6 +158,80 @@ class GroupMembershipEvidence(unittest.TestCase):
         with self.assertRaises(ValueError):
             v.validate(altered, altered['backend']['provenance'], altered['uiProvenance'], shots.__getitem__)
 
+    def test_raw_reference_fail_closed(self):
+        data, shots = specimen()
+        for key in ['rawReferences', 'readerRawReferences']:
+            mutations = [lambda d: d.pop(key), lambda d: d[key]['cases'].pop(),
+                         lambda d: d[key].update(actorId=99), lambda d: d[key].update(writes=['POST /api/directory/v4/sync']),
+                         lambda d: d[key].update(navigationCleared=False), lambda d: d[key].update(logoutCleared=False),
+                         lambda d: d[key]['cases'][0].update(closed=False),
+                         lambda d: d[key]['cases'][0].pop('replacement'),
+                         lambda d: d[key]['cases'][0].pop('reopened'),
+                         lambda d: d[key]['cases'][0]['restored']['value'].update(list=[]),
+                         lambda d: d[key]['cases'][0]['replacement']['value'].update(object=d['backend']['objects'][0]),
+                         lambda d: d[key]['cases'][0]['reply']['query'].append(['objectGUID', 'duplicate']),
+                         lambda d: d[key]['cases'][0]['reply']['query'].pop(),
+                         lambda d: d[key]['cases'][0]['reply']['value'].update(list=[]),
+                         lambda d: d[key]['cases'][2]['reply']['value'].update(list=[d['backend']['objects'][14]]),
+                         lambda d: d[key]['cases'][0]['reply']['value']['coverage'].update(memberNotReturnedGroupCount=0),
+                         lambda d: d[key]['cases'][0]['reply']['value']['page'].update(total=True),
+                         lambda d: d[key]['cases'][0]['reread']['value'].update(observationId='newer'),
+                         lambda d: d[key]['cases'][0].update(rendered=['invented group']),
+                         lambda d: d[key]['cases'][0]['screenshot'].update(filename='../wrong.png'),
+                         lambda d: d[key]['cases'][0]['screenshot'].update(sha256='0' * 64)]
+            for field, value in [('actor', '99'), ('cache', 'private'), ('eof', False), ('uncanceledEOF', False), ('signalAborted', True), ('cancelCalls', 1), ('readers', 2), ('released', False), ('method', 'POST'), ('path', '/api/group-assets/v4/members'), ('status', True), ('byteLength', 8388609), ('sha256', 'bad')]:
+                mutations.append(lambda d, field=field, value=value: d[key]['cases'][0]['reply']['witness'].update({field: value}))
+            for i, mutate in enumerate(mutations):
+                changed = copy.deepcopy(data)
+                mutate(changed)
+                with self.subTest(key=key, mutation=i), self.assertRaises((ValueError, KeyError)):
+                    v.validate(changed, data['backend']['provenance'], data['uiProvenance'], shots.__getitem__)
+            for case in data[key]['cases']:
+                name = case['screenshot']['filename']
+                remaining = {k: val for k, val in shots.items() if k != name}
+                with self.subTest(missing=name), self.assertRaises(KeyError):
+                    v.validate(data, data['backend']['provenance'], data['uiProvenance'], remaining.__getitem__)
+            changed = copy.deepcopy(data)
+            name = changed[key]['cases'][0]['screenshot']['filename']
+            raw = shots[name][:-12]
+            changed[key]['cases'][0]['screenshot']['sha256'] = hashlib.sha256(raw).hexdigest()
+            with self.assertRaises(ValueError):
+                v.validate(changed, data['backend']['provenance'], data['uiProvenance'], lambda n: raw if n == name else shots[n])
+
+    def test_reverse_matching_recomputes_original_body_without_dn_normalization(self):
+        import base64, json
+        data, shots = specimen()
+        for key in ['rawReferences', 'readerRawReferences']:
+            for transform in [str.lower, lambda value: ' ' + value, lambda value: value + ' ']:
+                changed = copy.deepcopy(data)
+                b = changed['backend']
+                body = json.loads(base64.b64decode(b['bodyBase64']))
+                b['objects'][0]['distinguishedName'] = transform(b['objects'][0]['distinguishedName'])
+                body['objects'][0]['base']['distinguishedName'] = b['objects'][0]['distinguishedName']
+                raw = json.dumps(body).encode()
+                b['bodyBase64'] = base64.b64encode(raw).decode()
+                b['sha256'] = hashlib.sha256(raw).hexdigest()
+                for phase in ['before', 'after']:
+                    changed['reader'][phase]['observationSha256'] = b['sha256']
+                # Rehash every duplicated claim. The stored member bytes remain
+                # original, so text-normalized invented links must still fail.
+                for case in changed[key]['cases']:
+                    for name in ['reply', 'reread', 'restored', 'reopened']:
+                        if case[name]['value']['object']['objectGUID'] == b['objects'][0]['objectGUID']:
+                            case[name]['value']['object'] = copy.deepcopy(b['objects'][0])
+                with self.subTest(key=key, transform=transform), self.assertRaises(ValueError):
+                    v.validate(changed, data['backend']['provenance'], data['uiProvenance'], shots.__getitem__)
+
+    def test_all_twenty_four_screenshots_use_existing_safe_upload(self):
+        import fnmatch
+        data, shots = specimen()
+        self.assertEqual(len(shots), 24)
+        workflow = Path('.github/workflows/ci.yml').read_text()
+        self.assertEqual(workflow.count('            web/test-results/**/group-members-v4-*.png'), 1)
+        self.assertTrue(all(fnmatch.fnmatch(name, 'group-members-v4-*.png') for name in shots))
+        for key in ['rawReferences', 'readerRawReferences']:
+            self.assertEqual(len(data[key]['cases']), 6)
+
     def test_valid_contract_specimen(self):
         data, shots = specimen()
         v.validate(data, data['backend']['provenance'], data['uiProvenance'], shots.__getitem__)
@@ -187,7 +287,7 @@ class GroupMembershipEvidence(unittest.TestCase):
             ('missing menu', lambda d: d['reader']['menu'].pop()),
             ('extra menu', lambda d: d['reader']['menu'].append(d['reader']['permissions'][0])),
             ('missing check', lambda d: d['reader']['checks'].pop()),
-            ('write allowed', lambda d: d['reader']['checks'][4].update(allowed=True)),
+            ('write allowed', lambda d: d['reader']['checks'][len(v.PRIMARY_READ_PATHS)].update(allowed=True)),
             ('nonboolean check', lambda d: d['reader']['checks'][0].update(allowed=1)),
             ('wrong check route', lambda d: d['reader']['checks'][0].update(path='/api/domain-selection/options')),
             ('missing denial', lambda d: d['reader']['denied'].pop()),

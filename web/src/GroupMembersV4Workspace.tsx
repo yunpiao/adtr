@@ -13,6 +13,11 @@ import {
   type GroupMembersV4Page,
   type GroupMembersV4PageQuery,
 } from "./group-members-v4-read";
+import type {
+  RawDNReferencesV4,
+  RawDNReferencesV4Query,
+} from "./raw-dn-references-v4-api";
+import type { DirectoryV4Object } from "./directory-v4-facts";
 import { listenForSessionInvalidation } from "./session-invalidation";
 
 type Props = { profile: Profile; sessionChanged: () => void };
@@ -33,6 +38,10 @@ function Workspace({ profile, sessionChanged }: Props) {
     [picker, setPicker] = useState(0);
   const [page, setPage] = useState<GroupMembersV4Page | null>(null),
     [detail, setDetail] = useState<GroupMembersV4 | null>(null);
+  const [kind, setKind] = useState<"user" | "group" | "computer">("group");
+  const [references, setReferences] = useState<RawDNReferencesV4 | null>(null);
+  const [referencesBusy, setReferencesBusy] = useState(false);
+  const referencesQuery = useRef<RawDNReferencesV4Query | null>(null);
   const [detailBusy, setDetailBusy] = useState(false);
   const sourceRef = useRef<ResolvedSource | null>(null),
     query = useRef<GroupMembersV4PageQuery | null>(null),
@@ -48,6 +57,9 @@ function Workspace({ profile, sessionChanged }: Props) {
     detailGeneration.current++;
     detailAbort.current?.abort();
     setDetail(null);
+    setReferences(null);
+    setReferencesBusy(false);
+    referencesQuery.current = null;
     setDetailBusy(false);
   };
   const stopSource = () => {
@@ -83,6 +95,64 @@ function Workspace({ profile, sessionChanged }: Props) {
       (e.status === 409 || e.code === "selection_changed")
     )
       clearSource();
+  };
+  const readReferences = async (
+    q: RawDNReferencesV4Query,
+    target: DirectoryV4Object,
+    expectedSource: RawDNReferencesV4["source"],
+  ) => {
+    stopDetail();
+    detailQuery.current = null;
+    referencesQuery.current = q;
+    setReferencesBusy(true);
+    setNotice("");
+    const generation = detailGeneration.current,
+      domain = domainGeneration.current,
+      selected = sourceGeneration.current,
+      abort = new AbortController();
+    detailAbort.current = abort;
+    try {
+      const value = await api.references(
+        q,
+        sourceRef.current!.selection,
+        profile,
+        abort.signal,
+      );
+      if (
+        abort.signal.aborted ||
+        generation !== detailGeneration.current ||
+        domain !== domainGeneration.current ||
+        selected !== sourceGeneration.current
+      )
+        return;
+      // A response must agree with the exact saved object and source that the
+      // user selected, not merely reuse its GUID and observation identifier.
+      if (
+        Object.keys(expectedSource).some(
+          (k) =>
+            value.source[k as keyof typeof expectedSource] !==
+            expectedSource[k as keyof typeof expectedSource],
+        ) ||
+        Object.keys(target).some(
+          (k) =>
+            JSON.stringify(value.object[k as keyof DirectoryV4Object]) !==
+            JSON.stringify(target[k as keyof DirectoryV4Object]),
+        )
+      )
+        throw new ApiError("invalid_response");
+      setReferences(value);
+      setReferencesBusy(false);
+    } catch (e) {
+      if (
+        !abort.signal.aborted &&
+        generation === detailGeneration.current &&
+        domain === domainGeneration.current &&
+        selected === sourceGeneration.current
+      ) {
+        setReferencesBusy(false);
+        failure(e);
+      }
+    }
   };
   const readDetail = async (q: GroupMembersV4Query) => {
     stopDetail();
@@ -206,6 +276,7 @@ function Workspace({ profile, sessionChanged }: Props) {
     });
     window.addEventListener("focus", focus);
     window.addEventListener("blur", hide);
+    window.addEventListener("popstate", hide);
     document.addEventListener("visibilitychange", visibility);
     return () => {
       domainGeneration.current++;
@@ -217,6 +288,7 @@ function Workspace({ profile, sessionChanged }: Props) {
       invalidation.close();
       window.removeEventListener("focus", focus);
       window.removeEventListener("blur", hide);
+      window.removeEventListener("popstate", hide);
       document.removeEventListener("visibilitychange", visibility);
     };
   }, []);
@@ -233,6 +305,12 @@ function Workspace({ profile, sessionChanged }: Props) {
       <p>
         member
         不包含仅通过主组关联的成员；未做嵌套展开、目标查询或跨域完整性判断。
+      </p>
+      <p>
+        “引用此 DN 原文的组”仅逐字匹配同一观测保存的 DN
+        文本，不做大小写、空白或转义等价处理，不解析
+        memberOf、嵌套、主组或跨域关系。同 DN 可能对应多个
+        GUID；原始采集不是事务快照。
       </p>
       {notice && <p role="alert">{notice}</p>}
       {busy && <p role="status">正在核对权限或读取原观测…</p>}
@@ -251,6 +329,7 @@ function Workspace({ profile, sessionChanged }: Props) {
             void readPage(
               {
                 domainId: selected.selection.domainId,
+                kind,
                 pageIdx: 1,
                 pageSize: 25,
               },
@@ -280,6 +359,32 @@ function Workspace({ profile, sessionChanged }: Props) {
               重读原观测
             </button>
           )}
+          <label>
+            对象类别{" "}
+            <select
+              aria-label="对象类别"
+              value={kind}
+              disabled={busy}
+              onChange={(e) => {
+                const next = e.target.value as typeof kind;
+                setKind(next);
+                void readPage(
+                  {
+                    ...query.current!,
+                    domainId: source.selection.domainId,
+                    kind: next,
+                    pageIdx: 1,
+                    pageSize: query.current?.pageSize ?? 25,
+                  },
+                  source,
+                );
+              }}
+            >
+              <option value="group">组</option>
+              <option value="user">用户</option>
+              <option value="computer">计算机</option>
+            </select>
+          </label>
           {page && !page.available && (
             <p role="status">
               暂无可读取的字典 4
@@ -303,36 +408,66 @@ function Workspace({ profile, sessionChanged }: Props) {
                 <dd>{display(page.source!.completed_at)}</dd>
               </dl>
               {page.list.length === 0 && (
-                <p role="status">本页观测未返回组对象；成员情况未知。</p>
+                <p role="status">
+                  {kind === "group"
+                    ? "本页观测未返回组对象；成员情况未知。"
+                    : "本页观测未返回所选类别对象。"}
+                </p>
               )}
-              <ul aria-label="本次观测的组">
+              <ul
+                aria-label={
+                  kind === "group" ? "本次观测的组" : "本次观测的对象"
+                }
+              >
                 {page.list.map((row) => (
                   <li key={row.objectGUID}>
                     <span>
                       {display(row.samAccountName ?? row.distinguishedName)}
                     </span>{" "}
                     <span>{row.objectGUID}</span>{" "}
+                    {row.kind === "group" && (
+                      <button
+                        onClick={() =>
+                          void readDetail({
+                            domainId: source.selection.domainId,
+                            expectedRevision: source.selection.revision,
+                            expectedCredentialRevision:
+                              source.selection.credentialRevision,
+                            observationId: page.observationId!,
+                            objectGUID: row.objectGUID,
+                          })
+                        }
+                      >
+                        查看原始成员
+                      </button>
+                    )}
                     <button
                       onClick={() =>
-                        void readDetail({
-                          domainId: source.selection.domainId,
-                          expectedRevision: source.selection.revision,
-                          expectedCredentialRevision:
-                            source.selection.credentialRevision,
-                          observationId: page.observationId!,
-                          objectGUID: row.objectGUID,
-                        })
+                        void readReferences(
+                          {
+                            domainId: source.selection.domainId,
+                            expectedRevision: source.selection.revision,
+                            expectedCredentialRevision:
+                              source.selection.credentialRevision,
+                            observationId: page.observationId!,
+                            objectGUID: row.objectGUID,
+                            pageIdx: 1,
+                            pageSize: 25,
+                          },
+                          row,
+                          page.source!,
+                        )
                       }
                     >
-                      查看原始成员
+                      引用此 DN 原文的组
                     </button>
                   </li>
                 ))}
               </ul>
               <label>
-                每页组数{" "}
+                {kind === "group" ? "每页组数" : "每页对象数"}{" "}
                 <select
-                  aria-label="每页组数"
+                  aria-label={kind === "group" ? "每页组数" : "每页对象数"}
                   value={query.current?.pageSize}
                   onChange={(e) =>
                     void readPage(
@@ -363,7 +498,9 @@ function Workspace({ profile, sessionChanged }: Props) {
               </button>
               <span>
                 第 {page.page.pageIdx} 页 · 共 {page.page.totalPage}{" "}
-                页（仅本次观测中的组）
+                页（仅本次观测中的
+                {kind === "group" ? "组" : kind === "user" ? "用户" : "计算机"}
+                ）
               </span>
               <button
                 disabled={page.page.pageIdx >= page.page.totalPage}
@@ -377,6 +514,111 @@ function Workspace({ profile, sessionChanged }: Props) {
                 下一页
               </button>
             </>
+          )}
+          {(referencesBusy || references) && (
+            <button
+              onClick={() => {
+                stopDetail();
+                detailQuery.current = null;
+              }}
+            >
+              关闭 DN 原文引用
+            </button>
+          )}
+          {referencesBusy && <p role="status">正在读取 DN 原文引用…</p>}
+          {references && (
+            <section aria-label="引用此 DN 原文的组">
+              <h3>引用此 DN 原文的组</h3>
+              <p>目标 DN：{display(references.object.distinguishedName)}</p>
+              <p>
+                对象 GUID：{references.object.objectGUID} · 观测编号：
+                {display(references.observationId)}
+              </p>
+              <p>
+                本观测组数：{references.coverage.groupCount}；member
+                已返回的组：{references.coverage.memberReturnedGroupCount}
+                ；member 未返回的组：
+                {references.coverage.memberNotReturnedGroupCount}
+                （引用情况未知）。
+              </p>
+              {references.page.total === 0 && (
+                <p>本观测未发现完全相同的 DN 文本引用</p>
+              )}
+              <ul aria-label="DN 原文引用组列表">
+                {references.list.map((row) => (
+                  <li key={row.objectGUID}>
+                    {display(row.distinguishedName)} · {row.objectGUID}
+                  </li>
+                ))}
+              </ul>
+              <label>
+                每页引用组数{" "}
+                <select
+                  aria-label="每页引用组数"
+                  value={references.page.pageSize}
+                  onChange={(e) =>
+                    void readReferences(
+                      {
+                        ...referencesQuery.current!,
+                        pageIdx: 1,
+                        pageSize: Number(e.target.value),
+                      },
+                      references.object,
+                      references.source,
+                    )
+                  }
+                >
+                  {[25, 50, 100].map((n) => (
+                    <option key={n}>{n}</option>
+                  ))}
+                </select>
+              </label>
+              <button
+                disabled={references.page.pageIdx <= 1}
+                onClick={() =>
+                  void readReferences(
+                    {
+                      ...referencesQuery.current!,
+                      pageIdx: references.page.pageIdx - 1,
+                    },
+                    references.object,
+                    references.source,
+                  )
+                }
+              >
+                引用组上一页
+              </button>
+              <span>
+                引用组第 {references.page.pageIdx} 页 · 共{" "}
+                {references.page.totalPage} 页
+              </span>
+              <button
+                disabled={references.page.pageIdx >= references.page.totalPage}
+                onClick={() =>
+                  void readReferences(
+                    {
+                      ...referencesQuery.current!,
+                      pageIdx: references.page.pageIdx + 1,
+                    },
+                    references.object,
+                    references.source,
+                  )
+                }
+              >
+                引用组下一页
+              </button>
+              <button
+                onClick={() =>
+                  void readReferences(
+                    referencesQuery.current!,
+                    references.object,
+                    references.source,
+                  )
+                }
+              >
+                重读 DN 原文引用
+              </button>
+            </section>
           )}
           {(detailBusy || detail) && (
             <button

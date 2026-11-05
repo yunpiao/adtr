@@ -6,6 +6,14 @@ import { navigateTo } from "./navigation";
 import { groupMembersV4ResponseJSON } from "./group-members-v4-response-observer";
 
 export const membershipSources = [
+  "cmd/adtr/main.go",
+
+  "web/e2e/raw-dn-references-v4-helpers.ts",
+  "scripts/validate_raw_dn_references_v4_evidence.py",
+  "web/src/raw-dn-references-v4-api.ts",
+  "internal/domains/raw_dn_references_v4.go",
+  "internal/auth/raw_dn_references_v4_http.go",
+
   "web/e2e/group-members-v4-response-observer.ts",
   "web/src/GroupMembersV4Observer.test.ts",
   "web/e2e/group-members-v4.spec.ts",

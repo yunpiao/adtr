@@ -643,3 +643,13 @@ Refs #50 / AD-F-158 / DTL-036。迁移18新增有界冻结目标、原接受回�
   停后新出现 spectoken 立即失败并 CONT 清理，不循环解冻重试；严格冻结 validator、checkpoint 时序及 SQL 白名单原文不变。
 - 严格离线 82 项契约通过：两模式/两 granted 布尔、token 边界、非法形态、三种导出瞬态→ready、持续超时、停后 race、
   后续坏样本不被遮蔽、候选 task 身份/租约失败优先以及原关键函数 SHA256 保真。真实行为等待新 head CI 验证。
+
+
+## Issue #284：同观测 DN 原文反向组引用（提交前本地验证）
+
+- 需求：#30 / AD-F-043，原工作簿第47行及 FLD-0481–0488；仅把现有 dictionary4 保存对象 DN 与同观测 group 原始 member 逐字反向查询接通 API/UI。契约见 `docs/raw-dn-references-v4-contract.md`。
+- 基线：main `cacd8395105134da227743d70cb3d77f4838c00f`，tree `1db328a3bbb8f8a9c3a58a7380f7ec48dcbe7d14`。2026-11-05 本地 Go 1.27.1 的 domains/auth 测试通过，前端现有定向基线2文件58测试通过；Node 24.22.1。
+- 2026-11-05 首轮完整 `make check` 的1205项Python与业务Go race通过，源码证书按设计拒绝新增handler/domain和main/access变化。源码独审后仅更新两套完整生产源证书的4路径及wiring证书main一行；checker、白名单、CompleteWorkerClosure=false和CI预算不变。default282与CI293源集合已独立逐项核验，首轮失败保留。
+- 第二轮完整 `make check` 通过：1205项Python、全部Go race/vet/build、严格TypeScript/build、108文件5069项Vitest、npm audit 0漏洞。另有独立128项成员证据合同和新Go边界复核；所有27个变更文件经独立源码复审。
+- 提交前本地没有 Docker，真实 PostgreSQL、Worker、TLS LDAP 和浏览器链路未运行。既有group-members-v4 suite新增强制12PNG、同Response采证与保存body独立oracle，原12PNG保留；workflow及其hash守卫零改动。后续结果以精确head CI与实际24PNG/manifest独审记录为准，不把本段当真实链路验收。
+- 原组→成员流程保留；不新增采集/schema/生产授权，不解析DN等价、嵌套/主组，不声称完整memberOf或当前目录身份关系。未知member和重复DN保留明确边界。209/57/3258/804及0/209产品验收不变，原#30不关闭。

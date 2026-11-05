@@ -94,7 +94,7 @@ beforeEach(() => vi.stubGlobal("location", new URL(origin)));
 afterEach(() => vi.unstubAllGlobals());
 
 describe("passive bounded directory browser response observer", () => {
-  it.each(["/api/directory/v4/observation", "/api/group-assets/v4/members"])(
+  it.each(["/api/directory/v4/observation", "/api/group-assets/v4/members", "/api/directory-assets/v4/raw-dn-references"])(
     "observes original bounded-reader bytes for %s",
     async (route) => {
       const text = JSON.stringify({
@@ -117,6 +117,17 @@ describe("passive bounded directory browser response observer", () => {
         signalAborted: false,
       });
       expect(fetch).toHaveBeenCalledExactlyOnceWith(route);
+    },
+  );
+  it.each(["POST", "PUT", "DELETE"])(
+    "does not observe reverse-reference %s",
+    async (method) => {
+      const route = "/api/directory-assets/v4/raw-dn-references";
+      const native = response('{"dictionaryVersion":4}');
+      install(vi.fn(() => Promise.resolve(native)));
+      const result = await window.fetch(route, { method });
+      await readDirectoryV2JSON(result, signal());
+      expect(observer().count(`${method} ${origin}${route}`)).toBe(0);
     },
   );
   it("returns the original fetch/read promises, response, reader and read result", async () => {
@@ -361,7 +372,7 @@ describe("passive bounded directory browser response observer", () => {
 });
 
 describe("v4-only host path allowlist", () => {
-  it.each(["/api/directory/v4/observation", "/api/group-assets/v4/members"])(
+  it.each(["/api/directory/v4/observation", "/api/group-assets/v4/members", "/api/directory-assets/v4/raw-dn-references"])(
     "includes exact %s",
     (path) => {
       expect(groupMembersV4ObservedPath(new URL(path, origin))).toBe(true);
@@ -371,6 +382,9 @@ describe("v4-only host path allowlist", () => {
     "/api/directory/v4/sync",
     "/api/directory/v4/observation/",
     "/api/group-assets/v4/members/extra",
+    "/api/directory-assets/v4/raw-dn-references/",
+    "/api/directory-assets/v4/raw-dn-references/extra",
+    "/api/directory-assets/v3/raw-dn-references",
     "/api/directory/v3/observation",
     "/api/auth/me",
   ])("excludes %s", (path) => {
@@ -501,10 +515,15 @@ describe("v4 native host binding", () => {
     expect(h.fetch).toHaveBeenCalledTimes(2);
   });
   it.each([
+    ["POST", "/api/directory-assets/v4/raw-dn-references"],
+    ["PUT", "/api/directory-assets/v4/raw-dn-references"],
+    ["GET", "/api/directory-assets/v4/raw-dn-references/"],
+    ["GET", "/api/directory-assets/v4/raw-dn-references/extra"],
+    ["GET", "https://other.test/api/directory-assets/v4/raw-dn-references"],
     ["GET", "/api/access/check"], ["POST", "/api/access/check/"],
     ["POST", "/api/access/check?extra=1"], ["POST", "/api/access/check/other"],
     ["POST", "https://other.test/api/access/check"],
-  ])("does not admit access route %s %s outside its exact same-origin POST scope", async (method, route) => {
+  ])("does not admit %s %s outside its exact route/method/origin scope", async (method, route) => {
     const h = await harness(route, { method });
     await readDirectoryV2JSON(await window.fetch(route, { method }), signal());
     expect(observer().count(`${method} ${new URL(route, origin).href}`)).toBe(0);
@@ -572,7 +591,7 @@ describe("v4 native host binding", () => {
     }
   });
 
-  it.each(["/api/directory/v4/observation", "/api/group-assets/v4/members"])(
+  it.each(["/api/directory/v4/observation", "/api/group-assets/v4/members", "/api/directory-assets/v4/raw-dn-references"])(
     "binds exact native bytes for %s and installs once",
     async (route) => {
       const h = await harness(route);

@@ -59,6 +59,7 @@ export function installGroupMembersV4ResponseObserver() {
   const paths = new Set([
     "/api/directory/v4/observation",
     "/api/group-assets/v4/members",
+    "/api/directory-assets/v4/raw-dn-references",
   ]);
   const originalFetch = window.fetch;
   window.fetch = function (...args: Parameters<typeof fetch>) {
@@ -77,8 +78,20 @@ export function installGroupMembersV4ResponseObserver() {
         return pending;
       }
       const method = (init?.method ?? request?.method ?? "GET").toUpperCase();
-      const accessCheck = method === "POST" && url.pathname === "/api/access/check" && !url.search && !url.hash;
-      if (url.origin !== location.origin || !(paths.has(url.pathname) || accessCheck))
+      if (
+        url.pathname === "/api/directory-assets/v4/raw-dn-references" &&
+        method !== "GET"
+      )
+        return pending;
+      const accessCheck =
+        method === "POST" &&
+        url.pathname === "/api/access/check" &&
+        !url.search &&
+        !url.hash;
+      if (
+        url.origin !== location.origin ||
+        !(paths.has(url.pathname) || accessCheck)
+      )
         return pending;
       if (recordCount >= 2048) {
         capacityFailed = true;
@@ -433,15 +446,23 @@ const documents = new WeakMap<
   { epoch: string; counts: Map<string, number> }
 >();
 export const groupMembersV4ObservedPath = (url: URL) =>
-  ["/api/directory/v4/observation", "/api/group-assets/v4/members"].includes(
-    url.pathname,
-  );
+  [
+    "/api/directory/v4/observation",
+    "/api/group-assets/v4/members",
+    "/api/directory-assets/v4/raw-dn-references",
+  ].includes(url.pathname);
 const directoryPath = groupMembersV4ObservedPath;
-const observedRequest = (url: URL, method: string) => directoryPath(url) ||
-  (method === "POST" && url.pathname === "/api/access/check" && !url.search && !url.hash);
+const observedRequest = (url: URL, method: string) =>
+  (directoryPath(url) &&
+    (url.pathname !== "/api/directory-assets/v4/raw-dn-references" ||
+      method === "GET")) ||
+  (method === "POST" &&
+    url.pathname === "/api/access/check" &&
+    !url.search &&
+    !url.hash);
 const observedResponse = (response: Response) => {
   const url = new URL(response.url());
-  return directoryPath(url) || (url.pathname === "/api/access/check" && observedRequest(url, response.request().method()));
+  return observedRequest(url, response.request().method());
 };
 
 export async function observeGroupMembersV4Responses(context: BrowserContext) {
