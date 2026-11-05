@@ -366,6 +366,94 @@ async function openAuditFilters(page: Page) {
     await details.getByText("更多筛选与分页设置", { exact: true }).click();
 }
 
+async function expectAuditPageOrdinals(page: Page, ids: string[]) {
+  const table = page.getByRole("table", { name: "操作审计记录", exact: true });
+  await expect(table.getByRole("columnheader").first()).toHaveText("本页序号");
+  const rows = table.locator("tbody > tr:not(.audit-expanded-row)");
+  await expect(rows).toHaveCount(ids.length);
+  for (const [index, id] of ids.entries()) {
+    await expect(rows.nth(index).getByRole("cell").first()).toHaveText(
+      String(index + 1),
+    );
+    await expect(
+      rows.nth(index).locator("button.audit-record-toggle"),
+    ).toHaveAttribute("id", `audit-record-toggle-${id}`);
+  }
+}
+
+async function verifyAuditKeywordDraftClear(page: Page) {
+  await openAuditFilters(page);
+  const form = page.locator("form.audit-filter-form");
+  const keyword = page.getByLabel("审计关键词", { exact: true });
+  const start = page.getByLabel("开始时间（UTC）", { exact: true });
+  const end = page.getByLabel("结束时间（UTC）", { exact: true });
+  const sort = page.getByLabel("审计排序", { exact: true });
+  const size = page.getByLabel("每页审计数", { exact: true });
+  const original = {
+    keyword: await keyword.inputValue(),
+    start: await start.inputValue(),
+    end: await end.inputValue(),
+    sort: await sort.inputValue(),
+    size: await size.inputValue(),
+  };
+  const table = page.getByRole("table", { name: "操作审计记录", exact: true });
+  const beforeRows = await table.innerText();
+  const requests: string[] = [];
+  const record = (request: Request) => {
+    const path = new URL(request.url()).pathname;
+    if (path.startsWith("/api/")) requests.push(`${request.method()} ${path}`);
+  };
+  page.on("request", record);
+  try {
+    await keyword.fill("  synthetic clear draft  ");
+    await start.fill("2026-09-01T00:00");
+    await end.fill("2026-10-01T00:00");
+    await sort.selectOption("1");
+    await size.selectOption("10");
+    const draft = await form.evaluate((node) =>
+      Array.from(new FormData(node as HTMLFormElement).entries()),
+    );
+    const clear = page.getByRole("button", {
+      name: "清空审计关键词",
+      exact: true,
+    });
+    await clear.focus();
+    await page.keyboard.press("Enter");
+    await expect(keyword).toHaveValue("");
+    await expect(keyword).toBeFocused();
+    expect(
+      await form.evaluate((node) =>
+        Array.from(new FormData(node as HTMLFormElement).entries()),
+      ),
+    ).toEqual(
+      draft.map(([key, value]) => [key, key === "keyword" ? "" : value]),
+    );
+    expect(await table.innerText()).toBe(beforeRows);
+    await clear.click();
+    await expect(keyword).toHaveValue("");
+    await expect(keyword).toBeFocused();
+    expect(requests).toEqual([]);
+    return {
+      viewport: page.viewportSize(),
+      keywordOnly: true,
+      unchangedRenderedRows: true,
+      returnedFocus: true,
+      apiRequests: 0,
+    };
+  } finally {
+    page.off("request", record);
+    await keyword.fill(original.keyword);
+    await start.fill(original.start);
+    await end.fill(original.end);
+    await sort.selectOption(original.sort);
+    await size.selectOption(original.size);
+    await page
+      .locator(".audit-advanced-filters")
+      .getByText("更多筛选与分页设置", { exact: true })
+      .click();
+  }
+}
+
 async function filteredAudit(
   page: Page,
   keyword: string,
@@ -681,7 +769,9 @@ async function verifyTaskOriginalExport(
     ).toBe(downloadPath);
     await page.goBack();
     await expect(identity).toHaveText(taskUUID);
-    await page.getByRole("button", { name: "返回任务列表", exact: true }).click();
+    await page
+      .getByRole("button", { name: "返回任务列表", exact: true })
+      .click();
     await expect(selection).toBeFocused();
     expect(
       await page.evaluate(
@@ -769,6 +859,12 @@ test("real browser audit history, visibility, XLSX worker export and persisted r
   let exportDownloadPath = "";
   const exportIDs: string[] = [];
   const taskLinkVisuals: AuditVisual[] = [];
+  const queryControlVisuals: AuditVisual[] = [];
+  const keywordClearChecks: Awaited<
+    ReturnType<typeof verifyAuditKeywordDraftClear>
+  >[] = [];
+  const historyOrdinalChecks: { taskIDs: string[]; ordinals: number[] }[] = [];
+  let initialAuditIDs: string[] = [];
   const taskLinkResults: Awaited<
     ReturnType<typeof verifyTaskOriginalExport>
   >[] = [];
@@ -781,12 +877,23 @@ test("real browser audit history, visibility, XLSX worker export and persisted r
   });
 
   await test.step("server-captured history, missing metadata, filters and input boundaries", async () => {
-    await navigateTo(page, "操作审计");
+    const [initialResponse] = await Promise.all([
+      page.waitForResponse(
+        (response) =>
+          new URL(response.url()).pathname === "/api/audit" &&
+          response.request().method() === "GET",
+      ),
+      navigateTo(page, "操作审计"),
+    ]);
+    expect(initialResponse.status()).toBe(200);
+    const initialPage = (await initialResponse.json()) as AuditList;
+    initialAuditIDs = initialPage.List.map((row) => row.ID);
     const table = page.getByRole("table", {
       name: "操作审计记录",
       exact: true,
     });
     await expect(table).toBeVisible();
+    await expectAuditPageOrdinals(page, initialAuditIDs);
     await test.step("SOC desktop and mobile inline audit fields use actual persisted rows", async () => {
       const visuals: AuditVisual[] = [];
       await page.setViewportSize({ width: 1440, height: 900 });
@@ -827,6 +934,9 @@ test("real browser audit history, visibility, XLSX worker export and persisted r
       const row = persisted.List.find((item) => item.ID === id);
       expect(row).toBeDefined();
       await expect(fields.locator("pre")).toHaveText(row!.eventArgs);
+      keywordClearChecks.push(await verifyAuditKeywordDraftClear(page));
+      await expect(fields).toBeVisible();
+      await expectAuditPageOrdinals(page, initialAuditIDs);
       await captureAuditView(
         page,
         testInfo,
@@ -861,6 +971,9 @@ test("real browser audit history, visibility, XLSX worker export and persisted r
         await page.evaluate(() => document.documentElement.scrollWidth),
       ).toBeLessThanOrEqual(390);
       await fields.scrollIntoViewIfNeeded();
+      keywordClearChecks.push(await verifyAuditKeywordDraftClear(page));
+      await expect(fields).toBeVisible();
+      await expectAuditPageOrdinals(page, initialAuditIDs);
       await captureAuditView(
         page,
         testInfo,
@@ -893,6 +1006,7 @@ test("real browser audit history, visibility, XLSX worker export and persisted r
           .update(readFileSync(resolve(root, file)))
           .digest("hex");
       expect(visuals).toHaveLength(4);
+      queryControlVisuals.push(...visuals);
       const frontendAssets = readdirSync(resolve(root, "web/dist/assets"), {
         withFileTypes: true,
       });
@@ -1414,6 +1528,43 @@ test("real browser audit history, visibility, XLSX worker export and persisted r
         .getByRole("table", { name: "导出历史记录", exact: true })
         .getByRole("row")
         .filter({ hasText: created.taskUUID });
+      const historyTable = page.getByRole("table", {
+        name: "导出历史记录",
+        exact: true,
+      });
+      await expect(historyTable.getByRole("columnheader").first()).toHaveText(
+        "本页序号",
+      );
+      await expect(historyTable.locator("tbody > tr")).toHaveCount(
+        history.list.length,
+      );
+      for (const [index, record] of history.list.entries()) {
+        const displayed = historyTable.locator("tbody > tr").nth(index);
+        await expect(displayed.getByRole("cell").first()).toHaveText(
+          String(index + 1),
+        );
+        await expect(displayed).toContainText(record.taskUUID);
+      }
+      historyOrdinalChecks.push({
+        taskIDs: history.list.map((record) => record.taskUUID),
+        ordinals: history.list.map((_, index) => index + 1),
+      });
+      if (exportIDs.length === 2) {
+        for (const viewport of [
+          { width: 1440, height: 900 },
+          { width: 390, height: 844 },
+        ]) {
+          await page.setViewportSize(viewport);
+          await historyTable.scrollIntoViewIfNeeded();
+          await captureAuditView(
+            page,
+            testInfo,
+            `audit-soc-history-ordinals-${viewport.width}.png`,
+            queryControlVisuals,
+          );
+        }
+        await page.setViewportSize({ width: 1440, height: 900 });
+      }
       await expect(historyRow).toContainText(saved.fileName);
       await expect(historyRow).toContainText("Audit");
       await expect(historyRow).toContainText(/xlsx/i);
@@ -1704,14 +1855,17 @@ test("real browser audit history, visibility, XLSX worker export and persisted r
     });
     expect(assets.length).toBeGreaterThan(0);
     expect(assets.every((entry) => entry.isFile())).toBe(true);
-    const manifestPath = testInfo.outputPath("audit-soc-task-link-evidence.json");
+    const manifestPath = testInfo.outputPath(
+      "audit-soc-task-link-evidence.json",
+    );
     writeFileSync(
       manifestPath,
       JSON.stringify(
         {
           formatVersion: 1,
           suite: "audit",
-          chain: "task detail → original audit detail → authorized original XLSX",
+          chain:
+            "task detail → original audit detail → authorized original XLSX",
           recordedAt: new Date().toISOString(),
           checkoutCommit: execFileSync("git", ["rev-parse", "HEAD"], {
             encoding: "utf8",
@@ -1766,6 +1920,71 @@ test("real browser audit history, visibility, XLSX worker export and persisted r
     );
     await testInfo.attach("audit-soc-task-link-evidence", {
       path: manifestPath,
+      contentType: "application/json",
+    });
+    expect(keywordClearChecks).toHaveLength(2);
+    expect(historyOrdinalChecks).toHaveLength(2);
+    expect(queryControlVisuals).toHaveLength(6);
+    const queryControlsPath = testInfo.outputPath(
+      "audit-soc-query-controls-evidence.json",
+    );
+    writeFileSync(
+      queryControlsPath,
+      JSON.stringify(
+        {
+          formatVersion: 1,
+          suite: "audit",
+          issue: 278,
+          chain:
+            "authorized audit rows → page ordinals and draft-only keyword clear",
+          checkoutCommit: execFileSync("git", ["rev-parse", "HEAD"], {
+            encoding: "utf8",
+          }).trim(),
+          tree: execFileSync("git", ["rev-parse", "HEAD^{tree}"], {
+            encoding: "utf8",
+          }).trim(),
+          dirty:
+            execFileSync("git", ["status", "--porcelain"], {
+              encoding: "utf8",
+            }).trim() !== "",
+          workflowCommit: process.env.GITHUB_SHA ?? null,
+          workflowRun: process.env.GITHUB_RUN_ID ?? null,
+          workflowAttempt: process.env.GITHUB_RUN_ATTEMPT ?? null,
+          sourceSHA256: Object.fromEntries(
+            [
+              "web/e2e/audit.spec.ts",
+              "web/src/AuditWorkspace.tsx",
+              "web/src/AuditHistory.tsx",
+              "web/src/audit-soc.css",
+              "web/src/audit-common.tsx",
+              "web/src/audit-api.ts",
+              "web/src/audit-history.ts",
+              "web/package-lock.json",
+              ".github/workflows/ci.yml",
+            ].map((file) => [file, hashFile(file)]),
+          ),
+          artifactsSHA256: {
+            apiWorker: hashFile("bin/adtr"),
+            frontendEntry: hashFile("web/dist/index.html"),
+          },
+          frontendAssetsSHA256: Object.fromEntries(
+            assets.map((entry) => {
+              const file = `web/dist/assets/${entry.name}`;
+              return [file, hashFile(file)];
+            }),
+          ),
+          initialAuditIDs,
+          initialAuditOrdinals: initialAuditIDs.map((_, index) => index + 1),
+          keywordClearChecks,
+          historyOrdinalChecks,
+          screenshots: queryControlVisuals,
+        },
+        null,
+        2,
+      ) + "\n",
+    );
+    await testInfo.attach("audit-soc-query-controls-evidence", {
+      path: queryControlsPath,
       contentType: "application/json",
     });
     await page
@@ -1926,9 +2145,18 @@ test("real browser audit history, visibility, XLSX worker export and persisted r
       },
       { mark: "system_logs", auth: { readable: false, writeable: false } },
       { mark: "directory_assets", auth: { readable: false, writeable: false } },
-      { mark: "user_asset_exports", auth: { readable: false, writeable: false } },
-      { mark: "group_asset_exports", auth: { readable: false, writeable: false } },
-      { mark: "computer_asset_exports", auth: { readable: false, writeable: false } },
+      {
+        mark: "user_asset_exports",
+        auth: { readable: false, writeable: false },
+      },
+      {
+        mark: "group_asset_exports",
+        auth: { readable: false, writeable: false },
+      },
+      {
+        mark: "computer_asset_exports",
+        auth: { readable: false, writeable: false },
+      },
     ]);
     await page.getByRole("button", { name: "用户管理", exact: true }).click();
     await page.getByRole("button", { name: "新增用户", exact: true }).click();

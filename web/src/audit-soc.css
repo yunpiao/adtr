@@ -102,6 +102,12 @@
 .audit-filter-form small {
   font-size: 12px;
 }
+.audit-keyword-field {
+  min-width: 0;
+}
+.audit-keyword-field > button {
+  margin-top: 6px;
+}
 .audit-advanced-filters {
   margin: 10px 0 0;
 }
@@ -141,7 +147,7 @@
 }
 .audit-table-scroll table {
   table-layout: fixed;
-  min-width: 950px;
+  min-width: 1030px;
   width: 100%;
   font-size: 14px;
 }
@@ -157,13 +163,16 @@
   font-size: 12px;
   font-weight: 500;
 }
-.audit-table-scroll th:first-child {
+.audit-table-scroll thead th:first-child {
+  width: 80px;
+}
+.audit-table-scroll thead th:nth-child(2) {
   width: 52px;
 }
-.audit-table-scroll th:nth-child(2) {
+.audit-table-scroll thead th:nth-child(3) {
   width: 14%;
 }
-.audit-table-scroll th:nth-child(3) {
+.audit-table-scroll thead th:nth-child(4) {
   width: 17%;
 }
 .audit-table-scroll small {

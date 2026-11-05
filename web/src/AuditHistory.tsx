@@ -174,18 +174,20 @@ export default function AuditHistory({
             <table aria-label="导出历史记录">
               <thead>
                 <tr>
-                  <th>预期文件名 / 任务 ID</th>
-                  <th>模型 / 格式</th>
-                  <th>任务状态 / 持久化进度</th>
-                  <th>创建 / 更新时间（UTC）</th>
-                  <th>尝试 / 错误</th>
-                  <th>下载状态</th>
-                  <th>操作</th>
+                  <th scope="col">本页序号</th>
+                  <th scope="col">预期文件名 / 任务 ID</th>
+                  <th scope="col">模型 / 格式</th>
+                  <th scope="col">任务状态 / 持久化进度</th>
+                  <th scope="col">创建 / 更新时间（UTC）</th>
+                  <th scope="col">尝试 / 错误</th>
+                  <th scope="col">下载状态</th>
+                  <th scope="col">操作</th>
                 </tr>
               </thead>
               <tbody>
-                {read.data.list.map((row) => (
+                {read.data.list.map((row, index) => (
                   <tr key={row.taskUUID}>
+                    <td>{index + 1}</td>
                     <td>
                       {row.fileName}
                       <br />

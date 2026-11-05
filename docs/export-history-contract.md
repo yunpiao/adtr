@@ -177,7 +177,7 @@ No format selector implying unavailable conversions, no unsupported appType filt
 | FLD-2474 | error is a bounded safe persisted code; no unfiltered errMsg/driver data |
 | FLD-2476/2477 | file_name/file_type definition-only inputs rejected; dedicated taskUUID download retained |
 | UI-0540/0548 | intentional UTC inputs/display and real creation time; source naive date format not reproduced |
-| UI-0541 | presentation row index optional; never identity |
+| UI-0541 | 本页序号：按当前返回行顺序 index+1，每页从1开始；仅呈现，不是身份 |
 | UI-0542–0544 | expected filename, Audit, XLSX |
 | UI-0545/0546 | no format selector until real alternate producers/conversion exists |
 | UI-0547 | nine canonical statuses + actual progress; no four-label lossy mapping |
@@ -226,3 +226,26 @@ replacing earlier screenshot proof or removing stale/session/revocation assertio
 New test and capture code is not execution evidence: local runtime validation was
 not run under the current execution hold, and exact-head CI plus independent review
 remain required. See [task UI boundaries](soc-task-ui.md#audit-task-to-original-export-detail-bounded-candidate).
+
+## Page ordinals (engineering Issue #278)
+
+The original UI-0541 `type=index` control was previously optional and absent from
+this bounded Audit/XLSX view. The history table now displays “本页序号” as its first
+column. Each current response page starts at 1; sorting and a new response can
+renumber rows. Every table heading has explicit `scope="col"` to identify its
+column association for assistive technology. Empty results have no numbered rows. The ordinal is never a task
+identity, global rank, stored field, download selector or exported XLSX column.
+All selection/navigation continues to use the original taskUUID and all existing
+permission, error, actor-change and stale-response boundaries remain in force.
+Removing this column only removes a presentation aid; it changes no API or data.
+
+DOM tests exercise multiple pages, ordering, empty/error/session boundaries and
+unchanged task actions. The existing real audit suite compares every displayed
+ordinal with the original history response and task ID on its two existing
+history UI visits. The third, header-only export retains its original task and
+download checks without adding another history request. Two additional read-only 1440/390 history
+captures and a source/build/commit-bound `audit-soc-query-controls-evidence.json`
+are uploaded by the existing audit artifact rule. No new job, producer, API,
+sensitive action, time budget or retry is introduced. A passed CI and independent
+artifact review must be reported separately; this control does not establish
+full F38/source compatibility or product acceptance.
