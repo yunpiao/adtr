@@ -19,7 +19,16 @@ type operation struct {
 	Search  *string                `json:"search"`
 }
 type scenario struct {
-	Operations []operation `json:"operations"`
+	Defaults   []defaultTemplate `json:"defaults"`
+	Operations []operation       `json:"operations"`
+}
+
+// Defaults are explicit synthetic scenario inputs, never installed product
+// templates. Like create.content, params must be supplied as an object.
+type defaultTemplate struct {
+	ID     string                 `json:"id"`
+	Name   string                 `json:"name"`
+	Params *querytemplates.Params `json:"params"`
 }
 type result struct {
 	Simulation bool                   `json:"simulation"`
@@ -38,7 +47,19 @@ func run(in io.Reader, out io.Writer) error {
 	if len(input.Operations) == 0 || len(input.Operations) > 100 {
 		return querytemplates.ErrInvalid
 	}
-	store := &querytemplates.Store{}
+	defaults := make([]querytemplates.Template, 0, len(input.Defaults))
+	for _, template := range input.Defaults {
+		if template.Params == nil {
+			return querytemplates.ErrInvalid
+		}
+		defaults = append(defaults, querytemplates.Template{
+			ID: template.ID, Name: template.Name, Params: *template.Params,
+		})
+	}
+	store, err := querytemplates.New(defaults)
+	if err != nil {
+		return err
+	}
 	output := result{Simulation: true, Lists: []querytemplates.Lists{}}
 	for _, op := range input.Operations {
 		switch op.Op {
