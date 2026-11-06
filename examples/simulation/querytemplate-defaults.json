@@ -1,0 +1,26 @@
+{
+  "defaults": [
+    {
+      "id": "synthetic-built-in-1",
+      "name": "合成内置模板",
+      "params": {
+        "appName": [0],
+        "rulesID": ["synthetic-rule"],
+        "time": ["2026-11-01T00:00:00Z", "2026-11-02T00:00:00Z"],
+        "dc": ["synthetic-dc"],
+        "dataSource": [{"server": "synthetic.invalid", "appType": 0}],
+        "userList": ["synthetic-user"],
+        "ipList": ["192.0.2.1", "2001:db8::1"],
+        "types": ["synthetic-event"]
+      }
+    }
+  ],
+  "operations": [
+    {"op": "create", "id": "synthetic-custom-1", "tplName": "合成自定义模板", "content": {}},
+    {"op": "list", "search": "合成"},
+    {"op": "delete", "id": "synthetic-custom-1"},
+    {"op": "list"},
+    {"op": "restore", "id": "synthetic-custom-1"},
+    {"op": "list"}
+  ]
+}

@@ -61,7 +61,16 @@ server/DC/user/rule/type 是不解析不执行的合成标签，不代表已授�
 这些是模拟解析预算，不是 HTTP 或产品请求限制。
 
 `cmd/adtr-querytemplates` 只从标准输入读取一个场景，不接受文件路径、网络参数、
-环境配置或真实身份字段。每次启动一个空 Store，不加载默认模板。
+环境配置或真实身份字段。每次启动独立 Store，不加载产品默认模板。
+可选 `defaults` 数组只用于显式合成内置模板；省略或 `[]` 保持旧空 Store 行为。
+每个元素必须有合法 `id`、`name` 和显式对象 `params`；`params:{}` 表示空条件，
+其条件字段沿用上表，不执行查询。缺省 `params`、`null`、错误类型或无效模板均失败。
+CLI 通过既有 `New` 初始化这些值，因此内置/自定义名称与 ID 共享唯一性及1000项总预算，
+内置项同样参与大小写敏感名称搜索和稳定排序，却不能 delete/restore。
+`defaults` 不是权限、可信来源、持久化导入或产品内置规则声明；任何人可重建合成输入。
+需要验证非空 `defaultTplList` 时必须提供它，删除它后仍能运行旧场景但内置列表为空。
+它增加本次场景内存/输出量并占用现有总容量，不增加1MiB输入或1000项数组上限。
+初始化任意一项失败时不运行 operations，也不输出部分列表。
 场景必须含1–100个 operations。支持：
 
 - create：op、id、tplName、content 必须存在；拒绝 search。
@@ -81,6 +90,14 @@ printf '%s' '{"operations":[{"op":"create","id":"synthetic-1","tplName":"合成�
   go run ./cmd/adtr-querytemplates
 ```
 
+显式合成内置与自定义并存示例：
+
+```sh
+go run ./cmd/adtr-querytemplates < examples/simulation/querytemplate-defaults.json
+```
+
+该样例只有人工合成条件值；不是产品预置模板，也不连接样例域名或 IP。
+
 ## 具名测试与验收缺口
 
 - TestLifecycleAndIsolation：FLD-2216–2258 的合成值往返、全部条件切片的深拷贝、
@@ -91,6 +108,12 @@ printf '%s' '{"operations":[{"op":"create","id":"synthetic-1","tplName":"合成�
 - TestConcurrentLifecycle、TestNewFailureAndDefaultCopy：race、构造失败不返回半成品。
 - CLI TestScenario、TestFailureNoPartialOutput、TestIOFailures、TestBudgets：
   实际场景流转、进程内隔离、错误无部分结果、I/O失败与输入预算。
+- #292 / AD-F-134、FLD-2216–2229、UI-0413：CLI 的 TestDefaultsFullValuesAndIndependentLists、
+  TestDefaultsSearchAndInvocationIsolation 核验非空内置八字段原值、独立列表快照、
+  名称搜索/排序、缺省/空数组逐字兼容与跨调用隔离。
+  TestDefaultsImmutableAndReservedNames、TestDefaultsStrictInputsAndAtomicFailure、
+  TestDefaultsShareExistingCapacity、TestDefaultsUnicodeBoundariesAndIO 覆盖只读/冲突、
+  严格 JSON 与固定错误、零部分输出、1000项共享边界、Unicode 和写入失败。
 
 可复现命令：
 `go test -race -count=1 ./internal/querytemplates ./cmd/adtr-querytemplates`；
