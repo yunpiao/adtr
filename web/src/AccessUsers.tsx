@@ -300,6 +300,7 @@ function UsersList({
                   )}
                   <th scope="col">用户名</th>
                   <th scope="col">角色</th>
+                  <th scope="col">本页序号</th>
                   <th scope="col">安全状态</th>
                   <th scope="col">创建时间（UTC）</th>
                   <th scope="col">密码更新时间（UTC）</th>
@@ -308,7 +309,7 @@ function UsersList({
                 </tr>
               </thead>
               <tbody>
-                {data.List.map((user) => (
+                {data.List.map((user, index) => (
                   <tr key={user.ID}>
                     {context.can("POST /api/access/assignments") && (
                       <td>
@@ -338,6 +339,7 @@ function UsersList({
                       {user.roleName}
                       <small className="block">{user.roleID}</small>
                     </td>
+                    <td data-field="rowNumber">{index + 1}</td>
                     <td>
                       {user.disabled ? "账户已停用" : "账户已启用"}
                       <br />
