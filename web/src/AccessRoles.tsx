@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import RoleUsersReadPanel from "./RoleUsersReadPanel";
 import {
   canReadRoleUsers,
@@ -162,6 +162,7 @@ function RolesList({
     [revision, setRevision] = useState(0);
   const task = useAccessTask(context.sessionChanged),
     queryText = queryString(query);
+  const keywordInput = useRef<HTMLInputElement>(null);
   useEffect(() => {
     setData(null);
     void task.run(
@@ -193,9 +194,26 @@ function RolesList({
         }}
       >
         <div className="form-grid">
-          <Field label="搜索角色名称">
-            <input name="search" maxLength={50} />
-          </Field>
+          <div>
+            <Field
+              label="搜索角色名称"
+              help="清空仅修改输入，筛选角色后更新结果。"
+            >
+              <input ref={keywordInput} name="search" maxLength={50} />
+            </Field>
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => {
+                if (keywordInput.current) {
+                  keywordInput.current.value = "";
+                  keywordInput.current.focus();
+                }
+              }}
+            >
+              清空角色名关键词
+            </button>
+          </div>
           <PageSize />
           <Field label="角色排序">
             <select name="sort" defaultValue="-1">

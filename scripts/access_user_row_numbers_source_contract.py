@@ -20,6 +20,8 @@ def require(condition):
 
 
 def restore_user_row_numbers_spec(text):
+    from access_search_clear_source_contract import restore_search_clear_spec
+    text = restore_search_clear_spec(text)
     require(type(text) is str)
     require(text.count(ANCHOR) == text.count(BEGIN) == text.count(END) == 1)
     left, right = text.index(BEGIN), text.index(END) + len(END)

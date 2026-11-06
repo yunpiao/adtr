@@ -155,3 +155,11 @@ F56/AD-F-205 本地切片记录本应用从部署后实际产生的 api/worker �
 后端 PR152、固定观测组成员页面 PR153 和采集/取消/原任务恢复界面 PR195 已合并。
 PR195 合并提交 `39eb1077df159c6d83cd7f0c4f5e504cd335066e` 的[历史 main CI](https://github.com/yunpiao/adtr/actions/runs/39518300817) 首轮 75/75 通过，包含实际 PostgreSQL/合成 TLS LDAP/浏览器控制与读取链；历史失败、证据边界及当前源码入口见[对账记录](docs/delivery-evidence-reconciliation.md)。
 这不提供 memberOf、主组补齐、递归/跨域完整性或 ranged continuation；真实 AD、八版本 Windows、生产和目标容量仍未验，不改变 0/209。
+
+## 用户与角色关键词单独清空候选
+
+[#296](https://github.com/yunpiao/adtr/issues/296) 补齐原 UI-0578/UI-0627 的
+关键词清空控件。只修改输入草稿并回焦；原已应用结果、页码、其他筛选和选中用户
+保持，点击原提交按钮后才更新查询。完整清除筛选和权限不变。详见
+[交互与证据边界](docs/access-search-clear-contract.md)。当前精确 head 的真实
+浏览器/PG、独立复审及 main 兼容门禁分别核验，不改变产品验收 0/209。

@@ -1,6 +1,58 @@
 import { navigateTo } from "./navigation";
 import { test, expect, type BrowserContext, type Page } from "@playwright/test";
 import { createHmac } from "node:crypto";
+// F45 search clear: additive draft-only native checks.
+async function verifyAccessSearchClear(
+  page: Page,
+  kind: "users" | "roles",
+) {
+  const users = kind === "users";
+  const input = page.getByLabel(users ? "搜索用户名" : "搜索角色名称", {
+    exact: true,
+  });
+  const clear = page.getByRole("button", {
+    name: users ? "清空用户名关键词" : "清空角色名关键词",
+    exact: true,
+  });
+  const table = page.getByRole("table", {
+    name: users ? "平台用户列表" : "角色列表",
+    exact: true,
+  });
+  // Settle the existing list read before observing this bounded action interval.
+  await expect(table).toBeVisible();
+  const original = await input.inputValue();
+  const beforeRows = await table.innerText();
+  const otherFields = () => input.evaluate((element) =>
+    [...new FormData((element as HTMLInputElement).form!).entries()]
+      .filter(([name]) => name !== "search"),
+  );
+  const beforeFields = await otherFields();
+  let requests = 0;
+  const observe = (request: import("@playwright/test").Request) => {
+    if (new URL(request.url()).pathname === `/api/access/${kind}`) requests++;
+  };
+  page.on("request", observe);
+  try {
+    await expect(input).toHaveAttribute("maxlength", "50");
+    await expect(clear).toHaveAttribute("type", "button");
+    await input.fill("SYNTHETIC-DRAFT-ONLY");
+    await clear.click();
+    await expect(input).toHaveValue("");
+    await expect(input).toBeFocused();
+    await clear.focus();
+    await clear.press("Enter");
+    await expect(input).toHaveValue("");
+    await expect(input).toBeFocused();
+    expect(await otherFields()).toEqual(beforeFields);
+    expect(await table.innerText()).toBe(beforeRows);
+    expect(requests).toBe(0);
+  } finally {
+    page.off("request", observe);
+    // No submit or request: preserve the exact original successor's draft state.
+    await input.fill(original);
+  }
+}
+// End F45 search clear native helpers.
 // AD-F-176 role users: exact additive readonly consumer.
 import { verifyRoleUsersRead } from "./role-users-read";
 // End AD-F-176 role users import.
@@ -819,6 +871,9 @@ test("real browser → API → PostgreSQL users and function permissions", async
   ]);
 
   await page.getByRole("button", { name: "角色管理", exact: true }).click();
+  // F45 search clear: existing role-list draft, no new read or mutation.
+  await verifyAccessSearchClear(page, "roles");
+  // End F45 search clear role-list check.
   await page.getByRole("button", { name: "新增角色", exact: true }).click();
   await page.getByLabel("角色名称", { exact: true }).fill(roleName);
   await page.getByLabel("角色备注", { exact: true }).fill(roleRemark);
@@ -1503,6 +1558,9 @@ test("real browser → API → PostgreSQL users and function permissions", async
       }
 
       bulkPhase = "safe_screenshot";
+      // F45 search clear: existing user-list draft, before the unchanged final query.
+      await verifyAccessSearchClear(page, "users");
+      // End F45 search clear user-list check.
       // AD-F-171 user times: observe the unchanged final filter request.
       const userTimesResponse = observeAccessUserTimes(page);
       // End AD-F-171 user times observer registration.

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { validPassword, validUsername } from "./api";
 import {
   accessRequest,
@@ -105,6 +105,7 @@ function UsersList({
     [selected, setSelected] = useState<string[]>([]),
     [revision, setRevision] = useState(0);
   const task = useAccessTask(context.sessionChanged);
+  const keywordInput = useRef<HTMLInputElement>(null);
   const queryText = queryString(query);
   useEffect(() => {
     setData(null);
@@ -192,9 +193,26 @@ function UsersList({
         }}
       >
         <div className="form-grid">
-          <Field label="搜索用户名">
-            <input name="search" maxLength={50} />
-          </Field>
+          <div>
+            <Field
+              label="搜索用户名"
+              help="清空仅修改输入，应用筛选后更新结果。"
+            >
+              <input ref={keywordInput} name="search" maxLength={50} />
+            </Field>
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => {
+                if (keywordInput.current) {
+                  keywordInput.current.value = "";
+                  keywordInput.current.focus();
+                }
+              }}
+            >
+              清空用户名关键词
+            </button>
+          </div>
           <PageSize />
           <Field label="排序">
             <select name="sort" defaultValue="-1">

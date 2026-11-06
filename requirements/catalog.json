@@ -10872,6 +10872,12 @@
             "保留PR69原证据；批量分配/所有过滤组合的证据以PostgreSQL集成为主，不能声称每个组合已有浏览器覆盖",
             "源字段/状态兼容、容量和生产验收尚未完成"
           ]
+        },
+        "search_clear_candidate": {
+          "issue": "https://github.com/yunpiao/adtr/issues/296",
+          "contract": "docs/access-search-clear-contract.md",
+          "scope": "Clear only the username or role-name keyword draft using its explicit source clearable control; preserve applied query, rows, other filters and existing submit/reset behavior.",
+          "verification": "Candidate: local client/source checks and independent review recorded separately. Exact-head native CI and current-main compatibility pending; no product acceptance claim."
         }
       }
     },
@@ -11210,6 +11216,12 @@
             "保留PR69原证据；批量分配/所有过滤组合的证据以PostgreSQL集成为主，不能声称每个组合已有浏览器覆盖",
             "源字段/状态兼容、容量和生产验收尚未完成"
           ]
+        },
+        "search_clear_candidate": {
+          "issue": "https://github.com/yunpiao/adtr/issues/296",
+          "contract": "docs/access-search-clear-contract.md",
+          "scope": "Clear only the username or role-name keyword draft using its explicit source clearable control; preserve applied query, rows, other filters and existing submit/reset behavior.",
+          "verification": "Candidate: local client/source checks and independent review recorded separately. Exact-head native CI and current-main compatibility pending; no product acceptance claim."
         }
       }
     },

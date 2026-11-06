@@ -653,3 +653,16 @@ Refs #50 / AD-F-158 / DTL-036。迁移18新增有界冻结目标、原接受回�
 - 第二轮完整 `make check` 通过：1205项Python、全部Go race/vet/build、严格TypeScript/build、108文件5069项Vitest、npm audit 0漏洞。另有独立128项成员证据合同和新Go边界复核；所有27个变更文件经独立源码复审。
 - 提交前本地没有 Docker，真实 PostgreSQL、Worker、TLS LDAP 和浏览器链路未运行。既有group-members-v4 suite新增强制12PNG、同Response采证与保存body独立oracle，原12PNG保留；workflow及其hash守卫零改动。后续结果以精确head CI与实际24PNG/manifest独审记录为准，不把本段当真实链路验收。
 - 原组→成员流程保留；不新增采集/schema/生产授权，不解析DN等价、嵌套/主组，不声称完整memberOf或当前目录身份关系。未知member和重复DN保留明确边界。209/57/3258/804及0/209产品验收不变，原#30不关闭。
+
+### 2026-11-06 F45 用户与角色关键词单独清空候选
+
+[#296](https://github.com/yunpiao/adtr/issues/296) 基于 main
+`21dbf9d2fa513a7ebfe006cc5d2ebcd3928cf27f`，对应 #9 的 UI-0578/UI-0627。
+两个列表添加各自的非提交清空按钮，只清空输入草稿并回焦，不改当前查询、其他
+筛选、页码、选中用户或 pending/error 状态；原提交和完整重置保持。
+两列表新增 synthetic DOM 覆盖及原 access suite 的有界原生控件观察；新增外层
+精确逆变换恢复全部旧 spec 字节，旧断言、证明/时间预算、截图/产物及清理不变。
+原生检查期间不提交、不加请求或fixture写入；不把有限观察窗口当任意迟发请求证明。
+本地检查、独立复审、精确head CI、实际artifact和main兼容性分开记录；本地无Docker，
+真实PG/browser不能算通过。全部209项及产品验收0/209保持，#9不关闭。
+详见[契约](access-search-clear-contract.md)。
