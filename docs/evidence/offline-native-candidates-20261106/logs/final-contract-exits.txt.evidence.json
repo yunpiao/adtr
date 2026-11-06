@@ -1,0 +1,9 @@
+{
+  "encoding": "utf-8-lines",
+  "originalPath": "logs/final-contract-exits.txt",
+  "originalBytes": 44,
+  "originalSHA256": "38c02ab2a1313aef7e7cd7fe4c09140ce1e9539ac27ac505c72df5cc9d704f2c",
+  "lines": [
+    "access=0 access_rows=0 domain=0 typecheck=0\n"
+  ]
+}

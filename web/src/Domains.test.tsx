@@ -347,6 +347,7 @@ describe("domain list identity and creation facts", () => {
       screen.getAllByRole("columnheader").map((node) => node.textContent),
     ).toEqual([
       "域名",
+      "序号",
       "配置的域控",
       "加密连接",
       "状态",

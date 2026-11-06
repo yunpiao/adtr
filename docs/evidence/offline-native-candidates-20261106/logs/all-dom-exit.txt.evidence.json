@@ -1,0 +1,9 @@
+{
+  "encoding": "utf-8-lines",
+  "originalPath": "logs/all-dom-exit.txt",
+  "originalBytes": 7,
+  "originalSHA256": "cf205dbb8cea84897b488abcc281bf96698d5e94b1096b16657b4caba9082a22",
+  "lines": [
+    "exit=1\n"
+  ]
+}

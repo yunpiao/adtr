@@ -1,0 +1,10 @@
+{
+  "encoding": "utf-8-lines",
+  "originalPath": "logs/format-changed.log",
+  "originalBytes": 66,
+  "originalSHA256": "17aa973d3f004560237d9a95171210b0671deff23d61628eecf7322ff5938f20",
+  "lines": [
+    "Checking formatting...\n",
+    "All matched files use Prettier code style!\n"
+  ]
+}

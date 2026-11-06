@@ -594,6 +594,7 @@ function DomainList({
                 <thead>
                   <tr>
                     <th scope="col">域名</th>
+                    <th scope="col">序号</th>
                     <th scope="col">配置的域控</th>
                     <th scope="col">加密连接</th>
                     <th scope="col">状态</th>
@@ -603,7 +604,7 @@ function DomainList({
                   </tr>
                 </thead>
                 <tbody>
-                  {read.data.List.map((c) => (
+                  {read.data.List.map((c, index) => (
                     <tr key={c.domainId}>
                       <td data-label="域名">
                         <strong>{c.domain}</strong>
@@ -613,6 +614,12 @@ function DomainList({
                         <small>
                           {sourceLabels[c.credentialSource ?? "custom"]}
                         </small>
+                      </td>
+                      <td data-label="序号">
+                        {(read.data!.page.pageIdx - 1) *
+                          read.data!.page.pageSize +
+                          index +
+                          1}
                       </td>
                       <td data-label="配置的域控">{c.dcHostName}</td>
                       <td data-label="加密连接">{mode(c)}</td>

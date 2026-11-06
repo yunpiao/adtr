@@ -14,6 +14,95 @@ import { resolve } from "node:path";
 
 type Authenticator = { secret: string; lastCounter: number };
 
+// AD-F-001 UI-0390: read-only positions from the existing accepted response.
+type DomainListIndexResponse = {
+  page: { pageIdx: number; pageSize: number; total: number; totalPage: number };
+  List: Array<{ domainId: string; domain: string }>;
+};
+
+function domainListIndexRows(body: DomainListIndexResponse) {
+  return body.List.map((connection, index) => ({
+    domainId: connection.domainId,
+    position: (body.page.pageIdx - 1) * body.page.pageSize + index + 1,
+  }));
+}
+
+async function verifyDomainListIndex(
+  page: Page,
+  body: DomainListIndexResponse,
+) {
+  const table = page.getByRole("table", {
+    name: "获授权的域连接",
+    exact: true,
+  });
+  const rows = table.locator("tbody tr");
+  const indexCells = page.locator('.domain-table-scroll td[data-label="序号"]');
+  const expectedRows = domainListIndexRows(body);
+  expect(new Set(expectedRows.map((row) => row.domainId)).size).toBe(
+    expectedRows.length,
+  );
+  await expect(rows).toHaveCount(expectedRows.length);
+  await expect(indexCells).toHaveCount(expectedRows.length);
+  await expect(table.locator("button[data-domain-id]")).toHaveCount(
+    expectedRows.length,
+  );
+  if (expectedRows.length === 0) {
+    await expect(table).toHaveCount(0);
+  } else {
+    await expect(table).toHaveCount(1);
+    // Mobile intentionally clips the semantic header; measure its real index
+    // cell with the unchanged text-fragment helper at both original captures.
+    const headers = table.getByRole("columnheader", { includeHidden: true });
+    await expect(headers).toHaveText([
+      "域名",
+      "序号",
+      "配置的域控",
+      "加密连接",
+      "状态",
+      "创建时间（UTC）",
+      "上次检测（UTC）",
+      "操作",
+    ]);
+    for (let index = 0; index < 8; index++)
+      await expect(headers.nth(index)).toHaveAttribute("scope", "col");
+  }
+  const renderedRows: Array<{
+    domainId: string | null;
+    identityText: string | null;
+    positionText: string | null;
+  }> = [];
+  for (let index = 0; index < expectedRows.length; index++) {
+    const expected = expectedRows[index];
+    const row = rows.nth(index);
+    const position = row.locator('td[data-label="序号"]');
+    const identity = row.locator(".domain-row-id");
+    const action = row.getByRole("button", {
+      name: `查看 ${body.List[index].domain}`,
+      exact: true,
+    });
+    await expect(position).toBeVisible();
+    await expect(position).toHaveText(String(expected.position));
+    await expect(identity).toHaveText(`域 ID：${expected.domainId}`);
+    await expect(action).toHaveAttribute("data-domain-id", expected.domainId);
+    renderedRows.push({
+      domainId: await action.getAttribute("data-domain-id"),
+      identityText: await identity.textContent(),
+      positionText: await position.textContent(),
+    });
+  }
+  return {
+    responsePage: {
+      pageIdx: body.page.pageIdx,
+      pageSize: body.page.pageSize,
+      total: body.page.total,
+      totalPage: body.page.totalPage,
+    },
+    responseRows: expectedRows,
+    renderedRows,
+  };
+}
+// End AD-F-001 UI-0390 native helpers.
+
 function totp(secret: string, now = Date.now()): string {
   const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
   let bits = "";
@@ -730,12 +819,25 @@ test("real domain enrollment, explicit grant, TLS diagnostics, rotation and loca
     .getByRole("row")
     .filter({ has: domainRow });
   const idField = persistedRow.getByText(`域 ID：${id}`, { exact: true });
+  // AD-F-001 UI-0390: retain the original persisted domain identity binding.
+  const positionField = persistedRow.locator('td[data-label="序号"]');
+  const listIndexEvidence: Array<
+    {
+      viewport: { width: number; height: number } | null;
+      request: { method: string; path: string; query: Array<[string, string]> };
+      responseStatus: number;
+    } & Awaited<ReturnType<typeof verifyDomainListIndex>>
+  > = [];
+  // End AD-F-001 UI-0390 identity and evidence binding.
   const createdField = persistedRow.locator('td[data-label="创建时间（UTC）"]');
   const observedField = persistedRow.locator(
     'td[data-label="上次检测（UTC）"]',
   );
   const measureListFacts = async () => {
     const fields = {
+      // AD-F-001 UI-0390: reuse the original fragment and clipping thresholds.
+      position: await measureListFact(positionField),
+      // End AD-F-001 UI-0390 position geometry.
       domainId: await measureListFact(idField),
       createdAt: await measureListFact(createdField),
       observedAt: await measureListFact(observedField),
@@ -776,6 +878,24 @@ test("real domain enrollment, explicit grant, TLS diagnostics, rotation and loca
       selected.length === 0 || selected.includes("verified");
     expect(body.page.total).toBe(includesVerified ? 1 : 0);
     expect(body.List).toHaveLength(includesVerified ? 1 : 0);
+    // AD-F-001 UI-0390: bind positions to this same real list response.
+    expect(body.page).toEqual({
+      pageIdx: Number(query.get("pageIdx")),
+      pageSize: Number(query.get("pageSize")),
+      total: includesVerified ? 1 : 0,
+      totalPage: includesVerified ? 1 : 0,
+    });
+    listIndexEvidence.push({
+      viewport: page.viewportSize(),
+      request: {
+        method: response.request().method(),
+        path: new URL(response.url()).pathname,
+        query: Array.from(query),
+      },
+      responseStatus: response.status(),
+      ...(await verifyDomainListIndex(page, body)),
+    });
+    // End AD-F-001 UI-0390 response comparison.
     if (includesVerified) {
       expect(body.List[0]).toMatchObject({
         domainId: id,
@@ -1035,6 +1155,14 @@ test("real domain enrollment, explicit grant, TLS diagnostics, rotation and loca
         "web/src/style.css",
         "web/src/soc-shell.css",
         "web/e2e/domains.spec.ts",
+        // AD-F-001 UI-0390: bind the candidate contract and offline guards.
+        "web/src/DomainListIndex.test.tsx",
+        "docs/domain-contract.md",
+        "docs/domain-list-index-contract.md",
+        "docs/domain-list-index-native-evidence.md",
+        "scripts/domain_list_index_native_source_contract.py",
+        "scripts/test_domain_list_index_native_contract.py",
+        // End AD-F-001 UI-0390 source binding.
         "web/package-lock.json",
         ".github/workflows/ci.yml",
       ].map((file) => [file, hashFile(file)]),
@@ -1074,6 +1202,20 @@ test("real domain enrollment, explicit grant, TLS diagnostics, rotation and loca
       geometry: [desktopListFacts, mobileListFacts],
     },
     mobileGeometry: { queueTitle, headingBox, guidanceBox, dangerContrast },
+    // AD-F-001 UI-0390: evidence only for the unchanged one-domain fixture.
+    listIndex: {
+      source: "Issue #16 / AD-F-001 / UI-0390",
+      semantics:
+        "(response.page.pageIdx - 1) * response.page.pageSize + index + 1",
+      fixtureBoundary: "one isolated domain; page 1 position 1 or empty only",
+      cases: listIndexEvidence,
+      geometry: [desktopListFacts, mobileListFacts].map((facts) => ({
+        viewport: facts.viewport,
+        domainId: facts.fields.domainId,
+        position: facts.fields.position,
+      })),
+    },
+    // End AD-F-001 UI-0390 manifest.
   };
   writeFileSync(
     testInfo.outputPath("domains-soc-evidence.json"),

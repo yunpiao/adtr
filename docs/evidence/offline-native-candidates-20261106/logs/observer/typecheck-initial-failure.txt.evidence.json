@@ -1,0 +1,13 @@
+{
+  "encoding": "utf-8-lines",
+  "originalPath": "logs/observer/typecheck-initial-failure.txt",
+  "originalBytes": 449,
+  "originalSHA256": "8db65f3c34fe4a84533910c0d699c0080304757b036f8c93936762f7905e19aa",
+  "lines": [
+    "src/system-candidate-observations.test.ts(158,46): error TS2345: Argument of type 'Buffer<ArrayBufferLike>' is not assignable to parameter of type 'Buffer<ArrayBuffer>'.\n",
+    "  Type 'ArrayBufferLike' is not assignable to type 'ArrayBuffer'.\n",
+    "    Type 'SharedArrayBuffer' is not assignable to type 'ArrayBuffer'.\n",
+    "      Types of property '[Symbol.toStringTag]' are incompatible.\n",
+    "        Type '\"SharedArrayBuffer\"' is not assignable to type '\"ArrayBuffer\"'.\n"
+  ]
+}

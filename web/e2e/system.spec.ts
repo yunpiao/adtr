@@ -1,4 +1,15 @@
 import { navigateTo } from "./navigation";
+// F52 candidate evidence imports.
+import {
+  observeSystemCandidateRead,
+  type CandidateObservation,
+} from "./system-candidate-observations";
+import {
+  captureSystemCandidateViews,
+  writeSystemCandidateEvidence,
+  type SystemCandidateVisual,
+} from "./system-candidate-evidence";
+// End F52 candidate evidence imports.
 import {
   test,
   expect,
@@ -608,8 +619,25 @@ test("real browser → Linux sampler → PostgreSQL history/settings and actual 
   await login(page, username, password);
   await changeInitialPassword(page, password, changed);
   const mfa = await enrollMfa(page, changed);
-  await navigateTo(page, "系统健康");
+  // F52 candidate evidence overview.
+  const candidateReads: CandidateObservation[] = [];
+  const candidateVisuals: SystemCandidateVisual[] = [];
+  const overviewRead = await observeSystemCandidateRead(
+    page,
+    "overview-disk",
+    async () => {
+      await navigateTo(page, "系统健康");
+    },
+  );
   await expect(page.getByRole("table", { name: "已登记节点" })).toBeVisible();
+  candidateReads.push(overviewRead);
+  await captureSystemCandidateViews(
+    page,
+    testInfo,
+    overviewRead,
+    candidateVisuals,
+  );
+  // End F52 candidate evidence overview.
   const nodes = await readJSON(context, "/api/system/nodes");
   expect(nodes.nodeList).toHaveLength(1);
   expect(nodes.nodeList[0]).toMatchObject({
@@ -1086,10 +1114,25 @@ test("real browser → Linux sampler → PostgreSQL history/settings and actual 
       )
     ).status(),
   ).toBe(400);
-  await page.getByRole("button", { name: "存储管理", exact: true }).click();
+  // F52 candidate evidence storage.
+  const storageRead = await observeSystemCandidateRead(
+    page,
+    "storage-ordinals",
+    async () => {
+      await page.getByRole("button", { name: "存储管理", exact: true }).click();
+    },
+  );
   await expect(
     page.getByRole("table", { name: "实际文件系统存储" }),
   ).toBeVisible();
+  candidateReads.push(storageRead);
+  await captureSystemCandidateViews(
+    page,
+    testInfo,
+    storageRead,
+    candidateVisuals,
+  );
+  // End F52 candidate evidence storage.
   const initial: StorageView = await readJSON(
     context,
     "/api/system/storage?instance=local-api&page=1&pageSize=20",
@@ -1901,4 +1944,13 @@ test("real browser → Linux sampler → PostgreSQL history/settings and actual 
     path: manifestPath,
     contentType: "application/json",
   });
+  // F52 candidate evidence sidecar.
+  await writeSystemCandidateEvidence(
+    testInfo,
+    manifest,
+    candidateReads,
+    candidateVisuals,
+    hashFile,
+  );
+  // End F52 candidate evidence sidecar.
 });

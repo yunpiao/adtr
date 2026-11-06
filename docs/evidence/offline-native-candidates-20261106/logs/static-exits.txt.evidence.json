@@ -1,0 +1,9 @@
+{
+  "encoding": "utf-8-lines",
+  "originalPath": "logs/static-exits.txt",
+  "originalBytes": 43,
+  "originalSHA256": "e92e4c8e238e34b37982d5f48a4ff3ac630cef60af566a404eb301ce4905cdae",
+  "lines": [
+    "typecheck=0 format=1 requirements=2 diff=0\n"
+  ]
+}

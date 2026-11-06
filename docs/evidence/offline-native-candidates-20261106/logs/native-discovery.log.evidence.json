@@ -1,0 +1,12 @@
+{
+  "encoding": "utf-8-lines",
+  "originalPath": "logs/native-discovery.log",
+  "originalBytes": 284,
+  "originalSHA256": "9b995d0579a83288bd82fcb413d8e6c351fae8d305b8a95d8f4adc5ed67ab009",
+  "lines": [
+    "Listing tests:\n",
+    "  domains.spec.ts:289:1 › real domain enrollment, explicit grant, TLS diagnostics, rotation and local deletion\n",
+    "  system.spec.ts:477:1 › real browser → Linux sampler → PostgreSQL history/settings and actual worker/permission boundaries\n",
+    "Total: 2 tests in 2 files\n"
+  ]
+}

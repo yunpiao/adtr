@@ -1,0 +1,17 @@
+{
+  "encoding": "utf-8-lines",
+  "originalPath": "logs/access-row-source-contract.log",
+  "originalBytes": 820,
+  "originalSHA256": "8cb2eb17aae4d41cbda50f9a610aabf67c122f370d1da519b230e0dba56e24c8",
+  "lines": [
+    "test_added_line_anchor_and_prior_drift_fail_closed (test_access_user_row_numbers_contract.AccessUserRowNumbersContract.test_added_line_anchor_and_prior_drift_fail_closed) ... ok\n",
+    "test_assertions_use_the_current_validated_rows_before_original_image (test_access_user_row_numbers_contract.AccessUserRowNumbersContract.test_assertions_use_the_current_validated_rows_before_original_image) ... ok\n",
+    "test_exact_inverse_restores_every_prior_layer (test_access_user_row_numbers_contract.AccessUserRowNumbersContract.test_exact_inverse_restores_every_prior_layer) ... ok\n",
+    "test_old_inverse_has_only_exact_outer_hook (test_access_user_row_numbers_contract.AccessUserRowNumbersContract.test_old_inverse_has_only_exact_outer_hook) ... ok\n",
+    "\n",
+    "----------------------------------------------------------------------\n",
+    "Ran 4 tests in 0.036s\n",
+    "\n",
+    "OK\n"
+  ]
+}

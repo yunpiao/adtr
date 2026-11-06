@@ -1,0 +1,21 @@
+{
+  "encoding": "utf-8-lines",
+  "originalPath": "logs/domain-source-contract.log",
+  "originalBytes": 1668,
+  "originalSHA256": "7d3d222d8ea81e8ee9f5f2dccface6ed7f5b4b027a979e24b09876ab0cf837d1",
+  "lines": [
+    "test_added_blocks_have_no_new_business_actions_or_budgets (test_domain_list_index_native_contract.DomainListIndexNativeContract.test_added_blocks_have_no_new_business_actions_or_budgets) ... ok\n",
+    "test_each_added_line_block_and_anchor_fail_closed_on_mutation (test_domain_list_index_native_contract.DomainListIndexNativeContract.test_each_added_line_block_and_anchor_fail_closed_on_mutation) ... ok\n",
+    "test_exact_inverse_restores_all_original_bytes (test_domain_list_index_native_contract.DomainListIndexNativeContract.test_exact_inverse_restores_all_original_bytes) ... ok\n",
+    "test_manifest_hashes_all_new_sources_without_replacing_old_bindings (test_domain_list_index_native_contract.DomainListIndexNativeContract.test_manifest_hashes_all_new_sources_without_replacing_old_bindings) ... ok\n",
+    "test_offline_typescript_helper_with_synthetic_locator_values (test_domain_list_index_native_contract.DomainListIndexNativeContract.test_offline_typescript_helper_with_synthetic_locator_values) ... ok\n",
+    "test_prior_security_flow_budget_and_byte_drift_fail_closed (test_domain_list_index_native_contract.DomainListIndexNativeContract.test_prior_security_flow_budget_and_byte_drift_fail_closed) ... ok\n",
+    "test_same_response_formula_identity_empty_and_geometry_wiring (test_domain_list_index_native_contract.DomainListIndexNativeContract.test_same_response_formula_identity_empty_and_geometry_wiring) ... ok\n",
+    "test_seeded_role_matches_browser_and_real_api_id_shape (test_domain_source_session_contract.DomainSourceSessionFixtureContract.test_seeded_role_matches_browser_and_real_api_id_shape) ... ok\n",
+    "\n",
+    "----------------------------------------------------------------------\n",
+    "Ran 8 tests in 0.461s\n",
+    "\n",
+    "OK\n"
+  ]
+}

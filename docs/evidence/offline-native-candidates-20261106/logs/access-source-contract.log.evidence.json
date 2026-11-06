@@ -1,0 +1,17 @@
+{
+  "encoding": "utf-8-lines",
+  "originalPath": "logs/access-source-contract.log",
+  "originalBytes": 798,
+  "originalSHA256": "c82f84f51d0bacaebe6a621ff7503bd96e441dec85aaeea91d37995dceeb9287",
+  "lines": [
+    "test_all_previous_layers_restore_exactly (test_access_search_clear_contract.AccessSearchClearContract.test_all_previous_layers_restore_exactly) ... ok\n",
+    "test_drift_changed_moved_missing_and_duplicate_lines_reject (test_access_search_clear_contract.AccessSearchClearContract.test_drift_changed_moved_missing_and_duplicate_lines_reject) ... ok\n",
+    "test_native_checks_remain_draft_only_and_observe_real_page (test_access_search_clear_contract.AccessSearchClearContract.test_native_checks_remain_draft_only_and_observe_real_page) ... ok\n",
+    "test_only_exact_outer_hook_changes_existing_inverse (test_access_search_clear_contract.AccessSearchClearContract.test_only_exact_outer_hook_changes_existing_inverse) ... ok\n",
+    "\n",
+    "----------------------------------------------------------------------\n",
+    "Ran 4 tests in 0.023s\n",
+    "\n",
+    "OK\n"
+  ]
+}

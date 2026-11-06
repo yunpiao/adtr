@@ -1,0 +1,19 @@
+{
+  "encoding": "utf-8-lines",
+  "originalPath": "logs/system-native-contract.log",
+  "originalBytes": 930,
+  "originalSHA256": "5a61bf1008164dea555a117d33b89e68b2c8b7652a0f3f97ef556668306bbb2b",
+  "lines": [
+    "test_duplicate_missing_and_moved_blocks_rejected (__main__.SystemCandidateNativeContract.test_duplicate_missing_and_moved_blocks_rejected) ... ok\n",
+    "test_every_addition_line_is_frozen (__main__.SystemCandidateNativeContract.test_every_addition_line_is_frozen) ... ok\n",
+    "test_exact_predecessor_restored (__main__.SystemCandidateNativeContract.test_exact_predecessor_restored) ... ok\n",
+    "test_exact_writer_safe_projection_and_source_bindings (__main__.SystemCandidateNativeContract.test_exact_writer_safe_projection_and_source_bindings) ... ok\n",
+    "test_predecessor_safety_and_budget_mutations_rejected (__main__.SystemCandidateNativeContract.test_predecessor_safety_and_budget_mutations_rejected) ... ok\n",
+    "test_success_only_capture_and_no_extra_requests (__main__.SystemCandidateNativeContract.test_success_only_capture_and_no_extra_requests) ... ok\n",
+    "\n",
+    "----------------------------------------------------------------------\n",
+    "Ran 6 tests in 0.380s\n",
+    "\n",
+    "OK\n"
+  ]
+}

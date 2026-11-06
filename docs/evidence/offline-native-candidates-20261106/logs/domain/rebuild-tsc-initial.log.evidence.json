@@ -1,0 +1,10 @@
+{
+  "encoding": "utf-8-lines",
+  "originalPath": "logs/domain/rebuild-tsc-initial.log",
+  "originalBytes": 170,
+  "originalSHA256": "9dac86b19dbfa5e59cad461f1c01716ebaa1b8be401636255b3bb35d5658b0e7",
+  "lines": [
+    "web/src/DomainsWorkspace.tsx(619,27): error TS18047: 'read.data' is possibly 'null'.\n",
+    "web/src/DomainsWorkspace.tsx(620,27): error TS18047: 'read.data' is possibly 'null'.\n"
+  ]
+}

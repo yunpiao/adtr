@@ -1,0 +1,17 @@
+{
+  "encoding": "utf-8-lines",
+  "originalPath": "logs/review/final-focused-vitest.log",
+  "originalBytes": 249,
+  "originalSHA256": "b298e190991517c856f609f90d00f83fcbdb2d30698e393a69b732a89d17bdce",
+  "lines": [
+    "\n",
+    " RUN  v5.0.3 /workspace/scratch/2d420540fec7/adtr-native-rebuild-20261106-0854/web\n",
+    "\n",
+    "\n",
+    " Test Files  6 passed (6)\n",
+    "      Tests  415 passed (415)\n",
+    "   Start at  18:10:20\n",
+    "   Duration  12.04s (tests 65%, transform 21%, environment 9%, import 3%, setup 2%)\n",
+    "\n"
+  ]
+}

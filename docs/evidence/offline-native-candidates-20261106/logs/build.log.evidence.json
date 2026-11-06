@@ -1,0 +1,22 @@
+{
+  "encoding": "utf-8-lines",
+  "originalPath": "logs/build.log",
+  "originalBytes": 689,
+  "originalSHA256": "032a424bd7520ba84918500c0992b7b4feb42c25a9c5aa2d98c0665cd8c063df",
+  "lines": [
+    "vite v7.3.7 building client environment for production...\n",
+    "transforming...\n",
+    "✓ 170 modules transformed.\n",
+    "rendering chunks...\n",
+    "computing gzip size...\n",
+    "dist/index.html                     0.46 kB │ gzip:   0.31 kB\n",
+    "dist/assets/index-CS0cK2lv.css     56.89 kB │ gzip:  11.33 kB\n",
+    "dist/assets/index-8h_AGcAq.js   1,058.51 kB │ gzip: 284.52 kB\n",
+    "\n",
+    "(!) Some chunks are larger than 500 kB after minification. Consider:\n",
+    "- Using dynamic import() to code-split the application\n",
+    "- Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks\n",
+    "- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.\n",
+    "✓ built in 1.96s\n"
+  ]
+}

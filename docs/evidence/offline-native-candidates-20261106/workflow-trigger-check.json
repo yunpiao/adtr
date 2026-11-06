@@ -1,0 +1,58 @@
+{
+  "branch": "dot/offline-native-candidates-20261106",
+  "mainCommit": "21dbf9d2fa513a7ebfe006cc5d2ebcd3928cf27f",
+  "baseCommit": "21fcba85fb057a1327be33955edd0d8aa84f416e",
+  "checkedDuringUTC": "2026-11-06 09:22\u201309:26 UTC",
+  "branchAbsent": true,
+  "openPullRequestForBranch": false,
+  "workflows": [
+    {
+      "path": ".github/workflows/ci.yml",
+      "gitBlob": "fdf7e55c26cb04a478151b4c1f1570bba4d9f141",
+      "sha256": "90091e86fc5da2d73f931b417a411725555a61608bb7117020c3bf88acc1b9e9",
+      "events": {
+        "push": {
+          "branches": [
+            "main"
+          ]
+        },
+        "pull_request": null,
+        "workflow_dispatch": null,
+        "merge_group": {
+          "types": [
+            "checks_requested"
+          ]
+        }
+      }
+    },
+    {
+      "path": ".github/workflows/ci-image-probe.yml",
+      "gitBlob": "7cdd799b66e7c4d7d4a8433cbddf4b843e3e6699",
+      "sha256": "d7af9b728ac4218979848cb0ee0480ef644006672ca469062ac30c79fd6a5672",
+      "events": {
+        "push": {
+          "branches": [
+            "ci/image-transfer-probe/**"
+          ]
+        }
+      }
+    },
+    {
+      "path": ".github/workflows/prototype.yml",
+      "gitBlob": "628a3555e3a541fee099dba22e57dd6b4a6bf3a9",
+      "sha256": "7278183137d50d7eb15137734011529a938995f60f0e8f5772de71d9849ad00e",
+      "events": {
+        "pull_request": {
+          "branches": [
+            "main"
+          ],
+          "paths": [
+            "prototype/adtr/**",
+            ".github/workflows/prototype.yml"
+          ]
+        }
+      }
+    }
+  ],
+  "conclusion": "No eligible repository workflow for creating or pushing this exact branch with these unchanged workflow bytes. PR creation/manual dispatch/merge/main push remain outside this backup action. Future configuration changes or unrelated external automation are not covered."
+}

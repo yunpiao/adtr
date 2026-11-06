@@ -1,0 +1,20 @@
+{
+  "encoding": "utf-8-lines",
+  "originalPath": "logs/all-dom-from-web.log",
+  "originalBytes": 458,
+  "originalSHA256": "2a342dd2be250860c486821561b65d5587269431afa6550bd69872da206ac4f7",
+  "lines": [
+    "\n",
+    " RUN  v5.0.3 /workspace/scratch/2d420540fec7/adtr-native-rebuild-20261106-0854/web\n",
+    "\n",
+    "\n",
+    " Test Files  117 passed (117)\n",
+    "      Tests  5371 passed (5371)\n",
+    "   Start at  18:09:29\n",
+    "   Duration  161.54s (tests 78%, environment 12%, setup 4%, import 4%, transform 2%)\n",
+    "\n",
+    "    Isolate  117 workers spawned · ~445ms startup each (spawn + environment, per file)\n",
+    "             at least ~25.59s faster with isolate: false — reuses workers across files instead of one per file\n",
+    "\n"
+  ]
+}

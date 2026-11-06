@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import SystemDiskOverview from "./SystemDiskOverview";
 import { fixedHistoryWindow } from "./system-history-window";
 import "./system-soc.css";
 import { ApiError, type Profile } from "./api";
@@ -399,6 +400,7 @@ function Overview({ context }: { context: SystemContext }) {
               </div>
             ))}
           </dl>
+          <SystemDiskOverview current={info.current} />
           {read.data?.nodes && (
             <div className="table-scroll">
               <table>
@@ -951,6 +953,7 @@ function StorageList({
               <thead>
                 <tr>
                   {[
+                    "本页序号",
                     "存储目标",
                     "文件系统",
                     "总容量",
@@ -971,8 +974,9 @@ function StorageList({
                 </tr>
               </thead>
               <tbody>
-                {read.data.storage.map((item) => (
+                {read.data.storage.map((item, index) => (
                   <tr key={item.id}>
+                    <td>{index + 1}</td>
                     <th scope="row">{item.id}</th>
                     <td>{item.fs || "未提供"}</td>
                     <td>{byteText(item.totalBytes)}</td>

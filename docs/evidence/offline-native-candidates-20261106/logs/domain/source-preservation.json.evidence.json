@@ -1,0 +1,16 @@
+{
+  "encoding": "utf-8-lines",
+  "originalPath": "logs/domain/source-preservation.json",
+  "originalBytes": 381,
+  "originalSHA256": "444c8c3b5983ce5e21659f8b8437d3b0cc777a0d9908494ae979efb0d1313b51",
+  "lines": [
+    "{\n",
+    "  \"productionExactInverse\": true,\n",
+    "  \"productionBaseSHA256\": \"9bc6dfdf0dcbba51bf37c471797dde2408d20576e1a156de58de6183f07730c9\",\n",
+    "  \"originalDOMExactInverse\": true,\n",
+    "  \"originalDOMBaseSHA256\": \"1617a0fd5d43821fc221b0e0f1c7c7ddf564c55626fd3e8ed6b2cce99c108599\",\n",
+    "  \"nativeExactInverse\": true,\n",
+    "  \"nativeBaseSHA256\": \"8a987a9405764e2c3c5c24b70fece9db7ee9db04ed707335b19c928a48afd7d8\"\n",
+    "}\n"
+  ]
+}
