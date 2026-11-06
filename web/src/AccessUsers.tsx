@@ -301,6 +301,8 @@ function UsersList({
                   <th scope="col">用户名</th>
                   <th scope="col">角色</th>
                   <th scope="col">安全状态</th>
+                  <th scope="col">创建时间（UTC）</th>
+                  <th scope="col">密码更新时间（UTC）</th>
                   <th scope="col">资料</th>
                   <th scope="col">操作</th>
                 </tr>
@@ -342,6 +344,10 @@ function UsersList({
                       MFA {user.hasMfa ? "已开启" : "已关闭"}
                       <br />
                       密码强度：{user.passStrength}
+                    </td>
+                    <td data-field="createTm">{user.createTm || "未提供"}</td>
+                    <td data-field="pwdUpdateTm">
+                      {user.pwdUpdateTm || "未提供"}
                     </td>
                     <td>
                       <details>

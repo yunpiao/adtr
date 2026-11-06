@@ -265,3 +265,49 @@ exact source/run binding and independent pixel review. Current-head native
 execution, source review, evidence admission and main-push verification remain
 separate gates. This slice does not close Issue #9 or change product acceptance
 from 0/209.
+
+## AD-F-171 visible user timestamps
+
+Engineering Issue #290 restores the two independent platform-user table columns
+specified by original Issue #9: FLD-2812 / UI-0586 (`List[].createTm`, creation
+time) and FLD-2815 / UI-0587 (`List[].pwdUpdateTm`, password update time).
+Both headers explicitly say UTC. Each cell displays its own row's returned
+RFC3339 string without parsing, timezone conversion or precision truncation,
+matching the existing expandable profile details. An empty string displays
+`未提供`, never the current clock, the other timestamp or an inferred event.
+Equal values remain separate facts in separate cells.
+
+The columns are visible without opening profile details. They follow security
+status so existing selection, username and role columns keep their positions.
+Existing cell wrapping and the table's horizontal scroll container are reused;
+no inline style or content-security-policy change is needed. No API, schema,
+permission, mutation, proof, history, filter or pagination behavior is added.
+The existing `sort=1/-1` creation-time and `sort=2/-2` password-time queries,
+start-inclusive/end-exclusive time filters and server row order remain the
+source of query results; these cells do not sort or calculate dates locally.
+Read-only users see the same factual columns through their existing user-read
+permission, without gaining editing or assignment controls.
+
+Dedicated DOM fixtures cover distinct fractional-second values, equal and empty
+values, row identity across all four sorts, filters and pages, read-only controls,
+empty/error results, replaced reads and delayed responses after unmount. These
+synthetic DOM checks establish client presentation only. The real isolated
+access browser/API/PostgreSQL case and its safe PNG require their own exact-head
+run, artifact admission and independent pixel review. Source changes and earlier
+CI cannot establish those results. Full original Issue #9, field compatibility,
+capacity, real AD and product acceptance remain open at 0/209.
+
+The native addition observes the existing final `search=e2e.`, ascending creation
+query before its UI click, checks that exact same-page fetch response and binds
+the two original synthetic IDs to both timestamp cells and expanded details.
+Details are closed and the table scroll position restored before the original
+1440×900 bulk-role screenshot. It adds no GET, context, mutation, proof, artifact,
+or timeout budget. The existing safe JSON keeps its original meaning and does
+not separately attest timestamp values; successful current-source browser
+assertions and independent inspection of the actual PNG are the time-column
+evidence. No new 390px native screenshot or capacity claim is made.
+
+An exact outer source inverse removes only this addition and restores the entire
+previous access spec, then the unchanged role-user and bulk-role inverses still
+recover their frozen predecessors. Their hashes, old helper, original source
+lists, workflow, validators, screenshots and cleanup gates are unchanged.
