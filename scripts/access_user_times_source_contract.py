@@ -30,6 +30,8 @@ def require(condition):
 
 
 def restore_user_times_spec(text):
+    from access_user_row_numbers_source_contract import restore_user_row_numbers_spec
+    text = restore_user_row_numbers_spec(text)
     require(type(text) is str)
     for anchor, begin, end, expected, size in BLOCKS:
         require(text.count(anchor) == text.count(begin) == text.count(end) == 1)

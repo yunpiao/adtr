@@ -1518,6 +1518,26 @@ test("real browser → API → PostgreSQL users and function permissions", async
         viewerID,
       ]);
       // End AD-F-171 user times native comparison.
+      // AD-F-171 user rows: observe positions on the same validated user response.
+      const rowNumberHeader = table.getByRole("columnheader", {
+        name: "本页序号",
+        exact: true,
+      });
+      bulkRequire(
+        (await rowNumberHeader.count()) === 1 &&
+          (await rowNumberHeader.getAttribute("scope")) === "col",
+      );
+      await expect(rowNumberHeader).toBeInViewport({ ratio: 1 });
+      bulkRequire((await rows.count()) === 2);
+      for (let index = 0; index < 2; index++) {
+        const numberCell = rows.nth(index).locator('td[data-field="rowNumber"]');
+        bulkRequire(
+          (await numberCell.count()) === 1 &&
+            (await numberCell.textContent()) === String(index + 1),
+        );
+        await expect(numberCell).toBeInViewport({ ratio: 1 });
+      }
+      // End AD-F-171 user rows native comparison.
       for (const [index, name, expectedRole] of [
         [0, readerUsername, "viewer"],
         [1, viewerUsername, roleName],
