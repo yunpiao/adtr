@@ -1,0 +1,22 @@
+{
+  "encoding": "utf-8-lines",
+  "sourceName": "build.log",
+  "originalBytes": 327,
+  "originalSHA256": "2e45c58a2f62b1cc62db9646746f02ad54aa3322bd5c6ac80c38ddf5e4357496",
+  "sanitization": "none; JSON line container only",
+  "preservedBytes": 327,
+  "preservedSHA256": "2e45c58a2f62b1cc62db9646746f02ad54aa3322bd5c6ac80c38ddf5e4357496",
+  "lines": [
+    "COMMAND: go version\n",
+    "go version go1.27.1 linux/amd64\n",
+    "EXIT: 0\n",
+    "COMMAND: go mod verify\n",
+    "all modules verified\n",
+    "EXIT: 0\n",
+    "COMMAND: make build\n",
+    "go build -buildvcs=false -trimpath -o bin/adtr ./cmd/adtr\n",
+    "EXIT: 0\n",
+    "COMMAND: CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -tags=integration -o bin/ldap-fixture ./internal/testldapfixture\n",
+    "EXIT: 0\n"
+  ]
+}

@@ -1,0 +1,122 @@
+{
+  "head": "503022338044ddfaffb26836449da58db2a798ea",
+  "tree": "8fa959a7f56eea7493f745141893ea2fd9fec0a9",
+  "working_tree_clean": true,
+  "architecture": "external files, not Go embed",
+  "binary": {
+    "path": "bin/adtr",
+    "bytes": 22560067,
+    "sha256": "adfaaec6566f127eb6cd8ef99e343a060e05835315ba67342c60d76066d4ea43"
+  },
+  "candidate_files_hash_verified": 21,
+  "dist_manifest": [
+    {
+      "path": "web/dist/assets/index-8h_AGcAq.js",
+      "bytes": 1058512,
+      "sha256": "66a05a988c8535fb597d7b78076c6a883e208937fe45cef4e1515309b7578d2b"
+    },
+    {
+      "path": "web/dist/assets/index-CS0cK2lv.css",
+      "bytes": 56891,
+      "sha256": "0743bf461f1227a67d012d19c9207bdeaf1f15aca9559415758cd01580c96790"
+    },
+    {
+      "path": "web/dist/index.html",
+      "bytes": 459,
+      "sha256": "10b948d5d2172975100547d944906095a8e7f6b233f71e9569e1cb0cdff07f95"
+    }
+  ],
+  "entry_resources": [
+    "/assets/index-8h_AGcAq.js",
+    "/assets/index-CS0cK2lv.css"
+  ],
+  "native_runner_web_directory": "Absolute path to repository web/dist; local workspace prefix removed.",
+  "container_web_directory": "/web (COPY web/dist /web)",
+  "existing_receipt_hashes_verified": [
+    "vite.log",
+    "vite.exit",
+    "commands.txt",
+    "result.json",
+    "recovery-verification.json"
+  ],
+  "receipt_files": [
+    {
+      "bytes": 689,
+      "sha256": "f95679ff12d06921464ee95524494d609df03b037db28cd6d51eeeaef3886144",
+      "source_group": "frontend-validation",
+      "source_name": "vite.log"
+    },
+    {
+      "bytes": 1510,
+      "sha256": "7eb1c6d944f9a122db50a5a5292ba3a7048d9bfc8daa0a404857282d6ab6213c",
+      "source_group": "frontend-validation",
+      "source_name": "commands.txt"
+    },
+    {
+      "bytes": 1157,
+      "sha256": "bf4efd4b477448dba9b2cd18daed6c3f6de1c4010a2f84e8eea3ef0a79d88e9d",
+      "source_group": "frontend-validation",
+      "source_name": "result.json"
+    },
+    {
+      "bytes": 327,
+      "sha256": "2e45c58a2f62b1cc62db9646746f02ad54aa3322bd5c6ac80c38ddf5e4357496",
+      "source_group": "go-build",
+      "source_name": "build.log"
+    },
+    {
+      "bytes": 3457,
+      "sha256": "b2564393aee6d1f0a9eb06f9559483f959dfba55d382db97c9e4a3b6e904451b",
+      "source_group": "go-build",
+      "source_name": "summary.md"
+    },
+    {
+      "bytes": 1701,
+      "sha256": "bbb366a2a1a54e89404245ce9c3b515c9fd3c464a0ca400eb0b0bd0fe0cd671e",
+      "source_group": "go-build",
+      "source_name": "artifact-check.log"
+    }
+  ],
+  "source_files": [
+    {
+      "path": "Makefile",
+      "bytes": 1350,
+      "sha256": "ebfd874551b27e7d23434488896068e26f09a6462a15a31f959fb1ac77d5c618"
+    },
+    {
+      "path": "Dockerfile",
+      "bytes": 565,
+      "sha256": "fa85855f8f42ca34c4a2438114640bfe34bf46e30d9fd80a8c09348ccaf66e92"
+    },
+    {
+      "path": "cmd/adtr/main.go",
+      "bytes": 17508,
+      "sha256": "c0cc658e210aca3316ac3781d32ba01acbc0633bbdf31eba2a996986350ed95f"
+    },
+    {
+      "path": "scripts/test_auth_e2e.py",
+      "bytes": 99472,
+      "sha256": "26f3a500814d507f47e4226b883864f21a8c3d5010620fa5f19a2e52af7b822a"
+    },
+    {
+      "path": "web/vite.config.ts",
+      "bytes": 589,
+      "sha256": "3522ed789e78bb8e07d430e26975bbd9258322a6d41ed5239b27c3a561e3e4c7"
+    },
+    {
+      "path": "web/package-lock.json",
+      "bytes": 99944,
+      "sha256": "fb73eca2ec9a028891dd12cb85086d51663c25677651d007dfc798e751c60261"
+    }
+  ],
+  "limits": [
+    "No runtime HTTP/service/browser execution.",
+    "make build builds Go only; frontend must be built and supplied separately.",
+    "Build receipts plus clean source establish recorded provenance, not a cryptographic source-to-binary attestation.",
+    "Prior Vite receipt identifies filenames, not full dist byte hashes; this manifest captures current bytes and cannot independently prove they are unchanged since that build.",
+    "Node used for prior frontend build was 24.22.1, not required 24.19.0.",
+    "No embedded commit in adtr because buildvcs=false."
+  ],
+  "producer_record_sha256": "a5b882473aa72d1d15b6a0a075defd0928f8b4bee0a2a1c5adf81dcf1ffc180f",
+  "transformation": "Repo paths made repository-relative; local evidence directories replaced with logical source group/name; absolute runner workspace path removed. Other fields retained."
+}

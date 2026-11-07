@@ -1,0 +1,17 @@
+{
+  "encoding": "utf-8-lines",
+  "sourceName": "toolchain-verification.json",
+  "originalBytes": 245,
+  "originalSHA256": "7ff52a97208ab4bd179c449e6dcf412a01f788d33c69d77d215af476fbddceee",
+  "sanitization": "none; JSON line container only",
+  "preservedBytes": 245,
+  "preservedSHA256": "7ff52a97208ab4bd179c449e6dcf412a01f788d33c69d77d215af476fbddceee",
+  "lines": [
+    "{\n",
+    "  \"archive_sha256\": \"63d339f0da5ab53635a56f2490a7984dfe12dfcff22ad749f63edaf590168445\",\n",
+    "  \"official_source_record\": \"docs/validation-g03.md lines 10-11 and PR #6 review corrections (2026-10-07)\",\n",
+    "  \"files_checked\": 15639,\n",
+    "  \"mismatches\": []\n",
+    "}\n"
+  ]
+}

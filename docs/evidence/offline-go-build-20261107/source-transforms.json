@@ -1,0 +1,32 @@
+[
+  {
+    "sourceName": "build.log",
+    "originalSHA256": "2e45c58a2f62b1cc62db9646746f02ad54aa3322bd5c6ac80c38ddf5e4357496",
+    "output": "build.log.evidence.json",
+    "transformation": "Lossless UTF-8 lines with line endings retained; no redaction needed."
+  },
+  {
+    "sourceName": "artifact-check.log",
+    "originalSHA256": "bbb366a2a1a54e89404245ce9c3b515c9fd3c464a0ca400eb0b0bd0fe0cd671e",
+    "output": "artifact-check.log.evidence.json",
+    "transformation": "Lossless UTF-8 lines with line endings retained; no redaction needed."
+  },
+  {
+    "sourceName": "toolchain-verification.json",
+    "originalSHA256": "7ff52a97208ab4bd179c449e6dcf412a01f788d33c69d77d215af476fbddceee",
+    "output": "toolchain-verification.json.evidence.json",
+    "transformation": "Lossless UTF-8 lines with line endings retained; no redaction needed."
+  },
+  {
+    "sourceName": "summary.md",
+    "originalSHA256": "b2564393aee6d1f0a9eb06f9559483f959dfba55d382db97c9e4a3b6e904451b",
+    "output": "README.md and result.json",
+    "transformation": "Engineering summary rewritten; removed local toolchain script path, internal process wording and repeated narrative. Historical offline environment is producer-reported, not an environment snapshot."
+  },
+  {
+    "sourceName": "static-asset-binding result.json",
+    "originalSHA256": "a5b882473aa72d1d15b6a0a075defd0928f8b4bee0a2a1c5adf81dcf1ffc180f",
+    "output": "static-assets.json",
+    "transformation": "Repo paths made repository-relative; local evidence directories replaced with logical source group/name; absolute runner workspace path removed. Other fields retained."
+  }
+]

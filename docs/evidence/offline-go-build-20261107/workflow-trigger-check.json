@@ -1,0 +1,63 @@
+{
+  "checked_at_utc": "2026-11-07T02:33:43Z",
+  "repository": "yunpiao/adtr",
+  "main_head": "21dbf9d2fa513a7ebfe006cc5d2ebcd3928cf27f",
+  "backup_head": "ef482b08396230ffa4dedce1f7f2c3e013e0a047",
+  "backup_tree": "b7e4776597036327684ddde9464e551c18a16b2f",
+  "target_ref": "refs/heads/dot/offline-validation-evidence-20261107",
+  "target_pull_requests_all_states": [],
+  "workflows": [
+    {
+      "path": ".github/workflows/ci-image-probe.yml",
+      "git_blob_sha": "7cdd799b66e7c4d7d4a8433cbddf4b843e3e6699",
+      "sha256": "d7af9b728ac4218979848cb0ee0480ef644006672ca469062ac30c79fd6a5672",
+      "events": {
+        "push": {
+          "branches": [
+            "ci/image-transfer-probe/**"
+          ]
+        }
+      }
+    },
+    {
+      "path": ".github/workflows/ci.yml",
+      "git_blob_sha": "fdf7e55c26cb04a478151b4c1f1570bba4d9f141",
+      "sha256": "90091e86fc5da2d73f931b417a411725555a61608bb7117020c3bf88acc1b9e9",
+      "events": {
+        "pull_request": "",
+        "workflow_dispatch": "",
+        "merge_group": {
+          "types": [
+            "checks_requested"
+          ]
+        },
+        "push": {
+          "branches": [
+            "main"
+          ]
+        }
+      }
+    },
+    {
+      "path": ".github/workflows/prototype.yml",
+      "git_blob_sha": "628a3555e3a541fee099dba22e57dd6b4a6bf3a9",
+      "sha256": "7278183137d50d7eb15137734011529a938995f60f0e8f5772de71d9849ad00e",
+      "events": {
+        "pull_request": {
+          "branches": [
+            "main"
+          ],
+          "paths": [
+            "prototype/adtr/**",
+            ".github/workflows/prototype.yml"
+          ]
+        }
+      }
+    }
+  ],
+  "workflow_files_identical_at_both_exact_heads": true,
+  "existing_evidence_blob_count": 32,
+  "conclusion": "Existing branch push matches none of these three workflow declarations; no PR exists in any state for this branch. No PR/dispatch/merge-group operation is planned.",
+  "limits": "Repository workflow declarations at these exact refs only; not external integrations or future changes. Recheck refs and PR absence immediately before publication.",
+  "remote_writes_performed": false
+}

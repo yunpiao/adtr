@@ -1,0 +1,59 @@
+{
+  "source_head": "503022338044ddfaffb26836449da58db2a798ea",
+  "files": [
+    {
+      "path": "docs/evidence/offline-go-build-20261107/README.md",
+      "sha256": "f67da84cba419fe30b59ee406e974299679d6ba2f4b3a56dab2b2c45116f8e54",
+      "git_blob_sha": "83c39a448c17a1dc05e9f3b4b7cdcffb0af5cd53",
+      "bytes": 4853
+    },
+    {
+      "path": "docs/evidence/offline-go-build-20261107/artifact-check.log.evidence.json",
+      "sha256": "48176ee0585f3052a4e55b734010e123f1f22bed2badfda9672472a7b2396886",
+      "git_blob_sha": "0420d57b25b1cd5f5ee28ef02c89d778368167b1",
+      "bytes": 2568
+    },
+    {
+      "path": "docs/evidence/offline-go-build-20261107/build.log.evidence.json",
+      "sha256": "0f510b919e6cf47a0b3ed6855242aa02a55a81d632bd758079eed1a2bd5aea68",
+      "git_blob_sha": "c8744d1d4483ea288985d4eb3474905ddefd8dfc",
+      "bytes": 782
+    },
+    {
+      "path": "docs/evidence/offline-go-build-20261107/command-exits.json",
+      "sha256": "22aaad84f42860b17e4c79056e2f89c36871aee05771660f28e70c9d97365414",
+      "git_blob_sha": "fc1d388f68deda7c9a0d4f95f9752f357ffc581d",
+      "bytes": 1562
+    },
+    {
+      "path": "docs/evidence/offline-go-build-20261107/result.json",
+      "sha256": "54fc7001e220a231fdb8845cf23136f45046cab44de25f4eb04549cb1fe7740f",
+      "git_blob_sha": "8099ce95f2ad80040fa839529504682b1289adb6",
+      "bytes": 1838
+    },
+    {
+      "path": "docs/evidence/offline-go-build-20261107/source-transforms.json",
+      "sha256": "1fb9f4f7f0ab5fcb44a18f1630e8e36ac603eea50bdb548837a66af6c65d7674",
+      "git_blob_sha": "7e052a6cdf882f90ee7ca393808a527905f79ebc",
+      "bytes": 1630
+    },
+    {
+      "path": "docs/evidence/offline-go-build-20261107/static-assets.json",
+      "sha256": "ef712c0120c69eec1c64c197fd60fb4af711a43ec9bff0a1e306a5b6d2202bbe",
+      "git_blob_sha": "697c36220eecc068dc6b1f6b7383078999d8a4f6",
+      "bytes": 4289
+    },
+    {
+      "path": "docs/evidence/offline-go-build-20261107/toolchain-verification.json.evidence.json",
+      "sha256": "807c02cd255cb77c2f27a25a9db34e3303a01884338a8c1e9510b92f96c996e3",
+      "git_blob_sha": "23b86dbd0633adb4fc1b8fef65e4336e83c946d6",
+      "bytes": 685
+    },
+    {
+      "path": "docs/evidence/offline-go-build-20261107/workflow-trigger-check.json",
+      "sha256": "26817eb9f98f87acf67bcebf1350ee3f2bcb0e887f73167c0694fa5cafe8ffb3",
+      "git_blob_sha": "e4f4b9a7620c33b20cf01a9ebe055eb9ddecf3e9",
+      "bytes": 2150
+    }
+  ]
+}

@@ -1,0 +1,55 @@
+{
+  "basis": "Extracted existing receipt markers, not rerun; null means no explicit exit marker retained for that command.",
+  "commands": [
+    {
+      "command": "go version",
+      "recorded_exit_code": 0,
+      "source": "build.log.evidence.json"
+    },
+    {
+      "command": "go mod verify",
+      "recorded_exit_code": 0,
+      "source": "build.log.evidence.json"
+    },
+    {
+      "command": "make build",
+      "recorded_exit_code": 0,
+      "source": "build.log.evidence.json"
+    },
+    {
+      "command": "CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -tags=integration -o bin/ldap-fixture ./internal/testldapfixture",
+      "recorded_exit_code": 0,
+      "source": "build.log.evidence.json"
+    },
+    {
+      "command": "bin/adtr -h",
+      "recorded_exit_code": 0,
+      "source": "artifact-check.log.evidence.json"
+    },
+    {
+      "command": "bin/ldap-fixture -h",
+      "recorded_exit_code": 1,
+      "source": "artifact-check.log.evidence.json"
+    },
+    {
+      "command": "go version -m bin/adtr bin/ldap-fixture",
+      "recorded_exit_code": 0,
+      "source": "artifact-check.log.evidence.json"
+    },
+    {
+      "command": "sha256sum bin/adtr bin/ldap-fixture",
+      "recorded_exit_code": null,
+      "source": "artifact-check.log.evidence.json"
+    },
+    {
+      "command": "git status --porcelain",
+      "recorded_exit_code": null,
+      "source": "artifact-check.log.evidence.json"
+    },
+    {
+      "command": "git diff --check",
+      "recorded_exit_code": 0,
+      "source": "artifact-check.log.evidence.json"
+    }
+  ]
+}

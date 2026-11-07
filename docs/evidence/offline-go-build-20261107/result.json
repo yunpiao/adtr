@@ -1,0 +1,39 @@
+{
+  "source_head": "503022338044ddfaffb26836449da58db2a798ea",
+  "source_tree": "8fa959a7f56eea7493f745141893ea2fd9fec0a9",
+  "backup_parent": "ef482b08396230ffa4dedce1f7f2c3e013e0a047",
+  "go_version": "go1.27.1 linux/amd64",
+  "go_mod_verify": "exit 0; all modules verified",
+  "application_build": "exit 0",
+  "fixture_build": "exit 0",
+  "application_help_exit": 0,
+  "fixture_help_exit": 1,
+  "fixture_help_result": "Not passed: flag.ErrHelp maps to generic configuration error before credentials or listeners.",
+  "artifacts": [
+    {
+      "path": "bin/adtr",
+      "sha256": "adfaaec6566f127eb6cd8ef99e343a060e05835315ba67342c60d76066d4ea43",
+      "revision_binding": "No embedded VCS revision (-buildvcs=false); producer receipt plus clean source snapshot only."
+    },
+    {
+      "path": "bin/ldap-fixture",
+      "sha256": "53058c61f2722965a8917f295d85740d5216e0d2f5770cba2365682b7125f236",
+      "revision_binding": "Embedded vcs.revision matches source_head; vcs.modified=false."
+    }
+  ],
+  "offline_controls": {
+    "basis": "Producer summary, not captured environment snapshot",
+    "GOTOOLCHAIN": "local",
+    "GOPROXY": "off",
+    "GOSUMDB": "off",
+    "GOTELEMETRY": "off"
+  },
+  "toolchain_provenance": "Retained archive matches historical docs/validation-g03.md digest; 15639 installed regular files match archive. No fresh official metadata retrieval or signed provenance proof.",
+  "limitations": [
+    "No hermetic build or reproducible-build attestation.",
+    "No service/PG/TLS LDAP/browser/real-AD acceptance.",
+    "Required Docker/PG, Node 24.19.0 and Chromium 141.0.7390.37 are still unavailable.",
+    "No frontend rebuild; frontend is external web/dist, not embedded. See static-assets.json for current-byte checks and limitations.",
+    "No binaries included. Product acceptance remains 0/209."
+  ]
+}
