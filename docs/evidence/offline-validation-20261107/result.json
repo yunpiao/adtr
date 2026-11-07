@@ -1,0 +1,39 @@
+{
+  "head": "503022338044ddfaffb26836449da58db2a798ea",
+  "tree": "8fa959a7f56eea7493f745141893ea2fd9fec0a9",
+  "working_tree_clean": true,
+  "exit_codes": {
+    "access_search_clear": 0,
+    "access_user_row_numbers": 0,
+    "all-dom": 0,
+    "candidate-format": 0,
+    "diff-check": 0,
+    "domain_list_index_native": 0,
+    "domain_source_session": 0,
+    "fetch": 0,
+    "requirements": 0,
+    "system_candidate_native": 0,
+    "tsc": 0,
+    "vite": 0
+  },
+  "dom": {
+    "files": 117,
+    "tests": 5371,
+    "duration_seconds": 134.41
+  },
+  "python_contracts": 22,
+  "notes": [
+    "Node runtime v24.22.1 rather than README v24.19.0; dependencies exact locked versions copied offline",
+    "Vite build passed with existing >500kB chunk warning",
+    "Two recovery-verifier invocation path errors fixed without source changes; recorded in recovery-verification.json"
+  ],
+  "not_run": [
+    "npm audit",
+    "npm install/ci",
+    "make check",
+    "native browser/API/Worker/PostgreSQL",
+    "PNG capture or visual review",
+    "remote PR/CI/push/merge/deploy"
+  ],
+  "product_acceptance": "Real product/native acceptance was not performed in this execution; these offline results add no new requirements-acceptance conclusions."
+}

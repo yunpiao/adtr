@@ -1,0 +1,23 @@
+{
+  "encoding": "utf-8-lines",
+  "sourceName": "all-dom.log",
+  "originalBytes": 460,
+  "originalSHA256": "8fa6fcd119203c4a458504720b59f79bf5c8aa5b7eccf43c181fd656498ffa63",
+  "sanitization": "checkout absolute path replaced with <CHECKOUT>",
+  "preservedBytes": 403,
+  "preservedSHA256": "d67174bd9cf50cf7cf26c5236ae82520533a05cf08822d5459ba4ef940a5a87e",
+  "lines": [
+    "\n",
+    " RUN  v5.0.3 <CHECKOUT>/web\n",
+    "\n",
+    "\n",
+    " Test Files  117 passed (117)\n",
+    "      Tests  5371 passed (5371)\n",
+    "   Start at  11:04:21\n",
+    "   Duration  134.41s (tests 79%, environment 11%, setup 4%, import 4%, transform 2%)\n",
+    "\n",
+    "    Isolate  117 workers spawned · ~366ms startup each (spawn + environment, per file)\n",
+    "             at least ~21.04s faster with isolate: false — reuses workers across files instead of one per file\n",
+    "\n"
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "commands.txt": {
+    "originalSHA256": "7eb1c6d944f9a122db50a5a5292ba3a7048d9bfc8daa0a404857282d6ab6213c",
+    "transformation": "Dependency source path replaced with placeholder; recovery scope sentence summarized. Commands are a record, not an instruction to run restricted checks."
+  },
+  "result.json": {
+    "originalSHA256": "bf4efd4b477448dba9b2cd18daed6c3f6de1c4010a2f84e8eea3ef0a79d88e9d",
+    "transformation": "JSON parsed and formatted. The product_acceptance summary is clarified to describe only this execution: real product/native acceptance was not performed and offline results add no new requirements-acceptance conclusions. All test counts, exit codes and other values are unchanged."
+  }
+}

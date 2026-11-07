@@ -1,0 +1,20 @@
+{
+  "encoding": "utf-8-lines",
+  "sourceName": "access_user_row_numbers.log",
+  "originalBytes": 704,
+  "originalSHA256": "0caa2cddd04567c4344f728ced952ae5c76637479321715bb4fe716a8d4a9dee",
+  "sanitization": "none",
+  "preservedBytes": 704,
+  "preservedSHA256": "0caa2cddd04567c4344f728ced952ae5c76637479321715bb4fe716a8d4a9dee",
+  "lines": [
+    "test_added_line_anchor_and_prior_drift_fail_closed (__main__.AccessUserRowNumbersContract.test_added_line_anchor_and_prior_drift_fail_closed) ... ok\n",
+    "test_assertions_use_the_current_validated_rows_before_original_image (__main__.AccessUserRowNumbersContract.test_assertions_use_the_current_validated_rows_before_original_image) ... ok\n",
+    "test_exact_inverse_restores_every_prior_layer (__main__.AccessUserRowNumbersContract.test_exact_inverse_restores_every_prior_layer) ... ok\n",
+    "test_old_inverse_has_only_exact_outer_hook (__main__.AccessUserRowNumbersContract.test_old_inverse_has_only_exact_outer_hook) ... ok\n",
+    "\n",
+    "----------------------------------------------------------------------\n",
+    "Ran 4 tests in 0.031s\n",
+    "\n",
+    "OK\n"
+  ]
+}

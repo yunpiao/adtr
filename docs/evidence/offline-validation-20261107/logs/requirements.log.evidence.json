@@ -1,0 +1,12 @@
+{
+  "encoding": "utf-8-lines",
+  "sourceName": "requirements.log",
+  "originalBytes": 122,
+  "originalSHA256": "58c49e4b6a5fa8a835e69c15d63f2c6747003405b27b848be76b7288e47ecb15",
+  "sanitization": "none",
+  "preservedBytes": 122,
+  "preservedSHA256": "58c49e4b6a5fa8a835e69c15d63f2c6747003405b27b848be76b7288e47ecb15",
+  "lines": [
+    "Requirements: 209 unique AD-F records, 57 groups, 3258 fields, 804 controls, source rows and evidence boundaries verified\n"
+  ]
+}

@@ -1,0 +1,24 @@
+Recovery (repository root):
+git init
+git fetch --depth=1 --no-tags https://github.com/yunpiao/adtr.git 503022338044ddfaffb26836449da58db2a798ea
+git checkout --detach 503022338044ddfaffb26836449da58db2a798ea
+Before fetch: read exact nontruncated recursive tree 8fa959a7f56eea7493f745141893ea2fd9fec0a9 and checked recovery scope.
+After recovery: every remote blob verified with Git blob SHA1; candidate manifest lengths/SHA256/blob checked; historical evidence container and reconstructed bytes checked.
+Dependencies: byte-equal lock check, then cp -a <EXISTING_OFFLINE_DEPENDENCIES> web/node_modules
+
+Executed from repository root:
+python3 scripts/test_system_candidate_native_contract.py -v
+python3 scripts/test_domain_list_index_native_contract.py -v
+python3 scripts/test_domain_source_session_contract.py -v
+python3 scripts/test_access_search_clear_contract.py -v
+python3 scripts/test_access_user_row_numbers_contract.py -v
+python3 scripts/verify_requirements.py
+node web/node_modules/prettier/bin/prettier.cjs --check [all .ts/.tsx paths from candidate-manifest.json]
+git diff --check
+
+Executed from web directory:
+node node_modules/vitest/vitest.mjs run --maxWorkers=2
+node node_modules/typescript/bin/tsc --noEmit
+node node_modules/vite/bin/vite.js build
+
+Not executed: audit, npm install/ci, network dependency acquisition, make check, native browser/API/Worker/PostgreSQL tests, native PNG capture/review, PR/CI/push/merge/deploy. No product/native script/guard/budget edits.

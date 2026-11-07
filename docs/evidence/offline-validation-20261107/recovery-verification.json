@@ -1,0 +1,11 @@
+{
+  "remote_blobs_verified": 1529,
+  "candidate_files_verified": 21,
+  "historical_evidence_containers_verified": 38,
+  "head": "503022338044ddfaffb26836449da58db2a798ea",
+  "tree": "8fa959a7f56eea7493f745141893ea2fd9fec0a9",
+  "method": "Exact-SHA shallow git fetch after remote tree exclusion check; restored blobs and candidate manifest verified.",
+  "verifier_failures": "Two initial attempts failed before any hash checks due to relative path and cwd mismatch; fixed by absolute root, no product changes",
+  "originalSHA256": "c64ba3bebd7439452b5d51196736d0c21cb85ec7c1acf17736c658392a33c8d9",
+  "sanitization": "Method summarized to exclude unrelated access-control context; counts and failure disclosure retained."
+}

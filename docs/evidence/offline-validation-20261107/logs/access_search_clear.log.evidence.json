@@ -1,0 +1,20 @@
+{
+  "encoding": "utf-8-lines",
+  "sourceName": "access_search_clear.log",
+  "originalBytes": 698,
+  "originalSHA256": "23637c44c1582015d11456f71f1f868000161e98a6a089f2fdd4623fc456df10",
+  "sanitization": "none",
+  "preservedBytes": 698,
+  "preservedSHA256": "23637c44c1582015d11456f71f1f868000161e98a6a089f2fdd4623fc456df10",
+  "lines": [
+    "test_all_previous_layers_restore_exactly (__main__.AccessSearchClearContract.test_all_previous_layers_restore_exactly) ... ok\n",
+    "test_drift_changed_moved_missing_and_duplicate_lines_reject (__main__.AccessSearchClearContract.test_drift_changed_moved_missing_and_duplicate_lines_reject) ... ok\n",
+    "test_native_checks_remain_draft_only_and_observe_real_page (__main__.AccessSearchClearContract.test_native_checks_remain_draft_only_and_observe_real_page) ... ok\n",
+    "test_only_exact_outer_hook_changes_existing_inverse (__main__.AccessSearchClearContract.test_only_exact_outer_hook_changes_existing_inverse) ... ok\n",
+    "\n",
+    "----------------------------------------------------------------------\n",
+    "Ran 4 tests in 0.018s\n",
+    "\n",
+    "OK\n"
+  ]
+}

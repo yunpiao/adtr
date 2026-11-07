@@ -1,0 +1,64 @@
+{
+  "checked_at_utc": "2026-11-07T02:14:39.532099+00:00",
+  "repository": "yunpiao/adtr",
+  "main_head": "21dbf9d2fa513a7ebfe006cc5d2ebcd3928cf27f",
+  "candidate_head": "503022338044ddfaffb26836449da58db2a798ea",
+  "candidate_tree": "8fa959a7f56eea7493f745141893ea2fd9fec0a9",
+  "proposed_branch": "dot/offline-validation-evidence-20261107",
+  "proposed_path": "docs/evidence/offline-validation-20261107/",
+  "target_ref": "404 NOT_FOUND; main/candidate read successfully",
+  "target_pull_requests_all_states": [],
+  "workflow_files_identical_on_both_heads": true,
+  "workflows": [
+    {
+      "path": ".github/workflows/ci-image-probe.yml",
+      "git_blob_sha": "7cdd799b66e7c4d7d4a8433cbddf4b843e3e6699",
+      "sha256": "d7af9b728ac4218979848cb0ee0480ef644006672ca469062ac30c79fd6a5672",
+      "events": {
+        "push": {
+          "branches": [
+            "ci/image-transfer-probe/**"
+          ]
+        }
+      }
+    },
+    {
+      "path": ".github/workflows/ci.yml",
+      "git_blob_sha": "fdf7e55c26cb04a478151b4c1f1570bba4d9f141",
+      "sha256": "90091e86fc5da2d73f931b417a411725555a61608bb7117020c3bf88acc1b9e9",
+      "events": {
+        "pull_request": "",
+        "workflow_dispatch": "",
+        "merge_group": {
+          "types": [
+            "checks_requested"
+          ]
+        },
+        "push": {
+          "branches": [
+            "main"
+          ]
+        }
+      }
+    },
+    {
+      "path": ".github/workflows/prototype.yml",
+      "git_blob_sha": "628a3555e3a541fee099dba22e57dd6b4a6bf3a9",
+      "sha256": "7278183137d50d7eb15137734011529a938995f60f0e8f5772de71d9849ad00e",
+      "events": {
+        "pull_request": {
+          "branches": [
+            "main"
+          ],
+          "paths": [
+            "prototype/adtr/**",
+            ".github/workflows/prototype.yml"
+          ]
+        }
+      }
+    }
+  ],
+  "conclusion": "None of the three checked repository workflows subscribes to create. Their push filters exclude the proposed branch. Branch creation and an evidence-only push do not match these workflow triggers. No PR, dispatch or merge-group operation is planned.",
+  "scope_limit": "This checks repository workflow declarations at the observed exact commits, not external integrations or later changes. Recheck refs and target absence immediately before any publication.",
+  "remote_writes_performed": false
+}

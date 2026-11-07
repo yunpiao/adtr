@@ -1,0 +1,14 @@
+{
+  "method": "cp -a; no npm install, no downloads",
+  "lock_sha256": "fb73eca2ec9a028891dd12cb85086d51663c25677651d007dfc798e751c60261",
+  "node": "v24.22.1",
+  "packages": {
+    "vitest": "5.0.3",
+    "typescript": "5.9.3",
+    "vite": "7.3.7"
+  },
+  "source_description": "Existing offline dependency tree from an earlier project checkout; lockfiles matched byte for byte.",
+  "destination_description": "Recovered checkout web/node_modules",
+  "originalSHA256": "d1c15a5de4e82f3d1f1ebcfb83f894d5ec8a06303646c1e3cc588e41bf8b5902",
+  "sanitization": "Local source and destination absolute paths replaced with role descriptions."
+}

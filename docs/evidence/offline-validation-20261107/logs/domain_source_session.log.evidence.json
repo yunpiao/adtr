@@ -1,0 +1,17 @@
+{
+  "encoding": "utf-8-lines",
+  "sourceName": "domain_source_session.log",
+  "originalBytes": 260,
+  "originalSHA256": "ad2b3f5ccf5025706541cf6129e7981c3a3f2457524bc4fbecc81d9b83a3181b",
+  "sanitization": "none",
+  "preservedBytes": 260,
+  "preservedSHA256": "ad2b3f5ccf5025706541cf6129e7981c3a3f2457524bc4fbecc81d9b83a3181b",
+  "lines": [
+    "test_seeded_role_matches_browser_and_real_api_id_shape (__main__.DomainSourceSessionFixtureContract.test_seeded_role_matches_browser_and_real_api_id_shape) ... ok\n",
+    "\n",
+    "----------------------------------------------------------------------\n",
+    "Ran 1 test in 0.001s\n",
+    "\n",
+    "OK\n"
+  ]
+}

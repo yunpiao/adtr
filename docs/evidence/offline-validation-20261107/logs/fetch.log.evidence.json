@@ -1,0 +1,13 @@
+{
+  "encoding": "utf-8-lines",
+  "sourceName": "fetch.log",
+  "originalBytes": 113,
+  "originalSHA256": "74a9b07935e6e7b4f4c71ee6fd10cd6a4071318ca73e18a5ef36b1a5bc3c08fb",
+  "sanitization": "none",
+  "preservedBytes": 113,
+  "preservedSHA256": "74a9b07935e6e7b4f4c71ee6fd10cd6a4071318ca73e18a5ef36b1a5bc3c08fb",
+  "lines": [
+    "From https://github.com/yunpiao/adtr\n",
+    " * branch            503022338044ddfaffb26836449da58db2a798ea -> FETCH_HEAD\n"
+  ]
+}
