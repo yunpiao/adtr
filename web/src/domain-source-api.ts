@@ -201,6 +201,17 @@ async function transport(
   )
     throw new ApiError("domain_source_identity_changed", 401);
   const data: unknown = await response.json().catch(() => {
+    // Read failures have no mutation outcome to recover. Preserve known denial
+    // semantics even when a gateway or interrupted body is not valid JSON.
+    // POST failures stay uncertain so the original receipt can be recovered.
+    if (body === undefined && !response.ok) {
+      if (response.status === 401)
+        throw new ApiError("unauthenticated", response.status);
+      if (response.status === 403)
+        throw new ApiError("forbidden", response.status);
+      if (response.status === 404)
+        throw new ApiError("not_found", response.status);
+    }
     throw new ApiError("invalid_response", response.status);
   });
   signal.throwIfAborted();
