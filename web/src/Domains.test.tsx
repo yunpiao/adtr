@@ -1446,6 +1446,14 @@ describe("concurrent domain review invalidation", () => {
 
 describe("domain SOC queue continuity", () => {
   it("keeps applied filters, unsubmitted edits and row focus after details", async () => {
+    override = (url) => {
+      if (!url.startsWith("/api/domains?")) return undefined;
+      const data = list();
+      data.page.pageSize = Number(
+        new URL(url, "http://localhost").searchParams.get("pageSize") ?? "20",
+      );
+      return response(data);
+    };
     await start();
     fill("域或域控关键词", "synthetic");
     fill("每页条数", "10");

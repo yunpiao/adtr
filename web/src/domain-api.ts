@@ -366,9 +366,30 @@ export const domainAPI = {
       !d.List.every(validConnection) ||
       typeof d.exhausted !== "boolean" ||
       !integer(d.page.pageIdx, 1, 1000000) ||
-      !integer(d.page.pageSize, 1, 100) ||
+      !(d.page.pageSize === -1 || integer(d.page.pageSize, 1, 100)) ||
       !integer(d.page.total, 0) ||
       !integer(d.page.totalPage, 0)
+    )
+      return invalid();
+    const params = new URLSearchParams(query),
+      indices = params.getAll("pageIdx"),
+      sizes = params.getAll("pageSize");
+    if (
+      indices.length > 1 ||
+      sizes.length > 1 ||
+      String(d.page.pageIdx) !== (indices[0] ?? "1") ||
+      String(d.page.pageSize) !== (sizes[0] ?? "20")
+    )
+      return invalid();
+    // The existing -1 mode is bounded-all, never an unbounded page or a new UI
+    // option. Preserve the server's sentinel and require its complete result.
+    if (
+      d.page.pageSize === -1 &&
+      (d.page.pageIdx !== 1 ||
+        d.page.total > 1000 ||
+        d.page.totalPage !== (d.page.total === 0 ? 0 : 1) ||
+        d.List.length !== d.page.total ||
+        !d.exhausted)
     )
       return invalid();
     return d as unknown as DomainList;
