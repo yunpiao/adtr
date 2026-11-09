@@ -45,6 +45,7 @@ export function useMessageBulk(
 ) {
   const [operations, setOperations] = useState<Operation[]>([]),
     [storageError, setStorageError] = useState("");
+  const [oversizedResult, setOversizedResult] = useState<string>();
   const [busy, setBusy] = useState(false);
   const [selection, setSelection] = useState<{
     resultId: string;
@@ -84,6 +85,7 @@ export function useMessageBulk(
     locked.current = false;
     apply([]);
     setBusy(false);
+    setOversizedResult(undefined);
     setPreview(undefined);
     setSelection({ resultId: "", ids: [], all: false });
   };
@@ -301,7 +303,9 @@ export function useMessageBulk(
   const unresolved = operations.some(
     (o) => o.phase !== "known" || !o.value || !bulkTerminal(o.value.state),
   );
-  const blocked = !allowed || busy || unresolved || !!storageError;
+  const oversized =
+    oversizedResult !== undefined && oversizedResult === snapshot?.resultId;
+  const blocked = !allowed || busy || unresolved || !!storageError || oversized;
   const pageIDs = new Set(snapshot?.items.map((row) => row.messageId) ?? []);
   const pageSelectionBlocked = blocked || workspaceBusy || currentSelection.all;
   const pageSelected = [...pageIDs].filter((id) => currentSelection.ids.includes(id)).length;
@@ -359,9 +363,10 @@ export function useMessageBulk(
       if (
         new TextEncoder().encode(JSON.stringify(intent.input)).length > 32768
       ) {
-        setStorageError(
-          "所选 ID 超过 32 KiB 请求限制，尚未创建批次。请减少选择，或选择固定结果全部。",
-        );
+        // This is a local selection error, not evidence that storage failed.
+        // Keep the chosen IDs, but require editing and a fresh preview before
+        // another explicit confirmation. Never persist/send this oversized input.
+        setOversizedResult(preview.resultId);
         return;
       }
       persistBulkIntent(profile, intent);
@@ -429,6 +434,7 @@ export function useMessageBulk(
               disabled={busy}
               onClick={() => {
                 setStorageError("");
+                setOversizedResult(undefined);
                 setPreview(undefined);
                 setSelection({
                   resultId: snapshot.resultId,
@@ -485,11 +491,36 @@ export function useMessageBulk(
         </section>
       ) : null,
     panel:
-      allowed && (operations.length > 0 || storageError) ? (
+      allowed && (operations.length > 0 || storageError || oversized) ? (
         <section
           className="message-read-panel message-bulk-panel"
           aria-label="批量已读操作"
         >
+          {oversized && (
+            <>
+              <p role="alert">
+                所选 ID 超过 32 KiB 请求限制，尚未创建批次。已保留全部选择；返回调整后可减少选择，或选择固定结果全部，并重新预览确认。
+              </p>
+              <button
+                className="secondary"
+                disabled={busy || workspaceBusy || unresolved || !!storageError}
+                onClick={() => {
+                  if (
+                    locked.current ||
+                    !permitted.current ||
+                    workspaceBusy ||
+                    unresolved ||
+                    storageError
+                  )
+                    return;
+                  setOversizedResult(undefined);
+                  setPreview(undefined);
+                }}
+              >
+                返回调整批量选择
+              </button>
+            </>
+          )}
           {storageError && (
             <>
               <p role="alert">{storageError}</p>
