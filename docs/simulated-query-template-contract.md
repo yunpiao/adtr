@@ -62,6 +62,11 @@ server/DC/user/rule/type 是不解析不执行的合成标签，不代表已授�
 
 `cmd/adtr-querytemplates` 只从标准输入读取一个场景，不接受文件路径、网络参数、
 环境配置或真实身份字段。每次启动独立 Store，不加载产品默认模板。
+命令不提供参数模式；任何额外参数（含空参数、`--`、`--help`、路径或未知选项）
+都在读取 stdin 前以固定 usage 退出2，stdout 为空，也不回显参数。这防止调用方
+误以为路径/选项生效时仍执行 stdin 场景；移除校验会恢复原来的静默忽略行为。
+无参数调用仍按下述场景契约运行。若 stdin 一直不结束或输出设备阻塞，仍无运行
+时限；这里的修复只保证无效参数不等待 stdin，不为合法调用增加超时或后台行为。
 可选 `defaults` 数组只用于显式合成内置模板；省略或 `[]` 保持旧空 Store 行为。
 每个元素必须有合法 `id`、`name` 和显式对象 `params`；`params:{}` 表示空条件，
 其条件字段沿用上表，不执行查询。缺省 `params`、`null`、错误类型或无效模板均失败。
@@ -82,6 +87,12 @@ CLI 通过既有 `New` 初始化这些值，因此内置/自定义名称与 ID �
 未冻结的 result 字符串。输入解析/值校验/场景操作失败时退出1，不输出部分场景结果。
 整个场景先在内存完成才写 stdout；若输出设备自身失败，无法撤销已被设备接收的字节。
 错误仅输出固定类别，不回显输入原值。没有外部副作用、恢复磁盘记录或后台任务。
+返回给程序的读错误固定为 `cannot read scenario`，返回给程序的写错误（包括短写）
+固定为 `cannot write scenario result`，退出1；底层 Reader/Writer 错误原文不会透传。
+这样保证错误分类稳定且不泄露底层错误附带的信息；副作用是 stderr 不再提供
+设备错误细节。写入失败后不会重试，已经交给设备的字节仍可能存在。
+操作系统信号终止不属于这些返回错误；例如 stdout 断管仍保留 Go 的默认 SIGPIPE
+行为，进程可被信号终止且没有诊断。本修复不安装信号处理或改变管道退出语义。
 
 示例只使用合成值：
 
@@ -114,6 +125,13 @@ go run ./cmd/adtr-querytemplates < examples/simulation/querytemplate-defaults.js
   TestDefaultsImmutableAndReservedNames、TestDefaultsStrictInputsAndAtomicFailure、
   TestDefaultsShareExistingCapacity、TestDefaultsUnicodeBoundariesAndIO 覆盖只读/冲突、
   严格 JSON 与固定错误、零部分输出、1000项共享边界、Unicode 和写入失败。
+- #297：TestCommandProcessExitAndSeparatePipes 调用真实 main 子进程，核对成功、
+  未支持参数、非法 JSON 和后续操作失败的退出码及独立 stdout/stderr。
+  TestCommandArgumentsFailBeforeIO、TestCommandArgumentDoesNotWaitForStdinEOF
+  分别验证无效参数不读取/写结果以及不等待尚未关闭的 stdin。
+  TestCommandIOErrorsAreSanitized、TestCommandWriteErrorIsFixed、
+  TestCommandPartialWriteIsNotRetried 和 TestCommandReadBudget 核对固定 I/O 错误、
+  已写前缀不可撤销且不重试，以及最多读取1MiB加1字节。
 
 可复现命令：
 `go test -race -count=1 ./internal/querytemplates ./cmd/adtr-querytemplates`；

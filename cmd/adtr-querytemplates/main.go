@@ -4,11 +4,17 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 
 	"github.com/yunpiao/adtr/internal/querytemplates"
+)
+
+var (
+	errRead  = errors.New("cannot read scenario")
+	errWrite = errors.New("cannot write scenario result")
 )
 
 type operation struct {
@@ -38,7 +44,7 @@ type result struct {
 func run(in io.Reader, out io.Writer) error {
 	data, err := io.ReadAll(io.LimitReader(in, querytemplates.MaxJSONBytes+1))
 	if err != nil {
-		return fmt.Errorf("cannot read scenario")
+		return errRead
 	}
 	var input scenario
 	if err = querytemplates.Decode(data, &input); err != nil {
@@ -100,17 +106,25 @@ func run(in io.Reader, out io.Writer) error {
 	// No scenario results are emitted before every operation succeeds.
 	var buffer bytes.Buffer
 	if err = json.NewEncoder(&buffer).Encode(output); err != nil {
-		return err
+		return errWrite
 	}
 	n, err := out.Write(buffer.Bytes())
-	if err == nil && n != buffer.Len() {
-		return io.ErrShortWrite
+	if err != nil || n != buffer.Len() {
+		return errWrite
 	}
-	return err
+	return nil
 }
-func main() {
-	if err := run(os.Stdin, os.Stdout); err != nil {
-		fmt.Fprintln(os.Stderr, "synthetic query-template scenario failed:", err)
-		os.Exit(1)
+
+func execute(args []string, in io.Reader, out, diagnostic io.Writer) int {
+	if len(args) != 0 {
+		fmt.Fprintln(diagnostic, "usage: adtr-querytemplates < synthetic-scenario.json")
+		return 2
 	}
+	if err := run(in, out); err != nil {
+		fmt.Fprintln(diagnostic, "synthetic query-template scenario failed:", err)
+		return 1
+	}
+	return 0
 }
+
+func main() { os.Exit(execute(os.Args[1:], os.Stdin, os.Stdout, os.Stderr)) }
