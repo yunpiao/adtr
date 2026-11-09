@@ -651,6 +651,7 @@ describe("archived replay and candidate paging", () => {
               operationUUID: sid,
               action: "archive",
               reason: "Earlier archive",
+              before: "2026-10-07T00:01:00Z",
               occurredAt: plan().createdAt,
               targets: [
                 { taskUUID: tid, archived: true, visibilityVersion: 1 },

@@ -126,6 +126,15 @@ const validEvent = (v: unknown): v is ScheduleEvent =>
   ["firstAt", "lastAt"].every(
     (k) => v[k] === undefined || typeof v[k] === "string",
   );
+function archiveTime(value: unknown): string | undefined {
+  if (typeof value !== "string" || value.startsWith("0000") || !validUTC(value))
+    return undefined;
+  // Preserve PostgreSQL microseconds while allowing equivalent trailing zeros.
+  return (
+    value.slice(0, 19) +
+    (value.split(".")[1]?.slice(0, -1) ?? "").padEnd(6, "0")
+  );
+}
 export const maintenanceAPI = {
   async schedules(query: string, signal: AbortSignal) {
     const v = await taskTransport(`/schedules?${query}`, signal);
@@ -260,30 +269,50 @@ export const maintenanceAPI = {
     csrf: string,
     signal: AbortSignal,
   ) {
+    // Bind the receipt to sent intent, not caller-owned objects changed in flight.
+    // This private snapshot contains no proof or session credentials.
+    const expected = {
+      before: input.before,
+      reason: input.reason,
+      targets: input.targets.map(({ taskUUID, visibilityVersion }) => ({
+        taskUUID,
+        visibilityVersion,
+      })),
+    };
     const v = await taskTransport(
       `/${action}`,
       signal,
       { ...input, idempotencyKey: key, ...proof },
       csrf,
     );
+    const before = archiveTime(expected.before);
     if (
       !object(v) ||
       typeof v.replayed !== "boolean" ||
       !object(v.receipt) ||
       !strings(v.receipt, ["operationUUID", "reason", "occurredAt"]) ||
       v.receipt.action !== action ||
+      v.receipt.reason !== expected.reason ||
+      (action === "archive"
+        ? before === undefined || archiveTime(v.receipt.before) !== before
+        : Object.hasOwn(v.receipt, "before")) ||
       !Array.isArray(v.receipt.targets) ||
-      v.receipt.targets.length !== input.targets.length ||
+      v.receipt.targets.length !== expected.targets.length ||
       !v.receipt.targets.every(
         (t) =>
           object(t) &&
           typeof t.taskUUID === "string" &&
-          input.targets.some((w) => w.taskUUID === t.taskUUID) &&
-          typeof t.archived === "boolean" &&
+          expected.targets.some(
+            (w) =>
+              w.taskUUID === t.taskUUID &&
+              integer(w.visibilityVersion, 0, Number.MAX_SAFE_INTEGER - 1) &&
+              t.visibilityVersion === w.visibilityVersion + 1,
+          ) &&
+          t.archived === (action === "archive") &&
           integer(t.visibilityVersion, 0),
       ) ||
       new Set(v.receipt.targets.map((t) => t.taskUUID)).size !==
-        input.targets.length
+        expected.targets.length
     )
       throw new ApiError("invalid_response");
     return v as unknown as { receipt: ArchiveReceipt; replayed: boolean };
