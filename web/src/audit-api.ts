@@ -185,13 +185,28 @@ async function fetchResponse(
     throw new ApiError("network");
   }
 }
-async function json(response: Response) {
+async function json(response: Response, readOnly: boolean) {
+  // GETs carry no password/TOTP proof. Preserve HTTP denial/resource status
+  // when their error body is unusable, rather than turning it into a retry.
+  // Valid server codes (notably 403/password_change_required) stay intact.
+  // POSTs retain distinct proof errors and uncertain submission handling.
+  const readFailure = readOnly
+    ? (
+        {
+          401: "unauthenticated",
+          403: "forbidden",
+          404: "not_found",
+        } as Record<number, string>
+      )[response.status]
+    : undefined;
   const data: unknown = await response.json().catch(() => {
-    throw new ApiError("invalid_response", response.status);
+    throw new ApiError(readFailure ?? "invalid_response", response.status);
   });
   if (!response.ok)
     throw new ApiError(
-      object(data) && typeof data.error === "string" ? data.error : "internal",
+      object(data) && typeof data.error === "string"
+        ? data.error
+        : (readFailure ?? "internal"),
       response.status,
     );
   return data;
@@ -202,7 +217,10 @@ async function transport(
   body?: unknown,
   csrf?: string,
 ) {
-  return json(await fetchResponse(path, signal, body, csrf));
+  return json(
+    await fetchResponse(path, signal, body, csrf),
+    body === undefined,
+  );
 }
 function verifyExportActor(response: Response, userID: number) {
   if (response.ok && response.headers.get("X-ADTR-User-ID") !== String(userID))
@@ -231,6 +249,7 @@ export const auditAPI = {
           signal,
           userID,
         ),
+        true,
       ),
       query,
     );
@@ -372,6 +391,7 @@ export const auditAPI = {
         signal,
         userID,
       ),
+      true,
     );
     if (
       !object(v) ||
@@ -400,7 +420,7 @@ export const auditAPI = {
       userID,
     );
     if (!response.ok) {
-      await json(response);
+      await json(response, true);
       throw new ApiError("invalid_response");
     }
     if (
