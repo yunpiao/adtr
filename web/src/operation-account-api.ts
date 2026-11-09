@@ -171,6 +171,7 @@ function validPage(
   value: unknown,
   length: number,
   exhausted: unknown,
+  query: string,
 ): value is PageInfo {
   if (
     !object(value) ||
@@ -180,6 +181,16 @@ function validPage(
     !integer(value.total, 0) ||
     !integer(value.totalPage, 0) ||
     typeof exhausted !== "boolean"
+  )
+    return false;
+  const params = new URLSearchParams(query),
+    indices = params.getAll("pageIdx"),
+    sizes = params.getAll("pageSize");
+  if (
+    indices.length > 1 ||
+    sizes.length > 1 ||
+    String(value.pageIdx) !== (indices[0] ?? "1") ||
+    String(value.pageSize) !== (sizes[0] ?? "20")
   )
     return false;
   const size =
@@ -279,7 +290,7 @@ export const operationAccountAPI = {
       !Array.isArray(data.List) ||
       !data.List.every(validOperationAccount) ||
       new Set(data.List.map((v) => v.accountId)).size !== data.List.length ||
-      !validPage(data.page, data.List.length, data.exhausted)
+      !validPage(data.page, data.List.length, data.exhausted, query)
     )
       return invalid();
     return data as unknown as AccountList;
@@ -303,7 +314,7 @@ export const operationAccountAPI = {
       ) ||
       new Set(data.domains.map((v) => v.domainId)).size !==
         data.domains.length ||
-      !validPage(data.page, data.domains.length, data.exhausted)
+      !validPage(data.page, data.domains.length, data.exhausted, query)
     )
       return invalid();
     return data as unknown as AccountDomainList;

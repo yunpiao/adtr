@@ -321,7 +321,13 @@ describe("operation account strict safe projections", () => {
     ]) {
       override = () => response(value);
       await expect(
-        operationAccountAPI.list("", new AbortController().signal),
+        operationAccountAPI.list(
+          new URLSearchParams({
+            pageIdx: String(value.page.pageIdx),
+            pageSize: String(value.page.pageSize),
+          }).toString(),
+          new AbortController().signal,
+        ),
       ).resolves.toEqual(value);
     }
   });
