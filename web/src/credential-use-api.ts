@@ -249,6 +249,18 @@ export const credentialUseAPI = {
       typeof v.exhausted !== "boolean"
     )
       return invalid();
+    // A self-consistent page can still belong to a different request. Keep the
+    // cleanup catalogue bound to its requested page, including server defaults.
+    const params = new URLSearchParams(query),
+      indices = params.getAll("pageIdx"),
+      sizes = params.getAll("pageSize");
+    if (
+      indices.length > 1 ||
+      sizes.length > 1 ||
+      String(v.page.pageIdx) !== (indices[0] ?? "1") ||
+      String(v.page.pageSize) !== (sizes[0] ?? "20")
+    )
+      return invalid();
     const size = v.page.pageSize as number;
     if (
       v.page.totalPage !== Math.ceil(v.page.total / size) ||
