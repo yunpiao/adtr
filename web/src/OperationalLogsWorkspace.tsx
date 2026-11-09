@@ -323,7 +323,9 @@ function EventList({
         <button
           type="button"
           className="secondary"
-          onClick={() => {
+          onClick={(event) => {
+            // A default query keeps the form key; discard its unsubmitted draft.
+            event.currentTarget.form?.reset();
             setFormError("");
             change(emptyLogQuery());
             read.refresh();
