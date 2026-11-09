@@ -155,7 +155,9 @@ export default function AuditHistory({
         <button
           type="button"
           className="secondary"
-          onClick={() => {
+          onClick={(event) => {
+            // An already-default query keeps the form key, so clear its draft too.
+            event.currentTarget.form?.reset();
             setError("");
             change(emptyHistoryQuery());
           }}
