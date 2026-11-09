@@ -278,7 +278,15 @@ async function transport(
   }
   if (response.ok && response.headers.get("X-ADTR-User-ID") !== String(actor))
     throw new ApiError("unauthenticated", 401);
-  const value: unknown = await response.json().catch(() => invalid());
+  const value: unknown = await response.json().catch(() => {
+    // Known read-authority failures must not become retryable malformed data.
+    // Keep POST uncertainty and the structured 404 receipt-recovery gate intact.
+    if (body === undefined && !response.ok) {
+      if (response.status === 401) throw new ApiError("unauthenticated", 401);
+      if (response.status === 403) throw new ApiError("forbidden", 403);
+    }
+    return invalid();
+  });
   if (!response.ok)
     throw new ApiError(
       object(value) &&
