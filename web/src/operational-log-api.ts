@@ -553,15 +553,30 @@ async function response(
     throw new ApiError("unauthenticated", 401);
   return result;
 }
-async function json(response: Response) {
-  const v: unknown = await response.json().catch(() => fail());
+async function json(response: Response, readOnly: boolean) {
+  // Only GETs may recover denial/resource meaning from the HTTP status when
+  // the error body cannot provide a usable code. POST proof/uncertainty handling
+  // remains unchanged; valid codes such as password_change_required win.
+  const readFailure = readOnly
+    ? (
+        {
+          401: "unauthenticated",
+          403: "forbidden",
+          404: "not_found",
+        } as Record<number, string>
+      )[response.status]
+    : undefined;
+  const v: unknown = await response.json().catch(() => {
+    if (readFailure) throw new ApiError(readFailure, response.status);
+    return fail();
+  });
   if (!response.ok)
     throw new ApiError(
       object(v) &&
       typeof v.error === "string" &&
       /^[a-z][a-z0-9_]{0,63}$/.test(v.error)
         ? v.error
-        : "internal",
+        : (readFailure ?? "internal"),
       response.status,
     );
   return v;
@@ -569,17 +584,20 @@ async function json(response: Response) {
 export const logAPI = {
   async list(q: LogQuery, signal: AbortSignal, actor: number) {
     return parseLogList(
-      await json(await response(`?${logQuery(q)}`, signal, actor)),
+      await json(await response(`?${logQuery(q)}`, signal, actor), true),
       q,
     );
   },
   async sources(signal: AbortSignal, actor: number) {
-    return parseSources(await json(await response("/sources", signal, actor)));
+    return parseSources(
+      await json(await response("/sources", signal, actor), true),
+    );
   },
   async history(q: BundleQuery, signal: AbortSignal, actor: number) {
     return parseBundleHistory(
       await json(
         await response(`/bundles/history?${bundleQuery(q)}`, signal, actor),
+        true,
       ),
       q,
     );
@@ -589,6 +607,7 @@ export const logAPI = {
     return parseBundleDetail(
       await json(
         await response(`/bundles/detail?taskUUID=${id}`, signal, actor),
+        true,
       ),
       id,
     );
@@ -621,6 +640,7 @@ export const logAPI = {
         },
         csrf,
       ),
+      false,
     );
     if (
       !object(v) ||
@@ -652,6 +672,7 @@ export const logAPI = {
         },
         csrf,
       ),
+      false,
     );
     if (
       !object(v) ||
@@ -670,7 +691,7 @@ export const logAPI = {
     if (!validExportID(id)) throw new ApiError("invalid_input");
     const r = await response(`/bundles/download?taskUUID=${id}`, signal, actor);
     if (!r.ok) {
-      await json(r);
+      await json(r, true);
       return fail();
     }
     const max = 16 * 1024 * 1024,
