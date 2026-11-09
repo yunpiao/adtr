@@ -366,7 +366,6 @@ function MessageSession({ profile, sessionChanged }: Props) {
               <Field label="关键词">
                 <input
                   value={draft.keyword}
-                  maxLength={4000}
                   onChange={(e) => edit("keyword", e.target.value)}
                   placeholder="标题字面匹配，区分大小写"
                 />

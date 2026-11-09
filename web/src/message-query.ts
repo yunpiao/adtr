@@ -62,7 +62,7 @@ export function messageQueryBody(query: MessageQuery) {
     new TextEncoder().encode(query.keyword).length > 16000
   )
     throw new ApiError("invalid_input");
-  return {
+  const body = {
     types: ["task_result"],
     subTypes: query.subType
       ? [{ type: "task_result", subType: query.subType }]
@@ -74,4 +74,9 @@ export function messageQueryBody(query: MessageQuery) {
     offset: 0,
     limit: query.limit,
   };
+  // JSON escaping can exceed the HTTP body budget even when the raw keyword
+  // fits its UTF-8 budget. Reject before creating a non-idempotent snapshot.
+  if (new TextEncoder().encode(JSON.stringify(body)).length > 32768)
+    throw new ApiError("invalid_input");
+  return body;
 }
