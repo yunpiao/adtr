@@ -214,7 +214,20 @@ async function read(
   // profile. Successful metadata must belong to the same authenticated actor.
   if (response.ok && response.headers.get("X-ADTR-User-ID") !== String(userID))
     throw new ApiError("unauthenticated", 401);
-  const value: unknown = await response.json().catch(() => invalid());
+  // Both consumers are GETs. An unusable error body must not erase a known
+  // authentication/scope denial. Parsed JSON error handling stays unchanged;
+  // in particular, do not invent selection_changed from a bare HTTP 409.
+  const readFailure = (
+    {
+      401: "unauthenticated",
+      403: "forbidden",
+      404: "not_found",
+    } as Record<number, string>
+  )[response.status];
+  const value: unknown = await response.json().catch(() => {
+    if (readFailure) throw new ApiError(readFailure, response.status);
+    return invalid();
+  });
   if (!response.ok) {
     const code =
       object(value) &&
