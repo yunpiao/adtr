@@ -345,7 +345,21 @@ async function transport(
     await response.body?.cancel().catch(() => undefined);
     throw new ApiError("unauthenticated", 401);
   }
-  const value = await readDirectoryV2JSON(response, signal);
+  const value = await readDirectoryV2JSON(response, signal).catch((error) => {
+    // Preserve bounded-reader and abort failures; only classify unreadable GET denials.
+    // POST uncertainty and the structured 404 receipt-recovery gate stay unchanged.
+    if (
+      body === undefined &&
+      !signal.aborted &&
+      !response.ok &&
+      error instanceof ApiError &&
+      error.code === "invalid_response"
+    ) {
+      if (response.status === 401) throw new ApiError("unauthenticated", 401);
+      if (response.status === 403) throw new ApiError("forbidden", 403);
+    }
+    throw error;
+  });
   signal.throwIfAborted();
   if (!response.ok)
     throw new ApiError(
