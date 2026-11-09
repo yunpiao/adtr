@@ -395,7 +395,6 @@ function AuditList({
               <input
                 ref={keywordInput}
                 name="keyword"
-                maxLength={50}
                 defaultValue={filter.keyword}
               />
             </Field>
@@ -779,7 +778,7 @@ function VisibilityForm({
       )}
       <fieldset disabled={mutation.busy}>
         <Field label="操作原因">
-          <textarea name="reason" maxLength={500} required />
+          <textarea name="reason" required />
         </Field>
       </fieldset>
       <fieldset key={proofVersion} disabled={mutation.busy}>
