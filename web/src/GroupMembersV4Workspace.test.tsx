@@ -917,6 +917,44 @@ describe("same-observation raw DN references", () => {
       );
     },
   );
+  it.each(["retry", "close", "source"])(
+    "keeps only the failed reference request until %s",
+    async (action) => {
+      await open();
+      await expandReferences();
+      override = (url) =>
+        url.startsWith(referencesPath) ? response({}, 503) : undefined;
+      click("引用组下一页");
+      await screen.findByRole("alert");
+      const retry = screen.getByRole("button", { name: "重试 DN 原文引用" });
+      const failed = calls(referencesPath).at(-1)![0];
+      expect(params(referencesPath)).toEqual({
+        ...q,
+        pageIdx: "2",
+        pageSize: "25",
+      });
+      expect(
+        screen.queryByRole("region", { name: "引用此 DN 原文的组" }),
+      ).toBeNull();
+
+      override = () => undefined;
+      const before = calls(referencesPath).length;
+      if (action === "retry") {
+        fireEvent.click(retry);
+        const region = await screen.findByRole("region", {
+          name: "引用此 DN 原文的组",
+        });
+        expect(region).toHaveTextContent("引用组第 2 页");
+        expect(calls(referencesPath)).toHaveLength(before + 1);
+        expect(calls(referencesPath).at(-1)![0]).toBe(failed);
+      } else {
+        click(action === "close" ? "关闭 DN 原文引用" : "重新选择数据源");
+        expect(retry).not.toBeInTheDocument();
+        expect(calls(referencesPath)).toHaveLength(before);
+        expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+      }
+    },
+  );
   it("shows exact zero text and unknown coverage, never empty membership inference", async () => {
     await open();
     override = (url) =>

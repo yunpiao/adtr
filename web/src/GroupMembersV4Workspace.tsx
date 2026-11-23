@@ -21,6 +21,11 @@ import type { DirectoryV4Object } from "./directory-v4-facts";
 import { listenForSessionInvalidation } from "./session-invalidation";
 
 type Props = { profile: Profile; sessionChanged: () => void };
+type ReferenceRetry = {
+  query: RawDNReferencesV4Query;
+  target: DirectoryV4Object;
+  expectedSource: RawDNReferencesV4["source"];
+};
 // Isolated consumer only. No route, producer, grant or mutation integration.
 export default function GroupMembersV4Workspace(props: Props) {
   return (
@@ -41,6 +46,9 @@ function Workspace({ profile, sessionChanged }: Props) {
   const [kind, setKind] = useState<"user" | "group" | "computer">("group");
   const [references, setReferences] = useState<RawDNReferencesV4 | null>(null);
   const [referencesBusy, setReferencesBusy] = useState(false);
+  const [referenceRetry, setReferenceRetry] = useState<ReferenceRetry | null>(
+    null,
+  );
   const referencesQuery = useRef<RawDNReferencesV4Query | null>(null);
   const [detailBusy, setDetailBusy] = useState(false);
   const sourceRef = useRef<ResolvedSource | null>(null),
@@ -60,6 +68,7 @@ function Workspace({ profile, sessionChanged }: Props) {
     setReferences(null);
     setReferencesBusy(false);
     referencesQuery.current = null;
+    setReferenceRetry(null);
     setDetailBusy(false);
   };
   const stopSource = () => {
@@ -151,6 +160,12 @@ function Workspace({ profile, sessionChanged }: Props) {
       ) {
         setReferencesBusy(false);
         failure(e);
+        if (
+          e instanceof ApiError &&
+          (e.code === "network" ||
+            (e.code === "read_failed" && e.status >= 500))
+        )
+          setReferenceRetry({ query: q, target, expectedSource });
       }
     }
   };
@@ -515,11 +530,25 @@ function Workspace({ profile, sessionChanged }: Props) {
               </button>
             </>
           )}
-          {(referencesBusy || references) && (
+          {referenceRetry && (
+            <button
+              onClick={() =>
+                void readReferences(
+                  referenceRetry.query,
+                  referenceRetry.target,
+                  referenceRetry.expectedSource,
+                )
+              }
+            >
+              重试 DN 原文引用
+            </button>
+          )}
+          {(referencesBusy || references || referenceRetry) && (
             <button
               onClick={() => {
                 stopDetail();
                 detailQuery.current = null;
+                if (referenceRetry) setNotice("");
               }}
             >
               关闭 DN 原文引用
