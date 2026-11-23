@@ -216,7 +216,9 @@ const sourceParams = (q: SourceRequest) => ({
   expectedCredentialRevision: q.expectedCredentialRevision,
 });
 export const groupAssetsV3API = {
-  async list(q: GroupAssetsV3Query, actor: number, signal: AbortSignal) {
+  async list(query: GroupAssetsV3Query, actor: number, signal: AbortSignal) {
+    // Bind response validation to the same scalar fields sent on the wire.
+    const q = { ...query };
     if (!validListQuery(q)) throw new ApiError("invalid_input");
     return parseGroupAssetsV3List(
       await transport(

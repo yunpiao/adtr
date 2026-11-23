@@ -267,7 +267,8 @@ const sourceParams = (q: SourceRequest) => ({
   expectedCredentialRevision: q.expectedCredentialRevision,
 });
 export const userAssetsV3API = {
-  async list(q: UserAssetsV3Query, actor: number, signal: AbortSignal) {
+  async list(query: UserAssetsV3Query, actor: number, signal: AbortSignal) {
+    const q = { ...query };
     if (!validListQuery(q)) throw new ApiError("invalid_input");
     return parseUserAssetsV3List(
       await transport(
@@ -293,7 +294,8 @@ export const userAssetsV3API = {
       q,
     );
   },
-  async detail(q: UserAssetV3Query, actor: number, signal: AbortSignal) {
+  async detail(query: UserAssetV3Query, actor: number, signal: AbortSignal) {
+    const q = { ...query };
     if (!validDetailQuery(q)) throw new ApiError("invalid_input");
     return parseUserAssetV3Detail(
       await transport(
