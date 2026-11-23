@@ -353,6 +353,16 @@ function Assets({
     detailTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const origin = useRef<HTMLButtonElement | null>(null);
   const detailClose = useRef<HTMLButtonElement>(null);
+  const detailRetry = useRef<HTMLButtonElement>(null);
+  const moveFocusFromDetailRetry = () => {
+    const close = detailClose.current;
+    if (
+      detailRetry.current === document.activeElement &&
+      close &&
+      !close.closest("[hidden], [inert]")
+    )
+      close.focus();
+  };
   const searchInput = useRef<HTMLInputElement | null>(null);
   const failureRef = useRef(failure);
   failureRef.current = failure;
@@ -468,6 +478,8 @@ function Assets({
         );
         if (sequence !== detailSequence.current || controller.signal.aborted)
           return;
+        // A successful background retry also removes the error's retry button.
+        moveFocusFromDetailRetry();
         setDetail(value);
         setDetailBusy(false);
         setDetailError("");
@@ -936,10 +948,10 @@ function Assets({
               <ErrorNotice error={detailError} />
               {detailError && (
                 <button
-                  onClick={(event) => {
+                  ref={detailRetry}
+                  onClick={() => {
                     // The retry button is removed while the pinned read restarts.
-                    if (event.currentTarget === document.activeElement)
-                      detailClose.current?.focus();
+                    moveFocusFromDetailRetry();
                     loadDetail(selected);
                   }}
                 >

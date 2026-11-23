@@ -772,6 +772,47 @@ describe("UserAssetsV2 strict parser and transport", () => {
 });
 
 describe("UserAssetsV2 private workspace", () => {
+  it.each([false, true])(
+    "retains drawer focus on automatic recovery (moved away: %s)",
+    async (moveAway) => {
+      await start();
+      const path = "/api/user-assets/v2/detail";
+      const pending = deferred();
+      override = (url) =>
+        url.split("?")[0] === path
+          ? calls(path).length === 1
+            ? Promise.reject(new Error("temporary transport failure"))
+            : pending.promise
+          : undefined;
+      const launch = screen.getByRole("button", {
+        name: "查看用户 observed-1",
+      });
+      fireEvent.click(launch);
+      const retry = await screen.findByRole("button", {
+        name: "重试用户详情读取",
+      });
+      const first = params(path);
+      retry.focus();
+      expect(retry).toHaveFocus();
+      await waitFor(() => expect(calls(path)).toHaveLength(2), {
+        timeout: 3000,
+      });
+      expect(params(path)).toEqual(first);
+      expect(retry).toHaveFocus();
+      const footer = screen.getByRole("button", { name: "返回用户列表" });
+      if (moveAway) footer.focus();
+      await pending.resolve(detail());
+      expect(
+        screen.queryByRole("button", { name: "重试用户详情读取" }),
+      ).toBeNull();
+      const close = screen.getByRole("button", { name: "关闭用户详情" });
+      const focused = moveAway ? footer : close;
+      expect(focused).toHaveFocus();
+      fireEvent.keyDown(focused, { key: "Escape" });
+      expect(launch).toHaveFocus();
+    },
+  );
+
   it("keeps keyboard focus in the drawer when a manual detail retry starts", async () => {
     await start();
     const path = "/api/user-assets/v2/detail";
