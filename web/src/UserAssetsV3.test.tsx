@@ -1493,6 +1493,75 @@ describe("UserAssetsV3 private workspace", () => {
     });
     expect(screen.queryByRole("alert")).toBeNull();
   });
+  it.each([false, true])(
+    "does not restart an in-flight automatic list retry (focus moved: %s)",
+    async (moveAway) => {
+      await start();
+      const held = deferred();
+      let fail = true;
+      override = (url) => {
+        if (url.split("?")[0] !== "/api/user-assets/v3") return undefined;
+        if (fail) {
+          fail = false;
+          return Promise.reject(new Error("temporary transport failure"));
+        }
+        return held.promise;
+      };
+      click("用户资产下一页");
+      const retry = await screen.findByRole("button", {
+        name: "重试用户资产读取",
+      });
+      const before = calls().length;
+      const [failedUrl] = calls().at(-1)!;
+      retry.focus();
+      expect(retry).toHaveFocus();
+      await waitFor(() => expect(calls()).toHaveLength(before + 1), {
+        timeout: 3000,
+      });
+      expect(retry).toHaveFocus();
+      const [retryUrl, init] = calls().at(-1)!;
+      expect(retryUrl).toBe(failedUrl);
+      fireEvent.click(retry);
+      expect(calls()).toHaveLength(before + 1);
+      expect(init.signal.aborted).toBe(false);
+      expect(retry).toHaveAttribute("aria-disabled", "true");
+      const refresh = screen.getByRole("button", { name: "刷新用户资产观测" });
+      if (moveAway) refresh.focus();
+      await held.resolve(list(queryFrom(failedUrl), [row(11), row(12)], 12));
+      await screen.findByText("observed-12");
+      expect(retry).not.toBeInTheDocument();
+      expect(
+        moveAway ? refresh : screen.getByLabelText("用户资产关键词"),
+      ).toHaveFocus();
+    },
+  );
+  it("hands off keyboard focus on immediate list retry and ignores a replaced result", async () => {
+    await start();
+    override = (url) =>
+      url.split("?")[0] === "/api/user-assets/v3"
+        ? response({ error: "schema_unavailable" }, 503)
+        : undefined;
+    click("用户资产下一页");
+    const retry = await screen.findByRole("button", {
+      name: "重试用户资产读取",
+    });
+    const before = calls().length;
+    const [failedUrl] = calls().at(-1)!;
+    const held = deferred();
+    override = (url) => (url === failedUrl ? held.promise : undefined);
+    retry.focus();
+    fireEvent.click(retry);
+    expect(calls()).toHaveLength(before + 1);
+    const [retryUrl, init] = calls().at(-1)!;
+    expect(retryUrl).toBe(failedUrl);
+    expect(screen.getByLabelText("用户资产关键词")).toHaveFocus();
+    click("刷新用户资产观测");
+    expect(init.signal.aborted).toBe(true);
+    expect(params()).not.toHaveProperty("observationId");
+    await screen.findByText("observed-1");
+    await held.resolve(list(queryFrom(failedUrl), [row(11), row(12)], 12));
+    expect(screen.queryByText("observed-12")).toBeNull();
+  });
   it("automatically retries network reads with exactly the intended pin", async () => {
     await start();
     let count = 0;
