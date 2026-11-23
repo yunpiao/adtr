@@ -364,6 +364,18 @@ function Assets({
       close.focus();
   };
   const searchInput = useRef<HTMLInputElement | null>(null);
+  const listRetry = useRef<HTMLButtonElement>(null);
+  const listInFlight = useRef(false);
+  const moveFocusFromListRetry = () => {
+    const input = searchInput.current;
+    if (
+      listRetry.current &&
+      listRetry.current === document.activeElement &&
+      input &&
+      !input.closest("[hidden], [inert]")
+    )
+      input.focus();
+  };
   const failureRef = useRef(failure);
   failureRef.current = failure;
   const cancelDetail = () => {
@@ -380,6 +392,7 @@ function Assets({
   };
   const cancelList = () => {
     listSequence.current++;
+    listInFlight.current = false;
     listController.current?.abort();
     clearTimeout(listTimer.current);
   };
@@ -417,6 +430,7 @@ function Assets({
   };
   const loadList = (next: UserAssetsV2Query) => {
     cancelList();
+    moveFocusFromListRetry();
     clearDetail();
     const sequence = listSequence.current;
     const controller = new AbortController();
@@ -429,6 +443,7 @@ function Assets({
     setStale(false);
     setBusy(true);
     async function read() {
+      listInFlight.current = true;
       try {
         const value = await userAssetsV2API.list(
           next,
@@ -437,6 +452,8 @@ function Assets({
         );
         if (sequence !== listSequence.current || controller.signal.aborted)
           return;
+        listInFlight.current = false;
+        moveFocusFromListRetry();
         // Capture a pin without re-fetching or retaining an unpinned retry.
         const pinned = value.available
           ? { ...next, observationId: value.observationId }
@@ -449,6 +466,7 @@ function Assets({
       } catch (reason) {
         if (sequence !== listSequence.current || controller.signal.aborted)
           return;
+        listInFlight.current = false;
         if (handleFailure(reason)) return;
         setList(null);
         setBusy(false);
@@ -756,8 +774,13 @@ function Assets({
       <ErrorNotice error={transferError || inputError || error} />
       {error && !stale && (
         <button
+          type="button"
+          ref={listRetry}
           className="secondary"
-          onClick={() => loadList(queryRef.current)}
+          aria-disabled={busy}
+          onClick={() => {
+            if (!busy && !listInFlight.current) loadList(queryRef.current);
+          }}
         >
           重试用户资产读取
         </button>
