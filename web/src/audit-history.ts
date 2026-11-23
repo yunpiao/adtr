@@ -212,5 +212,17 @@ export function parseHistory(
       value.list.some((row) => !query.status.includes(row.state)))
   )
     return invalid();
+  // History filters use creation time, with an inclusive start and exclusive end.
+  // The server projects UTC, and millisecond conversion would round the bounds.
+  const start = query.startTm ? comparableUTC(query.startTm) : "";
+  const end = query.endTm ? comparableUTC(query.endTm) : "";
+  if (
+    (start || end) &&
+    value.list.some(({ createdAt }) => {
+      const created = comparableUTC(createdAt);
+      return (start && created < start) || (end && created >= end);
+    })
+  )
+    return invalid();
   return value as unknown as ExportHistory;
 }
