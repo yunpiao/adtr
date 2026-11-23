@@ -61,7 +61,7 @@ export type GroupExportCancelBinding = {
 };
 type CancelProfile = Readonly<Pick<Profile, (typeof cancelProfileKeys)[number]>>;
 type CancelProofOrigin = Omit<GroupExportCancelBinding, "actor"> & { actor: CancelProfile };
-function copyCancelRequest(request: ExportRequest): ExportRequest {
+function snapshotExportRequest(request: ExportRequest): ExportRequest {
   const copy: ExportRequest = { domainId: request.domainId, expectedRevision: request.expectedRevision,
     expectedCredentialRevision: request.expectedCredentialRevision, observationId: request.observationId,
     search: request.search, creatTm: request.creatTm, screenColumns: [...request.screenColumns] };
@@ -289,11 +289,15 @@ function requireCancelMenu(value: unknown): void {
 export const groupAssetExportAPI = {
   async create(request: ExportRequest, idempotencyKey: string, proof: Proof, actor: number, csrf: string, signal: AbortSignal) {
     if (!validExportRequest(request) || !validExportID(idempotencyKey)) throw new ApiError("invalid_input");
-    return parseExportReceipt(await json(await fetchExport("", actor, signal, { ...request, idempotencyKey, ...proof }, csrf), signal), request.domainId, request, "create");
+    // Preserve the exact submitted draft while awaiting a response.
+    const original = snapshotExportRequest(request);
+    return parseExportReceipt(await json(await fetchExport("", actor, signal, { ...original, idempotencyKey, ...proof }, csrf), signal), original.domainId, original, "create");
   },
   async receipt(domainId: string, idempotencyKey: string, actor: number, signal: AbortSignal, expected?: ExportRequest) {
-    if (!validDomainID(domainId) || !validExportID(idempotencyKey)) throw new ApiError("invalid_input");
-    return parseExportReceipt(await json(await fetchExport(`/receipt?${new URLSearchParams({ domainId, idempotencyKey })}`, actor, signal), signal), domainId, expected);
+    if (!validDomainID(domainId) || !validExportID(idempotencyKey) ||
+      (expected !== undefined && !validExportRequest(expected))) throw new ApiError("invalid_input");
+    const original = expected === undefined ? undefined : snapshotExportRequest(expected);
+    return parseExportReceipt(await json(await fetchExport(`/receipt?${new URLSearchParams({ domainId, idempotencyKey })}`, actor, signal), signal), domainId, original);
   },
   // Initial task read has no recovery locator; strict receipt parsing binds the
   // original canonical request to this exact task, domain, kind and actor.
@@ -303,12 +307,13 @@ export const groupAssetExportAPI = {
   },
   async detail(taskID: string, request: ExportRequest, actor: number, signal: AbortSignal): Promise<ExportDetail> {
     if (!validExportID(taskID) || !validExportRequest(request)) throw new ApiError("invalid_input");
-    return parseExportReceipt(await json(await fetchExport(`/detail?${new URLSearchParams({ taskID })}`, actor, signal), signal), request.domainId, request, "detail", taskID) as ExportDetail;
+    const original = snapshotExportRequest(request);
+    return parseExportReceipt(await json(await fetchExport(`/detail?${new URLSearchParams({ taskID })}`, actor, signal), signal), original.domainId, original, "detail", taskID) as ExportDetail;
   },
   async cancel(taskID: string, request: ExportRequest, proof: Proof, actor: number, csrf: string, signal: AbortSignal, capturedProfile?: Profile) {
     signal.throwIfAborted();
     if (!validExportID(taskID) || !validExportRequest(request)) throw new ApiError("invalid_input");
-    const original = copyCancelRequest(request);
+    const original = snapshotExportRequest(request);
     const profile = capturedProfile === undefined ? undefined : copyCancelProfile(capturedProfile);
     if (profile && (!matchingCancelProfile(capturedProfile, profile) || actor !== profile.ID || csrf !== profile.csrfToken))
       throw new ApiError("invalid_input");
@@ -331,7 +336,7 @@ export const groupAssetExportAPI = {
   async recheckCancelAuthority(taskID: string, request: ExportRequest, capturedProfile: Profile, signal: AbortSignal): Promise<ExportDetail> {
     signal.throwIfAborted();
     if (!validExportID(taskID) || !validExportRequest(request)) throw new ApiError("invalid_input");
-    const original = copyCancelRequest(request), profile = copyCancelProfile(capturedProfile);
+    const original = snapshotExportRequest(request), profile = copyCancelProfile(capturedProfile);
     const current = () => {
       signal.throwIfAborted();
       if (!matchingCancelProfile(capturedProfile, profile)) throw new ApiError("unauthenticated", 401);

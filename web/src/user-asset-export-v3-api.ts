@@ -74,7 +74,7 @@ export function sameExportRequest(a: ExportRequest, b: ExportRequest) {
 export type UserExportCancelBinding = {
   taskID: string; request: ExportRequest; actor: number; signal: AbortSignal;
 };
-function copyCancelRequest(request: ExportRequest): ExportRequest {
+function snapshotExportRequest(request: ExportRequest): ExportRequest {
   const copy: ExportRequest = { domainId: request.domainId, expectedRevision: request.expectedRevision,
     expectedCredentialRevision: request.expectedCredentialRevision, observationId: request.observationId,
     search: request.search, sAMAccountName: request.sAMAccountName, startTm: request.startTm,
@@ -301,11 +301,15 @@ function requireCancelMenu(value: unknown): void {
 export const userAssetExportAPI = {
   async create(request: ExportRequest, idempotencyKey: string, proof: Proof, actor: number, csrf: string, signal: AbortSignal) {
     if (!validExportRequest(request) || !validExportID(idempotencyKey)) throw new ApiError("invalid_input");
-    return parseExportReceipt(await json(await fetchExport("", actor, signal, { ...request, idempotencyKey, ...proof }, csrf), signal), request.domainId, request, "create");
+    // Bind the response to the submitted values, not later edits to the draft.
+    const original = snapshotExportRequest(request);
+    return parseExportReceipt(await json(await fetchExport("", actor, signal, { ...original, idempotencyKey, ...proof }, csrf), signal), original.domainId, original, "create");
   },
   async receipt(domainId: string, idempotencyKey: string, actor: number, signal: AbortSignal, expected?: ExportRequest) {
-    if (!validDomainID(domainId) || !validExportID(idempotencyKey)) throw new ApiError("invalid_input");
-    return parseExportReceipt(await json(await fetchExport(`/receipt?${new URLSearchParams({ domainId, idempotencyKey })}`, actor, signal), signal), domainId, expected);
+    if (!validDomainID(domainId) || !validExportID(idempotencyKey) ||
+      (expected !== undefined && !validExportRequest(expected))) throw new ApiError("invalid_input");
+    const original = expected === undefined ? undefined : snapshotExportRequest(expected);
+    return parseExportReceipt(await json(await fetchExport(`/receipt?${new URLSearchParams({ domainId, idempotencyKey })}`, actor, signal), signal), domainId, original);
   },
   // First read from a generic task binds its ID/domain/kind without requiring a
   // saved submission key. Subsequent reads use detail() with the original request.
@@ -315,11 +319,12 @@ export const userAssetExportAPI = {
   },
   async detail(taskID: string, request: ExportRequest, actor: number, signal: AbortSignal): Promise<ExportDetail> {
     if (!validExportID(taskID) || !validExportRequest(request)) throw new ApiError("invalid_input");
-    return parseExportReceipt(await json(await fetchExport(`/detail?${new URLSearchParams({ taskID })}`, actor, signal), signal), request.domainId, request, "detail", taskID) as ExportDetail;
+    const original = snapshotExportRequest(request);
+    return parseExportReceipt(await json(await fetchExport(`/detail?${new URLSearchParams({ taskID })}`, actor, signal), signal), original.domainId, original, "detail", taskID) as ExportDetail;
   },
   async cancel(taskID: string, request: ExportRequest, proof: Proof, actor: number, csrf: string, signal: AbortSignal) {
     if (!validExportID(taskID) || !validExportRequest(request)) throw new ApiError("invalid_input");
-    const binding = { taskID, request: copyCancelRequest(request), actor, signal };
+    const binding = { taskID, request: snapshotExportRequest(request), actor, signal };
     const response = await fetchExport("/cancel", actor, signal, { taskID, ...proof }, csrf);
     signal.throwIfAborted();
     if (response.status === 401) return rejectCancelProof(response, binding);
@@ -332,7 +337,7 @@ export const userAssetExportAPI = {
   async recheckCancelAuthority(taskID: string, request: ExportRequest, capturedProfile: Profile, signal: AbortSignal): Promise<ExportDetail> {
     signal.throwIfAborted();
     if (!validExportID(taskID) || !validExportRequest(request)) throw new ApiError("invalid_input");
-    const original = copyCancelRequest(request), profile = { ...capturedProfile };
+    const original = snapshotExportRequest(request), profile = { ...capturedProfile };
     const current = () => {
       signal.throwIfAborted();
       if (!matchingCancelProfile(capturedProfile, profile)) throw new ApiError("unauthenticated", 401);
