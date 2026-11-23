@@ -88,9 +88,12 @@ Source-system compatibility, real AD/Windows and production gates remain open.
 Priority never removes a requirement.
 
 `python3 scripts/verify_requirements.py` is part of `make check`; it fails on scope
-reduction, duplicate requirement IDs, missing field/control references or an
-acceptance claim with unresolved gates. Source definitions remain in the linked
-Issues; no omitted field is silently treated as implemented.
+reduction, duplicate requirement IDs, duplicate workbook source rows or field
+record references, missing field/control references, or unsupported acceptance
+claims. Shared UI controls remain valid. The checks also run with Python
+optimization enabled. The gate checks internal ledger consistency, not whether
+a unique mapping agrees with the source workbook or whether product acceptance
+has been independently verified. Source definitions remain in the linked Issues.
 
 
 The next group/computer snapshot-stage running-cancel candidate starts from PR163
@@ -122,3 +125,12 @@ failed-jobs retry; its separate main run passed71/71 on attempt1. Original
 47-field/9-control compatibility and real AD/Windows/capacity gates remain open.
 This corrects missing implementation evidence; product acceptance remains0/209.
 Historical failures, duplicate-check metadata and screenshot limits are retained.
+
+
+For `implemented_verified_slice` and `accepted` rows, the local checker also
+requires a full commit SHA, PR and Actions-run URLs in this repository, a
+nonempty list of verification notes, and an explicit list of remaining gates.
+An `accepted` row must have no remaining gates; the acceptance flag must be a
+JSON boolean and the aggregate a JSON integer. These are offline format checks:
+they cannot establish that a linked run passed, corresponds to the commit, or
+satisfies the product gates. Those facts still require separate review.
