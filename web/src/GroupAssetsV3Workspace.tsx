@@ -358,6 +358,22 @@ function Assets({
   const [query, setQuery] = useState(initial),
     queryRef = useRef(initial);
   const searchInput = useRef<HTMLInputElement>(null);
+  const retryControl = useRef<HTMLButtonElement>(null);
+  const [retryOriginal, setRetryOriginal] = useState<GroupAssetsV3Query | null>(
+    null,
+  );
+  const clearOriginalRetry = () => {
+    const target = searchInput.current;
+    if (
+      retryControl.current &&
+      retryControl.current === document.activeElement &&
+      target &&
+      !target.closest("[hidden], [inert]")
+    ) {
+      target.focus();
+    }
+    setRetryOriginal(null);
+  };
   const acceptedKeyword = useRef("");
   const composingKeyword = useRef(false);
   const [keywordComposition, setKeywordComposition] = useState(false);
@@ -379,6 +395,7 @@ function Assets({
   const [transfers, setTransfers] = useState<
     Partial<Record<RawFilterKey, string>>
   >({});
+  const readInFlight = useRef(false);
   const sequence = useRef(0),
     controller = useRef<AbortController | null>(null),
     timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -391,6 +408,7 @@ function Assets({
   };
   const load = (next: GroupAssetsV3Query) => {
     cancel();
+    clearOriginalRetry();
     setExpanded(null);
     const current = sequence.current,
       abort = new AbortController();
@@ -403,6 +421,7 @@ function Assets({
     setBusy(true);
     setStale(false);
     async function read() {
+      readInFlight.current = true;
       try {
         const value = await groupAssetsV3API.list(
           next,
@@ -410,16 +429,19 @@ function Assets({
           abort.signal,
         );
         if (current !== sequence.current || abort.signal.aborted) return;
+        readInFlight.current = false;
         const pinned = value.available
           ? { ...next, observationId: value.observationId }
           : next;
         queryRef.current = pinned;
         setQuery(pinned);
         setList(value);
+        clearOriginalRetry();
         setBusy(false);
         setError("");
       } catch (reason) {
         if (current !== sequence.current || abort.signal.aborted) return;
+        readInFlight.current = false;
         setList(null);
         setExpanded(null);
         setBusy(false);
@@ -430,6 +452,7 @@ function Assets({
             reason.code === "selection_changed")
         ) {
           cancel();
+          setRetryOriginal(null);
           failureRef.current(reason);
           return;
         }
@@ -440,7 +463,18 @@ function Assets({
         ) {
           cancel();
           setStale(true);
+          clearOriginalRetry();
           return;
+        }
+        if (
+          next.observationId &&
+          reason instanceof ApiError &&
+          reason.code !== "invalid_response" &&
+          (reason.code === "network" || reason.status >= 500)
+        ) {
+          setRetryOriginal(next);
+        } else {
+          clearOriginalRetry();
         }
         if (retryGroupAssetsV3Read(reason))
           timer.current = setTimeout(() => {
@@ -694,6 +728,18 @@ function Assets({
       </form>
       {dirty && <p role="status">筛选尚未应用；分页和事实展开已暂停。</p>}
       <ErrorNotice error={inputError || transferError || error} />
+      {retryOriginal && (
+        <button
+          type="button"
+          ref={retryControl}
+          aria-disabled={busy || dirty}
+          onClick={() => {
+            if (!busy && !dirty && !readInFlight.current) load(retryOriginal);
+          }}
+        >
+          重试原组资产读取
+        </button>
+      )}
       {busy && <p role="status">正在读取组观测…</p>}
       {stale && <p role="status">原观测已不可用，请明确刷新观测。</p>}
       {list && !list.available && (

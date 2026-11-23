@@ -675,6 +675,105 @@ describe("GroupAssetsV3 App navigation and session boundaries", () => {
 });
 
 describe("group generation and response integrity", () => {
+  it.each(["recover", "discard"] as const)(
+    "lets the operator immediately retry the exact pinned group read and %s its result",
+    async (outcome) => {
+      await start();
+      const pending = deferred();
+      override = (url) =>
+        url.startsWith("/api/group-assets/v3?") && queryFrom(url).pageIdx === 2
+          ? response({ error: "internal" }, 503)
+          : undefined;
+      click("下一页");
+      await screen.findByRole("alert");
+      const retry = screen.getByRole("button", { name: "重试原组资产读取" });
+      const failedUrl = calls().at(-1)![0];
+      expect(params()).toMatchObject({
+        pageIdx: "2",
+        observationId: "observation-one",
+      });
+      const before = calls().length;
+      override = (url) => (url === failedUrl ? pending.promise : undefined);
+      fill("组资产关键词", "unsent draft");
+      expect(retry).toHaveAttribute("aria-disabled", "true");
+      fireEvent.click(retry);
+      expect(calls()).toHaveLength(before);
+      fill("组资产关键词", "");
+      expect(retry).toHaveAttribute("aria-disabled", "false");
+      retry.focus();
+      fireEvent.click(retry);
+      expect(calls()).toHaveLength(before + 1);
+      expect(calls().at(-1)![0]).toBe(failedUrl);
+      expect(document.activeElement).toBe(
+        screen.getByLabelText("组资产关键词"),
+      );
+      const requestSignal = calls().at(-1)![1].signal;
+      expect(
+        screen.queryByRole("button", { name: "重试原组资产读取" }),
+      ).toBeNull();
+
+      const retryQuery = queryFrom(failedUrl);
+      if (outcome === "discard") {
+        click("刷新组资产观测");
+        expect(requestSignal.aborted).toBe(true);
+        expect(params().observationId).toBeUndefined();
+        await screen.findByText("observed-1", { exact: true });
+        await pending.resolve(list(retryQuery, [row(11), row(12)], 12));
+        expect(screen.queryByText("observed-11", { exact: true })).toBeNull();
+      } else {
+        await pending.resolve(list(retryQuery, [row(11), row(12)], 12));
+        await screen.findByText("observed-11", { exact: true });
+        expect(calls()).toHaveLength(before + 1);
+      }
+    },
+  );
+
+  it("continues the automatic retry and blocks repeat clicks until it completes", async () => {
+    await start();
+    const pending = deferred();
+    let fail = true;
+    override = (url) => {
+      if (!url.startsWith("/api/group-assets/v3?")) return undefined;
+      if (fail) {
+        fail = false;
+        return response({ error: "internal" }, 503);
+      }
+      return pending.promise;
+    };
+    click("下一页");
+    const retry = await screen.findByRole("button", {
+      name: "重试原组资产读取",
+    });
+    const before = calls().length;
+    const failedUrl = calls().at(-1)![0];
+    retry.focus();
+    await waitFor(() => expect(calls()).toHaveLength(before + 1), {
+      timeout: 3000,
+    });
+    expect(retry).toHaveFocus();
+    expect(retry).toHaveAttribute("aria-disabled", "true");
+    expect(calls().at(-1)![0]).toBe(failedUrl);
+    fireEvent.click(retry);
+    expect(calls()).toHaveLength(before + 1);
+    await pending.resolve(list(queryFrom(failedUrl), [row(11), row(12)], 12));
+    await screen.findByText("observed-11", { exact: true });
+    expect(retry).not.toBeInTheDocument();
+    expect(screen.getByLabelText("组资产关键词")).toHaveFocus();
+  });
+
+  it("does not offer same-pin retry for a missing original group observation", async () => {
+    await start();
+    override = (url) =>
+      url.startsWith("/api/group-assets/v3?")
+        ? response({ error: "directory_observation_unavailable" }, 410)
+        : undefined;
+    click("下一页");
+    await screen.findByText("原观测已不可用，请明确刷新观测。");
+    expect(
+      screen.queryByRole("button", { name: "重试原组资产读取" }),
+    ).toBeNull();
+  });
+
   it("newer search wins over an older same-pin response even when abort is ignored", async () => {
     await start();
     const held = deferred();
