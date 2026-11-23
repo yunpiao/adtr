@@ -267,6 +267,13 @@ export function AuditExportDetail({
         </button>
       </div>
       <ErrorNotice error={read.error || download.error} />
+      <div role="status" aria-label="XLSX 下载进度">
+        {download.busy
+          ? "正在下载 XLSX…"
+          : task && downloaded
+            ? "已收到通过当前权限验证的 XLSX 文件，并交由浏览器下载。"
+            : ""}
+      </div>
       {read.busy && <p role="status">正在读取导出任务…</p>}
       {task && (
         <>
@@ -331,8 +338,10 @@ export function AuditExportDetail({
             !stale &&
             context.can("GET /api/audit/exports/download") && (
               <button
-                disabled={download.busy}
+                type="button"
+                aria-disabled={download.busy}
                 onClick={() => {
+                  if (download.busy) return;
                   setDownloaded(false);
                   void download.run(
                     (signal) =>
@@ -360,14 +369,9 @@ export function AuditExportDetail({
                   );
                 }}
               >
-                {download.busy ? "正在下载…" : "下载 XLSX"}
+                下载 XLSX
               </button>
             )}
-          {downloaded && (
-            <p role="status">
-              已收到通过当前权限验证的 XLSX 文件，并交由浏览器下载。
-            </p>
-          )}
           <p className="muted">
             下载时会重新验证登录会话、当前权限和记录可见性。隐藏或恢复记录后，旧快照会失效，请重新创建导出。
           </p>
