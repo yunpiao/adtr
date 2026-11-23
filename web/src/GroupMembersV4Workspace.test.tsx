@@ -251,6 +251,53 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 describe("isolated dictionary4 membership consumer", () => {
+  it.each(["retry", "close", "source", "next page"] as const)(
+    "keeps a failed pinned original member read until %s",
+    async (action) => {
+      await open();
+      override = (url) =>
+        url.startsWith(detailPath) ? response({}, 503) : undefined;
+      fireEvent.click(
+        screen.getAllByRole("button", { name: "查看原始成员" })[0],
+      );
+      await screen.findByRole("alert");
+      const button = screen.getByRole("button", { name: "重试原始成员读取" });
+      const failed = calls(detailPath).at(-1)![0];
+      expect(params(detailPath)).toEqual(q);
+      const before = calls(detailPath).length;
+      override = () => undefined;
+
+      if (action === "retry") {
+        fireEvent.click(button);
+        await screen.findByRole("region", { name: "组原始成员详情" });
+        expect(calls(detailPath)).toHaveLength(before + 1);
+        expect(calls(detailPath).at(-1)![0]).toBe(failed);
+      } else {
+        click(
+          {
+            close: "关闭成员详情",
+            source: "重新选择数据源",
+            "next page": "下一页",
+          }[action],
+        );
+        if (action === "next page") await screen.findByText("group-26");
+        expect(button).not.toBeInTheDocument();
+        expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+        expect(calls(detailPath)).toHaveLength(before);
+      }
+    },
+  );
+  it("does not offer pinned member retry for an invalid response", async () => {
+    await open();
+    override = (url) =>
+      url.startsWith(detailPath) ? response({ unexpected: true }) : undefined;
+    fireEvent.click(screen.getAllByRole("button", { name: "查看原始成员" })[0]);
+    await screen.findByRole("alert");
+    expect(
+      screen.queryByRole("button", { name: "重试原始成员读取" }),
+    ).not.toBeInTheDocument();
+  });
+
   it("keeps the old pin and restores detail on focus, then explicitly rediscovers a newer empty observation", async () => {
     await open();
     await expand();

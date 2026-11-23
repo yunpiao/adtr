@@ -26,6 +26,10 @@ type ReferenceRetry = {
   target: DirectoryV4Object;
   expectedSource: RawDNReferencesV4["source"];
 };
+const canRetryRead = (error: unknown) =>
+  error instanceof ApiError &&
+  (error.code === "network" ||
+    (error.code === "read_failed" && error.status >= 500));
 // Isolated consumer only. No route, producer, grant or mutation integration.
 export default function GroupMembersV4Workspace(props: Props) {
   return (
@@ -51,6 +55,9 @@ function Workspace({ profile, sessionChanged }: Props) {
   );
   const referencesQuery = useRef<RawDNReferencesV4Query | null>(null);
   const [detailBusy, setDetailBusy] = useState(false);
+  const [detailRetry, setDetailRetry] = useState<GroupMembersV4Query | null>(
+    null,
+  );
   const sourceRef = useRef<ResolvedSource | null>(null),
     query = useRef<GroupMembersV4PageQuery | null>(null),
     detailQuery = useRef<GroupMembersV4Query | null>(null);
@@ -69,6 +76,7 @@ function Workspace({ profile, sessionChanged }: Props) {
     setReferencesBusy(false);
     referencesQuery.current = null;
     setReferenceRetry(null);
+    setDetailRetry(null);
     setDetailBusy(false);
   };
   const stopSource = () => {
@@ -160,11 +168,7 @@ function Workspace({ profile, sessionChanged }: Props) {
       ) {
         setReferencesBusy(false);
         failure(e);
-        if (
-          e instanceof ApiError &&
-          (e.code === "network" ||
-            (e.code === "read_failed" && e.status >= 500))
-        )
+        if (canRetryRead(e))
           setReferenceRetry({ query: q, target, expectedSource });
       }
     }
@@ -196,8 +200,10 @@ function Workspace({ profile, sessionChanged }: Props) {
         generation === detailGeneration.current &&
         domain === domainGeneration.current &&
         selected === sourceGeneration.current
-      )
+      ) {
         failure(e);
+        if (canRetryRead(e)) setDetailRetry(q);
+      }
     }
   };
   const readPage = async (
@@ -649,11 +655,17 @@ function Workspace({ profile, sessionChanged }: Props) {
               </button>
             </section>
           )}
-          {(detailBusy || detail) && (
+          {detailRetry && (
+            <button onClick={() => void readDetail(detailRetry)}>
+              重试原始成员读取
+            </button>
+          )}
+          {(detailBusy || detail || detailRetry) && (
             <button
               onClick={() => {
                 stopDetail();
                 detailQuery.current = null;
+                if (detailRetry) setNotice("");
               }}
             >
               关闭成员详情
