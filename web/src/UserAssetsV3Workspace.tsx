@@ -412,6 +412,7 @@ function Assets({
     ),
     detailTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const origin = useRef<HTMLButtonElement | null>(null);
+  const detailClose = useRef<HTMLButtonElement>(null);
   const searchInput = useRef<HTMLInputElement | null>(null);
   const failureRef = useRef(failure);
   failureRef.current = failure;
@@ -1208,6 +1209,7 @@ function Assets({
               </div>
               <button
                 className="secondary"
+                ref={detailClose}
                 aria-label="关闭用户详情"
                 onClick={close}
               >
@@ -1221,7 +1223,14 @@ function Assets({
               {detailBusy && <p role="status">正在读取用户详情…</p>}
               <ErrorNotice error={detailError} />
               {detailError && (
-                <button onClick={() => loadDetail(selected)}>
+                <button
+                  onClick={(event) => {
+                    // The retry button is removed while the pinned read restarts.
+                    if (event.currentTarget === document.activeElement)
+                      detailClose.current?.focus();
+                    loadDetail(selected);
+                  }}
+                >
                   重试用户详情读取
                 </button>
               )}

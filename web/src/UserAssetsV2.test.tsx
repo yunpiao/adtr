@@ -772,6 +772,37 @@ describe("UserAssetsV2 strict parser and transport", () => {
 });
 
 describe("UserAssetsV2 private workspace", () => {
+  it("keeps keyboard focus in the drawer when a manual detail retry starts", async () => {
+    await start();
+    const path = "/api/user-assets/v2/detail";
+    const pending = deferred();
+    override = (url) =>
+      url.split("?")[0] === path
+        ? calls(path).length === 1
+          ? response({ code: "invalid_response" }, 400)
+          : pending.promise
+        : undefined;
+    click("查看用户 observed-1");
+    const retry = await screen.findByRole("button", {
+      name: "重试用户详情读取",
+    });
+    const first = params(path);
+    retry.focus();
+    fireEvent.click(retry);
+    const close = screen.getByRole("button", { name: "关闭用户详情" });
+    expect(close).toHaveFocus();
+    expect(calls(path)).toHaveLength(2);
+    expect(params(path)).toEqual(first);
+    const signal = calls(path).at(-1)![1].signal;
+    fireEvent.keyDown(close, { key: "Escape" });
+    expect(signal.aborted).toBe(true);
+    expect(
+      screen.getByRole("button", { name: "查看用户 observed-1" }),
+    ).toHaveFocus();
+    await pending.resolve(detail());
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
   it("does not render a same-pin response for another keyword", async () => {
     await start();
     override = (url) =>
