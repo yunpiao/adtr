@@ -28,6 +28,7 @@ export default function UserAssetExportTaskResult(props: Props) {
 function Result({ profile, task, sessionChanged }: Props) {
   const [allowed, setAllowed] = useState<boolean[]>([]);
   const [open, setOpen] = useState(false), [busy, setBusy] = useState(true);
+  const [downloading, setDownloading] = useState(false);
   const [detail, setDetail] = useState<ExportDetail | null>(null);
   const [error, setError] = useState(""), [notice, setNotice] = useState("");
   const controller = useRef<AbortController | null>(null), generation = useRef(0), locked = useRef(false);
@@ -35,11 +36,14 @@ function Result({ profile, task, sessionChanged }: Props) {
   const session = useRef(sessionChanged); session.current = sessionChanged;
   const live = (signal: AbortSignal) => !signal.aborted && controller.current?.signal === signal;
   const invalidate = () => { generation.current++; controller.current?.abort(); locked.current = false; };
-  const run = async (work: (signal: AbortSignal) => Promise<void>) => {
+  const run = async (
+    work: (signal: AbortSignal) => Promise<void>,
+    operation: "read" | "download" = "read",
+  ) => {
     if (locked.current) return;
     invalidate(); locked.current = true;
     const token = generation.current, control = new AbortController(); controller.current = control;
-    setBusy(true); setError(""); setNotice("");
+    setBusy(true); setDownloading(operation === "download"); setError(""); setNotice("");
     try { await work(control.signal); }
     catch (reason) {
       if (!live(control.signal) || token !== generation.current) return;
@@ -51,7 +55,7 @@ function Result({ profile, task, sessionChanged }: Props) {
         : "未取得可验证的原导出结果，已清空详情并停止下载；可手动重新读取同一任务。");
       if (reason instanceof ApiError && (reason.status === 401 || sessionError(reason))) session.current();
     } finally {
-      if (live(control.signal) && token === generation.current) { locked.current = false; setBusy(false); }
+      if (live(control.signal) && token === generation.current) { locked.current = false; setBusy(false); setDownloading(false); }
     }
   };
   const check = async (signal: AbortSignal) => {
@@ -85,14 +89,16 @@ function Result({ profile, task, sessionChanged }: Props) {
       setDetail(value);
     });
   };
-  const close = () => { invalidate(); setOpen(false); setDetail(null); setBusy(false); setError(""); setNotice(""); };
+  const close = () => { invalidate(); setOpen(false); setDetail(null); setBusy(false); setDownloading(false); setError(""); setNotice(""); };
   return <section aria-label="任务原用户导出结果">
     <button disabled={busy || !allowed[0]} onClick={read}>查看原导出结果</button>
     {!busy && !allowed[0] && <p>当前未获原导出专用读取权限；通用任务记录仍可查看。</p>}
     <button className="secondary" disabled={busy} onClick={() => { void run(check); }}>重新核验原导出权限</button>
-    {busy && <><p role="status">正在核对原导出…</p><button className="secondary" onClick={close}>停止读取原导出</button></>}
+    {busy && <>{!downloading && <p role="status">正在核对原导出…</p>}<button className="secondary" onClick={close}>停止读取原导出</button></>}
     {error && <p role="alert">{error}</p>}
-    {notice && <p role="status">{notice}</p>}
+    <div role="status" aria-label="原 XLSX 下载进度">
+      {downloading ? "正在下载原 XLSX…" : notice}
+    </div>
     {open && <section aria-label="原导出只读详情">
       <h4>原导出只读详情</h4>
       <p>仅读取此任务的原请求与文件；不会新建、取消或重放导出。</p>
@@ -116,19 +122,25 @@ function Result({ profile, task, sessionChanged }: Props) {
           <div><dt>完整字节</dt><dd>{detail.artifact.byteCount}</dd></div>
           <div><dt>SHA256</dt><dd>{detail.artifact.sha256}</dd></div>
         </dl>}
-        <button disabled={busy || !allowed[0] || !allowed[1] || !detail.downloadReady} onClick={() => {
-          if (!allowed[0] || !allowed[1] || !detail.downloadReady) return;
-          const captured = detail;
-          void run(async (signal) => {
-            const blob = await userAssetExportAPI.download(captured, profile.ID, signal);
-            if (!live(signal)) return;
-            const url = URL.createObjectURL(blob), anchor = document.createElement("a");
-            try {
-              anchor.href = url; anchor.download = captured.artifact!.filename; anchor.hidden = true;
-              document.body.appendChild(anchor); anchor.click(); setNotice("原文件完整字节已验证，并交由浏览器下载。");
-            } finally { anchor.remove(); URL.revokeObjectURL(url); }
-          });
-        }}>下载原用户 XLSX</button>
+        <button
+          aria-disabled={downloading || undefined}
+          disabled={(busy && !downloading) || !allowed[0] || !allowed[1] || !detail.downloadReady}
+          onClick={() => {
+            if (locked.current || !allowed[0] || !allowed[1] || !detail.downloadReady) return;
+            const captured = detail;
+            void run(async (signal) => {
+              const blob = await userAssetExportAPI.download(captured, profile.ID, signal);
+              if (!live(signal)) return;
+              const url = URL.createObjectURL(blob), anchor = document.createElement("a");
+              try {
+                anchor.href = url; anchor.download = captured.artifact!.filename; anchor.hidden = true;
+                document.body.appendChild(anchor); anchor.click(); setNotice("原文件完整字节已验证，并交由浏览器下载。");
+              } finally { anchor.remove(); URL.revokeObjectURL(url); }
+            }, "download");
+          }}
+        >
+          下载原用户 XLSX
+        </button>
       </>}
     </section>}
   </section>;

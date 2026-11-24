@@ -115,12 +115,31 @@ it("downloads with both fresh metadata checks and complete byte digest, never mu
   vi.stubGlobal("URL", class extends URL { static createObjectURL = create; static revokeObjectURL = revoke; });
   const anchor = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
   const fetcher = vi.mocked(fetch).getMockImplementation()!;
-  vi.mocked(fetch).mockImplementation((url, init) => String(url).startsWith(`${exportPrefix}/download?`) ? Promise.resolve(new Response("abc", { headers: {
+  let resolveFile!: (response: Response) => void;
+  const pendingFile = new Promise<Response>((resolve) => { resolveFile = resolve; });
+  vi.mocked(fetch).mockImplementation((url, init) => String(url).startsWith(`${exportPrefix}/download?`) ? pendingFile : fetcher(url, init));
+  const file = new Response("abc", { headers: {
     "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "Content-Disposition": `attachment; filename="${readyExport.artifact!.filename}"`,
     "Content-Length": "3", "X-ADTR-Artifact-SHA256": readyExport.artifact!.sha256, "X-ADTR-Row-Count": "0", "X-ADTR-User-ID": "1", "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff",
-  } })) : fetcher(url, init));
-  view(); await open(); click("下载原计算机 XLSX");
+  } });
+  view(); await open();
+  const button = screen.getByRole("button", { name: "下载原计算机 XLSX" });
+  const downloadStatus = screen.queryByRole("status", { name: "原 XLSX 下载进度" });
+  button.focus();
+  fireEvent.click(button);
+  fireEvent.click(button);
+  await waitFor(() => expect(requests().filter(([url]) => String(url).startsWith(`${exportPrefix}/download?`))).toHaveLength(1));
+  expect(screen.getByRole("status", { name: "原 XLSX 下载进度" })).toHaveTextContent("正在下载原 XLSX");
+  expect(downloadStatus).toBe(screen.getByRole("status", { name: "原 XLSX 下载进度" }));
+  expect(screen.queryByText("正在核对原导出…")).not.toBeInTheDocument();
+  expect(button).toHaveFocus();
+  expect(button).toHaveAttribute("aria-disabled", "true");
+  expect(anchor).not.toHaveBeenCalled();
+  await act(async () => resolveFile(file));
   await screen.findByText("原文件完整字节已验证，并交由浏览器下载。");
+  expect(downloadStatus).toHaveTextContent("原文件完整字节已验证，并交由浏览器下载。");
+  expect(button).toHaveFocus();
+  expect(button).not.toHaveAttribute("aria-disabled", "true");
   expect(anchor).toHaveBeenCalledTimes(1); expect(create).toHaveBeenCalledTimes(1); expect(revoke).toHaveBeenCalledTimes(1);
   expect(requests().map(([url]) => String(url).split("?")[0])).toEqual([`${exportPrefix}/detail`, `${exportPrefix}/detail`, `${exportPrefix}/download`, `${exportPrefix}/detail`]);
   expect(requests().every(([, init]) => init?.method === "GET")).toBe(true);
@@ -143,8 +162,10 @@ it.each(["close", "session", "unmount"])("late verified bytes never create a dow
   else if (change === "unmount") mounted.unmount();
   else mounted.rerender(<ComputerAssetExportTaskResult profile={{ ...exportProfile, csrfToken: "new" }} task={readyExport.task} sessionChanged={changed} />);
   expect(signal.aborted).toBe(true);
+  expect(screen.queryByText("正在下载原 XLSX…")).not.toBeInTheDocument();
   await act(async () => resolve(new Blob(["abc"])));
   expect(create).not.toHaveBeenCalled();
+  expect(screen.queryByText("原文件完整字节已验证，并交由浏览器下载。")).not.toBeInTheDocument();
 });
 it("network failure has no automatic retry and never creates a submission intent", async () => {
   response = async () => { throw new TypeError("network"); };
@@ -200,6 +221,7 @@ it.each(["bytes", "metadata"])("rejects changed %s without creating a browser fi
   view(); await open(); click("下载原计算机 XLSX"); await screen.findByRole("alert");
   expect(create).not.toHaveBeenCalled(); expect(anchor).not.toHaveBeenCalled();
   expect(screen.queryByLabelText("原导出规范请求")).not.toBeInTheDocument();
+  expect(screen.getByRole("status", { name: "原 XLSX 下载进度" })).toBeEmptyDOMElement();
 });
 
 it.each([401, 403, 409])("rejects download postcheck authority failure %i and clears original result", async (status) => {
