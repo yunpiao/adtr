@@ -30,6 +30,18 @@ const canRetryRead = (error: unknown) =>
   error instanceof ApiError &&
   (error.code === "network" ||
     (error.code === "read_failed" && error.status >= 500));
+function handoffRetryFocus(
+  retry: HTMLButtonElement,
+  close: HTMLButtonElement | null,
+) {
+  // Retry disappears while Close remains mounted during the same pinned read.
+  if (
+    retry === document.activeElement &&
+    close?.isConnected &&
+    !close.closest("[hidden], [inert]")
+  )
+    close.focus();
+}
 // Isolated consumer only. No route, producer, grant or mutation integration.
 export default function GroupMembersV4Workspace(props: Props) {
   return (
@@ -54,6 +66,8 @@ function Workspace({ profile, sessionChanged }: Props) {
     null,
   );
   const referencesQuery = useRef<RawDNReferencesV4Query | null>(null);
+  const referenceClose = useRef<HTMLButtonElement>(null);
+  const detailClose = useRef<HTMLButtonElement>(null);
   const [detailBusy, setDetailBusy] = useState(false);
   const [detailRetry, setDetailRetry] = useState<GroupMembersV4Query | null>(
     null,
@@ -538,19 +552,21 @@ function Workspace({ profile, sessionChanged }: Props) {
           )}
           {referenceRetry && (
             <button
-              onClick={() =>
+              onClick={(event) => {
+                handoffRetryFocus(event.currentTarget, referenceClose.current);
                 void readReferences(
                   referenceRetry.query,
                   referenceRetry.target,
                   referenceRetry.expectedSource,
-                )
-              }
+                );
+              }}
             >
               重试 DN 原文引用
             </button>
           )}
           {(referencesBusy || references || referenceRetry) && (
             <button
+              ref={referenceClose}
               onClick={() => {
                 stopDetail();
                 detailQuery.current = null;
@@ -656,12 +672,18 @@ function Workspace({ profile, sessionChanged }: Props) {
             </section>
           )}
           {detailRetry && (
-            <button onClick={() => void readDetail(detailRetry)}>
+            <button
+              onClick={(event) => {
+                handoffRetryFocus(event.currentTarget, detailClose.current);
+                void readDetail(detailRetry);
+              }}
+            >
               重试原始成员读取
             </button>
           )}
           {(detailBusy || detail || detailRetry) && (
             <button
+              ref={detailClose}
               onClick={() => {
                 stopDetail();
                 detailQuery.current = null;

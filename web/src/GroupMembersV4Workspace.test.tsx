@@ -251,7 +251,13 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 describe("isolated dictionary4 membership consumer", () => {
-  it.each(["retry", "close", "source", "next page"] as const)(
+  it.each([
+    "retry",
+    "unfocused retry",
+    "close",
+    "source",
+    "next page",
+  ] as const)(
     "keeps a failed pinned original member read until %s",
     async (action) => {
       await open();
@@ -267,9 +273,14 @@ describe("isolated dictionary4 membership consumer", () => {
       const before = calls(detailPath).length;
       override = () => undefined;
 
-      if (action === "retry") {
+      if (action === "retry" || action === "unfocused retry") {
+        const close = screen.getByRole("button", { name: "关闭成员详情" });
+        const source = screen.getByRole("button", { name: "重新选择数据源" });
+        (action === "retry" ? button : source).focus();
         fireEvent.click(button);
+        expect(action === "retry" ? close : source).toHaveFocus();
         await screen.findByRole("region", { name: "组原始成员详情" });
+        expect(action === "retry" ? close : source).toHaveFocus();
         expect(calls(detailPath)).toHaveLength(before + 1);
         expect(calls(detailPath).at(-1)![0]).toBe(failed);
       } else {
@@ -964,7 +975,7 @@ describe("same-observation raw DN references", () => {
       );
     },
   );
-  it.each(["retry", "close", "source"])(
+  it.each(["retry", "unfocused retry", "close", "source"])(
     "keeps only the failed reference request until %s",
     async (action) => {
       await open();
@@ -986,12 +997,17 @@ describe("same-observation raw DN references", () => {
 
       override = () => undefined;
       const before = calls(referencesPath).length;
-      if (action === "retry") {
+      if (action === "retry" || action === "unfocused retry") {
+        const close = screen.getByRole("button", { name: "关闭 DN 原文引用" });
+        const source = screen.getByRole("button", { name: "重新选择数据源" });
+        (action === "retry" ? retry : source).focus();
         fireEvent.click(retry);
+        expect(action === "retry" ? close : source).toHaveFocus();
         const region = await screen.findByRole("region", {
           name: "引用此 DN 原文的组",
         });
         expect(region).toHaveTextContent("引用组第 2 页");
+        expect(action === "retry" ? close : source).toHaveFocus();
         expect(calls(referencesPath)).toHaveLength(before + 1);
         expect(calls(referencesPath).at(-1)![0]).toBe(failed);
       } else {
