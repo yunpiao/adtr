@@ -11,6 +11,7 @@ def require(valid, message):
 
 
 REPO_URL = "https://github.com/yunpiao/adtr"
+ISSUE_URL = re.compile(re.escape(REPO_URL) + r"/issues/[1-9][0-9]*")
 PR_URL = re.compile(re.escape(REPO_URL) + r"/pull/[1-9][0-9]*")
 CI_URL = re.compile(re.escape(REPO_URL) + r"/actions/runs/[1-9][0-9]*")
 COMMIT_SHA = re.compile(r"[a-f0-9]{40}")
@@ -56,10 +57,19 @@ def main():
         )
         rows.append(row)
     require(len(rows) == len(set(rows)), "duplicate workbook source row")
-    require(
-        all(re.fullmatch(r"https://github.com/yunpiao/adtr/issues/\d+", f["issue"]) for f in features),
-        "invalid requirement issue link",
-    )
+    issue_by_group = {}
+    group_by_issue = {}
+    for feature in features:
+        group, issue = feature["group"], feature["issue"]
+        require(matches(ISSUE_URL, issue), f"{feature['id']}: invalid requirement issue link")
+        require(
+            issue_by_group.setdefault(group, issue) == issue,
+            f"{group}: feature group maps to multiple issues",
+        )
+        require(
+            group_by_issue.setdefault(issue, group) == group,
+            f"{issue}: feature issue maps to multiple groups",
+        )
     field_ids = [record for feature in features for record in feature["field_records"]]
     unique_fields = set(field_ids)
     require(len(field_ids) == len(unique_fields), "duplicate field record")

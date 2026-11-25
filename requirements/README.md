@@ -90,9 +90,11 @@ Priority never removes a requirement.
 `python3 scripts/verify_requirements.py` is part of `make check`; it fails on scope
 reduction, duplicate requirement IDs, duplicate workbook source rows or field
 record references, missing field/control references, or unsupported acceptance
-claims. Shared UI controls remain valid. The checks also run with Python
-optimization enabled. The gate checks internal ledger consistency, not whether
-a unique mapping agrees with the source workbook or whether product acceptance
+claims. Each feature group must map to exactly one canonical issue URL in this
+repository, and no two groups may share an issue. Shared UI controls remain
+valid. The checks also run with Python optimization enabled. The gate checks
+internal ledger consistency, not whether a unique mapping agrees with the source
+workbook or whether product acceptance
 has been independently verified. Source definitions remain in the linked Issues.
 
 

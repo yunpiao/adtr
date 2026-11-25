@@ -59,6 +59,38 @@ class RequirementsLedgerContract(unittest.TestCase):
                 self.assertEqual(result.stdout, SUCCESS)
                 self.assertEqual(result.stderr, "")
 
+    def test_feature_group_cannot_split_across_issues(self):
+        def mutate(ledger):
+            features = ledger["features"]
+            counts = Counter(feature["group"] for feature in features)
+            feature = next(f for f in features if counts[f["group"]] > 1)
+            unused_number = max(int(f["issue"].rsplit("/", 1)[1]) for f in features) + 1
+            feature["issue"] = f"https://github.com/yunpiao/adtr/issues/{unused_number}"
+
+        self.assert_rejected(mutate, "feature group maps to multiple issues")
+
+    def test_feature_issue_cannot_cover_multiple_groups(self):
+        def mutate(ledger):
+            features = ledger["features"]
+            first = features[0]
+            other_group = next(f["group"] for f in features if f["group"] != first["group"])
+            for feature in features:
+                if feature["group"] == other_group:
+                    feature["issue"] = first["issue"]
+
+        self.assert_rejected(mutate, "feature issue maps to multiple groups")
+
+    def test_feature_issue_requires_canonical_number(self):
+        for suffix in ("0", "013", "１２", None):
+            with self.subTest(suffix=suffix):
+                def mutate(ledger):
+                    ledger["features"][0]["issue"] = (
+                        f"https://github.com/yunpiao/adtr/issues/{suffix}"
+                        if suffix is not None else None
+                    )
+
+                self.assert_rejected(mutate, "invalid requirement issue link")
+
     def test_duplicate_source_row_is_rejected(self):
         def mutate(ledger):
             first, second = ledger["features"][:2]
