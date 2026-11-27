@@ -1,4 +1,5 @@
 """Fail CI if the complete 209-feature source mapping is reduced or duplicated."""
+import hashlib
 import json
 from pathlib import Path
 import re
@@ -15,6 +16,7 @@ ISSUE_URL = re.compile(re.escape(REPO_URL) + r"/issues/[1-9][0-9]*")
 PR_URL = re.compile(re.escape(REPO_URL) + r"/pull/[1-9][0-9]*")
 CI_URL = re.compile(re.escape(REPO_URL) + r"/actions/runs/[1-9][0-9]*")
 COMMIT_SHA = re.compile(r"[a-f0-9]{40}")
+FROZEN_MAPPING_SHA256 = "8cd9614e1d158721da653d99252c7d742f054563a5e05eaa9d17a9f650c129ec"
 
 
 def matches(pattern, value):
@@ -23,6 +25,19 @@ def matches(pattern, value):
 
 def clean_notes(value):
     return isinstance(value, list) and all(isinstance(note, str) and note.strip() for note in value)
+
+
+def frozen_mapping_sha256(workbook_sha, features):
+    """Bind relationships, not JSON formatting or mutable acceptance evidence."""
+    rows = sorted(
+        [
+            f["id"], f["group"], f["issue"], f["source_sheet"], f["source_row"],
+            sorted(f["field_records"]), sorted(set(f["ui_records"])),
+        ]
+        for f in features
+    )
+    encoded = json.dumps([workbook_sha, rows], ensure_ascii=False, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
 def check_evidence(feature):
@@ -79,7 +94,12 @@ def main():
     # Shared UI controls may legitimately be referenced by multiple features.
     ui_ids = {record for feature in features for record in feature["ui_records"]}
     require(ui_ids == {f"UI-{index:04d}" for index in range(1, 805)}, "UI mapping reduced")
-    require(re.fullmatch(r"[a-f0-9]{64}", ledger["source_workbook"]["sha256"]), "invalid workbook SHA-256")
+    workbook_sha = ledger["source_workbook"]["sha256"]
+    require(matches(re.compile(r"[a-f0-9]{64}"), workbook_sha), "invalid workbook SHA-256")
+    require(
+        frozen_mapping_sha256(workbook_sha, features) == FROZEN_MAPPING_SHA256,
+        "frozen workbook mapping changed",
+    )
     allowed = {"not_started", "in_progress", "implemented_verified_slice", "accepted"}
     for feature in features:
         require(feature["status"] in allowed, "invalid requirement status")

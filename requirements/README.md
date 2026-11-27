@@ -137,3 +137,11 @@ An `accepted` row must have no remaining gates; the acceptance flag must be a
 JSON boolean and the aggregate a JSON integer. These are offline format checks:
 they cannot establish that a linked run passed, corresponds to the commit, or
 satisfies the product gates. Those facts still require separate review.
+
+The checker pins the reviewed source mapping using a SHA-256 fingerprint over the
+workbook hash and each feature's ID, group, issue, source sheet and row, field
+ownership, and UI references. Reformatting or reordering the catalog and updating
+implementation or acceptance evidence do not change this fingerprint. A change
+to the workbook or its mapping requires reconciling the new source before
+updating the pin. The pin detects drift from the reviewed catalog; it does not
+read the workbook or prove product acceptance.

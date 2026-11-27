@@ -126,6 +126,36 @@ class RequirementsLedgerContract(unittest.TestCase):
 
         self.assert_rejected(mutate, "field mapping reduced")
 
+    def test_source_mapping_reassignment_is_rejected_without_changing_totals(self):
+        for key in ("source_row", "field_records", "ui_records"):
+            with self.subTest(key=key):
+                def mutate(ledger):
+                    features = [f for f in ledger["features"] if f[key]]
+                    first = features[0]
+                    second = next(f for f in features[1:] if f[key] != first[key])
+                    first[key], second[key] = second[key], first[key]
+
+                self.assert_rejected(mutate, "frozen workbook mapping changed")
+
+    def test_alternative_well_formed_workbook_hash_is_rejected(self):
+        def mutate(ledger):
+            ledger["source_workbook"]["sha256"] = "0" * 64
+
+        self.assert_rejected(mutate, "frozen workbook mapping changed")
+
+    def test_record_order_does_not_change_the_frozen_mapping(self):
+        def mutate(ledger):
+            ledger["features"].reverse()
+            for feature in ledger["features"]:
+                feature["field_records"].reverse()
+                feature["ui_records"].reverse()
+
+        for optimized in (False, True):
+            with self.subTest(optimized=optimized):
+                result = self.run_checker(mutate, optimized=optimized)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout, SUCCESS)
+
     def test_invalid_commit_evidence_is_rejected(self):
         def mutate(ledger):
             f = next(
