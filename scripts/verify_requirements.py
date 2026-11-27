@@ -38,6 +38,8 @@ def check_evidence(feature):
     require(clean_notes(remaining), f"{requirement}: invalid remaining gates")
     if feature["product_accepted"]:
         require(not remaining, f"{requirement}: unresolved acceptance gates")
+    else:
+        require(bool(remaining), f"{requirement}: verified slice needs remaining acceptance gates")
 
 
 def main():

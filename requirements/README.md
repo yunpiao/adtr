@@ -11,7 +11,8 @@ Statuses are deliberately distinct:
 - `not_started`: no implementation evidence recorded
 - `in_progress`: implementation is active, not accepted
 - `implemented_verified_slice`: runnable implementation and specific tests exist,
-  with outstanding compatibility or release gates listed in `evidence.remaining`
+  with at least one outstanding compatibility or release gate listed in
+  `evidence.remaining`
 - `accepted`: all feature acceptance gates have been verified, with no remaining
   items; this is not the same as a PR, merge or deploy status
 

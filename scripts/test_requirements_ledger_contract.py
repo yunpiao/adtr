@@ -151,6 +151,28 @@ class RequirementsLedgerContract(unittest.TestCase):
 
                 self.assert_rejected(mutate, message)
 
+    def test_verified_slice_must_name_a_remaining_gate(self):
+        def mutate(ledger):
+            feature = next(f for f in ledger["features"] if f["status"] == "implemented_verified_slice")
+            feature["evidence"]["remaining"] = []
+
+        self.assert_rejected(mutate, "verified slice needs remaining acceptance gates")
+
+    def test_accepted_feature_can_have_no_remaining_gates(self):
+        def mutate(ledger):
+            feature = next(f for f in ledger["features"] if f["status"] == "implemented_verified_slice")
+            feature["status"] = "accepted"
+            feature["product_accepted"] = True
+            feature["evidence"]["remaining"] = []
+            ledger["scope"]["product_accepted"] = 1
+
+        for optimized in (False, True):
+            with self.subTest(optimized=optimized):
+                result = self.run_checker(mutate, optimized=optimized)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout, SUCCESS)
+                self.assertEqual(result.stderr, "")
+
     def test_acceptance_requires_structured_evidence(self):
         cases = (
             ("verified", "done", "invalid verified evidence"),
