@@ -64,7 +64,19 @@ def main():
     actual = [feature["id"] for feature in features]
     require(len(actual) == len(set(actual)) == 209, "requirement duplication or scope reduction")
     require(set(actual) == expected, "missing or invented source requirement")
-    require(len({feature["group"] for feature in features}) == 57, "feature-group coverage changed")
+    groups = {feature["group"] for feature in features}
+    require(len(groups) == 57, "feature-group coverage changed")
+    scope = ledger.get("scope")
+    require(isinstance(scope, dict), "invalid ledger scope")
+    for key, actual_count, label in (
+        ("requirements", len(features), "requirement"),
+        ("feature_groups", len(groups), "feature-group"),
+    ):
+        declared_count = scope.get(key)
+        require(
+            type(declared_count) is int and declared_count == actual_count,
+            f"inconsistent declared {label} count",
+        )
     rows = []
     for feature in features:
         row = feature["source_row"]
@@ -110,7 +122,7 @@ def main():
         )
         if feature["status"] in {"implemented_verified_slice", "accepted"}:
             check_evidence(feature)
-    accepted_count = ledger["scope"]["product_accepted"]
+    accepted_count = scope.get("product_accepted")
     require(
         type(accepted_count) is int and accepted_count == sum(f["product_accepted"] for f in features),
         "inconsistent total product acceptance",

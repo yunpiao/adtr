@@ -59,6 +59,28 @@ class RequirementsLedgerContract(unittest.TestCase):
                 self.assertEqual(result.stdout, SUCCESS)
                 self.assertEqual(result.stderr, "")
 
+    def test_declared_scope_counts_match_the_validated_feature_records(self):
+        for key, count, message in (
+            ("requirements", 209, "inconsistent declared requirement count"),
+            ("feature_groups", 57, "inconsistent declared feature-group count"),
+        ):
+            for wrong in (count - 1, count + 1, float(count), str(count), True, None):
+                with self.subTest(key=key, wrong=repr(wrong)):
+                    def mutate(ledger):
+                        ledger["scope"][key] = wrong
+
+                    self.assert_rejected(mutate, message)
+            with self.subTest(key=key, missing=True):
+                self.assert_rejected(lambda ledger: ledger["scope"].pop(key), message)
+
+    def test_scope_object_must_exist(self):
+        for value in (None, [], 209):
+            with self.subTest(value=value):
+                self.assert_rejected(
+                    lambda ledger: ledger.update(scope=value), "invalid ledger scope"
+                )
+        self.assert_rejected(lambda ledger: ledger.pop("scope"), "invalid ledger scope")
+
     def test_feature_group_cannot_split_across_issues(self):
         def mutate(ledger):
             features = ledger["features"]
