@@ -20,6 +20,10 @@ COMMIT_SHA = re.compile(r"[a-f0-9]{40}")
 ROADMAP_RELEASE_GATE_COUNT = 7
 FROZEN_MAPPING_SHA256 = "8cd9614e1d158721da653d99252c7d742f054563a5e05eaa9d17a9f650c129ec"
 
+# Preserve the checked-in workbook descriptors separately from delivery evidence.
+DESCRIPTOR_KEYS = ("module", "name", "description", "priority")
+FROZEN_DESCRIPTORS_SHA256 = "0fe2be3db640b08830d00ca2b7e1c549eecdfaf0bfe9cfde21eadcfdefab082b"
+
 
 def matches(pattern, value):
     return isinstance(value, str) and pattern.fullmatch(value) is not None
@@ -40,6 +44,27 @@ def frozen_mapping_sha256(workbook_sha, features):
     )
     encoded = json.dumps([workbook_sha, rows], ensure_ascii=False, separators=(",", ":"))
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def check_descriptors(workbook, features):
+    name = workbook.get("name")
+    require(isinstance(name, str) and name.strip(), "invalid workbook name")
+    rows = []
+    for f in features:
+        row = [f["id"]]
+        for key in DESCRIPTOR_KEYS:
+            value = f.get(key)
+            require(
+                isinstance(value, str) and value.strip(),
+                f"{f['id']}: invalid requirement descriptor {key}",
+            )
+            row.append(value)
+        rows.append(row)
+    encoded = json.dumps([name, sorted(rows)], ensure_ascii=False, separators=(",", ":"))
+    require(
+        hashlib.sha256(encoded.encode("utf-8")).hexdigest() == FROZEN_DESCRIPTORS_SHA256,
+        "frozen requirement descriptors changed",
+    )
 
 
 def check_evidence(feature):
@@ -109,12 +134,15 @@ def main():
     # Shared UI controls may legitimately be referenced by multiple features.
     ui_ids = {record for feature in features for record in feature["ui_records"]}
     require(ui_ids == {f"UI-{index:04d}" for index in range(1, 805)}, "UI mapping reduced")
-    workbook_sha = ledger["source_workbook"]["sha256"]
+    workbook = ledger.get("source_workbook")
+    require(isinstance(workbook, dict), "invalid source workbook")
+    workbook_sha = workbook.get("sha256")
     require(matches(re.compile(r"[a-f0-9]{64}"), workbook_sha), "invalid workbook SHA-256")
     require(
         frozen_mapping_sha256(workbook_sha, features) == FROZEN_MAPPING_SHA256,
         "frozen workbook mapping changed",
     )
+    check_descriptors(workbook, features)
     allowed = {"not_started", "in_progress", "implemented_verified_slice", "accepted"}
     for feature in features:
         require(feature["status"] in allowed, "invalid requirement status")

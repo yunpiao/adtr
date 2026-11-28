@@ -2,7 +2,11 @@
 
 `catalog.json` preserves all 209 AD-F requirements, 57 feature groups, 3,258 field
 record IDs and 804 UI control IDs from the source workbook. Each record links to
-its detailed GitHub Issue and source sheet/row. The workbook SHA-256 identifies
+its detailed GitHub Issue and source sheet/row. The verifier also preserves the
+checked-in workbook filename and exact module, name, description and priority
+for each requirement, without freezing status or implementation evidence. This
+checks for catalog drift; it does not re-read or validate the spreadsheet.
+The workbook SHA-256 identifies
 the inspected source. A UI control may be related to multiple features; a shared
 component reference does not prove the control appears in every parent page.
 

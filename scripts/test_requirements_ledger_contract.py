@@ -169,6 +169,34 @@ class RequirementsLedgerContract(unittest.TestCase):
 
                 self.assert_rejected(mutate, "frozen workbook mapping changed")
 
+    def test_frozen_requirement_descriptors_cannot_silently_drift(self):
+        for key in ("module", "name", "description", "priority"):
+            with self.subTest(key=key):
+                def mutate(ledger):
+                    features = ledger["features"]
+                    first = features[0]
+                    second = next(f for f in features[1:] if f[key] != first[key])
+                    first[key], second[key] = second[key], first[key]
+                self.assert_rejected(mutate, "frozen requirement descriptors changed")
+
+    def test_requirement_descriptor_shape_is_explicit(self):
+        for wrong in (None, [], " "):
+            with self.subTest(wrong=repr(wrong)):
+                self.assert_rejected(
+                    lambda ledger: ledger["features"][0].update(description=wrong),
+                    "AD-F-001: invalid requirement descriptor description",
+                )
+        self.assert_rejected(
+            lambda ledger: ledger["features"][0].pop("name"),
+            "AD-F-001: invalid requirement descriptor name",
+        )
+
+    def test_alternative_workbook_name_is_rejected(self):
+        self.assert_rejected(
+            lambda ledger: ledger["source_workbook"].update(name="different.xlsx"),
+            "frozen requirement descriptors changed",
+        )
+
     def test_alternative_well_formed_workbook_hash_is_rejected(self):
         def mutate(ledger):
             ledger["source_workbook"]["sha256"] = "0" * 64
