@@ -81,6 +81,25 @@ describe("group asset export bounded transport", () => {
     const blob = await groupAssetExportAPI.download(readyExport, 1, signal());
     expect(blob.size).toBe(3); expect(fetcher).toHaveBeenCalledTimes(3);
   });
+  it.each(["task", "columns", "source"] as const)("preserves the original download binding when the selected %s changes", async (changed) => {
+    vi.stubGlobal("crypto", webcrypto);
+    const selected = { ...readyExport, request: { ...readyExport.request, screenColumns: [...readyExport.request.screenColumns] } };
+    const fetcher = vi.fn()
+      .mockImplementationOnce(async () => {
+        if (changed === "task") selected.taskID = "other-task";
+        if (changed === "columns") selected.request.screenColumns.reverse();
+        if (changed === "source") selected.request = { ...selected.request, observationId: "other-observation" };
+        return exportJSON(readyExport);
+      })
+      .mockResolvedValueOnce(file())
+      .mockResolvedValueOnce(exportJSON(readyExport));
+    vi.stubGlobal("fetch", fetcher);
+    const blob = await groupAssetExportAPI.download(selected, 1, signal());
+    expect(blob.size).toBe(3);
+    expect(fetcher.mock.calls.map(([path]) => (path as string).split("/").at(-1))).toEqual(
+      ["detail", "download", "detail"].map((op) => `${op}?taskID=${readyExport.taskID}`),
+    );
+  });
   it.each([
     ["Content-Type", "text/html"], ["Content-Length", "33554433"], ["Content-Length", "03"],
     ["Content-Disposition", 'attachment; filename="foreign.xlsx"'], ["X-ADTR-Artifact-SHA256", "0".repeat(64)],

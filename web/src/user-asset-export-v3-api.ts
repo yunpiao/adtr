@@ -362,11 +362,15 @@ export const userAssetExportAPI = {
     return detail;
   },
   async download(detail: ExportDetail, actor: number, signal: AbortSignal): Promise<Blob> {
+    signal.throwIfAborted();
+    const { taskID, request } = detail;
+    if (!validExportID(taskID) || !validExportRequest(request)) throw new ApiError("invalid_input");
+    const original = snapshotExportRequest(request);
     // A fresh detail read binds current session, kind, exact source and manifest.
-    const current = await this.detail(detail.taskID, detail.request, actor, signal);
+    const current = await this.detail(taskID, original, actor, signal);
     const a = current.artifact;
     if (!current.downloadReady || !a) throw new ApiError("export_not_ready", 409);
-    const response = await fetchExport(`/download?${new URLSearchParams({ taskID: detail.taskID })}`, actor, signal);
+    const response = await fetchExport(`/download?${new URLSearchParams({ taskID })}`, actor, signal);
     if (!response.ok) { await json(response, signal); return invalid(); }
     const mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
     if (response.headers.get("Content-Type") !== mime ||
@@ -381,7 +385,7 @@ export const userAssetExportAPI = {
     signal.throwIfAborted();
     if (raw.byteLength !== a.byteCount || digest !== a.sha256) return invalid();
     // Revalidate after the full body/digest to discard bytes if authority changed in flight.
-    const verified = await this.detail(detail.taskID, detail.request, actor, signal);
+    const verified = await this.detail(taskID, original, actor, signal);
     signal.throwIfAborted();
     if (!verified.downloadReady || !verified.artifact || verified.artifact.rowCount !== a.rowCount || verified.artifact.byteCount !== a.byteCount || verified.artifact.sha256 !== a.sha256 || verified.artifact.filename !== a.filename) return invalid();
     return new Blob([raw], { type: mime });
