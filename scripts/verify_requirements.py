@@ -16,6 +16,8 @@ ISSUE_URL = re.compile(re.escape(REPO_URL) + r"/issues/[1-9][0-9]*")
 PR_URL = re.compile(re.escape(REPO_URL) + r"/pull/[1-9][0-9]*")
 CI_URL = re.compile(re.escape(REPO_URL) + r"/actions/runs/[1-9][0-9]*")
 COMMIT_SHA = re.compile(r"[a-f0-9]{40}")
+# G01 through G07 are separate roadmap gates, not business feature groups.
+ROADMAP_RELEASE_GATE_COUNT = 7
 FROZEN_MAPPING_SHA256 = "8cd9614e1d158721da653d99252c7d742f054563a5e05eaa9d17a9f650c129ec"
 
 
@@ -71,6 +73,7 @@ def main():
     for key, actual_count, label in (
         ("requirements", len(features), "requirement"),
         ("feature_groups", len(groups), "feature-group"),
+        ("release_gates", ROADMAP_RELEASE_GATE_COUNT, "release-gate"),
     ):
         declared_count = scope.get(key)
         require(

@@ -73,6 +73,16 @@ class RequirementsLedgerContract(unittest.TestCase):
             with self.subTest(key=key, missing=True):
                 self.assert_rejected(lambda ledger: ledger["scope"].pop(key), message)
 
+    def test_release_gate_count_preserves_the_roadmap_scope(self):
+        message = "inconsistent declared release-gate count"
+        for wrong in (0, 6, 8, 7.0, "7", True, None):
+            with self.subTest(wrong=repr(wrong)):
+                def mutate(ledger):
+                    ledger["scope"]["release_gates"] = wrong
+
+                self.assert_rejected(mutate, message)
+        self.assert_rejected(lambda ledger: ledger["scope"].pop("release_gates"), message)
+
     def test_scope_object_must_exist(self):
         for value in (None, [], 209):
             with self.subTest(value=value):

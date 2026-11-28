@@ -94,8 +94,10 @@ record references, missing field/control references, or unsupported acceptance
 claims. Each feature group must map to exactly one canonical issue URL in this
 repository, and no two groups may share an issue. Shared UI controls remain
 valid. The declared requirement and feature-group counts must match the validated
-records and groups, not a separate manually maintained total. The checks also
-run with Python optimization enabled. The gate checks
+records and groups, not a separate manually maintained total. The declaration
+of seven cross-functional gates must match G01–G07 in the [roadmap Issue](https://github.com/yunpiao/adtr/issues/1);
+counting those gates does not mark any of them complete. The checks also run
+with Python optimization enabled. The gate checks
 internal ledger consistency, not whether a unique mapping agrees with the source
 workbook or whether product acceptance
 has been independently verified. Source definitions remain in the linked Issues.
